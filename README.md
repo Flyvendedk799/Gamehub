@@ -5,15 +5,18 @@ Cloud-native AI game builder — describe a game in natural language, get a real
 > Working codename only; final brand TBD. See `CLAUDE.md` and `~/.claude/plans/deep-meandering-bunny.md`.
 
 ## Status
-**Phase 0 — cloud spine (in progress).** 5 packages, 495 tests green, typecheck clean.
+**Phase 0 — cloud spine (in progress).** 11 packages, 1608 tests green, typecheck clean.
 - ✅ Monorepo (pnpm + Turbo + Biome + strict TS)
 - ✅ `@playforge/shared` — domain schemas re-platformed from the desktop base (286 tests)
 - ✅ `@playforge/runtime` — Phaser + Three preview bootstraps + `__game` bridge (148 tests)
 - ✅ `@playforge/exporters` — web-games-only publish bundles: game-html/zip/markdown (46 tests)
 - ✅ `@playforge/db` — Drizzle schema, 16 tables, clean SQL migration (8 tests)
 - ✅ `@playforge/storage` — content-addressed blobs + snapshot manifests + path guard (7 tests)
-- ⬜ Auth (Clerk) → users; `@playforge/agent-core` (lift `core` + providers/artifacts/templates)
-- ⬜ API + generation-worker + browser-worker skeletons
+- ✅ `@playforge/agent-core` (+ i18n/artifacts/providers/templates) — the generation
+  brain: `generateViaAgent` loop, game tools, inlined prompts, multi-provider gateway (1102 tests)
+- ✅ `@playforge/worker` — `WorkingTree` fs adapter bridging the agent to storage (11 tests)
+- ⬜ Auth (Clerk) → users; Fastify API (projects CRUD + SSE relay)
+- ⬜ Worker BullMQ consumer + Redis pub/sub streaming + gameMode/runtimeVerify wiring
 - ⬜ End-to-end "red square" generation with SSE streaming + origin-isolated preview
 
 ## Develop
