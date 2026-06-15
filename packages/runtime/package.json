@@ -1,5 +1,5 @@
 {
-  "name": "@playforge/shared",
+  "name": "@playforge/runtime",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -7,16 +7,18 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./fingerprint": "./src/fingerprint.ts"
+    "./overlay": "./src/overlay.ts"
   },
+  "files": ["src", "vendor"],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "zod": "^3.24.1"
+    "@playforge/shared": "workspace:*"
   },
   "devDependencies": {
+    "happy-dom": "^20.9.0",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   }
