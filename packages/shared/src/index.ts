@@ -1,0 +1,785 @@
+import { z } from 'zod';
+import type { CodesignErrorCode } from './error-codes';
+
+export const ProviderId = z.enum([
+  'anthropic',
+  'openai',
+  'google',
+  'openrouter',
+  'groq',
+  'cerebras',
+  'xai',
+  'mistral',
+  'amazon-bedrock',
+  'azure-openai-responses',
+  'vercel-ai-gateway',
+]);
+export type ProviderId = z.infer<typeof ProviderId>;
+
+export const ModelRef = z.object({
+  // v3: providers may be custom ids (`custom-deepseek`, etc.), not just the
+  // legacy enum. Keep ProviderId as a documented convenience but let the wire
+  // do the dispatch downstream.
+  provider: z.string().min(1),
+  modelId: z.string(),
+});
+export type ModelRef = z.infer<typeof ModelRef>;
+
+export const DesignParam = z.discriminatedUnion('type', [
+  z.object({
+    id: z.string(),
+    label: z.string(),
+    type: z.literal('color'),
+    cssVar: z.string(),
+    defaultValue: z.string(),
+  }),
+  z.object({
+    id: z.string(),
+    label: z.string(),
+    type: z.literal('range'),
+    cssVar: z.string(),
+    defaultValue: z.string(),
+    min: z.number(),
+    max: z.number(),
+    step: z.number().optional(),
+    unit: z.string().optional(),
+  }),
+  z.object({
+    id: z.string(),
+    label: z.string(),
+    type: z.literal('select'),
+    cssVar: z.string(),
+    defaultValue: z.string(),
+    options: z.array(z.string()),
+  }),
+  z.object({
+    id: z.string(),
+    label: z.string(),
+    type: z.literal('toggle'),
+    cssVar: z.string(),
+    defaultValue: z.enum(['on', 'off']),
+  }),
+]);
+export type DesignParam = z.infer<typeof DesignParam>;
+
+export const ArtifactType = z.enum(['html', 'svg', 'slides', 'bundle', 'game', 'motion']);
+export type ArtifactType = z.infer<typeof ArtifactType>;
+
+/** motion-graphics-plan §1.1 — the visual flavor of a motion composition.
+ *  Drives prompt routing in the agent, mirrors `GameEngine` for game-mode.
+ *  Set via the `choose_remotion_style` tool or the New-design dialog. */
+export const MotionStyle = z.enum(['2d', '3d', 'kinetic-text', 'data-viz', 'mixed']);
+export type MotionStyle = z.infer<typeof MotionStyle>;
+
+export const MOTION_COMPOSITION_SCHEMA_VERSION = 1 as const;
+
+/** motion-graphics-plan §1.1 — registered Remotion `<Composition>` in a
+ *  motion-mode design's `src/Root.tsx`. One row per `<Composition>` tag the
+ *  agent registers; `register_composition` upserts these. */
+export const MotionCompositionV1 = z.object({
+  schemaVersion: z.literal(MOTION_COMPOSITION_SCHEMA_VERSION),
+  id: z.string().min(1),
+  designId: z.string().min(1),
+  /** The `<Composition id="...">` value — what the player references. */
+  compositionId: z.string().min(1),
+  name: z.string().min(1),
+  durationInFrames: z.number().positive(),
+  fps: z.number().positive(),
+  width: z.number().positive(),
+  height: z.number().positive(),
+  /** Path to the file that registers this composition. Almost always
+   *  `src/Root.tsx` but the agent can split. */
+  entryFile: z.string().min(1),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+export type MotionComposition = z.infer<typeof MotionCompositionV1>;
+
+/** Two-state preview discriminator: live composition playback (default) or
+ *  a single-frame still inspection. Mirrors `GamePreviewMode`. */
+export const MotionPreviewMode = z.enum(['composition', 'frame']);
+export type MotionPreviewMode = z.infer<typeof MotionPreviewMode>;
+
+/** Engine pin for game-mode designs. NULL on every design-mode artifact;
+ *  required (set via `choose_engine` tool or the New-design dialog) on game
+ *  artifacts. Adding an engine here also requires:
+ *    - matching adapter in packages/runtime/src/engines/<id>.ts
+ *    - branch in packages/core/src/tools/validate-game-scene.ts
+ *    - cell in the §3 engine matrix in docs/gameplan.md
+ */
+export const GameEngine = z.enum(['three', 'phaser', 'pygame', 'godot']);
+export type GameEngine = z.infer<typeof GameEngine>;
+
+export const Artifact = z.object({
+  id: z.string(),
+  type: ArtifactType,
+  title: z.string(),
+  content: z.string(),
+  designParams: z.array(DesignParam).default([]),
+  createdAt: z.string(),
+});
+export type Artifact = z.infer<typeof Artifact>;
+
+export const ChatRole = z.enum(['system', 'user', 'assistant', 'tool']);
+export type ChatRole = z.infer<typeof ChatRole>;
+
+/**
+ * Inline summary of a tool call the agent made on a prior turn. Persisted
+ * into history so follow-up turns reconstruct the agent's prior actions
+ * instead of re-`view`ing every file from scratch (Gameimprove §1).
+ *
+ * `args` is shipped as a serialised JSON string instead of a generic
+ * unknown to keep the IPC payload schema-stable across bumps; the
+ * receiver `JSON.parse`s right before handing to pi-ai.
+ */
+export const ChatToolCallRef = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  argsJson: z.string(),
+});
+export type ChatToolCallRef = z.infer<typeof ChatToolCallRef>;
+
+/** ChatMessage carries text-only history by default. Optional tool fields
+ *  surface when buildHistoryFromChat reconstructs prior tool transcript
+ *  for follow-up turns. */
+export const ChatMessage = z.object({
+  role: ChatRole,
+  content: z.string(),
+  /** Present on `assistant` rows when the assistant emitted tool calls
+   *  alongside (or instead of) text. The agent.ts converter rebuilds an
+   *  AssistantMessage with `[text, ...toolCalls]` content. */
+  toolCalls: z.array(ChatToolCallRef).optional(),
+  /** Present on `tool` rows — pairs with the assistant's `toolCalls[].id`
+   *  so pi-ai can stitch the result back to the originating call. */
+  toolCallId: z.string().optional(),
+  toolName: z.string().optional(),
+  /** Did the tool call error? Propagates pi-ai's `isError` flag. */
+  isError: z.boolean().optional(),
+});
+export type ChatMessage = z.infer<typeof ChatMessage>;
+
+export const LocalInputFile = z.object({
+  path: z.string().min(1),
+  name: z.string().min(1),
+  size: z.number().int().nonnegative(),
+});
+export type LocalInputFile = z.infer<typeof LocalInputFile>;
+
+export const ElementSelectionRect = z.object({
+  top: z.number(),
+  left: z.number(),
+  width: z.number(),
+  height: z.number(),
+});
+export type ElementSelectionRect = z.infer<typeof ElementSelectionRect>;
+
+export const SelectedElement = z.object({
+  selector: z.string().min(1),
+  tag: z.string().min(1),
+  outerHTML: z.string(),
+  rect: ElementSelectionRect,
+});
+export type SelectedElement = z.infer<typeof SelectedElement>;
+
+// Correlates renderer/main/core log lines for a single generation. Constrained
+// to alphanumerics + `_`/`-` so it cannot carry LF/CR into a log line (defense
+// in depth — log formatting also escapes, but belt-and-braces for payloads
+// that become `runId` fields via AsyncLocalStorage).
+const GenerationId = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9_-]+$/, 'generationId must be alphanumeric, _ or -');
+
+export const GeneratePayload = z.object({
+  prompt: z.string().min(1).max(32_000),
+  history: z.array(ChatMessage).max(200),
+  model: ModelRef,
+  baseUrl: z.string().url().optional(),
+  referenceUrl: z.string().url().optional(),
+  attachments: z.array(LocalInputFile).max(12).default([]),
+  generationId: GenerationId.optional(),
+});
+export type GeneratePayload = z.infer<typeof GeneratePayload>;
+
+/** @deprecated Use GeneratePayloadV1. */
+export type LegacyGeneratePayload = GeneratePayload;
+
+export const GameArtifactPromptContextPayload = z.object({
+  activeTab: z.enum(['preview', 'files', 'sprites', 'animations', 'levels', 'world']).optional(),
+  selectedSpriteId: z.string().optional(),
+  selectedAnimationId: z.string().optional(),
+  animationTargetSpriteId: z.string().optional(),
+  selectedLevelSlug: z.string().optional(),
+  mentionedAliases: z.array(z.string()).max(32).default([]),
+});
+export type GameArtifactPromptContextPayload = z.infer<typeof GameArtifactPromptContextPayload>;
+
+export const GeneratePayloadV1 = z.object({
+  schemaVersion: z.literal(1),
+  prompt: z.string().min(1).max(32_000),
+  history: z.array(ChatMessage).max(200),
+  model: ModelRef,
+  baseUrl: z.string().url().optional(),
+  referenceUrl: z.string().url().optional(),
+  attachments: z.array(LocalInputFile).max(12).default([]),
+  generationId: GenerationId,
+  /** game-artifacts §5 — the renderer's view of what the user is selecting
+   *  + any explicit alias mentions parsed out of the prompt text. The main
+   *  process resolves these against the live registry to inject a compact
+   *  artifact context block into the agent's user message. Only meaningful
+   *  for `artifactMode === 'game'`. */
+  gameArtifactContext: GameArtifactPromptContextPayload.optional(),
+  /** Optional so older clients / tests that don't set it still parse.
+   *  Present in the renderer path so agent stream events can route to
+   *  the right design's chat bubble. */
+  designId: z.string().min(1).optional(),
+  /** Current HTML for this design (if any). Seeded into the agent's
+   *  virtual FS as `index.html` so the text_editor tool can view/edit
+   *  incrementally instead of always rewriting from scratch. */
+  previousHtml: z.string().optional(),
+  /** Output pattern override from the renderer's slash-command parser.
+   *  `'jsx'` = single-file React/JSX (default behavior, value omitted by
+   *  most callers). `'vanilla'` = multi-source-file HTML+CSS+JS matching
+   *  Claude Design exports. Forwarded to GenerateInput.pattern. */
+  pattern: z.enum(['jsx', 'vanilla']).optional(),
+  /** gameplan §A6 / motion-graphics-plan §1.1 — mode discriminator. When
+   *  'game' or 'motion' the IPC handler routes through the matching agent
+   *  flow (gameMode/motionMode deps wired, mode-specific prompts composed
+   *  via composeSystemPrompt). Defaults to 'design' for back-compat with
+   *  existing clients. */
+  artifactMode: z.enum(['design', 'game', 'motion']).optional(),
+  /** Game-mode engine pin from the New-design dialog. When undefined and
+   *  artifactMode === 'game', the agent's first tool call is
+   *  `choose_engine` and the engine lands on the snapshot from there. */
+  gameEngine: GameEngine.optional(),
+  /** motion-graphics-plan §1.1 — motion-mode style pin from the
+   *  New-design dialog. When undefined and artifactMode === 'motion' the
+   *  agent's first tool call is `choose_remotion_style`. */
+  motionStyle: MotionStyle.optional(),
+  /** may9 Phase 10 — genre seed from the New-design dialog. Seeds the
+   *  agent's `declare_game_spec` first call so the spec gate runs with
+   *  a typed genre from turn 0 (vs. inferring from the brief). Free-form
+   *  string here so the renderer's curated dropdown can stay in sync
+   *  with the GameGenre Zod enum without a circular import. The agent
+   *  validates the value against GameGenre when it builds its spec. */
+  gameGenre: z.string().min(1).max(40).optional(),
+});
+export type GeneratePayloadV1 = z.infer<typeof GeneratePayloadV1>;
+
+export const ApplyCommentPayload = z.object({
+  html: z.string().min(1).max(500_000),
+  comment: z.string().min(1).max(4_000),
+  selection: SelectedElement,
+  model: ModelRef.optional(),
+  referenceUrl: z.string().url().optional(),
+  attachments: z.array(LocalInputFile).max(12).default([]),
+  /** Optional — when provided, the IPC handler reads the design's
+   *  promptAssistMetadata so the refinement turn keeps the same
+   *  scope/taste constraints as the initial generation (backlog-1 #9). */
+  designId: z.string().min(1).optional(),
+});
+export type ApplyCommentPayload = z.infer<typeof ApplyCommentPayload>;
+
+export const CancelGenerationPayloadV1 = z.object({
+  schemaVersion: z.literal(1),
+  generationId: GenerationId,
+  /** Backlog-3 §5 — when true, defer cancellation to the next safe
+   *  boundary (turn_end) so the in-flight assistant message + tool
+   *  results commit to chat_messages. Resume from chat_messages then
+   *  sees a complete transcript with no half-written turns. */
+  asCheckpoint: z.boolean().optional(),
+});
+export type CancelGenerationPayloadV1 = z.infer<typeof CancelGenerationPayloadV1>;
+
+/**
+ * Iframe runtime error event — schema for the postMessage payload sent by
+ * the sandbox overlay (see packages/runtime/src/overlay.ts) when JS inside
+ * the preview throws or rejects unhandled.
+ */
+export const IframeErrorEvent = z.object({
+  __codesign: z.literal(true),
+  type: z.literal('IFRAME_ERROR'),
+  kind: z.enum(['error', 'unhandledrejection']),
+  message: z.string(),
+  source: z.string().optional(),
+  lineno: z.number().optional(),
+  colno: z.number().optional(),
+  stack: z.string().optional(),
+  timestamp: z.number(),
+});
+export type IframeErrorEvent = z.infer<typeof IframeErrorEvent>;
+
+export const BRAND = {
+  appName: 'Open CoDesign',
+  backgroundColor: '#faf8f3',
+} as const;
+
+export const PROJECT_SCHEMA_VERSION = 1 as const;
+
+export const ProjectType = z.enum(['prototype', 'slideDeck', 'template', 'other']);
+export type ProjectType = z.infer<typeof ProjectType>;
+
+export const ProjectFidelity = z.enum(['wireframe', 'highFidelity']);
+export type ProjectFidelity = z.infer<typeof ProjectFidelity>;
+
+export const Project = z.object({
+  schemaVersion: z.literal(PROJECT_SCHEMA_VERSION),
+  id: z.string().min(1),
+  name: z.string().min(1),
+  type: ProjectType,
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  fidelity: ProjectFidelity.optional(),
+  speakerNotes: z.boolean().optional(),
+  templateId: z.string().optional(),
+});
+export type Project = z.infer<typeof Project>;
+
+export const ProjectDraft = z.object({
+  name: z.string().min(1),
+  type: ProjectType,
+  fidelity: ProjectFidelity.optional(),
+  speakerNotes: z.boolean().optional(),
+  templateId: z.string().optional(),
+});
+export type ProjectDraft = z.infer<typeof ProjectDraft>;
+
+export class CodesignError extends Error {
+  constructor(
+    message: string,
+    // Accept a known registry code (preferred) or a free-form string (backward compat).
+    public readonly code: CodesignErrorCode | string,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options);
+    this.name = 'CodesignError';
+  }
+}
+
+/** Thrown when a row read off disk carries a `schema_version` newer than the
+ *  current writer can safely deserialise. Callers in the read path should
+ *  catch and either skip the row (best-effort, with a log warning) or surface
+ *  the failure to the user. Older rows go through `migrateChatMessageRow`
+ *  instead and never raise this. */
+export class SchemaMismatchError extends CodesignError {
+  constructor(
+    public readonly table: string,
+    public readonly got: number,
+    public readonly expected: number,
+    options?: { cause?: unknown },
+  ) {
+    super(
+      `${table} row schema_version=${got} exceeds supported version ${expected}`,
+      'CHAT_SCHEMA_MISMATCH',
+      options,
+    );
+    this.name = 'SchemaMismatchError';
+  }
+}
+
+export {
+  BUILTIN_PROVIDERS,
+  CHATGPT_CODEX_PROVIDER_ID,
+  ConfigSchema,
+  ConfigV3Schema,
+  IMAGE_GENERATION_SCHEMA_VERSION,
+  PROVIDER_SHORTLIST,
+  ProviderCapabilitiesSchema,
+  ImageGenerationCredentialModeSchema,
+  ImageGenerationOutputFormatSchema,
+  ImageGenerationProviderSchema,
+  ImageGenerationQualitySchema,
+  ImageGenerationSettingsSchema,
+  ImageGenerationSizeSchema,
+  STEAM_SCHEMA_VERSION,
+  SteamSettingsSchema,
+  THREED_ASSET_SCHEMA_VERSION,
+  ThreeDAssetProviderSchema,
+  ThreeDAssetSettingsSchema,
+  ProviderEntrySchema,
+  ProviderModelDiscoveryModeSchema,
+  ReasoningLevelSchema,
+  CacheRetentionSchema,
+  SUPPORTED_ONBOARDING_PROVIDERS,
+  SecretRef,
+  STORED_DESIGN_SYSTEM_SCHEMA_VERSION,
+  StoredDesignSystem,
+  WireApiSchema,
+  defaultProviderCapabilities,
+  detectWireFromBaseUrl,
+  hydrateConfig,
+  isSupportedOnboardingProvider,
+  migrateLegacyToV3,
+  parseConfigFlexible,
+  resolveProviderCapabilities,
+  toPersistedV3,
+} from './config';
+export type {
+  Config,
+  ConfigV3,
+  ImageGenerationCredentialMode,
+  ImageGenerationOutputFormat,
+  ImageGenerationProvider,
+  ImageGenerationQuality,
+  ImageGenerationSettings,
+  ImageGenerationSize,
+  SteamSettings,
+  ThreeDAssetProviderId,
+  ThreeDAssetSettings,
+  OnboardingState,
+  ProviderCapabilities,
+  ProviderEntry,
+  ProviderModelDiscoveryMode,
+  ProviderShortlist,
+  ReasoningLevel,
+  CacheRetention,
+  SupportedOnboardingProvider,
+  WireApi,
+} from './config';
+
+export type {
+  ClaudeCodeDetectionMeta,
+  ClaudeCodeUserType,
+  CodexDetectionMeta,
+  ExternalConfigsDetection,
+  GeminiDetectionMeta,
+  OpencodeDetectionMeta,
+} from './detection';
+
+export {
+  PROXY_PRESET_SCHEMA_VERSION,
+  PROXY_PRESETS,
+  ProxyPreset,
+  ProxyPresetIdSchema,
+  getPresetById,
+} from './proxy-presets';
+export type { ProxyPresetId } from './proxy-presets';
+
+export {
+  canonicalBaseUrl,
+  ensureVersionedBase,
+  modelsEndpointUrl,
+  stripInferenceEndpointSuffix,
+} from './base-url';
+export type { CanonicalWire } from './base-url';
+
+export { DesignTokenV1, DesignTokenSet } from './design-token';
+export type { DesignToken } from './design-token';
+
+export {
+  FreeformJsonLevelDoc,
+  LEVEL_DOC_SCHEMA_VERSION,
+  LevelDoc,
+  LevelDocKind,
+  LevelSchemaDeclaration,
+  NodeGraphLevelDoc,
+  Scene3DLevelDoc,
+  Tilemap2DLevelDoc,
+  WaveScriptLevelDoc,
+  WORLD_DOC_SCHEMA_VERSION,
+  WorldDoc,
+  inferLevelKind,
+} from './level-schema';
+
+export {
+  GAME_ARTIFACT_SCHEMA_VERSION,
+  GameAnimationBinding,
+  GameAnimationBindingStatus,
+  GameArtifact,
+  GameArtifactCreateInput,
+  GameArtifactFile,
+  GameArtifactFileRefInput,
+  GameArtifactFileRole,
+  GameArtifactImportInput,
+  GameArtifactKind,
+  GameArtifactListResult,
+  GameArtifactProvenance,
+  GameArtifactSelection,
+  GameArtifactStatus,
+  GameArtifactUpdateInput,
+  GamePreviewMode,
+  AnimationArtifactMetadata,
+  GameArtifactBaseMetadata,
+  GameArtifactMetadata,
+  LevelArtifactMetadata,
+  SpriteArtifactMetadata,
+  WorldArtifactMetadata,
+  RESERVED_SLUGS,
+  SLUG_REGEX,
+  aliasForArtifact,
+  extractArtifactAliases,
+  isValidSlug,
+  parseArtifactAlias,
+  slugifyArtifactName,
+} from './game-artifact';
+export type { SlugValidation } from './game-artifact';
+export type {
+  GameArtifactPreviewManifest,
+  GameArtifactRegistry,
+  GameArtifactRegistryEntry,
+} from './game-artifact';
+
+export {
+  GAME_SPEC_SCHEMA_VERSION,
+  GameCameraKind,
+  GameDimensions,
+  GameFeatureSpec,
+  GameGenre,
+  GameInputKind,
+  GamePerspective,
+  GameSpec,
+  GameSpecPatch,
+  applyGameSpecPatch,
+  checkEngineFit,
+} from './game-spec';
+export type { EngineFit, EngineFitVerdict, GameEngineId } from './game-spec';
+
+export { classifyAbortKind, isNeutralAbort, suggestsTokenReimport } from './abort-kind';
+export type { AbortKind } from './abort-kind';
+
+export {
+  ESCALATION_MIN_FAILURES,
+  ESCALATION_WINDOW_MS,
+  selectEscalationHint,
+} from './escalation-hint';
+export type { EscalationHint, EscalationKind, EscalationSignal } from './escalation-hint';
+
+export {
+  CHAT_MESSAGE_SCHEMA_VERSION,
+  ChatMessageKind,
+  ChatMessageRowV1,
+  CommentKind,
+  CommentRect,
+  CommentRowV1,
+  CommentStatus,
+  DesignFileV1,
+  DesignMessageV1,
+  DesignSnapshotV1,
+  DesignV1,
+  PromptAssistMetadataV1,
+  UserSkillV1,
+} from './snapshot';
+export {
+  ANTHROPIC_PRICING,
+  computeImpliedCost,
+  contextWindowFor,
+  type CumulativeContextBytes,
+  estimateContextUsedPct,
+  MODEL_CONTEXT_WINDOWS,
+  type ModelPricingEntry,
+  type UsageTokens,
+} from './pricing.js';
+
+export type {
+  ChatAppendInput,
+  ChatArtifactDeliveredPayload,
+  ChatAssistantTextPayload,
+  ChatContinuationPendingPayload,
+  ChatErrorPayload,
+  ChatMessageRow,
+  ChatReasoningSummaryPayload,
+  ChatToolCallPayload,
+  ChatUserPayload,
+  CommentCreateInput,
+  CommentRow,
+  CommentScope,
+  CommentUpdateInput,
+  Design,
+  DesignFile,
+  DesignMessage,
+  DesignSnapshot,
+  PromptAssistMetadata,
+  SnapshotCreateInput,
+  UserSkill,
+  UserSkillCreateInput,
+  UserSkillExtractInput,
+  UserSkillUpdateInput,
+} from './snapshot';
+
+export { SkillFrontmatterV1 } from './skills';
+export type { LoadedSkill, LoadedSkillRule } from './skills';
+
+export { summarizeSnapshotDiff } from './snapshot-diff';
+export type { SnapshotDiffOptions } from './snapshot-diff';
+
+export { diagnose, diagnoseGenerateFailure, looksLikeTruncatedStream } from './diagnostics';
+export type {
+  DiagnosticHypothesis,
+  DiagnosticFix,
+  DiagnoseContext,
+  ErrorCode,
+  GenerateFailureContext,
+} from './diagnostics';
+
+export { ERROR_CODES, ERROR_CODE_DESCRIPTIONS } from './error-codes';
+export type { CodesignErrorCode } from './error-codes';
+// NOTE: fingerprint.ts imports node:crypto and is intentionally NOT re-exported
+// from this barrel — it's main-process only. Import from
+// '@playforge/shared/fingerprint' directly.
+export type { FingerprintInput } from './fingerprint';
+
+// ---------------------------------------------------------------------------
+// Diagnostic events (PR3 — main-process diagnostic_events table)
+// ---------------------------------------------------------------------------
+
+export type DiagnosticLevel = 'info' | 'warn' | 'error';
+
+export interface DiagnosticEventInput {
+  level: DiagnosticLevel;
+  code: string;
+  scope: string;
+  runId: string | undefined;
+  fingerprint: string;
+  message: string;
+  stack: string | undefined;
+  transient: boolean;
+  /**
+   * Arbitrary JSON-serializable payload attached to the event — typically the
+   * `NormalizedProviderError` from `retry.ts` (upstream_status, request_id,
+   * retry_count, redacted_body_head). Stored as JSON TEXT in the
+   * `context_json` column so the Report dialog can render structured fields
+   * without reparsing main.log.
+   */
+  context?: Record<string, unknown>;
+}
+
+export interface DiagnosticEventRow {
+  id: number;
+  schemaVersion: 1;
+  ts: number;
+  level: DiagnosticLevel;
+  code: string;
+  scope: string;
+  runId: string | undefined;
+  fingerprint: string;
+  message: string;
+  stack: string | undefined;
+  transient: boolean;
+  count: number;
+  /** Parsed JSON from the `context_json` column. May be undefined. */
+  context: Record<string, unknown> | undefined;
+}
+
+/**
+ * Ring-buffered record of a recent renderer-side user action, used to help
+ * triage a bug report. Entries should avoid raw prompt text, file paths, and
+ * URLs by convention. Redaction is enforced at the summary composer, not at
+ * construction, so callers must still rely on the composer's redaction passes.
+ */
+export interface ActionTimelineEntry {
+  ts: number;
+  type:
+    | 'prompt.submit'
+    | 'prompt.cancel'
+    | 'prompt.retry'
+    | 'prompt.dedup'
+    | 'provider.switch'
+    | 'skill.toggle'
+    | 'design.open'
+    | 'design.export'
+    | 'connection.test'
+    | 'onboarding.complete';
+  data?: Record<string, unknown>;
+}
+
+export interface ListEventsInput {
+  schemaVersion: 1;
+  limit?: number;
+  includeTransient?: boolean;
+}
+
+export interface ListEventsResult {
+  schemaVersion: 1;
+  events: DiagnosticEventRow[];
+  /**
+   * False when `safeInitSnapshotsDb` failed at boot and the main process has no
+   * diagnostics DB. Lets the panel distinguish "no events yet" from "errors are
+   * being dropped on the floor" — see FIX-9.
+   */
+  dbAvailable: boolean;
+}
+
+/**
+ * Always-reportable error record. Constructed synchronously in the renderer
+ * at the moment an error is surfaced to the user (toast, ErrorBoundary,
+ * async rejection). The `localId` is the canonical handle — the Report
+ * dialog opens purely from in-memory state so Report works even when the
+ * DB is unavailable or the event was never persisted.
+ *
+ * Persistence into `diagnostic_events` is a nice-to-have enhancement that
+ * runs fire-and-forget from `createReportableError`. If it succeeds, the
+ * caller patches `persistedEventId` / `persistedFingerprint` onto the
+ * in-memory record. Nothing downstream depends on that.
+ */
+export interface ReportableError {
+  /** Client-side id — stable across the app lifetime, no DB required. */
+  localId: string;
+  /** CodesignError code / err.name / 'RENDERER_ERROR' default. */
+  code: string;
+  /** 'generate' / 'apply-comment' / 'title' / 'onboarding' / 'settings' / etc. */
+  scope: string;
+  /** Human-readable message. */
+  message: string;
+  /** Stack if an Error instance had one. */
+  stack?: string;
+  /** Correlation id when known (generationId for gen paths). */
+  runId?: string;
+  /** Optional structured payload — normalized provider error, design-system
+   *  scan stats, whatever the caller has handy. Arbitrary JSON-safe object. */
+  context?: Record<string, unknown>;
+  /** SHA / FNV fingerprint — computed client-side so Report works without DB. */
+  fingerprint: string;
+  /** Unix ms at creation. */
+  ts: number;
+  /** If DB persistence succeeded (nice-to-have), caller patches this after the
+   *  fire-and-forget IPC completes. NOT required for Report to work. */
+  persistedEventId?: number;
+  /** Mirrors persistedEventId — the SHA1 fingerprint from the DB row. */
+  persistedFingerprint?: string;
+}
+
+export interface ReportEventInput {
+  schemaVersion: 1;
+  /** The full ReportableError payload — Report works from in-memory data alone,
+   *  no DB lookup required. */
+  error: ReportableError;
+  includePromptText: boolean;
+  includePaths: boolean;
+  includeUrls: boolean;
+  includeTimeline: boolean;
+  notes: string;
+  timeline: ActionTimelineEntry[];
+}
+
+export interface ReportEventResult {
+  schemaVersion: 1;
+  issueUrl: string;
+  bundlePath: string;
+  summaryMarkdown: string;
+}
+
+/**
+ * Result of `diagnostics:v1:recordRendererError`.
+ *
+ * `fingerprint` is the main-recomputed fingerprint stored on the DB row (or
+ * the in-flight fingerprint when db is unavailable). Renderer patches both
+ * `persistedEventId` and `persistedFingerprint` onto the in-memory
+ * ReportableError record after the fire-and-forget settles, so Report's
+ * dedup lookup uses the canonical main-side value instead of the
+ * client-side estimate.
+ */
+export interface RecordRendererErrorResult {
+  schemaVersion: 1;
+  eventId: number | null;
+  fingerprint: string | null;
+}
+
+export {
+  ensureEditmodeMarkers,
+  parseEditmodeBlock,
+  parseTweakSchema,
+  replaceEditmodeBlock,
+  replaceTweakSchema,
+} from './editmode';
+export type { EditmodeBlock, TokenSchemaEntry, TweakSchema } from './editmode';
