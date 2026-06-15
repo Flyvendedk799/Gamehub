@@ -1,0 +1,108 @@
+# Visual taste guidelines (anti-slop)
+
+These rules encode the difference between a design that looks generated and one that looks considered.
+
+## Typography
+
+**Forbidden fonts** (overused to the point of invisibility):
+- Inter, Roboto, Arial, Helvetica, Playfair Display (unless explicitly requested)
+
+**Preferred alternatives** (expressive, distinct, free via Google Fonts):
+- Display / editorial: Fraunces (bundled), Syne, DM Serif Display, Instrument Serif, Space Grotesk
+- Clean sans: Geist (bundled), Outfit, Plus Jakarta Sans, Neue Montreal (system-ui fallback)
+- Mono accents: JetBrains Mono, Fira Code (use sparingly, for data or code)
+
+**Required type ladder** — every design declares four scale steps and uses them consistently:
+- `display` (48–96 px) — single hero word or headline; tight tracking; serif for editorial types
+- `h1` (28–40 px) — section openers
+- `body` (16–18 px) — prose, list items, card content
+- `caption` (12–14 px, uppercase or muted) — labels, eyebrows, source lines
+
+Skipping a step (e.g. body that jumps straight to display with no h1 in between) reads as flat and is forbidden.
+
+Typography rules:
+- Mix weights deliberately: one very heavy line (700–900) anchors hierarchy; body at 400; captions at 400 with reduced opacity.
+- Use `letter-spacing: -0.02em` on large headings (36 px+). Tight tracking reads as confident.
+- Never center-align body paragraphs. Center alignment is for short headlines and CTAs only.
+- Line length: 60–75 characters for body text. Use `max-width: 65ch` on prose containers.
+
+## Color
+
+- Use oklch color space for accent colors. oklch gives perceptually uniform chroma — a color and its 20% lighter variant will feel proportionally related, unlike hex math.
+  - Examples, varied across the hue wheel so no single hue dominates: `oklch(72% 0.18 40)` (warm amber), `oklch(64% 0.16 150)` (deep moss), `oklch(58% 0.18 25)` (terracotta), `oklch(62% 0.22 265)` (blue-violet — pick last, only if the brief actually cues tech/sci-fi/gaming).
+- Avoid pure black (`#000`) for text. Use near-black with a slight hue cast — pick a hue that matches the design's accent rather than reflexively reaching for hue 265: warm `oklch(12% 0.012 60)`, mossy `oklch(12% 0.012 150)`, terracotta `oklch(12% 0.012 25)`, or cool `oklch(12% 0.01 265)`.
+- Do not use the default Tailwind blue (`#3b82f6`). It signals "this is an uncustomized Tailwind design."
+- Do not lean on default Tailwind grays (`gray-50`…`gray-900`) as the entire neutral scale. Tilt them warm (oklch hue 60–90) or cool (oklch hue 240–270) so the surface has a temperature.
+- Accent palette: one primary accent, optionally one complementary plus one positive / success tone. Three or more accent colors indicates lack of restraint.
+- Background: off-white or very light warm neutral (`#f8f5f0`, `oklch(97% 0.005 80)`) almost always beats pure white.
+
+### Dark themes specifically
+
+Dark does not mean monotone. A dark design that is one near-black plus one accent reads as a default Tailwind dark mode and is the canonical sparse-LLM look. Required when the brief asks for dark:
+
+- At least three distinct surface tones, with the hue chosen to match the subject rather than defaulting to cool blue-violet. Pick one tilt and stay consistent across page bg / elevated / inset:
+  - warm dark (artisan, hospitality, editorial): page `oklch(14% 0.012 60)`, elevated `oklch(18% 0.012 60)`
+  - mossy dark (outdoor, sustainability, nature): page `oklch(14% 0.012 150)`, elevated `oklch(18% 0.012 150)`
+  - terracotta dark (food, craft, earthy brands): page `oklch(14% 0.012 25)`, elevated `oklch(18% 0.012 25)`
+  - cool dark (tech, gaming, sci-fi only): page `oklch(14% 0.01 265)`, elevated `oklch(18% 0.01 265)`
+- A subtle gradient or radial glow on the hero or one feature panel — never a flat fill end-to-end.
+- Two accents minimum: one primary (saturated), one positive / data-positive (e.g. cyan, lime, or warm amber for delta indicators).
+- Borders rendered as `1px solid oklch(28% 0.012 <same-hue-as-page>)` or similar, never `border-gray-800`.
+
+## Layout
+
+- Prefer **asymmetry** over perfect bilateral symmetry. A 7:5 split column feels more alive than 6:6.
+- Vary section heights. A 3-section page where every section is the same height looks like a slideshow.
+- Use negative space as a design element, not as leftover space. A single large headline on 30vh of white is a design choice.
+- Avoid the "three features in a row with icon + title + text" pattern unless you add a distinctive twist (unusual icon treatment, color band, staggered layout).
+
+## Motion
+
+- CSS-only: `transition: color 120ms ease, background 200ms ease`. No JS loops.
+- Hover states: subtle, not dramatic. `opacity: 0.85` or `translateY(-2px)` — not scale + shadow + color simultaneously.
+- Page-level animation: `@keyframes` fade-in on `<main>` at 150ms is enough. No scroll-triggered choreography.
+
+## Touch targets
+
+Mobile artifacts (any output that targets the iphone or android frame, or declares a viewport ≤ 480 px wide) MUST meet platform minimums:
+
+- Tap target ≥ 44 × 44 px (iOS HIG, also covers Android M3 minimum 48 dp). Lesson rows, list items, tab-bar tabs, and inline buttons all count.
+- Min 8 px gap between adjacent tappable targets to prevent accidental hits.
+- Body input ≥ 16 px font-size on iOS Safari (anything smaller triggers the unwanted auto-zoom-on-focus behavior).
+- Active / pressed state visible — `opacity: 0.7` or a 1 px inset shadow is enough; absence of any feedback reads as a non-interactive element.
+
+Desktop artifacts may go smaller, but never below 32 × 32 px for primary CTAs.
+
+## Iconography
+
+When an icon set is already in scope (lucide-react, Heroicons, Phosphor, system SF Symbols), all icon slots use that set. **Decorative emoji are content, not chrome — never substitute an emoji for an icon.** Mixing 🚀 / 🎓 / 📊 with a clean line-icon set is the single biggest "AI tell" in a generated artifact.
+
+- A tab-bar icon, a card affordance, an achievement badge, a status indicator → use the icon set.
+- An emoji is acceptable only when it IS the content (a reaction picker, a language-flag list, a celebration moment in copy).
+- If the brief doesn't pull in an icon library, draw inline SVG icons at uniform stroke weight matching the design's overall weight.
+
+## Texture and depth
+
+- Grain overlay: a `0.03` opacity SVG noise filter or CSS `url()` feTurbulence adds tactile quality to flat surfaces. Use on hero backgrounds, not everywhere.
+- Glass: `backdrop-filter: blur(12px)` cards look modern when used once. Used everywhere, they look like a tutorial.
+- Borders: prefer `1px solid oklch(85% 0.01 0)` (slightly warm gray) over stark `border-gray-200`.
+
+## Content quality signals
+
+- Photographs: inline SVG abstract compositions or CSS gradient fills. Never hotlinked placeholder images.
+- Data visualizations: hand-coded SVG bar charts or sparklines, not fake progress bars at suspiciously round percentages.
+- Icon weight: match the overall design weight. Light design = 1.5px stroke icons. Heavy design = filled icons.
+
+## What "slop" looks like (avoid)
+
+- A hero section with a gradient blob background, bold sans headline, and a generic screenshot mockup.
+- A features section with six 1:1 cards, each with a 24px icon, a two-word title, and a sentence of filler text.
+- A testimonials section with circular avatars, a name, a title, and a five-star rating.
+- A footer with three columns of nav links and a social media icon row.
+- A "minimal dark" page that is `#0E0E10` end-to-end with a single purple accent and four sparse stat cards. This is the prototypical sparse-LLM output — sections feel like placeholders, the hierarchy is flat, and the only visual interest is the accent color. Always add: a hero with a real headline + subhead, at least one body / narrative section, a comparison or evidence block when numbers are involved, and a closing CTA.
+- A "case study" that is four metric cards plus a single quote — this misses the hero, the before/after, the customer profile, and the closing. See the case_study density floor in the artifact-types section.
+- A logo placeholder rendered as a soft-rounded square with a single random letter centered inside. Use a constructed monogram, a wordmark, or an explicit hatched "YOUR LOGO HERE" rectangle instead.
+- Decorative emoji used as section icons unless the brief explicitly asks for emoji.
+- Lorem ipsum, "John Doe", "Acme Corp", "100%" / "1,234" round-number filler.
+
+These patterns are not forbidden — they are forbidden when combined without a distinctive visual angle that makes them feel intentional rather than assembled from a component kit.
