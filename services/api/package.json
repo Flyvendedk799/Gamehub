@@ -9,6 +9,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@playforge/bus": "workspace:*",
     "@playforge/db": "workspace:*",
     "@playforge/shared": "workspace:*",
     "@playforge/storage": "workspace:*",
