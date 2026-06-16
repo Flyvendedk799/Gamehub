@@ -157,6 +157,7 @@ export interface SnapshotEntry {
   type: 'initial' | 'edit' | 'fork' | 'remix' | 'revert';
   prompt: string | null;
   engine: 'three' | 'phaser' | null;
+  tweakSchema: Record<string, unknown> | null;
   createdAt: string;
 }
 

@@ -11,6 +11,7 @@ export interface SnapshotEntry {
   prompt: string | null;
   engine: SnapshotEngine | null;
   gameSpec: GameSpec | null;
+  tweakSchema: Record<string, unknown> | null;
   filesManifestKey: string;
   filesHash: string;
   createdAt: string;
@@ -24,9 +25,9 @@ export interface SnapshotRepo {
 export class InMemorySnapshotRepo implements SnapshotRepo {
   private readonly byProject = new Map<string, SnapshotEntry[]>();
 
-  push(entry: SnapshotEntry): void {
+  push(entry: Omit<SnapshotEntry, 'tweakSchema'> & { tweakSchema?: Record<string, unknown> | null }): void {
     const list = this.byProject.get(entry.projectId) ?? [];
-    list.push(entry);
+    list.push({ ...entry, tweakSchema: entry.tweakSchema ?? null });
     this.byProject.set(entry.projectId, list);
   }
 

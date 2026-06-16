@@ -278,6 +278,7 @@ function rowToSnapshotEntry(row: typeof schema.snapshots.$inferSelect): Snapshot
     prompt: row.prompt ?? null,
     engine: (row.engine ?? null) as SnapshotEngine | null,
     gameSpec: (row.gameSpec ?? null) as SnapshotEntry['gameSpec'],
+    tweakSchema: (row.tweakSchema ?? null) as Record<string, unknown> | null,
     filesManifestKey: row.filesManifestKey,
     filesHash: row.filesHash,
     createdAt: row.createdAt.toISOString(),

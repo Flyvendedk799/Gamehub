@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChatPanel } from '@/components/ChatPanel';
-import { PreviewPane } from '@/components/PreviewPane';
+import { PreviewPane, type TweakSchema } from '@/components/PreviewPane';
 import { generateGame, getChatHistory, getProject, getSnapshots, publishProject, revertToSnapshot, streamRun, type SnapshotEntry } from '@/lib/api';
 import { useCollab } from '@/lib/use-collab';
 import { usePresence } from '@/lib/use-presence';
@@ -55,6 +55,7 @@ export default function BuilderPage() {
   const [snapshots, setSnapshots] = useState<SnapshotEntry[]>([]);
   const [showTimeline, setShowTimeline] = useState(false);
   const [isReverting, setIsReverting] = useState<string | null>(null);
+  const [currentTweakSchema, setCurrentTweakSchema] = useState<TweakSchema | null>(null);
 
   // CRDT collab — syncs a shared Y.Doc across all browser tabs on this project
   const { peerCount, connected: collabConnected } = useCollab(projectId || null);
@@ -71,7 +72,15 @@ export default function BuilderPage() {
 
   const refreshSnapshots = useCallback(() => {
     if (!projectId) return;
-    void getSnapshots(projectId).then(({ snapshots: s }) => setSnapshots(s)).catch(() => {});
+    void getSnapshots(projectId)
+      .then(({ snapshots: s }) => {
+        setSnapshots(s);
+        const latest = s[0];
+        if (latest?.tweakSchema && Object.keys(latest.tweakSchema).length > 0) {
+          setCurrentTweakSchema(latest.tweakSchema as TweakSchema);
+        }
+      })
+      .catch(() => {});
   }, [projectId]);
 
   // Track active SSE controller so we can close it on unmount / new run
@@ -366,6 +375,7 @@ export default function BuilderPage() {
             isBuilding={isBuilding}
             hasError={hasError}
             errorMessage={errorMessage}
+            tweakSchema={currentTweakSchema}
           />
         </div>
 

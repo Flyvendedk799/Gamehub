@@ -1,10 +1,28 @@
 'use client';
 
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+type TweakKind = 'color' | 'number' | 'boolean';
+
+interface TweakEntry {
+  kind: TweakKind;
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+}
+
+export interface TweakSchema {
+  [key: string]: TweakEntry;
+}
+
 interface PreviewPaneProps {
   previewUrl: string | null;
   isBuilding: boolean;
   hasError: boolean;
   errorMessage?: string;
+  /** Tweak schema for the current snapshot — drives the live-tweak panel. */
+  tweakSchema?: TweakSchema | null;
 }
 
 export function PreviewPane({
@@ -12,7 +30,33 @@ export function PreviewPane({
   isBuilding,
   hasError,
   errorMessage,
+  tweakSchema,
 }: PreviewPaneProps) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [showTweaks, setShowTweaks] = useState(false);
+  const [tweakValues, setTweakValues] = useState<Record<string, string | number | boolean>>({});
+
+  // Reset tweak values when URL changes (new game loaded)
+  useEffect(() => {
+    setTweakValues({});
+    setShowTweaks(false);
+  }, [previewUrl]);
+
+  const hasTweaks = tweakSchema && Object.keys(tweakSchema).length > 0;
+
+  const sendTweaks = useCallback((values: Record<string, string | number | boolean>) => {
+    iframeRef.current?.contentWindow?.postMessage(
+      { type: 'codesign:tweaks:update', tokens: values },
+      '*',
+    );
+  }, []);
+
+  function handleTweakChange(key: string, value: string | number | boolean) {
+    const next = { ...tweakValues, [key]: value };
+    setTweakValues(next);
+    sendTweaks(next);
+  }
+
   return (
     <div className="relative flex flex-col h-full bg-[#0a0a0a]">
       {/* Toolbar */}
@@ -32,90 +76,212 @@ export function PreviewPane({
             no preview
           </span>
         )}
-        {previewUrl && (
-          <a
-            href={previewUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[10px] text-[#6366f1] hover:text-[#818cf8] transition-colors font-mono"
-          >
-            open ↗
-          </a>
-        )}
+        <div className="flex items-center gap-2">
+          {hasTweaks && previewUrl && (
+            <button
+              onClick={() => setShowTweaks((v) => !v)}
+              className={`
+                text-[10px] px-2 py-1 rounded border transition-colors font-mono
+                ${showTweaks
+                  ? 'bg-[#6366f1]/20 text-[#6366f1] border-[#6366f1]/40'
+                  : 'bg-[#1a1a1a] text-[#52525b] border-[#222222] hover:text-[#a1a1aa]'}
+              `}
+            >
+              ⚙ tweaks
+            </button>
+          )}
+          {previewUrl && (
+            <a
+              href={previewUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[10px] text-[#6366f1] hover:text-[#818cf8] transition-colors font-mono"
+            >
+              open ↗
+            </a>
+          )}
+        </div>
       </div>
 
       {/* Content */}
-      <div className="flex-1 relative overflow-hidden">
-        {/* Preview iframe — shown when a URL is available */}
-        {previewUrl && !hasError && (
-          <iframe
-            src={previewUrl}
-            title="Game preview"
-            sandbox="allow-scripts allow-same-origin"
-            className="absolute inset-0 w-full h-full border-0"
-          />
-        )}
+      <div className="flex-1 relative overflow-hidden flex">
+        {/* Preview iframe */}
+        <div className="flex-1 relative overflow-hidden">
+          {previewUrl && !hasError && (
+            <iframe
+              ref={iframeRef}
+              src={previewUrl}
+              title="Game preview"
+              sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-downloads"
+              className="absolute inset-0 w-full h-full border-0"
+            />
+          )}
 
-        {/* Building placeholder */}
-        {!previewUrl && !hasError && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-6">
-            {isBuilding ? (
-              <>
-                <BuildingAnimation />
-                <div className="text-center">
-                  <p className="text-[#f4f4f5] text-sm font-medium">Building your game…</p>
-                  <p className="mt-1 text-[#52525b] text-xs">
-                    This usually takes 15–60 seconds
-                  </p>
-                </div>
-              </>
-            ) : (
-              <>
-                <IdleGraphic />
-                <div className="text-center">
-                  <p className="text-[#3f3f46] text-sm">Preview will appear here</p>
-                  <p className="mt-1 text-[#2a2a2a] text-xs">
-                    Start a build to see your game
-                  </p>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* Error state */}
-        {hasError && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-8">
-            <div className="w-12 h-12 rounded-full bg-[#ef4444]/10 border border-[#ef4444]/20 flex items-center justify-center">
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 20 20"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  d="M10 6v4M10 14h.01M19 10a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
-                  stroke="#ef4444"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </div>
-            <div className="text-center">
-              <p className="text-[#ef4444] text-sm font-medium">Build failed</p>
-              {errorMessage && (
-                <p className="mt-2 text-[#a1a1aa] text-xs font-mono max-w-sm break-all">
-                  {errorMessage}
-                </p>
+          {/* Building placeholder */}
+          {!previewUrl && !hasError && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-6">
+              {isBuilding ? (
+                <>
+                  <BuildingAnimation />
+                  <div className="text-center">
+                    <p className="text-[#f4f4f5] text-sm font-medium">Building your game…</p>
+                    <p className="mt-1 text-[#52525b] text-xs">
+                      This usually takes 15–60 seconds
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <IdleGraphic />
+                  <div className="text-center">
+                    <p className="text-[#3f3f46] text-sm">Preview will appear here</p>
+                    <p className="mt-1 text-[#2a2a2a] text-xs">
+                      Start a build to see your game
+                    </p>
+                  </div>
+                </>
               )}
+            </div>
+          )}
+
+          {/* Error state */}
+          {hasError && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-8">
+              <div className="w-12 h-12 rounded-full bg-[#ef4444]/10 border border-[#ef4444]/20 flex items-center justify-center">
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M10 6v4M10 14h.01M19 10a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+                    stroke="#ef4444"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+              <div className="text-center">
+                <p className="text-[#ef4444] text-sm font-medium">Build failed</p>
+                {errorMessage && (
+                  <p className="mt-2 text-[#a1a1aa] text-xs font-mono max-w-sm break-all">
+                    {errorMessage}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Tweak panel — slides in from the right of the preview */}
+        {showTweaks && hasTweaks && (
+          <div className="w-56 flex-shrink-0 bg-[#0f0f0f] border-l border-[#222222] overflow-y-auto flex flex-col">
+            <div className="px-3 py-2 border-b border-[#1a1a1a] flex items-center justify-between">
+              <span className="text-[10px] font-semibold text-[#52525b] uppercase tracking-wider">Live tweaks</span>
+              <button
+                onClick={() => setShowTweaks(false)}
+                className="text-[#3f3f46] hover:text-[#52525b] text-xs"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex-1 px-3 py-3 flex flex-col gap-4">
+              {Object.entries(tweakSchema).map(([key, entry]) => (
+                <TweakControl
+                  key={key}
+                  tweakKey={key}
+                  entry={entry}
+                  value={tweakValues[key]}
+                  onChange={(v) => handleTweakChange(key, v)}
+                />
+              ))}
             </div>
           </div>
         )}
       </div>
     </div>
   );
+}
+
+interface TweakControlProps {
+  tweakKey: string;
+  entry: TweakEntry;
+  value: string | number | boolean | undefined;
+  onChange: (v: string | number | boolean) => void;
+}
+
+function TweakControl({ tweakKey, entry, value, onChange }: TweakControlProps) {
+  const label = tweakKey.replace(/_/g, ' ').replace(/([A-Z])/g, ' $1').toLowerCase().trim();
+
+  if (entry.kind === 'color') {
+    const colorVal = typeof value === 'string' ? value : '#6366f1';
+    return (
+      <div className="flex flex-col gap-1.5">
+        <label className="text-[10px] text-[#52525b] capitalize">{label}</label>
+        <div className="flex items-center gap-2">
+          <input
+            type="color"
+            value={colorVal}
+            onChange={(e) => onChange(e.target.value)}
+            className="w-8 h-6 rounded cursor-pointer border border-[#222222] bg-transparent"
+          />
+          <span className="text-[10px] font-mono text-[#3f3f46]">{colorVal}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (entry.kind === 'number') {
+    const numVal = typeof value === 'number' ? value : (entry.min ?? 0);
+    const min = entry.min ?? 0;
+    const max = entry.max ?? 100;
+    const step = entry.step ?? 1;
+    return (
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center justify-between">
+          <label className="text-[10px] text-[#52525b] capitalize">{label}</label>
+          <span className="text-[10px] font-mono text-[#3f3f46]">
+            {numVal}{entry.unit ?? ''}
+          </span>
+        </div>
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={numVal}
+          onChange={(e) => onChange(Number(e.target.value))}
+          className="w-full accent-[#6366f1]"
+        />
+      </div>
+    );
+  }
+
+  if (entry.kind === 'boolean') {
+    const boolVal = typeof value === 'boolean' ? value : false;
+    return (
+      <div className="flex items-center justify-between">
+        <label className="text-[10px] text-[#52525b] capitalize">{label}</label>
+        <button
+          onClick={() => onChange(!boolVal)}
+          className={`
+            w-8 h-4 rounded-full transition-colors relative flex-shrink-0
+            ${boolVal ? 'bg-[#6366f1]' : 'bg-[#222222]'}
+          `}
+        >
+          <span className={`
+            absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform
+            ${boolVal ? 'translate-x-4' : 'translate-x-0.5'}
+          `} />
+        </button>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 // ─── Animations ───────────────────────────────────────────────────────────────
