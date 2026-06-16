@@ -23,9 +23,9 @@ import { createDb } from '@playforge/db';
 import { InMemoryEventBus, RedisEventBus, type EventBus } from '@playforge/bus';
 import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
 import { enqueueRun } from '../../worker/src/queue';
-import { HeaderAuthenticator } from './auth';
+import { SessionAuthenticator } from './auth';
 import { BrowserJobQueue } from './browser-queue';
-import { DrizzleChatRepo, DrizzleProjectRepo, DrizzleRunRepo } from './drizzle-repos';
+import { DrizzleChatRepo, DrizzleProjectRepo, DrizzleRunRepo, DrizzleSnapshotRepo } from './drizzle-repos';
 import { DrizzleHubRepo } from './hub-repo';
 import { DrizzlePublishRepo } from './publish-repo';
 import { buildServer, type EnqueueFn } from './server';
@@ -65,6 +65,7 @@ async function main() {
   const projectRepo = new DrizzleProjectRepo(db);
   const runRepo = new DrizzleRunRepo(db);
   const chatRepo = new DrizzleChatRepo(db);
+  const snapshotRepo = new DrizzleSnapshotRepo(db);
   const publishRepo = new DrizzlePublishRepo(db);
   const hubRepo = new DrizzleHubRepo(db);
 
@@ -146,7 +147,7 @@ async function main() {
 
   const server = buildServer({
     repo: projectRepo,
-    auth: new HeaderAuthenticator(),
+    auth: new SessionAuthenticator(db),
     bus,
     runRepo,
     chatRepo,
@@ -154,6 +155,8 @@ async function main() {
     hubRepo,
     enqueue,
     store,
+    snapshotRepo,
+    authDb: db,
     ...(adminToken !== undefined ? { adminToken } : {}),
     maxConcurrentRunsPerUser,
     ...(embedText !== undefined ? { embedText } : {}),

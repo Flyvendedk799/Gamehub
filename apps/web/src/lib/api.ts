@@ -7,15 +7,15 @@ import type {
   ListProjectsResponse,
   SseEvent,
 } from './types';
+import { getToken } from './auth';
 
 const BASE = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3191';
-const DEV_USER = '00000000-0000-0000-0000-000000000001';
 
 function headers(): HeadersInit {
-  return {
-    'Content-Type': 'application/json',
-    'x-user-id': DEV_USER,
-  };
+  const token = getToken();
+  const h: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) h['Authorization'] = `Bearer ${token}`;
+  return h;
 }
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -210,7 +210,8 @@ export function streamRun(
   onError?: (err: Event) => void,
 ): StreamController {
   const url = new URL(`${BASE}/v1/runs/${runId}/stream`);
-  url.searchParams.set('userId', DEV_USER);
+  const token = getToken();
+  if (token) url.searchParams.set('token', token);
 
   const es = new EventSource(url.toString());
 
@@ -257,4 +258,44 @@ export function streamRun(
   return {
     close: () => es.close(),
   };
+}
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+
+export interface AuthUser {
+  id: string;
+  handle: string;
+  displayName: string;
+}
+
+export interface AuthResponse {
+  token: string;
+  user: AuthUser;
+}
+
+export async function register(
+  email: string,
+  password: string,
+  handle: string,
+  displayName?: string,
+): Promise<AuthResponse> {
+  return apiFetch<AuthResponse>('/v1/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ email, password, handle, displayName }),
+  });
+}
+
+export async function login(email: string, password: string): Promise<AuthResponse> {
+  return apiFetch<AuthResponse>('/v1/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export async function logout(): Promise<void> {
+  await apiFetch<unknown>('/v1/auth/logout', { method: 'POST' });
+}
+
+export async function getMe(): Promise<{ userId: string; handle: string }> {
+  return apiFetch<{ userId: string; handle: string }>('/v1/auth/me');
 }

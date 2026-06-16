@@ -1,10 +1,10 @@
 /**
- * Identity & billing schema.
+ * Identity & billing schema — native auth (email + password, session tokens).
  *
- * Auth is delegated to Clerk; `users.clerkUserId` is the external subject. A
- * `users` row is provisioned on first sign-in via Clerk webhook. Billing is
- * Stripe; generation cost is metered as an append-only `creditLedger` (balance
- * = SUM(delta)) — the cloud promotion of the desktop base's `run_usage` table.
+ * No third-party auth provider. Sessions are random tokens stored in the
+ * `sessions` table; clients send `Authorization: Bearer <token>`. Passwords
+ * are hashed with scrypt (Node built-in). The `users` table is self-contained —
+ * no external subject ID needed.
  */
 import { sql } from 'drizzle-orm';
 import {
@@ -24,7 +24,8 @@ export const users = pgTable(
   'users',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    clerkUserId: text('clerk_user_id').notNull(),
+    email: text('email').notNull(),
+    passwordHash: text('password_hash').notNull(),
     handle: text('handle').notNull(),
     displayName: text('display_name').notNull(),
     avatarUrl: text('avatar_url'),
@@ -33,8 +34,24 @@ export const users = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (t) => ({
-    clerkIdx: uniqueIndex('users_clerk_user_id_key').on(t.clerkUserId),
+    emailIdx: uniqueIndex('users_email_key').on(t.email),
     handleIdx: uniqueIndex('users_handle_key').on(t.handle),
+  }),
+);
+
+/** Opaque session tokens. Each login creates one row; logout deletes it. */
+export const sessions = pgTable(
+  'sessions',
+  {
+    token: text('token').primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: uniqueIndex('sessions_user_idx').on(t.userId, t.createdAt),
   }),
 );
 

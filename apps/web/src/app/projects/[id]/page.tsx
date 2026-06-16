@@ -240,7 +240,7 @@ export default function BuilderPage() {
   const isBuilding = isStreaming;
 
   return (
-    <div className="flex flex-col h-screen bg-[#0a0a0a] overflow-hidden">
+    <div className="flex flex-col h-[calc(100vh-3rem)] bg-[#0a0a0a] overflow-hidden">
       {/* Top nav bar */}
       <header className="flex-shrink-0 h-12 border-b border-[#222222] bg-[#111111] flex items-center px-4 gap-3 z-10">
         <Link href="/" className="flex items-center gap-2 group flex-shrink-0">

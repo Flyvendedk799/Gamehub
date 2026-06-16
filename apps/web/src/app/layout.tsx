@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import NavBar from '@/components/NavBar';
 
 export const metadata: Metadata = {
   title: 'Playforge — Build games with AI',
@@ -17,7 +18,10 @@ export default function RootLayout({
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </head>
-      <body className="h-full antialiased">{children}</body>
+      <body className="h-full antialiased">
+        <NavBar />
+        <div className="pt-12 h-full">{children}</div>
+      </body>
     </html>
   );
 }

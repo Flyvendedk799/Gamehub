@@ -24,6 +24,8 @@ import { buildGameHtml, type ExportGameHtmlOptions } from '@playforge/exporters'
 import { exportGameZip } from '@playforge/exporters/game-zip';
 import { type SnapshotStore, contentTypeFor } from '@playforge/storage';
 import type { Authenticator, AuthedUser } from './auth';
+import { generateSessionToken, hashPassword, sessionExpiresAt, verifyPassword } from './auth';
+import { eq as drizzleEq, or as drizzleOr } from 'drizzle-orm';
 import type { BrowserJobQueue, RuntimeVerifyResult, ThumbnailResult } from './browser-queue';
 import type { ChatRepo } from './chat-repo';
 import type { HubRepo } from './hub-repo';
@@ -115,6 +117,8 @@ export interface ServerDeps {
   maxRunTokens?: number;
   /** Optional: enables GET /v1/projects/:id/snapshots + revert endpoint. */
   snapshotRepo?: SnapshotRepo;
+  /** Optional: enables /v1/auth/* routes (register, login, logout, me). */
+  authDb?: import('@playforge/db').Db;
 }
 
 const ENGINES: Engine[] = ['three', 'phaser'];
@@ -132,12 +136,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   void app.register(websocketPlugin);
 
   async function requireUser(req: FastifyRequest, reply: FastifyReply): Promise<AuthedUser | null> {
-    // EventSource cannot set custom headers; fall back to ?userId= query param.
-    const qUserId = (req.query as Record<string, string | undefined>)['userId'];
-    const headers = qUserId
-      ? { ...req.headers, 'x-user-id': qUserId }
-      : req.headers;
-    const user = await deps.auth.authenticate(headers);
+    const q = req.query as Record<string, string | undefined>;
+    const hdrs: Record<string, string | string[] | undefined> = { ...req.headers };
+    // EventSource cannot set custom headers — support ?token= (Bearer) and ?userId= (dev HeaderAuth).
+    const qToken = q['token'];
+    if (qToken && !hdrs['authorization']) hdrs['authorization'] = `Bearer ${qToken}`;
+    const qUserId = q['userId'];
+    if (qUserId && !hdrs['x-user-id']) hdrs['x-user-id'] = qUserId;
+    const user = await deps.auth.authenticate(hdrs);
     if (!user) {
       await reply.code(401).send({ error: 'unauthenticated' });
       return null;
@@ -148,6 +154,86 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // ── health ────────────────────────────────────────────────────────────────
 
   app.get('/health', async () => ({ ok: true, service: 'playforge-api' }));
+
+  // ── auth ──────────────────────────────────────────────────────────────────
+  // POST /v1/auth/register  — create account, return session token
+  // POST /v1/auth/login     — validate credentials, return session token
+  // POST /v1/auth/logout    — delete current session
+  // GET  /v1/auth/me        — return current user (requires auth)
+
+  app.post('/v1/auth/register', async (req, reply) => {
+    if (!deps.authDb) return reply.code(503).send({ error: 'auth_unavailable' });
+    const { schema: s } = await import('@playforge/db');
+    const body = (req.body ?? {}) as { email?: unknown; password?: unknown; handle?: unknown; displayName?: unknown };
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : null;
+    const password = typeof body.password === 'string' ? body.password : null;
+    const handle = typeof body.handle === 'string' ? body.handle.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') : null;
+    const displayName = typeof body.displayName === 'string' ? body.displayName.trim() : handle;
+
+    if (!email || !email.includes('@')) return reply.code(400).send({ error: 'invalid_email' });
+    if (!password || password.length < 8) return reply.code(400).send({ error: 'password_too_short', min: 8 });
+    if (!handle || handle.length < 2) return reply.code(400).send({ error: 'invalid_handle' });
+
+    // Check uniqueness
+    const existing = await deps.authDb.select({ id: s.users.id })
+      .from(s.users)
+      .where(drizzleOr(drizzleEq(s.users.email, email), drizzleEq(s.users.handle, handle)))
+      .catch(() => []);
+    if (existing.length > 0) return reply.code(409).send({ error: 'email_or_handle_taken' });
+
+    const passwordHash = await hashPassword(password);
+    const [user] = await deps.authDb.insert(s.users)
+      .values({ email, passwordHash, handle, displayName: displayName ?? handle })
+      .returning({ id: s.users.id, handle: s.users.handle, displayName: s.users.displayName });
+    if (!user) return reply.code(500).send({ error: 'registration_failed' });
+
+    const token = generateSessionToken();
+    await deps.authDb.insert(s.sessions).values({ token, userId: user.id, expiresAt: sessionExpiresAt() });
+
+    return reply.code(201).send({ token, user: { id: user.id, handle: user.handle, displayName: user.displayName } });
+  });
+
+  app.post('/v1/auth/login', async (req, reply) => {
+    if (!deps.authDb) return reply.code(503).send({ error: 'auth_unavailable' });
+    const { schema: s } = await import('@playforge/db');
+    const body = (req.body ?? {}) as { email?: unknown; password?: unknown };
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : null;
+    const password = typeof body.password === 'string' ? body.password : null;
+    if (!email || !password) return reply.code(400).send({ error: 'email_and_password_required' });
+
+    const [user] = await deps.authDb.select({
+      id: s.users.id, handle: s.users.handle, displayName: s.users.displayName, passwordHash: s.users.passwordHash,
+    }).from(s.users).where(drizzleEq(s.users.email, email));
+
+    const ok = user ? await verifyPassword(password, user.passwordHash) : false;
+    if (!user || !ok) {
+      if (!user) await hashPassword(password).catch(() => {});
+      return reply.code(401).send({ error: 'invalid_credentials' });
+    }
+
+    const token = generateSessionToken();
+    await deps.authDb.insert(s.sessions).values({ token, userId: user.id, expiresAt: sessionExpiresAt() });
+
+    return reply.send({ token, user: { id: user.id, handle: user.handle, displayName: user.displayName } });
+  });
+
+  app.post('/v1/auth/logout', async (req, reply) => {
+    if (!deps.authDb) return reply.code(503).send({ error: 'auth_unavailable' });
+    const { schema: s } = await import('@playforge/db');
+    const authHeader = req.headers['authorization'];
+    const raw = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+    const token = raw?.startsWith('Bearer ') ? raw.slice(7).trim() : null;
+    if (token) {
+      await deps.authDb.delete(s.sessions).where(drizzleEq(s.sessions.token, token)).catch(() => {});
+    }
+    return reply.send({ ok: true });
+  });
+
+  app.get('/v1/auth/me', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    return reply.send({ userId: user.userId, handle: user.handle });
+  });
 
   // ── projects CRUD ─────────────────────────────────────────────────────────
 
