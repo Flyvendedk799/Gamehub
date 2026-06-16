@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChatPanel } from '@/components/ChatPanel';
 import { PreviewPane } from '@/components/PreviewPane';
 import { generateGame, getChatHistory, getProject, publishProject, streamRun } from '@/lib/api';
+import { useCollab } from '@/lib/use-collab';
 import type { ChatHistoryMessage, Project, RunCompleteEvent, RunErrorEvent, SseEvent } from '@/lib/types';
 
 const BASE = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3191';
@@ -50,6 +51,9 @@ export default function BuilderPage() {
   const [currentRunId, setCurrentRunId] = useState<string | null>(initialRunId);
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishUrl, setPublishUrl] = useState<string | null>(null);
+
+  // CRDT collab — syncs a shared Y.Doc across all browser tabs on this project
+  const { peerCount, connected: collabConnected } = useCollab(projectId || null);
 
   // Track active SSE controller so we can close it on unmount / new run
   const streamCtrlRef = useRef<{ close: () => void } | null>(null);
@@ -266,6 +270,12 @@ export default function BuilderPage() {
                 </button>
               )}
             </>
+          )}
+          {collabConnected && peerCount > 0 && (
+            <span className="flex items-center gap-1 text-xs text-emerald-400 font-medium" title="Live collaborators">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              {peerCount} with you
+            </span>
           )}
           <Link
             href="/projects"

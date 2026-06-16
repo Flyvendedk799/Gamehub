@@ -70,6 +70,10 @@ const VISIBILITIES: Visibility[] = ['private', 'unlisted', 'public'];
 /** Per-project WebSocket presence: projectId → Set of connected socket send functions. */
 const presenceSockets = new Map<string, Set<(msg: string) => void>>();
 
+/** Per-project CRDT collab rooms: projectId → Set of raw WebSocket objects for binary relay. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const collabRooms = new Map<string, Set<any>>();
+
 export function buildServer(deps: ServerDeps): FastifyInstance {
   const app = Fastify({ logger: false });
   void app.register(websocketPlugin);
@@ -736,6 +740,36 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       presenceSockets.get(id)?.delete(send);
       if (presenceSockets.get(id)?.size === 0) presenceSockets.delete(id);
       broadcast();
+    });
+  });
+
+  // ── CRDT collab relay — GET /v1/projects/:id/collab (WebSocket) ───────────
+  // Pure binary relay: every message from peer A is forwarded to all other peers
+  // in the same project room. Clients run yjs + WebsocketProvider pointed here.
+  // No server-side Y.Doc; late-joiners get state from existing peers via the
+  // standard y-websocket sync step1/step2 protocol, which clients handle natively.
+  app.get('/v1/projects/:id/collab', { websocket: true }, (socket, req) => {
+    const { id } = req.params as { id: string };
+
+    let room = collabRooms.get(id);
+    if (!room) {
+      room = new Set();
+      collabRooms.set(id, room);
+    }
+    room.add(socket);
+
+    socket.on('message', (data: Buffer | ArrayBuffer) => {
+      const buf: Buffer = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
+      for (const peer of collabRooms.get(id) ?? []) {
+        if (peer !== socket && (peer.readyState as number) === 1 /* OPEN */) {
+          try { (peer as { send(d: Buffer): void }).send(buf); } catch { /* disconnected */ }
+        }
+      }
+    });
+
+    socket.on('close', () => {
+      collabRooms.get(id)?.delete(socket);
+      if (collabRooms.get(id)?.size === 0) collabRooms.delete(id);
     });
   });
 
