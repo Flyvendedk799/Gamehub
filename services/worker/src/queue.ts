@@ -13,7 +13,7 @@ import type { AgentEvent } from '@playforge/agent-core';
 import { type EventBus, runChannel } from '@playforge/bus';
 import type { ModelRef } from '@playforge/shared';
 import type { SnapshotStore } from '@playforge/storage';
-import { runGeneration, type GenerationResult, type WebEngine } from './run-generation';
+import { runGeneration, type GenerateFn, type GenerationResult, type WebEngine } from './run-generation';
 
 export interface EnqueueInput {
   runId: string;
@@ -27,6 +27,8 @@ export interface EnqueueInput {
 export interface QueuePorts {
   bus: EventBus;
   store: SnapshotStore;
+  /** Injectable agent runner — defaults to the real generateViaAgent. */
+  generate?: GenerateFn;
 }
 
 export async function enqueueRun(
@@ -44,6 +46,7 @@ export async function enqueueRun(
       },
       {
         store: ports.store,
+        ...(ports.generate !== undefined ? { generate: ports.generate } : {}),
         onEvent: (event: AgentEvent) => {
           void ports.bus.publish(channel, event);
         },
