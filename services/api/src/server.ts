@@ -355,8 +355,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           if (result?.pngBase64 && deps.store) {
             const pngBytes = Buffer.from(result.pngBase64, 'base64');
             const thumbKey = await deps.store.putBlob(pngBytes);
-            // Store thumbnail URL as a blob key reference — frontend resolves via /v1/blobs/:key
-            await deps.publishRepo?.setStatus(publishedGame.id, 'live');
+            await deps.publishRepo?.setThumbnailUrl(publishedGame.id, `/v1/blobs/${thumbKey}`);
             console.log(`[publish] thumbnail captured for ${publishedGame.publishSlug} → ${thumbKey}`);
           }
         } catch (err) {

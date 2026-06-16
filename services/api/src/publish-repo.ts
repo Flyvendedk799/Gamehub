@@ -8,6 +8,7 @@ export interface PublishedGame {
   publishSlug: string;
   title: string;
   bundleKey: string;
+  thumbnailUrl: string | null;
   status: 'live' | 'unpublished' | 'removed_by_mod';
   publishedAt: string;
   updatedAt: string;
@@ -23,6 +24,7 @@ export interface PublishRepo {
   getBySlug(slug: string): Promise<PublishedGame | null>;
   getByProject(projectId: string): Promise<PublishedGame | null>;
   setStatus(id: string, status: PublishedGame['status']): Promise<void>;
+  setThumbnailUrl(id: string, thumbnailUrl: string): Promise<void>;
   /** List live published games by project owner — for creator profiles. */
   listByOwner(ownerId: string, opts: { limit: number; offset: number }): Promise<PublishedGame[]>;
 }
@@ -34,6 +36,7 @@ function rowToPublishedGame(row: typeof schema.publishedGames.$inferSelect): Pub
     publishSlug: row.publishSlug,
     title: row.title,
     bundleKey: row.bundleKey,
+    thumbnailUrl: row.thumbnailUrl ?? null,
     status: row.status,
     publishedAt: row.publishedAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -54,6 +57,7 @@ export class InMemoryPublishRepo implements PublishRepo {
     const game: PublishedGame = {
       id: randomUUID(),
       ...input,
+      thumbnailUrl: null,
       status: 'live',
       publishedAt: now,
       updatedAt: now,
@@ -73,6 +77,11 @@ export class InMemoryPublishRepo implements PublishRepo {
   async setStatus(id: string, status: PublishedGame['status']): Promise<void> {
     const game = this.byId.get(id);
     if (game) this.byId.set(id, { ...game, status, updatedAt: new Date().toISOString() });
+  }
+
+  async setThumbnailUrl(id: string, thumbnailUrl: string): Promise<void> {
+    const game = this.byId.get(id);
+    if (game) this.byId.set(id, { ...game, thumbnailUrl, updatedAt: new Date().toISOString() });
   }
 
   async listByOwner(_ownerId: string, opts: { limit: number; offset: number }): Promise<PublishedGame[]> {
@@ -128,6 +137,13 @@ export class DrizzlePublishRepo implements PublishRepo {
     await this.db
       .update(schema.publishedGames)
       .set({ status, updatedAt: new Date() })
+      .where(eq(schema.publishedGames.id, id));
+  }
+
+  async setThumbnailUrl(id: string, thumbnailUrl: string): Promise<void> {
+    await this.db
+      .update(schema.publishedGames)
+      .set({ thumbnailUrl, updatedAt: new Date() })
       .where(eq(schema.publishedGames.id, id));
   }
 
