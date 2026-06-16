@@ -23,6 +23,8 @@ export interface RunRepo {
   get(id: string): Promise<Run | null>;
   updateStatus(id: string, status: Run['status']): Promise<void>;
   setSnapshot(id: string, manifestKey: string): Promise<void>;
+  /** Count queued/running runs for a user (for concurrent run cap). */
+  countActiveByUser(userId: string): Promise<number>;
 }
 
 export class InMemoryRunRepo implements RunRepo {
@@ -49,5 +51,11 @@ export class InMemoryRunRepo implements RunRepo {
   async setSnapshot(id: string, manifestKey: string): Promise<void> {
     const existing = this.byId.get(id);
     if (existing) this.byId.set(id, { ...existing, snapshotManifestKey: manifestKey });
+  }
+
+  async countActiveByUser(userId: string): Promise<number> {
+    return [...this.byId.values()].filter(
+      (r) => r.userId === userId && (r.status === 'queued' || r.status === 'running'),
+    ).length;
   }
 }

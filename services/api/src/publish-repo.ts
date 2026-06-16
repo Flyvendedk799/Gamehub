@@ -22,6 +22,7 @@ export interface PublishRepo {
   }): Promise<PublishedGame>;
   getBySlug(slug: string): Promise<PublishedGame | null>;
   getByProject(projectId: string): Promise<PublishedGame | null>;
+  setStatus(id: string, status: PublishedGame['status']): Promise<void>;
 }
 
 function rowToPublishedGame(row: typeof schema.publishedGames.$inferSelect): PublishedGame {
@@ -66,6 +67,11 @@ export class InMemoryPublishRepo implements PublishRepo {
   async getByProject(projectId: string): Promise<PublishedGame | null> {
     return [...this.byId.values()].find((g) => g.projectId === projectId) ?? null;
   }
+
+  async setStatus(id: string, status: PublishedGame['status']): Promise<void> {
+    const game = this.byId.get(id);
+    if (game) this.byId.set(id, { ...game, status, updatedAt: new Date().toISOString() });
+  }
 }
 
 export class DrizzlePublishRepo implements PublishRepo {
@@ -108,5 +114,12 @@ export class DrizzlePublishRepo implements PublishRepo {
       .orderBy(desc(schema.publishedGames.publishedAt))
       .limit(1);
     return rows[0] ? rowToPublishedGame(rows[0]) : null;
+  }
+
+  async setStatus(id: string, status: PublishedGame['status']): Promise<void> {
+    await this.db
+      .update(schema.publishedGames)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(schema.publishedGames.id, id));
   }
 }

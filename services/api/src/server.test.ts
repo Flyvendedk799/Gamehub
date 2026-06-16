@@ -467,3 +467,118 @@ describe('preview route', () => {
     expect(res.statusCode).toBe(503);
   });
 });
+
+describe('moderation', () => {
+  it('moderator can take down a published game', async () => {
+    const publishRepo = new InMemoryPublishRepo();
+    const game = await publishRepo.upsert({
+      projectId: 'proj_mod',
+      publishSlug: 'test-mod-game',
+      title: 'Mod Test',
+      bundleKey: 'blobs/abc123',
+    });
+    expect(game.status).toBe('live');
+
+    const app = buildServer({
+      repo: new InMemoryProjectRepo(),
+      auth: new HeaderAuthenticator(),
+      bus: new InMemoryEventBus(),
+      runRepo: new InMemoryRunRepo(),
+      enqueue: async () => {},
+      publishRepo,
+      adminToken: 'secret-admin',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/admin/games/test-mod-game/moderate',
+      headers: { 'x-admin-token': 'secret-admin' },
+      payload: { status: 'removed_by_mod' },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const taken = await publishRepo.getBySlug('test-mod-game');
+    expect(taken?.status).toBe('removed_by_mod');
+  });
+
+  it('rejects moderation without admin token', async () => {
+    const publishRepo = new InMemoryPublishRepo();
+    await publishRepo.upsert({
+      projectId: 'proj_mod2',
+      publishSlug: 'test-mod-game2',
+      title: 'Mod Test 2',
+      bundleKey: 'blobs/def',
+    });
+
+    const app = buildServer({
+      repo: new InMemoryProjectRepo(),
+      auth: new HeaderAuthenticator(),
+      bus: new InMemoryEventBus(),
+      runRepo: new InMemoryRunRepo(),
+      enqueue: async () => {},
+      publishRepo,
+      adminToken: 'secret-admin',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/admin/games/test-mod-game2/moderate',
+      headers: { 'x-admin-token': 'wrong-token' },
+      payload: { status: 'removed_by_mod' },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+});
+
+describe('concurrent run cap', () => {
+  it('blocks generation when concurrent run limit is reached', async () => {
+    const runRepo = new InMemoryRunRepo();
+    const repo = new InMemoryProjectRepo();
+
+    const project = await repo.create({ ownerId: 'alice', name: 'Cap Test', engine: 'phaser' });
+    // Pre-create a run in queued state to simulate an active run.
+    await runRepo.create({ projectId: project.id, userId: 'alice' });
+
+    const app = buildServer({
+      repo,
+      auth: new HeaderAuthenticator(),
+      bus: new InMemoryEventBus(),
+      runRepo,
+      enqueue: async () => {},
+      maxConcurrentRunsPerUser: 1,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${project.id}/generate`,
+      headers: AS_ALICE,
+      payload: { prompt: 'make a platformer' },
+    });
+    expect(res.statusCode).toBe(429);
+    expect((res.json() as { error: string }).error).toBe('concurrent_run_limit');
+  });
+
+  it('allows generation when under the concurrent limit', async () => {
+    const runRepo = new InMemoryRunRepo();
+    const repo = new InMemoryProjectRepo();
+
+    const project = await repo.create({ ownerId: 'alice', name: 'Cap OK', engine: 'phaser' });
+
+    const app = buildServer({
+      repo,
+      auth: new HeaderAuthenticator(),
+      bus: new InMemoryEventBus(),
+      runRepo,
+      enqueue: async () => {},
+      maxConcurrentRunsPerUser: 1,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${project.id}/generate`,
+      headers: AS_ALICE,
+      payload: { prompt: 'make a platformer' },
+    });
+    expect(res.statusCode).toBe(202);
+  });
+});

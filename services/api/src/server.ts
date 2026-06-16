@@ -52,6 +52,10 @@ export interface ServerDeps {
   publishRepo?: PublishRepo;
   /** Optional: enables community hub routes. */
   hubRepo?: HubRepo;
+  /** Optional: max concurrent runs per user (default 1 free / 3 pro — enforced if set). */
+  maxConcurrentRunsPerUser?: number;
+  /** Optional: admin token for moderation endpoints. */
+  adminToken?: string;
 }
 
 const ENGINES: Engine[] = ['three', 'phaser'];
@@ -161,6 +165,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (typeof body.prompt !== 'string' || body.prompt.trim() === '') {
       return reply.code(400).send({ error: 'prompt_required' });
     }
+    // Concurrent run cap — reject if the user already has too many active runs.
+    if (deps.maxConcurrentRunsPerUser !== undefined) {
+      const active = await deps.runRepo.countActiveByUser(user.userId);
+      if (active >= deps.maxConcurrentRunsPerUser) {
+        return reply.code(429).send({ error: 'concurrent_run_limit', active, limit: deps.maxConcurrentRunsPerUser });
+      }
+    }
+
     const run = await deps.runRepo.create({ projectId: project.id, userId: user.userId });
 
     // Persist the user's prompt to chat history so it survives page reloads.
@@ -595,6 +607,35 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       ...(reason !== undefined ? { reason } : {}),
     });
     return reply.code(202).send({ ok: true });
+  });
+
+  // ── moderation (admin) ────────────────────────────────────────────────────
+
+  app.post('/v1/admin/games/:slug/moderate', async (req, reply) => {
+    if (!deps.publishRepo) {
+      return reply.code(503).send({ error: 'publish_unavailable' });
+    }
+    // Require admin token when configured.
+    if (deps.adminToken) {
+      const provided = req.headers['x-admin-token'];
+      const token = Array.isArray(provided) ? provided[0] : provided;
+      if (token !== deps.adminToken) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
+    }
+    const { slug } = req.params as { slug: string };
+    const published = await deps.publishRepo.getBySlug(slug);
+    if (!published) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    const VALID_STATUSES = ['live', 'unpublished', 'removed_by_mod'] as const;
+    type Status = typeof VALID_STATUSES[number];
+    const body = (req.body ?? {}) as { status?: unknown };
+    if (!VALID_STATUSES.includes(body.status as Status)) {
+      return reply.code(400).send({ error: 'invalid_status', valid: VALID_STATUSES });
+    }
+    await deps.publishRepo.setStatus(published.id, body.status as Status);
+    return reply.code(200).send({ ok: true, slug, status: body.status });
   });
 
   return app;

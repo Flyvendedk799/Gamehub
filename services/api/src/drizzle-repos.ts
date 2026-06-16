@@ -6,7 +6,7 @@
  * contracts are identical; routes and tests need no changes.
  */
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { type Db, schema } from '@playforge/db';
 import type { ChatMessageKind } from '@playforge/shared';
 import type { ChatMessage, ChatRepo } from './chat-repo';
@@ -188,6 +188,19 @@ export class DrizzleRunRepo implements RunRepo {
         finishedAt: new Date(),
       })
       .where(eq(schema.runs.id, id));
+  }
+
+  async countActiveByUser(userId: string): Promise<number> {
+    const [row] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.runs)
+      .where(
+        and(
+          eq(schema.runs.userId, userId),
+          inArray(schema.runs.status, ['queued', 'running']),
+        ),
+      );
+    return row?.count ?? 0;
   }
 }
 

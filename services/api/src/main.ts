@@ -52,6 +52,8 @@ async function main() {
   const port = Number(process.env['PORT'] ?? '3100');
   const redisUrl = process.env['REDIS_URL'];
   const blobDir = process.env['BLOB_DIR'] ?? '.playforge-blobs';
+  const adminToken = process.env['ADMIN_TOKEN'];
+  const maxConcurrentRunsPerUser = Number(process.env['MAX_CONCURRENT_RUNS'] ?? '1');
 
   const db = createDb(databaseUrl);
 
@@ -129,6 +131,8 @@ async function main() {
     hubRepo,
     enqueue,
     store,
+    ...(adminToken !== undefined ? { adminToken } : {}),
+    maxConcurrentRunsPerUser,
   });
 
   try {
