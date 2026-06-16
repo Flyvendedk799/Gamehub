@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { type Db, schema } from '@playforge/db';
 
 export interface PublishedGame {
@@ -23,6 +23,8 @@ export interface PublishRepo {
   getBySlug(slug: string): Promise<PublishedGame | null>;
   getByProject(projectId: string): Promise<PublishedGame | null>;
   setStatus(id: string, status: PublishedGame['status']): Promise<void>;
+  /** List live published games by project owner — for creator profiles. */
+  listByOwner(ownerId: string, opts: { limit: number; offset: number }): Promise<PublishedGame[]>;
 }
 
 function rowToPublishedGame(row: typeof schema.publishedGames.$inferSelect): PublishedGame {
@@ -71,6 +73,12 @@ export class InMemoryPublishRepo implements PublishRepo {
   async setStatus(id: string, status: PublishedGame['status']): Promise<void> {
     const game = this.byId.get(id);
     if (game) this.byId.set(id, { ...game, status, updatedAt: new Date().toISOString() });
+  }
+
+  async listByOwner(_ownerId: string, opts: { limit: number; offset: number }): Promise<PublishedGame[]> {
+    return [...this.byId.values()]
+      .filter((g) => g.status === 'live')
+      .slice(opts.offset, opts.offset + opts.limit);
   }
 }
 
@@ -121,5 +129,22 @@ export class DrizzlePublishRepo implements PublishRepo {
       .update(schema.publishedGames)
       .set({ status, updatedAt: new Date() })
       .where(eq(schema.publishedGames.id, id));
+  }
+
+  async listByOwner(ownerId: string, opts: { limit: number; offset: number }): Promise<PublishedGame[]> {
+    const rows = await this.db
+      .select({ pg: schema.publishedGames })
+      .from(schema.publishedGames)
+      .innerJoin(schema.projects, eq(schema.projects.id, schema.publishedGames.projectId))
+      .where(
+        and(
+          eq(schema.projects.ownerId, ownerId),
+          eq(schema.publishedGames.status, 'live'),
+        ),
+      )
+      .orderBy(desc(schema.publishedGames.publishedAt))
+      .limit(opts.limit)
+      .offset(opts.offset);
+    return rows.map((r) => rowToPublishedGame(r.pg));
   }
 }

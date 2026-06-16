@@ -500,6 +500,38 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // POST /v1/hub/games/:slug/remix    — fork into requester's project (auth required)
   // POST /v1/hub/games/:slug/report   — report (auth optional)
 
+  // ── Creator profiles ─────────────────────────────────────────────────────
+
+  app.get('/v1/users/:handle', async (req, reply) => {
+    const { handle } = req.params as { handle: string };
+    const projects = await deps.repo.listByOwner(handle);
+    const publicProjects = projects.filter((p) => p.visibility === 'public');
+    return reply.send({
+      handle,
+      projectCount: publicProjects.length,
+      projects: publicProjects.map((p) => ({
+        id: p.id,
+        slug: p.slug,
+        name: p.name,
+        engine: p.engine,
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+      })),
+    });
+  });
+
+  app.get('/v1/users/:handle/games', async (req, reply) => {
+    if (!deps.publishRepo) return reply.code(503).send({ error: 'publish_unavailable' });
+    const { handle } = req.params as { handle: string };
+    const q = req.query as Record<string, string | undefined>;
+    const limit = Math.min(Number(q['limit'] ?? '20'), 50);
+    const offset = Number(q['offset'] ?? '0');
+    const games = await deps.publishRepo.listByOwner(handle, { limit, offset });
+    return reply.send({ handle, games });
+  });
+
+  // ── Hub ───────────────────────────────────────────────────────────────────
+
   app.get('/v1/hub', async (req, reply) => {
     if (!deps.hubRepo) return reply.code(503).send({ error: 'hub_unavailable' });
     const q = req.query as Record<string, string | undefined>;
