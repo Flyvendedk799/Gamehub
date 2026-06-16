@@ -8,9 +8,11 @@ export interface Run {
   id: string;
   projectId: string;
   userId: string;
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'paused';
   createdAt: string;
   snapshotManifestKey?: string;
+  /** Populated when status === 'paused'. Carries the continuation payload. */
+  continuation?: unknown;
 }
 
 export interface CreateRunInput {
@@ -37,6 +39,8 @@ export interface RunRepo {
   getPausedContinuation(projectId: string): Promise<{ continuation: unknown; snapshotManifestKey: string | null } | null>;
   /** Aggregate run stats for build-health dashboard. */
   getStats(): Promise<RunStats>;
+  /** Mark a run as paused with a continuation payload (used in tests and Drizzle impl). */
+  setPaused?(id: string, continuation: unknown, snapshotManifestKey?: string): Promise<void>;
 }
 
 export class InMemoryRunRepo implements RunRepo {
@@ -65,14 +69,34 @@ export class InMemoryRunRepo implements RunRepo {
     if (existing) this.byId.set(id, { ...existing, snapshotManifestKey: manifestKey });
   }
 
+  async setPaused(id: string, continuation: unknown, snapshotManifestKey?: string): Promise<void> {
+    const existing = this.byId.get(id);
+    if (existing) {
+      this.byId.set(id, {
+        ...existing,
+        status: 'paused',
+        continuation,
+        ...(snapshotManifestKey !== undefined ? { snapshotManifestKey } : {}),
+      });
+    }
+  }
+
   async countActiveByUser(userId: string): Promise<number> {
     return [...this.byId.values()].filter(
       (r) => r.userId === userId && (r.status === 'queued' || r.status === 'running'),
     ).length;
   }
 
-  async getPausedContinuation(_projectId: string): Promise<{ continuation: unknown; snapshotManifestKey: string | null } | null> {
-    return null; // InMemory: no paused runs
+  async getPausedContinuation(projectId: string): Promise<{ continuation: unknown; snapshotManifestKey: string | null } | null> {
+    // Find the most recently created paused run for this project.
+    const paused = [...this.byId.values()]
+      .filter((r) => r.projectId === projectId && r.status === 'paused' && r.continuation !== undefined)
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0];
+    if (!paused) return null;
+    return {
+      continuation: paused.continuation,
+      snapshotManifestKey: paused.snapshotManifestKey ?? null,
+    };
   }
 
   async getStats(): Promise<RunStats> {

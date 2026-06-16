@@ -72,6 +72,13 @@ export type EnqueueFn = (input: {
   parentManifestKey?: string;
   /** Hard token ceiling for this run — worker aborts if exceeded. */
   maxTokens?: number;
+  /** Continuation state from a previously paused run. */
+  continuation?: unknown;
+  /**
+   * When true, the working tree is seeded from a remixed project. The worker
+   * will prepend an untrusted-content safety header to the effective prompt.
+   */
+  isRemix?: boolean;
 }) => Promise<void>;
 
 export interface ServerDeps {
@@ -256,6 +263,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           : {}),
       ...(paused !== null ? { continuation: paused.continuation } : {}),
       ...(deps.maxRunTokens !== undefined ? { maxTokens: deps.maxRunTokens } : {}),
+      // Prompt-injection guard: flag remix projects so the worker prepends the
+      // untrusted-content safety header before passing the prompt to the agent.
+      ...(project.remixOfProjectId !== null ? { isRemix: true } : {}),
     });
     return reply.code(202).send({ runId: run.id });
   });

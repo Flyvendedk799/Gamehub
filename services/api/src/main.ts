@@ -78,7 +78,7 @@ async function main() {
     console.log('[playforge-api] no REDIS_URL — running generation in-process');
   }
 
-  const enqueue: EnqueueFn = async ({ runId, projectId, userId, prompt, parentManifestKey, maxTokens }) => {
+  const enqueue: EnqueueFn = async ({ runId, projectId, userId, prompt, parentManifestKey, maxTokens, continuation, isRemix }) => {
     if (queue) {
       await queue.add(
         'generate',
@@ -90,6 +90,8 @@ async function main() {
           model: { provider: modelProvider, modelId },
           ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
           ...(maxTokens !== undefined ? { maxTokens } : {}),
+          ...(continuation !== undefined ? { continuation } : {}),
+          ...(isRemix === true ? { isRemix } : {}),
         },
         { jobId: runId },
       );
@@ -105,6 +107,7 @@ async function main() {
         model: { provider: modelProvider, modelId },
         apiKey,
         ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
+        ...(isRemix === true ? { isRemix } : {}),
       },
       { bus, store },
     ).then(async (result) => {

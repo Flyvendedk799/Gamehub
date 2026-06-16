@@ -62,6 +62,11 @@ interface GenerateJobData {
   continuation?: ContinuationPromptInput;
   /** Hard token ceiling (input + output). Worker aborts the run if exceeded. */
   maxTokens?: number;
+  /**
+   * When true, the working tree is seeded from a remixed project. queue.ts will
+   * prepend the untrusted-content safety header to the effective prompt.
+   */
+  isRemix?: boolean;
 }
 
 async function main() {
@@ -81,7 +86,7 @@ async function main() {
   const worker = new Worker<GenerateJobData>(
     'generate',
     async (job) => {
-      const { runId, projectId, prompt, parentManifestKey, apiKey: jobApiKey, model: jobModel, continuation, maxTokens } = job.data;
+      const { runId, projectId, prompt, parentManifestKey, apiKey: jobApiKey, model: jobModel, continuation, maxTokens, isRemix } = job.data;
       const apiKey = jobApiKey ?? platformApiKey;
       const model: ModelRef = jobModel ?? { provider: modelProvider, modelId };
 
@@ -102,6 +107,7 @@ async function main() {
           ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
           ...(continuation !== undefined ? { continuation } : {}),
           ...(maxTokens !== undefined ? { maxTokens } : {}),
+          ...(isRemix === true ? { isRemix } : {}),
         },
         { bus, store },
       );

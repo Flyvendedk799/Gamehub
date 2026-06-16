@@ -242,7 +242,7 @@ export default function BuilderPage() {
   return (
     <div className="flex flex-col h-screen bg-[#0a0a0a] overflow-hidden">
       {/* Top nav bar */}
-      <header className="flex-shrink-0 h-12 border-b border-[#222222] bg-[#111111] flex items-center px-4 gap-4 z-10">
+      <header className="flex-shrink-0 h-12 border-b border-[#222222] bg-[#111111] flex items-center px-4 gap-3 z-10">
         <Link href="/" className="flex items-center gap-2 group flex-shrink-0">
           <div className="w-6 h-6 rounded-md bg-[#6366f1] flex items-center justify-center">
             <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
@@ -264,32 +264,36 @@ export default function BuilderPage() {
           )}
         </div>
 
-        <div className="flex items-center gap-3 flex-shrink-0">
+        <div className="flex items-center gap-2 md:gap-3 flex-shrink-0">
           {isBuilding && (
             <span className="flex items-center gap-1.5 text-xs text-[#6366f1] font-mono">
               <PulseRing />
-              building
+              <span className="hidden sm:inline">building</span>
             </span>
           )}
           {previewUrl && (
             <>
+              {/* Full screen — icon-only on small screens */}
               <a
                 href={previewUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="
-                  text-xs px-3 py-1.5 rounded-lg
+                  text-xs px-2 py-1.5 md:px-3 rounded-lg
                   bg-[#6366f1]/10 hover:bg-[#6366f1]/20
                   text-[#6366f1] border border-[#6366f1]/20
                   transition-colors font-medium
                 "
+                title="Full screen"
               >
-                Full screen ↗
+                <span className="hidden md:inline">Full screen </span>↗
               </a>
+              {/* Download — hidden on small screens */}
               <a
                 href={`${BASE}/v1/projects/${projectId}/game.zip`}
                 download
                 className="
+                  hidden md:inline-flex
                   text-xs px-3 py-1.5 rounded-lg
                   bg-[#1a1a1a] hover:bg-[#222222]
                   text-[#a1a1aa] border border-[#222222]
@@ -329,10 +333,12 @@ export default function BuilderPage() {
               )}
             </>
           )}
+          {/* History — hidden on small screens */}
           {snapshots.length > 0 && (
             <button
               onClick={() => setShowTimeline((v) => !v)}
               className={`
+                hidden md:inline-flex
                 text-xs px-3 py-1.5 rounded-lg border transition-colors font-medium
                 ${showTimeline
                   ? 'bg-[#6366f1]/20 text-[#6366f1] border-[#6366f1]/40'
@@ -345,12 +351,13 @@ export default function BuilderPage() {
           {(viewerCount > 1 || (collabConnected && peerCount > 0)) && (
             <span className="flex items-center gap-1 text-xs text-emerald-400 font-medium" title="Live collaborators">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              {Math.max(viewerCount - 1, peerCount)} with you
+              <span className="hidden sm:inline">{Math.max(viewerCount - 1, peerCount)} with you</span>
             </span>
           )}
+          {/* All projects link — hidden on small screens */}
           <Link
             href="/projects"
-            className="text-xs text-[#52525b] hover:text-[#a1a1aa] transition-colors"
+            className="hidden md:inline text-xs text-[#52525b] hover:text-[#a1a1aa] transition-colors"
           >
             All projects
           </Link>
@@ -358,9 +365,9 @@ export default function BuilderPage() {
       </header>
 
       {/* Main split */}
-      <div className="flex flex-1 overflow-hidden relative">
-        {/* Chat panel — 35% */}
-        <div className="w-[35%] min-w-[280px] max-w-[480px] flex-shrink-0 overflow-hidden">
+      <div className="flex flex-col md:flex-row flex-1 overflow-hidden relative">
+        {/* Chat panel — full width on mobile (50vh), 35% sidebar on md+ */}
+        <div className="h-[50vh] md:h-auto w-full md:w-[35%] md:min-w-[280px] md:max-w-[480px] md:flex-shrink-0 overflow-hidden">
           <ChatPanel
             events={events}
             onSend={(prompt) => { void handleSend(prompt); }}
@@ -368,8 +375,8 @@ export default function BuilderPage() {
           />
         </div>
 
-        {/* Preview pane — 65% */}
-        <div className="flex-1 overflow-hidden">
+        {/* Preview pane — full width on mobile (50vh), flex-1 on md+ */}
+        <div className="h-[50vh] md:h-auto flex-1 overflow-hidden">
           <PreviewPane
             previewUrl={previewUrl}
             isBuilding={isBuilding}
@@ -381,7 +388,7 @@ export default function BuilderPage() {
 
         {/* Version timeline overlay */}
         {showTimeline && (
-          <div className="absolute top-0 right-0 h-full w-72 bg-[#111111] border-l border-[#222222] flex flex-col z-20">
+          <div className="absolute top-0 right-0 h-full w-full md:w-72 bg-[#111111] border-l border-[#222222] flex flex-col z-20">
             <div className="flex items-center justify-between px-4 py-3 border-b border-[#222222]">
               <span className="text-xs font-semibold text-[#f4f4f5]">Version history</span>
               <button

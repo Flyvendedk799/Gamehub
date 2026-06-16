@@ -530,6 +530,45 @@ describe('moderation', () => {
   });
 });
 
+describe('resume / continuation', () => {
+  it('resumes a paused run on next prompt', async () => {
+    const repo = new InMemoryProjectRepo();
+    const runRepo = new InMemoryRunRepo();
+
+    // Create a project owned by alice.
+    const project = await repo.create({ ownerId: 'alice', name: 'Paused Game', engine: 'phaser' });
+
+    // Simulate a prior run that was paused with a continuation payload.
+    const priorRun = await runRepo.create({ projectId: project.id, userId: 'alice' });
+    const pausedContinuation = { todos: null, decisionRecap: 'half built', fsState: {}, originalUserPrompt: 'build a platformer' };
+    await runRepo.setPaused(priorRun.id, pausedContinuation, 'manifest-key-abc');
+
+    // Capture what is passed to enqueue on the second generate call.
+    const enqueued: Array<Parameters<EnqueueFn>[0]> = [];
+    const enqueue: EnqueueFn = async (input) => {
+      enqueued.push(input);
+    };
+
+    const app = makeApp({ repo, runRepo, enqueue });
+
+    // Second generate call — should pick up the paused continuation.
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${project.id}/generate`,
+      headers: AS_ALICE,
+      payload: { prompt: 'continue building' },
+    });
+    expect(res.statusCode).toBe(202);
+
+    // The enqueue call should carry the continuation payload from the paused run.
+    expect(enqueued).toHaveLength(1);
+    expect(enqueued[0]).toMatchObject({
+      continuation: pausedContinuation,
+      parentManifestKey: 'manifest-key-abc',
+    });
+  });
+});
+
 describe('concurrent run cap', () => {
   it('blocks generation when concurrent run limit is reached', async () => {
     const runRepo = new InMemoryRunRepo();

@@ -149,6 +149,25 @@ export async function reportGame(slug: string, reason?: string): Promise<void> {
   });
 }
 
+// ─── Creator profiles ────────────────────────────────────────────────────────
+
+export interface CreatorProfile {
+  handle: string;
+  projectCount: number;
+  projects: Array<{
+    id: string;
+    slug: string;
+    name: string;
+    engine: string | null;
+    visibility: string;
+    updatedAt: string;
+  }>;
+}
+
+export async function getCreatorProfile(handle: string): Promise<CreatorProfile> {
+  return apiFetch<CreatorProfile>(`/v1/users/${handle}`);
+}
+
 // ─── Version timeline ────────────────────────────────────────────────────────
 
 export interface SnapshotEntry {
