@@ -149,6 +149,28 @@ export async function reportGame(slug: string, reason?: string): Promise<void> {
   });
 }
 
+// ─── Version timeline ────────────────────────────────────────────────────────
+
+export interface SnapshotEntry {
+  id: string;
+  seq: number;
+  type: 'initial' | 'edit' | 'fork' | 'remix' | 'revert';
+  prompt: string | null;
+  engine: 'three' | 'phaser' | null;
+  createdAt: string;
+}
+
+export async function getSnapshots(projectId: string): Promise<{ snapshots: SnapshotEntry[] }> {
+  return apiFetch<{ snapshots: SnapshotEntry[] }>(`/v1/projects/${projectId}/snapshots`);
+}
+
+export async function revertToSnapshot(projectId: string, snapshotId: string): Promise<{ ok: boolean; snapshotId: string }> {
+  return apiFetch<{ ok: boolean; snapshotId: string }>(
+    `/v1/projects/${projectId}/snapshots/${snapshotId}/revert`,
+    { method: 'POST' },
+  );
+}
+
 // ─── SSE streaming ───────────────────────────────────────────────────────────
 //
 // EventSource cannot set custom headers. We pass userId as a query param

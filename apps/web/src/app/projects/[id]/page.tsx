@@ -5,7 +5,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChatPanel } from '@/components/ChatPanel';
 import { PreviewPane } from '@/components/PreviewPane';
-import { generateGame, getChatHistory, getProject, publishProject, streamRun } from '@/lib/api';
+import { generateGame, getChatHistory, getProject, getSnapshots, publishProject, revertToSnapshot, streamRun, type SnapshotEntry } from '@/lib/api';
 import { useCollab } from '@/lib/use-collab';
 import { usePresence } from '@/lib/use-presence';
 import type { ChatHistoryMessage, Project, RunCompleteEvent, RunErrorEvent, SseEvent } from '@/lib/types';
@@ -52,6 +52,9 @@ export default function BuilderPage() {
   const [currentRunId, setCurrentRunId] = useState<string | null>(initialRunId);
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishUrl, setPublishUrl] = useState<string | null>(null);
+  const [snapshots, setSnapshots] = useState<SnapshotEntry[]>([]);
+  const [showTimeline, setShowTimeline] = useState(false);
+  const [isReverting, setIsReverting] = useState<string | null>(null);
 
   // CRDT collab — syncs a shared Y.Doc across all browser tabs on this project
   const { peerCount, connected: collabConnected } = useCollab(projectId || null);
@@ -66,6 +69,11 @@ export default function BuilderPage() {
     },
   });
 
+  const refreshSnapshots = useCallback(() => {
+    if (!projectId) return;
+    void getSnapshots(projectId).then(({ snapshots: s }) => setSnapshots(s)).catch(() => {});
+  }, [projectId]);
+
   // Track active SSE controller so we can close it on unmount / new run
   const streamCtrlRef = useRef<{ close: () => void } | null>(null);
 
@@ -75,6 +83,8 @@ export default function BuilderPage() {
     void getProject(projectId)
       .then(({ project }) => setProject(project))
       .catch(() => {});
+
+    refreshSnapshots();
 
     void getChatHistory(projectId)
       .then(({ messages }) => {
@@ -101,7 +111,7 @@ export default function BuilderPage() {
       })
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [projectId, refreshSnapshots]);
 
   // ─── Start streaming when runId changes ───────────────────────────────────
   const startStream = useCallback((runId: string) => {
@@ -125,6 +135,7 @@ export default function BuilderPage() {
           setPreviewUrl(url);
           setIsStreaming(false);
           streamCtrlRef.current?.close();
+          refreshSnapshots();
         }
 
         if (event.type === 'run_error') {
@@ -202,6 +213,21 @@ export default function BuilderPage() {
     }
   }
 
+  async function handleRevert(snapshotId: string) {
+    if (!projectId || isReverting) return;
+    setIsReverting(snapshotId);
+    try {
+      await revertToSnapshot(projectId, snapshotId);
+      // After revert, reload the preview from the reverted snapshot
+      setPreviewUrl(`${BASE}/v1/projects/${projectId}/preview/`);
+      setShowTimeline(false);
+    } catch (err) {
+      console.error('Revert failed:', err);
+    } finally {
+      setIsReverting(null);
+    }
+  }
+
   const isBuilding = isStreaming;
 
   return (
@@ -251,6 +277,18 @@ export default function BuilderPage() {
               >
                 Full screen ↗
               </a>
+              <a
+                href={`${BASE}/v1/projects/${projectId}/game.zip`}
+                download
+                className="
+                  text-xs px-3 py-1.5 rounded-lg
+                  bg-[#1a1a1a] hover:bg-[#222222]
+                  text-[#a1a1aa] border border-[#222222]
+                  transition-colors font-medium
+                "
+              >
+                Download ↓
+              </a>
               {publishUrl ? (
                 <a
                   href={publishUrl}
@@ -282,6 +320,19 @@ export default function BuilderPage() {
               )}
             </>
           )}
+          {snapshots.length > 0 && (
+            <button
+              onClick={() => setShowTimeline((v) => !v)}
+              className={`
+                text-xs px-3 py-1.5 rounded-lg border transition-colors font-medium
+                ${showTimeline
+                  ? 'bg-[#6366f1]/20 text-[#6366f1] border-[#6366f1]/40'
+                  : 'bg-[#1a1a1a] hover:bg-[#222222] text-[#a1a1aa] border-[#222222]'}
+              `}
+            >
+              History ({snapshots.length})
+            </button>
+          )}
           {(viewerCount > 1 || (collabConnected && peerCount > 0)) && (
             <span className="flex items-center gap-1 text-xs text-emerald-400 font-medium" title="Live collaborators">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -298,7 +349,7 @@ export default function BuilderPage() {
       </header>
 
       {/* Main split */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
         {/* Chat panel — 35% */}
         <div className="w-[35%] min-w-[280px] max-w-[480px] flex-shrink-0 overflow-hidden">
           <ChatPanel
@@ -317,6 +368,68 @@ export default function BuilderPage() {
             errorMessage={errorMessage}
           />
         </div>
+
+        {/* Version timeline overlay */}
+        {showTimeline && (
+          <div className="absolute top-0 right-0 h-full w-72 bg-[#111111] border-l border-[#222222] flex flex-col z-20">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[#222222]">
+              <span className="text-xs font-semibold text-[#f4f4f5]">Version history</span>
+              <button
+                onClick={() => setShowTimeline(false)}
+                className="text-[#52525b] hover:text-[#a1a1aa] text-xs"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {snapshots.map((snap) => (
+                <div
+                  key={snap.id}
+                  className="px-4 py-3 border-b border-[#1a1a1a] hover:bg-[#1a1a1a] group"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <span className={`
+                          text-[10px] px-1.5 py-0.5 rounded font-mono font-medium
+                          ${snap.type === 'initial' ? 'bg-[#6366f1]/20 text-[#6366f1]' : 'bg-[#1a1a1a] text-[#52525b]'}
+                        `}>
+                          v{snap.seq + 1}
+                        </span>
+                        {snap.engine && (
+                          <span className="text-[10px] text-[#52525b] font-mono">{snap.engine}</span>
+                        )}
+                      </div>
+                      {snap.prompt && (
+                        <p className="text-xs text-[#a1a1aa] truncate leading-4">{snap.prompt}</p>
+                      )}
+                      <p className="text-[10px] text-[#3f3f46] mt-1">
+                        {new Date(snap.createdAt).toLocaleString(undefined, {
+                          month: 'short', day: 'numeric',
+                          hour: '2-digit', minute: '2-digit',
+                        })}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => { void handleRevert(snap.id); }}
+                      disabled={isReverting !== null || isStreaming}
+                      className="
+                        text-[10px] px-2 py-1 rounded
+                        bg-[#6366f1]/10 hover:bg-[#6366f1]/20
+                        text-[#6366f1] border border-[#6366f1]/20
+                        transition-colors font-medium flex-shrink-0
+                        opacity-0 group-hover:opacity-100
+                        disabled:opacity-30 disabled:cursor-not-allowed
+                      "
+                    >
+                      {isReverting === snap.id ? '…' : 'Restore'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

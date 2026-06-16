@@ -36,6 +36,8 @@ export interface ProjectRepo {
   rename(id: string, ownerId: string, name: string): Promise<Project | null>;
   softDelete(id: string, ownerId: string): Promise<boolean>;
   setCurrentManifestKey(id: string, manifestKey: string): Promise<void>;
+  /** Update HEAD pointer to a specific snapshot (used for revert). */
+  setCurrentSnapshot(id: string, snapshotId: string, manifestKey: string): Promise<void>;
 }
 
 function slugify(name: string, id: string): string {
@@ -108,5 +110,10 @@ export class InMemoryProjectRepo implements ProjectRepo {
   async setCurrentManifestKey(id: string, manifestKey: string): Promise<void> {
     const p = this.byId.get(id);
     if (p) this.byId.set(id, { ...p, currentManifestKey: manifestKey });
+  }
+
+  async setCurrentSnapshot(id: string, snapshotId: string, manifestKey: string): Promise<void> {
+    const p = this.byId.get(id);
+    if (p) this.byId.set(id, { ...p, currentSnapshotId: snapshotId, currentManifestKey: manifestKey });
   }
 }

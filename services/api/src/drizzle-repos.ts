@@ -12,6 +12,7 @@ import type { ChatMessageKind } from '@playforge/shared';
 import type { ChatMessage, ChatRepo } from './chat-repo';
 import type { CreateProjectInput, Engine, Project, ProjectRepo, Visibility } from './repo';
 import type { CreateRunInput, Run, RunRepo, RunStats } from './run-repo';
+import type { SnapshotEntry, SnapshotRepo, SnapshotEngine } from './snapshot-repo';
 
 function slugify(name: string, id: string): string {
   const base = name
@@ -149,6 +150,13 @@ export class DrizzleProjectRepo implements ProjectRepo {
       .set({ currentManifestKey: manifestKey, updatedAt: new Date() })
       .where(eq(schema.projects.id, id));
   }
+
+  async setCurrentSnapshot(id: string, snapshotId: string, manifestKey: string): Promise<void> {
+    await this.db
+      .update(schema.projects)
+      .set({ currentSnapshotId: snapshotId, currentManifestKey: manifestKey, updatedAt: new Date() })
+      .where(eq(schema.projects.id, id));
+  }
 }
 
 // ── RunRepo ───────────────────────────────────────────────────────────────────
@@ -255,5 +263,44 @@ export class DrizzleChatRepo implements ChatRepo {
       .where(eq(schema.chatMessages.projectId, projectId))
       .orderBy(asc(schema.chatMessages.seq));
     return rows.map(rowToChatMessage);
+  }
+}
+
+// ── SnapshotRepo ──────────────────────────────────────────────────────────────
+
+function rowToSnapshotEntry(row: typeof schema.snapshots.$inferSelect): SnapshotEntry {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    parentId: row.parentId ?? null,
+    seq: row.seq,
+    type: row.type as SnapshotEntry['type'],
+    prompt: row.prompt ?? null,
+    engine: (row.engine ?? null) as SnapshotEngine | null,
+    gameSpec: (row.gameSpec ?? null) as SnapshotEntry['gameSpec'],
+    filesManifestKey: row.filesManifestKey,
+    filesHash: row.filesHash,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+export class DrizzleSnapshotRepo implements SnapshotRepo {
+  constructor(private readonly db: Db) {}
+
+  async listByProject(projectId: string): Promise<SnapshotEntry[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.snapshots)
+      .where(eq(schema.snapshots.projectId, projectId))
+      .orderBy(desc(schema.snapshots.seq));
+    return rows.map(rowToSnapshotEntry);
+  }
+
+  async getById(snapshotId: string): Promise<SnapshotEntry | null> {
+    const [row] = await this.db
+      .select()
+      .from(schema.snapshots)
+      .where(eq(schema.snapshots.id, snapshotId));
+    return row ? rowToSnapshotEntry(row) : null;
   }
 }

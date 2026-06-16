@@ -30,6 +30,7 @@ import type { HubRepo } from './hub-repo';
 import type { PublishRepo } from './publish-repo';
 import type { Engine, ProjectRepo, Visibility } from './repo';
 import type { Run, RunRepo } from './run-repo';
+import type { SnapshotRepo } from './snapshot-repo';
 
 /**
  * autoMod — lightweight keyword/pattern classifier for published game content.
@@ -105,6 +106,8 @@ export interface ServerDeps {
   generateQueue?: import('bullmq').Queue;
   /** Optional: max tokens per run — hard ceiling to prevent runaway generation costs. */
   maxRunTokens?: number;
+  /** Optional: enables GET /v1/projects/:id/snapshots + revert endpoint. */
+  snapshotRepo?: SnapshotRepo;
 }
 
 const ENGINES: Engine[] = ['three', 'phaser'];
@@ -681,6 +684,40 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     } finally {
       await rm(tmpPath, { force: true }).catch(() => {});
     }
+  });
+
+  // ── version timeline ──────────────────────────────────────────────────────
+  // GET  /v1/projects/:id/snapshots         — list all snapshots (auth)
+  // POST /v1/projects/:id/snapshots/:sid/revert — revert HEAD to snapshot (auth)
+
+  app.get('/v1/projects/:id/snapshots', async (req, reply) => {
+    if (!deps.snapshotRepo) return reply.code(503).send({ error: 'snapshots_unavailable' });
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { id } = req.params as { id: string };
+    const project = await deps.repo.get(id);
+    if (!project || project.ownerId !== user.userId) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    const snapshots = await deps.snapshotRepo.listByProject(id);
+    return reply.send({ snapshots });
+  });
+
+  app.post('/v1/projects/:id/snapshots/:sid/revert', async (req, reply) => {
+    if (!deps.snapshotRepo) return reply.code(503).send({ error: 'snapshots_unavailable' });
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { id, sid } = req.params as { id: string; sid: string };
+    const project = await deps.repo.get(id);
+    if (!project || project.ownerId !== user.userId) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    const snapshot = await deps.snapshotRepo.getById(sid);
+    if (!snapshot || snapshot.projectId !== id) {
+      return reply.code(404).send({ error: 'snapshot_not_found' });
+    }
+    await deps.repo.setCurrentSnapshot(id, snapshot.id, snapshot.filesManifestKey);
+    return reply.send({ ok: true, manifestKey: snapshot.filesManifestKey, snapshotId: snapshot.id });
   });
 
   // ── community hub ─────────────────────────────────────────────────────────

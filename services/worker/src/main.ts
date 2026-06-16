@@ -142,6 +142,38 @@ async function main() {
         return { manifestKey, paused: true };
       }
 
+      // Compute next snapshot seq for this project.
+      const [snapSeqRow] = await db
+        .select({ val: sql<number>`COALESCE(MAX(${schema.snapshots.seq}), -1)` })
+        .from(schema.snapshots)
+        .where(eq(schema.snapshots.projectId, projectId));
+      const nextSnapSeq = (snapSeqRow?.val ?? -1) + 1;
+
+      // Fetch parent snapshot id (for the DAG chain).
+      const [projectRow] = await db
+        .select({ currentSnapshotId: schema.projects.currentSnapshotId })
+        .from(schema.projects)
+        .where(eq(schema.projects.id, projectId));
+      const parentSnapshotId = projectRow?.currentSnapshotId ?? null;
+
+      // Insert immutable snapshot row.
+      const [snapshotRow] = await db
+        .insert(schema.snapshots)
+        .values({
+          projectId,
+          ...(parentSnapshotId !== null ? { parentId: parentSnapshotId } : {}),
+          seq: nextSnapSeq,
+          type: nextSnapSeq === 0 ? 'initial' : 'edit',
+          prompt,
+          ...(result.spec !== null ? { gameSpec: result.spec } : {}),
+          ...(result.engine !== null ? { engine: result.engine } : {}),
+          filesManifestKey: manifestKey,
+          filesHash: result.snapshot.filesHash,
+        })
+        .returning({ id: schema.snapshots.id });
+
+      const snapshotId = snapshotRow?.id ?? null;
+
       await Promise.all([
         db
           .update(schema.runs)
@@ -154,7 +186,11 @@ async function main() {
           .where(eq(schema.runs.id, runId)),
         db
           .update(schema.projects)
-          .set({ currentManifestKey: manifestKey, updatedAt: new Date() })
+          .set({
+            currentManifestKey: manifestKey,
+            updatedAt: new Date(),
+            ...(snapshotId !== null ? { currentSnapshotId: snapshotId } : {}),
+          })
           .where(eq(schema.projects.id, projectId)),
         db.insert(schema.chatMessages).values({
           projectId,
@@ -164,6 +200,7 @@ async function main() {
             runId,
             previewUrl: `/v1/runs/${runId}/preview/`,
             engine: result.engine,
+            snapshotId,
           },
         }),
       ]);
