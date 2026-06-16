@@ -23,6 +23,13 @@ export interface HubComment {
   createdAt: string;
 }
 
+export interface HubStats {
+  totalPublished: number;
+  totalPlays: number;
+  totalLikes: number;
+  totalComments: number;
+}
+
 export interface HubRepo {
   feed(opts: { limit: number; offset: number; sort: 'recent' | 'popular' }): Promise<HubGame[]>;
   /** Full-text/semantic search. Pass embedding for pgvector; omit for text fallback. */
@@ -35,6 +42,7 @@ export interface HubRepo {
   addComment(publishedGameId: string, userId: string, body: string, parentCommentId?: string): Promise<HubComment>;
   addReport(input: { reporterId?: string; targetType: string; targetId: string; reason?: string }): Promise<void>;
   setEmbedding(id: string, embedding: number[]): Promise<void>;
+  getStats?(): Promise<HubStats>;
 }
 
 // ── InMemoryHubRepo ────────────────────────────────────────────────────────
@@ -133,6 +141,16 @@ export class InMemoryHubRepo implements HubRepo {
 
   async setEmbedding(_id: string, _embedding: number[]): Promise<void> {
     // No-op for in-memory (tests don't need vector search)
+  }
+
+  async getStats(): Promise<HubStats> {
+    const games = [...this.games.values()].filter((g) => g.status === 'live');
+    return {
+      totalPublished: games.length,
+      totalPlays: games.reduce((n, g) => n + g.playCount, 0),
+      totalLikes: this.likes.size,
+      totalComments: this.comments.size,
+    };
   }
 }
 
@@ -336,5 +354,31 @@ export class DrizzleHubRepo implements HubRepo {
       .update(schema.publishedGames)
       .set({ embedding } as Record<string, unknown>)
       .where(eq(schema.publishedGames.id, id));
+  }
+
+  async getStats(): Promise<HubStats> {
+    const [gameRow] = await this.db
+      .select({
+        totalPublished: sql<number>`count(*)::int`,
+        totalPlays: sql<number>`COALESCE(SUM(${schema.publishedGames.playCount}), 0)::int`,
+      })
+      .from(schema.publishedGames)
+      .where(eq(schema.publishedGames.status, 'live'));
+
+    const [likeRow] = await this.db
+      .select({ totalLikes: sql<number>`count(*)::int` })
+      .from(schema.likes);
+
+    const [commentRow] = await this.db
+      .select({ totalComments: sql<number>`count(*)::int` })
+      .from(schema.commentsSocial)
+      .where(isNull(schema.commentsSocial.deletedAt));
+
+    return {
+      totalPublished: gameRow?.totalPublished ?? 0,
+      totalPlays: gameRow?.totalPlays ?? 0,
+      totalLikes: likeRow?.totalLikes ?? 0,
+      totalComments: commentRow?.totalComments ?? 0,
+    };
   }
 }

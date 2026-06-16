@@ -11,7 +11,7 @@ import { type Db, schema } from '@playforge/db';
 import type { ChatMessageKind } from '@playforge/shared';
 import type { ChatMessage, ChatRepo } from './chat-repo';
 import type { CreateProjectInput, Engine, Project, ProjectRepo, Visibility } from './repo';
-import type { CreateRunInput, Run, RunRepo } from './run-repo';
+import type { CreateRunInput, Run, RunRepo, RunStats } from './run-repo';
 
 function slugify(name: string, id: string): string {
   const base = name
@@ -210,6 +210,22 @@ export class DrizzleRunRepo implements RunRepo {
     });
     if (!row?.continuation) return null;
     return { continuation: row.continuation, snapshotManifestKey: row.snapshotManifestKey ?? null };
+  }
+
+  async getStats(): Promise<RunStats> {
+    const [row] = await this.db
+      .select({
+        total: sql<number>`count(*)::int`,
+        completed: sql<number>`count(*) filter (where ${schema.runs.status} = 'completed')::int`,
+        failed: sql<number>`count(*) filter (where ${schema.runs.status} = 'failed')::int`,
+        active: sql<number>`count(*) filter (where ${schema.runs.status} in ('queued','running'))::int`,
+      })
+      .from(schema.runs);
+    const total = row?.total ?? 0;
+    const completed = row?.completed ?? 0;
+    const failed = row?.failed ?? 0;
+    const active = row?.active ?? 0;
+    return { total, completed, failed, active, successRate: total > 0 ? completed / total : 0 };
   }
 }
 

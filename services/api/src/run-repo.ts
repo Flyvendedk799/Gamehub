@@ -18,6 +18,14 @@ export interface CreateRunInput {
   userId: string;
 }
 
+export interface RunStats {
+  total: number;
+  completed: number;
+  failed: number;
+  active: number;
+  successRate: number;
+}
+
 export interface RunRepo {
   create(input: CreateRunInput): Promise<Run>;
   get(id: string): Promise<Run | null>;
@@ -27,6 +35,8 @@ export interface RunRepo {
   countActiveByUser(userId: string): Promise<number>;
   /** Load the continuation payload (jsonb) from a paused run, if any. */
   getPausedContinuation(projectId: string): Promise<{ continuation: unknown; snapshotManifestKey: string | null } | null>;
+  /** Aggregate run stats for build-health dashboard. */
+  getStats(): Promise<RunStats>;
 }
 
 export class InMemoryRunRepo implements RunRepo {
@@ -63,5 +73,15 @@ export class InMemoryRunRepo implements RunRepo {
 
   async getPausedContinuation(_projectId: string): Promise<{ continuation: unknown; snapshotManifestKey: string | null } | null> {
     return null; // InMemory: no paused runs
+  }
+
+  async getStats(): Promise<RunStats> {
+    const runs = [...this.byId.values()];
+    const total = runs.length;
+    const completed = runs.filter((r) => r.status === 'completed').length;
+    const failed = runs.filter((r) => r.status === 'failed').length;
+    const active = runs.filter((r) => r.status === 'queued' || r.status === 'running').length;
+    const successRate = total > 0 ? completed / total : 0;
+    return { total, completed, failed, active, successRate };
   }
 }

@@ -753,7 +753,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     for (const [projectId, sockets] of presenceSockets) {
       presence[projectId] = sockets.size;
     }
+    const [runStats, hubStats] = await Promise.all([
+      deps.runRepo.getStats(),
+      deps.hubRepo?.getStats?.() ?? Promise.resolve(null),
+    ]);
     return reply.send({
+      runs: runStats,
+      hub: hubStats,
       presence,
       presenceProjects: presenceSockets.size,
       connectedSockets: [...presenceSockets.values()].reduce((n, s) => n + s.size, 0),
