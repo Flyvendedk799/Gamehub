@@ -12,7 +12,7 @@
  * `game-files://` protocol: paths are validated (no traversal), and the games
  * edge server serves blobs back out by manifest lookup.
  */
-import { type BlobStore, sha256 } from './blob-store';
+import { type BlobStore, blobKey, sha256 } from './blob-store';
 import { assertSafeBundlePath } from './paths';
 
 export interface ManifestEntry {
@@ -98,6 +98,17 @@ export class SnapshotStore {
     const manifestKey = manifestKeyFor(filesHash);
     await this.blobs.put(Buffer.from(json, 'utf8'));
     return { manifestKey, filesHash, manifest };
+  }
+
+  /** Load a manifest from storage given its key (snapshots/{filesHash}/manifest.json). */
+  async readManifest(manifestKey: string): Promise<SnapshotManifest> {
+    // manifestKey = "snapshots/{filesHash}/manifest.json"
+    // The manifest JSON is itself a content-addressed blob stored as "blobs/{filesHash}"
+    const parts = manifestKey.split('/');
+    const filesHash = parts[1];
+    if (!filesHash) throw new Error(`invalid manifestKey: ${manifestKey}`);
+    const bytes = await this.blobs.get(blobKey(filesHash));
+    return JSON.parse(Buffer.from(bytes).toString()) as SnapshotManifest;
   }
 
   /** Read a single file's bytes from a manifest (used by the games edge server). */

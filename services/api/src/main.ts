@@ -47,13 +47,19 @@ async function main() {
   const blobDir = process.env['BLOB_DIR'] ?? '.playforge-blobs';
   const store = new SnapshotStore(new LocalFsBlobStore(blobDir));
 
+  const runRepo = new DrizzleRunRepo(db);
+
   const enqueue: EnqueueFn = async ({ runId, projectId, userId, prompt }) => {
     // Fire-and-forget: the worker publishes events to bus as it runs.
     void enqueueRun(
       { runId, projectId, prompt, model: { provider: modelProvider, modelId }, apiKey },
       { bus, store },
-    ).catch((err: unknown) => {
+    ).then(async (result) => {
+      // Store the manifest key so the preview route can serve the game files.
+      await runRepo.setSnapshot(runId, result.snapshot.manifestKey);
+    }).catch(async (err: unknown) => {
       console.error(`[run:${runId}] generation failed:`, err);
+      await runRepo.updateStatus(runId, 'failed').catch(() => {});
     });
     // Return immediately — the caller streams events via SSE.
   };
@@ -62,8 +68,9 @@ async function main() {
     repo: new DrizzleProjectRepo(db),
     auth: new HeaderAuthenticator(),
     bus,
-    runRepo: new DrizzleRunRepo(db),
+    runRepo,
     enqueue,
+    store,
   });
 
   try {

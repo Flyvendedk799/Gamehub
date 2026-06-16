@@ -15,6 +15,7 @@
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type { EventBus } from '@playforge/bus';
 import { runChannel } from '@playforge/bus';
+import { type SnapshotStore, contentTypeFor } from '@playforge/storage';
 import type { Authenticator, AuthedUser } from './auth';
 import type { Engine, ProjectRepo, Visibility } from './repo';
 import type { Run, RunRepo } from './run-repo';
@@ -33,6 +34,8 @@ export interface ServerDeps {
   bus: EventBus;
   runRepo: RunRepo;
   enqueue: EnqueueFn;
+  /** Optional: enables GET /v1/runs/:id/preview/* to serve generated game files. */
+  store?: SnapshotStore;
 }
 
 const ENGINES: Engine[] = ['three', 'phaser'];
@@ -42,7 +45,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   const app = Fastify({ logger: false });
 
   async function requireUser(req: FastifyRequest, reply: FastifyReply): Promise<AuthedUser | null> {
-    const user = await deps.auth.authenticate(req.headers);
+    // EventSource cannot set custom headers; fall back to ?userId= query param.
+    const qUserId = (req.query as Record<string, string | undefined>)['userId'];
+    const headers = qUserId
+      ? { ...req.headers, 'x-user-id': qUserId }
+      : req.headers;
+    const user = await deps.auth.authenticate(headers);
     if (!user) {
       await reply.code(401).send({ error: 'unauthenticated' });
       return null;
@@ -178,13 +186,46 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       // needing to await a separate enqueue step.
       void deps.bus.subscribe(runChannel(id), (message) => {
         if (done) return;
-        reply.raw.write(`data: ${JSON.stringify(message)}\n\n`);
         const m = message as { type?: string };
+        // Attach the preview URL to run_complete so the browser knows where to load the game.
+        const payload =
+          m.type === 'run_complete'
+            ? { ...m, previewUrl: `/v1/runs/${id}/preview/` }
+            : message;
+        reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
         if (m.type === 'run_complete' || m.type === 'run_error') {
           finish();
         }
       });
     });
+  });
+
+  // ── game preview file serving ─────────────────────────────────────────────
+  // Serves files from a run's snapshot manifest so the iframe can load the game.
+  // Route: GET /v1/runs/:id/preview/           → index.html
+  //        GET /v1/runs/:id/preview/assets/...  → asset files
+  // No auth required — the run ID acts as an unguessable capability token for
+  // Phase 1. Origin isolation + CSP land in Phase 2.
+
+  app.get('/v1/runs/:id/preview/*', async (req, reply) => {
+    if (!deps.store) return reply.code(503).send({ error: 'preview_unavailable' });
+
+    const { id } = req.params as { id: string };
+    const filePath = ((req.params as Record<string, string>)['*'] || '') || 'index.html';
+
+    const run = await deps.runRepo.get(id);
+    if (!run?.snapshotManifestKey) return reply.code(404).send({ error: 'not_found' });
+
+    try {
+      const manifest = await deps.store.readManifest(run.snapshotManifestKey);
+      const bytes = await deps.store.readFile(manifest, filePath);
+      return reply
+        .header('Content-Type', contentTypeFor(filePath))
+        .header('Cache-Control', 'no-cache')
+        .send(Buffer.from(bytes));
+    } catch {
+      return reply.code(404).send({ error: 'file_not_found', path: filePath });
+    }
   });
 
   return app;

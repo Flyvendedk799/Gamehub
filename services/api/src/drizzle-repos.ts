@@ -126,6 +126,9 @@ export class DrizzleProjectRepo implements ProjectRepo {
 }
 
 export class DrizzleRunRepo implements RunRepo {
+  // Phase 1 temp: snapshotManifestKey lives in memory until a DB column is added.
+  private readonly manifestKeys = new Map<string, string>();
+
   constructor(private readonly db: Db) {}
 
   async create(input: CreateRunInput): Promise<Run> {
@@ -140,13 +143,24 @@ export class DrizzleRunRepo implements RunRepo {
 
   async get(id: string): Promise<Run | null> {
     const row = await this.db.query.runs.findFirst({ where: eq(schema.runs.id, id) });
-    return row ? rowToRun(row) : null;
+    if (!row) return null;
+    const run = rowToRun(row);
+    const manifestKey = this.manifestKeys.get(id);
+    return manifestKey !== undefined ? { ...run, snapshotManifestKey: manifestKey } : run;
   }
 
   async updateStatus(id: string, status: Run['status']): Promise<void> {
     await this.db
       .update(schema.runs)
       .set({ status, updatedAt: new Date() })
+      .where(eq(schema.runs.id, id));
+  }
+
+  async setSnapshot(id: string, manifestKey: string): Promise<void> {
+    this.manifestKeys.set(id, manifestKey);
+    await this.db
+      .update(schema.runs)
+      .set({ status: 'completed', updatedAt: new Date(), finishedAt: new Date() })
       .where(eq(schema.runs.id, id));
   }
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { InMemoryEventBus, runChannel } from '@playforge/bus';
+import { InMemoryBlobStore, SnapshotStore } from '@playforge/storage';
 import { HeaderAuthenticator } from './auth';
 import { InMemoryProjectRepo } from './repo';
 import { InMemoryRunRepo } from './run-repo';
@@ -9,6 +10,7 @@ function makeApp(overrides?: {
   bus?: InstanceType<typeof InMemoryEventBus>;
   runRepo?: InstanceType<typeof InMemoryRunRepo>;
   enqueue?: EnqueueFn;
+  store?: SnapshotStore;
 }) {
   return buildServer({
     repo: new InMemoryProjectRepo(),
@@ -16,6 +18,7 @@ function makeApp(overrides?: {
     bus: overrides?.bus ?? new InMemoryEventBus(),
     runRepo: overrides?.runRepo ?? new InMemoryRunRepo(),
     enqueue: overrides?.enqueue ?? (async () => {}),
+    ...(overrides?.store !== undefined ? { store: overrides.store } : {}),
   });
 }
 
@@ -242,5 +245,104 @@ describe('SSE event relay', () => {
       headers: AS_BOB,
     });
     expect(res.statusCode).toBe(404);
+  });
+
+  it('injects previewUrl into run_complete event', async () => {
+    const bus = new InMemoryEventBus();
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+
+    await bus.publish(runChannel(run.id), { type: 'run_complete' });
+
+    const app = makeApp({ bus, runRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/runs/${run.id}/stream`,
+      headers: AS_ALICE,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const dataLine = res.body.split('\n').find((l) => l.startsWith('data:')) ?? '';
+    const event = JSON.parse(dataLine.replace('data: ', '')) as { type: string; previewUrl?: string };
+    expect(event.type).toBe('run_complete');
+    expect(event.previewUrl).toBe(`/v1/runs/${run.id}/preview/`);
+  });
+
+  it('accepts ?userId= query param in lieu of x-user-id header', async () => {
+    const runRepo = new InMemoryRunRepo();
+    const bus = new InMemoryEventBus();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+    await bus.publish(runChannel(run.id), { type: 'run_complete' });
+
+    const app = makeApp({ bus, runRepo });
+    // No header — userId only via query param
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/runs/${run.id}/stream?userId=alice`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('"type":"run_complete"');
+  });
+});
+
+describe('preview route', () => {
+  it('serves index.html from a run snapshot', async () => {
+    const blobStore = new InMemoryBlobStore();
+    const store = new SnapshotStore(blobStore);
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+
+    const html = '<html>game</html>';
+    const { manifestKey } = await store.write([
+      { path: 'index.html', bytes: Buffer.from(html) },
+    ]);
+    await runRepo.setSnapshot(run.id, manifestKey);
+
+    const app = makeApp({ store, runRepo });
+    const res = await app.inject({ method: 'GET', url: `/v1/runs/${run.id}/preview/` });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('text/html; charset=utf-8');
+    expect(res.body).toBe(html);
+  });
+
+  it('serves sub-assets from a run snapshot', async () => {
+    const blobStore = new InMemoryBlobStore();
+    const store = new SnapshotStore(blobStore);
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+
+    const { manifestKey } = await store.write([
+      { path: 'index.html', bytes: Buffer.from('<html/>') },
+      { path: 'assets/audio/sound.wav', bytes: Buffer.from('wavdata') },
+    ]);
+    await runRepo.setSnapshot(run.id, manifestKey);
+
+    const app = makeApp({ store, runRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/runs/${run.id}/preview/assets/audio/sound.wav`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('audio/wav');
+  });
+
+  it('returns 404 when run has no snapshot yet', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+
+    const app = makeApp({ store, runRepo });
+    const res = await app.inject({ method: 'GET', url: `/v1/runs/${run.id}/preview/` });
+    expect(res.statusCode).toBe(404);
+    expect((res.json() as { error: string }).error).toBe('not_found');
+  });
+
+  it('returns 503 when store is not configured', async () => {
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+
+    const app = makeApp({ runRepo }); // no store
+    const res = await app.inject({ method: 'GET', url: `/v1/runs/${run.id}/preview/` });
+    expect(res.statusCode).toBe(503);
   });
 });

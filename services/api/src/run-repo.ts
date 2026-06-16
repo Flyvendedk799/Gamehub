@@ -10,6 +10,7 @@ export interface Run {
   userId: string;
   status: 'queued' | 'running' | 'completed' | 'failed';
   createdAt: string;
+  snapshotManifestKey?: string;
 }
 
 export interface CreateRunInput {
@@ -21,6 +22,7 @@ export interface RunRepo {
   create(input: CreateRunInput): Promise<Run>;
   get(id: string): Promise<Run | null>;
   updateStatus(id: string, status: Run['status']): Promise<void>;
+  setSnapshot(id: string, manifestKey: string): Promise<void>;
 }
 
 export class InMemoryRunRepo implements RunRepo {
@@ -42,5 +44,10 @@ export class InMemoryRunRepo implements RunRepo {
   async updateStatus(id: string, status: Run['status']): Promise<void> {
     const existing = this.byId.get(id);
     if (existing) this.byId.set(id, { ...existing, status });
+  }
+
+  async setSnapshot(id: string, manifestKey: string): Promise<void> {
+    const existing = this.byId.get(id);
+    if (existing) this.byId.set(id, { ...existing, snapshotManifestKey: manifestKey });
   }
 }
