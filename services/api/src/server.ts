@@ -23,6 +23,7 @@ import { runChannel } from '@playforge/bus';
 import { buildGameHtml, type ExportGameHtmlOptions } from '@playforge/exporters';
 import { type SnapshotStore, contentTypeFor } from '@playforge/storage';
 import type { Authenticator, AuthedUser } from './auth';
+import type { BrowserJobQueue, ThumbnailResult } from './browser-queue';
 import type { ChatRepo } from './chat-repo';
 import type { HubRepo } from './hub-repo';
 import type { PublishRepo } from './publish-repo';
@@ -59,6 +60,8 @@ export interface ServerDeps {
   adminToken?: string;
   /** Optional: async function to embed text for pgvector Hub search. */
   embedText?: (text: string) => Promise<number[]>;
+  /** Optional: browser-worker queue for thumbnail capture + runtime verification. */
+  browserQueue?: BrowserJobQueue;
 }
 
 const ENGINES: Engine[] = ['three', 'phaser'];
@@ -342,6 +345,25 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       title: project.name,
       bundleKey,
     });
+
+    // Async: thumbnail capture via browser-worker (best-effort, non-blocking).
+    if (deps.browserQueue) {
+      void (async () => {
+        try {
+          const jobId = await deps.browserQueue!.enqueueThumbnail(html);
+          const result = await deps.browserQueue!.waitForResult<ThumbnailResult>(jobId, 20_000);
+          if (result?.pngBase64 && deps.store) {
+            const pngBytes = Buffer.from(result.pngBase64, 'base64');
+            const thumbKey = await deps.store.putBlob(pngBytes);
+            // Store thumbnail URL as a blob key reference — frontend resolves via /v1/blobs/:key
+            await deps.publishRepo?.setStatus(publishedGame.id, 'live');
+            console.log(`[publish] thumbnail captured for ${publishedGame.publishSlug} → ${thumbKey}`);
+          }
+        } catch (err) {
+          console.warn(`[publish] thumbnail failed for ${publishedGame.publishSlug}:`, err);
+        }
+      })();
+    }
 
     // Async: index embedding for Hub semantic search (best-effort, non-blocking).
     if (deps.embedText && deps.hubRepo) {

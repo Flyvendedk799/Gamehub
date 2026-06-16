@@ -24,6 +24,7 @@ import { InMemoryEventBus, RedisEventBus, type EventBus } from '@playforge/bus';
 import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
 import { enqueueRun } from '../../worker/src/queue';
 import { HeaderAuthenticator } from './auth';
+import { BrowserJobQueue } from './browser-queue';
 import { DrizzleChatRepo, DrizzleProjectRepo, DrizzleRunRepo } from './drizzle-repos';
 import { DrizzleHubRepo } from './hub-repo';
 import { DrizzlePublishRepo } from './publish-repo';
@@ -67,8 +68,10 @@ async function main() {
   const hubRepo = new DrizzleHubRepo(db);
 
   let queue: Queue | undefined;
+  let browserQueue: BrowserJobQueue | undefined;
   if (redisUrl) {
     queue = new Queue('generate', { connection: parseRedisUrl(redisUrl) });
+    browserQueue = new BrowserJobQueue(redisUrl);
     console.log('[playforge-api] BullMQ queue connected to Redis');
   } else {
     console.log('[playforge-api] no REDIS_URL — running generation in-process');
@@ -149,6 +152,7 @@ async function main() {
     ...(adminToken !== undefined ? { adminToken } : {}),
     maxConcurrentRunsPerUser,
     ...(embedText !== undefined ? { embedText } : {}),
+    ...(browserQueue !== undefined ? { browserQueue } : {}),
   });
 
   try {
