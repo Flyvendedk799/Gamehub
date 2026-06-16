@@ -24,7 +24,7 @@ import { buildGameHtml, type ExportGameHtmlOptions } from '@playforge/exporters'
 import { exportGameZip } from '@playforge/exporters/game-zip';
 import { type SnapshotStore, contentTypeFor } from '@playforge/storage';
 import type { Authenticator, AuthedUser } from './auth';
-import type { BrowserJobQueue, ThumbnailResult } from './browser-queue';
+import type { BrowserJobQueue, RuntimeVerifyResult, ThumbnailResult } from './browser-queue';
 import type { ChatRepo } from './chat-repo';
 import type { HubRepo } from './hub-repo';
 import type { PublishRepo } from './publish-repo';
@@ -424,17 +424,38 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     });
 
     // Auto-moderation: scan title + bundle for flagged patterns.
-    // Matching content defaults to 'live' but is logged for review; escalate to
-    // 'pending_review' (setStatus) if abuse rates justify a pre-publish gate.
     const autoModFlags = autoMod(project.name, html);
     if (autoModFlags.length > 0) {
       console.warn(`[publish:automod] game ${publishedGame.publishSlug} flagged: ${autoModFlags.join(', ')}`);
-      // Record the report for moderator review (non-blocking best-effort).
       void deps.hubRepo?.addReport({
         targetType: 'published_game',
         targetId: publishedGame.id,
         reason: `auto-mod: ${autoModFlags.join(', ')}`,
       }).catch(() => {});
+    }
+
+    // Smoke-test gate (blocking): verify the game boots in a headless browser
+    // before marking it live. If the game fails to boot, mark it unpublished and
+    // return a 422 so the user knows to fix the generation.
+    if (deps.browserQueue) {
+      try {
+        const verifyJobId = await deps.browserQueue.enqueueRuntimeVerify(html);
+        const verifyResult = await deps.browserQueue.waitForResult<RuntimeVerifyResult>(verifyJobId, 15_000);
+        if (verifyResult && !verifyResult.hasGameContract) {
+          await deps.publishRepo.setStatus(publishedGame.id, 'unpublished');
+          return reply.code(422).send({
+            error: 'smoke_test_failed',
+            message: 'The game did not boot correctly in our verification environment.',
+            fatalErrors: verifyResult.fatalErrors,
+          });
+        }
+        if (verifyResult?.fatalErrors.length) {
+          console.warn(`[publish:smoke] ${publishedGame.publishSlug} has fatal errors:`, verifyResult.fatalErrors);
+        }
+      } catch (err) {
+        // Smoke-test infrastructure error — don't block publish, just log.
+        console.warn(`[publish:smoke] verification skipped for ${publishedGame.publishSlug}:`, err);
+      }
     }
 
     // Async: thumbnail capture via browser-worker (best-effort, non-blocking).
@@ -581,6 +602,36 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       .header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()')
       .header('Cache-Control', 'public, max-age=31536000, immutable')
       .send(html);
+  });
+
+  // ── blob serving ─────────────────────────────────────────────────────────
+  // GET /v1/blobs/:key — serve a content-addressed blob (thumbnails, etc.)
+  // The key is the SHA-256 hash of the blob bytes. No auth — keys are unguessable.
+
+  app.get('/v1/blobs/:key', async (req, reply) => {
+    if (!deps.store) return reply.code(503).send({ error: 'store_unavailable' });
+    const { key } = req.params as { key: string };
+    // Reject keys that look path-traversal-y.
+    if (!/^[a-f0-9]{16,}$/.test(key)) {
+      return reply.code(400).send({ error: 'invalid_key' });
+    }
+    try {
+      const bytes = await deps.store.getBlob(key);
+      // Sniff PNG/JPEG/WebP/GIF magic bytes for content-type.
+      const buf = Buffer.from(bytes);
+      let ct = 'application/octet-stream';
+      if (buf[0] === 0x89 && buf[1] === 0x50) ct = 'image/png';
+      else if (buf[0] === 0xff && buf[1] === 0xd8) ct = 'image/jpeg';
+      else if (buf.slice(0, 4).toString() === 'RIFF') ct = 'image/webp';
+      else if (buf.slice(0, 6).toString() === 'GIF87a' || buf.slice(0, 6).toString() === 'GIF89a') ct = 'image/gif';
+      return reply
+        .header('Content-Type', ct)
+        .header('Cache-Control', 'public, max-age=31536000, immutable')
+        .header('X-Content-Type-Options', 'nosniff')
+        .send(buf);
+    } catch {
+      return reply.code(404).send({ error: 'not_found' });
+    }
   });
 
   // ── ZIP download ──────────────────────────────────────────────────────────
