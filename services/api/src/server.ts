@@ -23,6 +23,7 @@ import { buildGameHtml, type ExportGameHtmlOptions } from '@playforge/exporters'
 import { type SnapshotStore, contentTypeFor } from '@playforge/storage';
 import type { Authenticator, AuthedUser } from './auth';
 import type { ChatRepo } from './chat-repo';
+import type { HubRepo } from './hub-repo';
 import type { PublishRepo } from './publish-repo';
 import type { Engine, ProjectRepo, Visibility } from './repo';
 import type { Run, RunRepo } from './run-repo';
@@ -49,6 +50,8 @@ export interface ServerDeps {
   chatRepo?: ChatRepo;
   /** Optional: enables publish + play routes. */
   publishRepo?: PublishRepo;
+  /** Optional: enables community hub routes. */
+  hubRepo?: HubRepo;
 }
 
 const ENGINES: Engine[] = ['three', 'phaser'];
@@ -351,6 +354,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(404).send({ error: 'not_found' });
     }
 
+    // Fire-and-forget play count increment.
+    void deps.hubRepo?.incrementPlayCount(published.id);
+
     let html: string;
     try {
       const bytes = await deps.store.getBlob(published.bundleKey);
@@ -428,6 +434,167 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     } finally {
       await rm(tmpPath, { force: true }).catch(() => {});
     }
+  });
+
+  // ── community hub ─────────────────────────────────────────────────────────
+  // GET /v1/hub                       — discovery feed (no auth)
+  // GET /v1/hub/games/:slug           — game metadata (no auth)
+  // POST /v1/hub/games/:slug/like     — toggle like (auth required)
+  // POST /v1/hub/games/:slug/rate     — set rating (auth required)
+  // GET /v1/hub/games/:slug/comments  — list comments (no auth)
+  // POST /v1/hub/games/:slug/comments — add comment (auth required)
+  // POST /v1/hub/games/:slug/remix    — fork into requester's project (auth required)
+  // POST /v1/hub/games/:slug/report   — report (auth optional)
+
+  app.get('/v1/hub', async (req, reply) => {
+    if (!deps.hubRepo) return reply.code(503).send({ error: 'hub_unavailable' });
+    const q = req.query as Record<string, string | undefined>;
+    const sort = q['sort'] === 'popular' ? 'popular' : 'recent';
+    const limit = Math.min(Math.max(Number(q['limit'] ?? '20'), 1), 100);
+    const offset = Math.max(Number(q['offset'] ?? '0'), 0);
+    const games = await deps.hubRepo.feed({ limit, offset, sort });
+    return reply.send({ games });
+  });
+
+  app.get('/v1/hub/games/:slug', async (req, reply) => {
+    if (!deps.publishRepo) {
+      return reply.code(503).send({ error: 'hub_unavailable' });
+    }
+    const { slug } = req.params as { slug: string };
+    const published = await deps.publishRepo.getBySlug(slug);
+    if (!published || published.status !== 'live') {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    return reply.send({ game: published });
+  });
+
+  app.post('/v1/hub/games/:slug/like', async (req, reply) => {
+    if (!deps.hubRepo || !deps.publishRepo) {
+      return reply.code(503).send({ error: 'hub_unavailable' });
+    }
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { slug } = req.params as { slug: string };
+    const published = await deps.publishRepo.getBySlug(slug);
+    if (!published || published.status !== 'live') {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    const liked = await deps.hubRepo.toggleLike(user.userId, published.id);
+    return reply.send({ liked });
+  });
+
+  app.post('/v1/hub/games/:slug/rate', async (req, reply) => {
+    if (!deps.hubRepo || !deps.publishRepo) {
+      return reply.code(503).send({ error: 'hub_unavailable' });
+    }
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { slug } = req.params as { slug: string };
+    const published = await deps.publishRepo.getBySlug(slug);
+    if (!published || published.status !== 'live') {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    const body = (req.body ?? {}) as { stars?: unknown };
+    const stars = Number(body.stars);
+    if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
+      return reply.code(400).send({ error: 'invalid_stars', message: 'stars must be an integer 1–5' });
+    }
+    const result = await deps.hubRepo.setRating(user.userId, published.id, stars);
+    return reply.send(result);
+  });
+
+  app.get('/v1/hub/games/:slug/comments', async (req, reply) => {
+    if (!deps.hubRepo || !deps.publishRepo) {
+      return reply.code(503).send({ error: 'hub_unavailable' });
+    }
+    const { slug } = req.params as { slug: string };
+    const published = await deps.publishRepo.getBySlug(slug);
+    if (!published || published.status !== 'live') {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    const comments = await deps.hubRepo.listComments(published.id);
+    return reply.send({ comments });
+  });
+
+  app.post('/v1/hub/games/:slug/comments', async (req, reply) => {
+    if (!deps.hubRepo || !deps.publishRepo) {
+      return reply.code(503).send({ error: 'hub_unavailable' });
+    }
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { slug } = req.params as { slug: string };
+    const published = await deps.publishRepo.getBySlug(slug);
+    if (!published || published.status !== 'live') {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    const body = (req.body ?? {}) as { body?: unknown; parentCommentId?: unknown };
+    if (typeof body.body !== 'string' || body.body.trim() === '') {
+      return reply.code(400).send({ error: 'body_required' });
+    }
+    const parentCommentId =
+      typeof body.parentCommentId === 'string' ? body.parentCommentId : undefined;
+    const comment = await deps.hubRepo.addComment(
+      published.id,
+      user.userId,
+      body.body.trim(),
+      parentCommentId,
+    );
+    return reply.code(201).send({ comment });
+  });
+
+  app.post('/v1/hub/games/:slug/remix', async (req, reply) => {
+    if (!deps.hubRepo || !deps.publishRepo) {
+      return reply.code(503).send({ error: 'hub_unavailable' });
+    }
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { slug } = req.params as { slug: string };
+    const published = await deps.publishRepo.getBySlug(slug);
+    if (!published || published.status !== 'live') {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    const sourceProject = await deps.repo.get(published.projectId);
+    if (!sourceProject) {
+      return reply.code(404).send({ error: 'source_project_not_found' });
+    }
+    const newProject = await deps.repo.create({
+      ownerId: user.userId,
+      name: `Remix of ${published.title}`,
+      ...(sourceProject.engine !== null ? { engine: sourceProject.engine } : {}),
+      remixOfProjectId: published.projectId,
+    });
+    if (sourceProject.currentManifestKey !== null) {
+      await deps.repo.setCurrentManifestKey(newProject.id, sourceProject.currentManifestKey);
+    }
+    return reply.code(201).send({ projectId: newProject.id });
+  });
+
+  app.post('/v1/hub/games/:slug/report', async (req, reply) => {
+    if (!deps.hubRepo || !deps.publishRepo) {
+      return reply.code(503).send({ error: 'hub_unavailable' });
+    }
+    const { slug } = req.params as { slug: string };
+    const published = await deps.publishRepo.getBySlug(slug);
+    if (!published) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    // Auth is optional for reports — try to get the user but don't block.
+    const qUserId = (req.query as Record<string, string | undefined>)['userId'];
+    const headers = qUserId
+      ? { ...req.headers, 'x-user-id': qUserId }
+      : req.headers;
+    const user = await deps.auth.authenticate(headers);
+
+    const body = (req.body ?? {}) as { reason?: unknown };
+    const reason = typeof body.reason === 'string' ? body.reason : undefined;
+
+    await deps.hubRepo.addReport({
+      targetType: 'published_game',
+      targetId: published.id,
+      ...(user !== null ? { reporterId: user.userId } : {}),
+      ...(reason !== undefined ? { reason } : {}),
+    });
+    return reply.code(202).send({ ok: true });
   });
 
   return app;

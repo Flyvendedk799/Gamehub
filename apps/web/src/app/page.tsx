@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
 import { createProject, generateGame } from '@/lib/api';
@@ -149,9 +150,13 @@ export default function HomePage() {
       </div>
 
       {/* Footer */}
-      <p className="mt-16 text-xs text-[#3f3f46]">
-        Playforge — Phase 0 · Dev build
-      </p>
+      <div className="mt-16 flex items-center gap-4">
+        <p className="text-xs text-[#3f3f46]">Playforge — Phase 0 · Dev build</p>
+        <span className="text-[#2a2a2a]">·</span>
+        <Link href="/hub" className="text-xs text-[#52525b] hover:text-[#a1a1aa] transition-colors">
+          Community Hub
+        </Link>
+      </div>
     </main>
   );
 }

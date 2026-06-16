@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { InMemoryEventBus, runChannel } from '@playforge/bus';
 import { InMemoryBlobStore, SnapshotStore } from '@playforge/storage';
 import { HeaderAuthenticator } from './auth';
+import { InMemoryHubRepo } from './hub-repo';
 import { InMemoryPublishRepo } from './publish-repo';
 import { InMemoryProjectRepo } from './repo';
 import { InMemoryRunRepo } from './run-repo';
@@ -14,6 +15,7 @@ function makeApp(overrides?: {
   enqueue?: EnqueueFn;
   store?: SnapshotStore;
   publishRepo?: InMemoryPublishRepo;
+  hubRepo?: InMemoryHubRepo;
 }) {
   return buildServer({
     repo: overrides?.repo ?? new InMemoryProjectRepo(),
@@ -23,6 +25,7 @@ function makeApp(overrides?: {
     enqueue: overrides?.enqueue ?? (async () => {}),
     ...(overrides?.store !== undefined ? { store: overrides.store } : {}),
     ...(overrides?.publishRepo !== undefined ? { publishRepo: overrides.publishRepo } : {}),
+    ...(overrides?.hubRepo !== undefined ? { hubRepo: overrides.hubRepo } : {}),
   });
 }
 
@@ -341,6 +344,65 @@ describe('publish + play routes', () => {
     });
     expect(res.statusCode).toBe(200);
     expect((res.json() as { published: null }).published).toBeNull();
+  });
+});
+
+describe('hub routes', () => {
+  it('GET /v1/hub returns 503 when hubRepo not configured', async () => {
+    const res = await makeApp().inject({ method: 'GET', url: '/v1/hub' });
+    expect(res.statusCode).toBe(503);
+  });
+
+  it('GET /v1/hub returns empty feed from hubRepo', async () => {
+    const hubRepo = new InMemoryHubRepo();
+    const app = makeApp({ hubRepo });
+    const res = await app.inject({ method: 'GET', url: '/v1/hub' });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { games: unknown[] }).games).toEqual([]);
+  });
+
+  it('GET /v1/hub/games/:slug returns 404 for unknown slug', async () => {
+    const hubRepo = new InMemoryHubRepo();
+    const publishRepo = new InMemoryPublishRepo();
+    const app = makeApp({ hubRepo, publishRepo });
+    const res = await app.inject({ method: 'GET', url: '/v1/hub/games/unknown' });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('GET /v1/hub/games/:slug/comments returns empty list', async () => {
+    const hubRepo = new InMemoryHubRepo();
+    const publishRepo = new InMemoryPublishRepo();
+    // Seed a published game so the route can find it
+    await publishRepo.upsert({ projectId: 'p1', publishSlug: 'my-game', title: 'My Game', bundleKey: 'k' });
+
+    const app = makeApp({ hubRepo, publishRepo });
+    const res = await app.inject({ method: 'GET', url: '/v1/hub/games/my-game/comments' });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { comments: unknown[] }).comments).toEqual([]);
+  });
+
+  it('POST /v1/hub/games/:slug/like returns 404 for unknown slug', async () => {
+    const hubRepo = new InMemoryHubRepo();
+    const publishRepo = new InMemoryPublishRepo();
+    const app = makeApp({ hubRepo, publishRepo });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/hub/games/nope/like',
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('remix returns 404 for unknown slug', async () => {
+    const hubRepo = new InMemoryHubRepo();
+    const publishRepo = new InMemoryPublishRepo();
+    const app = makeApp({ hubRepo, publishRepo });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/hub/games/nope/remix',
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(404);
   });
 });
 

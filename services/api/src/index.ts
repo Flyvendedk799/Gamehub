@@ -25,4 +25,11 @@ export {
   InMemoryPublishRepo,
   DrizzlePublishRepo,
 } from './publish-repo';
+export {
+  type HubGame,
+  type HubComment,
+  type HubRepo,
+  InMemoryHubRepo,
+  DrizzleHubRepo,
+} from './hub-repo';
 export { DrizzleProjectRepo, DrizzleRunRepo, DrizzleChatRepo } from './drizzle-repos';

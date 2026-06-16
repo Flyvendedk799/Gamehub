@@ -84,6 +84,71 @@ export async function generateGame(
   });
 }
 
+// ─── Hub ─────────────────────────────────────────────────────────────────────
+
+export interface HubGame {
+  id: string;
+  projectId: string;
+  publishSlug: string;
+  title: string;
+  status: string;
+  playCount: number;
+  ratingAvg: number;
+  ratingCount: number;
+  publishedAt: string;
+}
+
+export interface HubComment {
+  id: string;
+  publishedGameId: string;
+  userId: string;
+  body: string;
+  parentCommentId: string | null;
+  createdAt: string;
+}
+
+export async function getHubFeed(opts?: { sort?: 'recent' | 'popular'; limit?: number; offset?: number }): Promise<{ games: HubGame[] }> {
+  const params = new URLSearchParams();
+  if (opts?.sort) params.set('sort', opts.sort);
+  if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
+  if (opts?.offset !== undefined) params.set('offset', String(opts.offset));
+  const qs = params.toString();
+  return apiFetch<{ games: HubGame[] }>(`/v1/hub${qs ? `?${qs}` : ''}`);
+}
+
+export async function toggleLike(slug: string): Promise<{ liked: boolean }> {
+  return apiFetch<{ liked: boolean }>(`/v1/hub/games/${slug}/like`, { method: 'POST' });
+}
+
+export async function setRating(slug: string, stars: number): Promise<{ ratingAvg: number; ratingCount: number }> {
+  return apiFetch<{ ratingAvg: number; ratingCount: number }>(`/v1/hub/games/${slug}/rate`, {
+    method: 'POST',
+    body: JSON.stringify({ stars }),
+  });
+}
+
+export async function getComments(slug: string): Promise<{ comments: HubComment[] }> {
+  return apiFetch<{ comments: HubComment[] }>(`/v1/hub/games/${slug}/comments`);
+}
+
+export async function addComment(slug: string, body: string): Promise<HubComment> {
+  return apiFetch<HubComment>(`/v1/hub/games/${slug}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({ body }),
+  });
+}
+
+export async function remixGame(slug: string): Promise<{ projectId: string }> {
+  return apiFetch<{ projectId: string }>(`/v1/hub/games/${slug}/remix`, { method: 'POST' });
+}
+
+export async function reportGame(slug: string, reason?: string): Promise<void> {
+  await apiFetch<unknown>(`/v1/hub/games/${slug}/report`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+}
+
 // ─── SSE streaming ───────────────────────────────────────────────────────────
 //
 // EventSource cannot set custom headers. We pass userId as a query param
