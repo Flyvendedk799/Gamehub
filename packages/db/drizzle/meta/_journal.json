@@ -15,6 +15,13 @@
       "when": 1781612856044,
       "tag": "0001_graceful_supreme_intelligence",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781613865069,
+      "tag": "0002_stormy_norrin_radd",
+      "breakpoints": true
     }
   ]
 }

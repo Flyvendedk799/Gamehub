@@ -5,7 +5,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChatPanel } from '@/components/ChatPanel';
 import { PreviewPane } from '@/components/PreviewPane';
-import { generateGame, getChatHistory, getProject, streamRun } from '@/lib/api';
+import { generateGame, getChatHistory, getProject, publishProject, streamRun } from '@/lib/api';
 import type { ChatHistoryMessage, Project, RunCompleteEvent, RunErrorEvent, SseEvent } from '@/lib/types';
 
 const BASE = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3191';
@@ -48,6 +48,8 @@ export default function BuilderPage() {
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
   const [currentRunId, setCurrentRunId] = useState<string | null>(initialRunId);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [publishUrl, setPublishUrl] = useState<string | null>(null);
 
   // Track active SSE controller so we can close it on unmount / new run
   const streamCtrlRef = useRef<{ close: () => void } | null>(null);
@@ -171,6 +173,20 @@ export default function BuilderPage() {
     }
   }
 
+  async function handlePublish() {
+    if (!projectId || isPublishing || !previewUrl) return;
+    setIsPublishing(true);
+    try {
+      const { publishUrl: url } = await publishProject(projectId);
+      const full = url.startsWith('http') ? url : `${BASE}${url}`;
+      setPublishUrl(full);
+    } catch (err) {
+      console.error('Publish failed:', err);
+    } finally {
+      setIsPublishing(false);
+    }
+  }
+
   const isBuilding = isStreaming;
 
   return (
@@ -206,19 +222,50 @@ export default function BuilderPage() {
             </span>
           )}
           {previewUrl && (
-            <a
-              href={previewUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="
-                text-xs px-3 py-1.5 rounded-lg
-                bg-[#6366f1]/10 hover:bg-[#6366f1]/20
-                text-[#6366f1] border border-[#6366f1]/20
-                transition-colors font-medium
-              "
-            >
-              Full screen ↗
-            </a>
+            <>
+              <a
+                href={previewUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="
+                  text-xs px-3 py-1.5 rounded-lg
+                  bg-[#6366f1]/10 hover:bg-[#6366f1]/20
+                  text-[#6366f1] border border-[#6366f1]/20
+                  transition-colors font-medium
+                "
+              >
+                Full screen ↗
+              </a>
+              {publishUrl ? (
+                <a
+                  href={publishUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="
+                    text-xs px-3 py-1.5 rounded-lg
+                    bg-emerald-500/10 hover:bg-emerald-500/20
+                    text-emerald-400 border border-emerald-500/20
+                    transition-colors font-medium
+                  "
+                >
+                  Published ↗
+                </a>
+              ) : (
+                <button
+                  onClick={() => { void handlePublish(); }}
+                  disabled={isPublishing || isStreaming}
+                  className="
+                    text-xs px-3 py-1.5 rounded-lg
+                    bg-emerald-500/10 hover:bg-emerald-500/20
+                    text-emerald-400 border border-emerald-500/20
+                    transition-colors font-medium
+                    disabled:opacity-40 disabled:cursor-not-allowed
+                  "
+                >
+                  {isPublishing ? 'Publishing…' : 'Publish'}
+                </button>
+              )}
+            </>
           )}
           <Link
             href="/projects"

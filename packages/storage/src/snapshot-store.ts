@@ -117,4 +117,14 @@ export class SnapshotStore {
     if (!entry) throw new Error(`file not in manifest: ${path}`);
     return this.blobs.get(entry.blob);
   }
+
+  /** Store arbitrary bytes (e.g. a publish bundle); returns the content-addressed key. */
+  async putBlob(bytes: Uint8Array): Promise<string> {
+    return this.blobs.put(bytes);
+  }
+
+  /** Retrieve bytes by the key returned from `putBlob`. */
+  async getBlob(key: string): Promise<Uint8Array> {
+    return this.blobs.get(key);
+  }
 }

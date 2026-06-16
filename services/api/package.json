@@ -13,6 +13,7 @@
   "dependencies": {
     "@playforge/bus": "workspace:*",
     "@playforge/db": "workspace:*",
+    "@playforge/exporters": "workspace:*",
     "@playforge/shared": "workspace:*",
     "@playforge/storage": "workspace:*",
     "drizzle-orm": "^0.38.3",

@@ -12,12 +12,18 @@
  *   `run_complete`) to the bus, then inject the SSE route; replay fires
  *   synchronously, the handler ends the response, inject() returns the full body.
  */
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { rm } from 'node:fs/promises';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type { EventBus } from '@playforge/bus';
 import { runChannel } from '@playforge/bus';
+import { buildGameHtml, type ExportGameHtmlOptions } from '@playforge/exporters';
 import { type SnapshotStore, contentTypeFor } from '@playforge/storage';
 import type { Authenticator, AuthedUser } from './auth';
 import type { ChatRepo } from './chat-repo';
+import type { PublishRepo } from './publish-repo';
 import type { Engine, ProjectRepo, Visibility } from './repo';
 import type { Run, RunRepo } from './run-repo';
 
@@ -41,6 +47,8 @@ export interface ServerDeps {
   store?: SnapshotStore;
   /** Optional: persists chat history (user prompts + artifact notifications). */
   chatRepo?: ChatRepo;
+  /** Optional: enables publish + play routes. */
+  publishRepo?: PublishRepo;
 }
 
 const ENGINES: Engine[] = ['three', 'phaser'];
@@ -259,6 +267,166 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         .send(Buffer.from(bytes));
     } catch {
       return reply.code(404).send({ error: 'file_not_found', path: filePath });
+    }
+  });
+
+  // ── publish pipeline ──────────────────────────────────────────────────────
+  // POST /v1/projects/:id/publish  — builds a single-file HTML bundle from
+  // the project's current snapshot and stores it as a published game.
+
+  app.post('/v1/projects/:id/publish', async (req, reply) => {
+    if (!deps.store || !deps.publishRepo) {
+      return reply.code(503).send({ error: 'publish_unavailable' });
+    }
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { id } = req.params as { id: string };
+    const project = await deps.repo.get(id);
+    if (!project || project.ownerId !== user.userId) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    if (!project.currentManifestKey) {
+      return reply.code(409).send({ error: 'no_snapshot', message: 'Generate a game first.' });
+    }
+
+    const engine = (project.engine ?? 'phaser') as 'phaser' | 'three';
+    const manifest = await deps.store.readManifest(project.currentManifestKey);
+
+    // Build ZipAsset[] from the manifest — text files as strings, binary as Buffers.
+    const TEXT_PREFIXES = ['text/', 'application/json'];
+    const files: ExportGameHtmlOptions['files'] = await Promise.all(
+      Object.entries(manifest.files).map(async ([path, entry]) => {
+        const bytes = await deps.store!.readFile(manifest, path);
+        const isText = TEXT_PREFIXES.some((p) => entry.contentType.startsWith(p));
+        return {
+          path,
+          content: isText ? Buffer.from(bytes).toString('utf8') : Buffer.from(bytes),
+        };
+      }),
+    );
+
+    const html = await buildGameHtml({ files, engine });
+    const htmlBytes = Buffer.from(html, 'utf8');
+    const bundleKey = await deps.store.putBlob(htmlBytes);
+
+    const publishedGame = await deps.publishRepo.upsert({
+      projectId: project.id,
+      publishSlug: project.slug,
+      title: project.name,
+      bundleKey,
+    });
+
+    return reply.code(200).send({
+      slug: publishedGame.publishSlug,
+      publishUrl: `/v1/play/${publishedGame.publishSlug}`,
+    });
+  });
+
+  // GET /v1/projects/:id/publish-info — returns the current published state.
+
+  app.get('/v1/projects/:id/publish-info', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { id } = req.params as { id: string };
+    const project = await deps.repo.get(id);
+    if (!project || project.ownerId !== user.userId) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    const published = deps.publishRepo ? await deps.publishRepo.getByProject(id) : null;
+    return reply.send({ published });
+  });
+
+  // ── public play endpoint ──────────────────────────────────────────────────
+  // GET /v1/play/:slug  — serves the published single-file HTML bundle with
+  // CSP headers that sandbox the game from the app origin.
+  // No auth required — run ID is the capability token; slug is public.
+
+  app.get('/v1/play/:slug', async (req, reply) => {
+    if (!deps.store || !deps.publishRepo) {
+      return reply.code(503).send({ error: 'play_unavailable' });
+    }
+    const { slug } = req.params as { slug: string };
+    const published = await deps.publishRepo.getBySlug(slug);
+    if (!published || published.status !== 'live') {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+
+    let html: string;
+    try {
+      const bytes = await deps.store.getBlob(published.bundleKey);
+      html = Buffer.from(bytes).toString('utf8');
+    } catch {
+      return reply.code(404).send({ error: 'bundle_not_found' });
+    }
+
+    // CSP for self-contained game bundles (engine + assets inlined as data URLs):
+    // • script-src data: blob:   — module scripts with src="data:..." need data: allowance
+    // • connect-src 'none'       — block all network (no exfil from generated code)
+    // • frame-ancestors *        — relaxed for Phase 2; tighten to app origins in Phase 3
+    const csp = [
+      "default-src 'none'",
+      "script-src 'unsafe-inline' data: blob:",
+      "style-src 'unsafe-inline'",
+      "img-src * data: blob:",
+      "media-src * data: blob:",
+      "connect-src 'none'",
+      "frame-ancestors *",
+    ].join('; ');
+
+    return reply
+      .header('Content-Type', 'text/html; charset=utf-8')
+      .header('Content-Security-Policy', csp)
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Cache-Control', 'public, max-age=31536000, immutable')
+      .send(html);
+  });
+
+  // ── ZIP download ──────────────────────────────────────────────────────────
+  // GET /v1/projects/:id/game.zip  — downloads the current snapshot as a ZIP.
+
+  app.get('/v1/projects/:id/game.zip', async (req, reply) => {
+    if (!deps.store) return reply.code(503).send({ error: 'download_unavailable' });
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { id } = req.params as { id: string };
+    const project = await deps.repo.get(id);
+    if (!project || project.ownerId !== user.userId) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    if (!project.currentManifestKey) {
+      return reply.code(409).send({ error: 'no_snapshot', message: 'Generate a game first.' });
+    }
+
+    const manifest = await deps.store.readManifest(project.currentManifestKey);
+    const files = await Promise.all(
+      Object.entries(manifest.files).map(async ([path, entry]) => {
+        const bytes = await deps.store!.readFile(manifest, path);
+        const TEXT_PREFIXES = ['text/', 'application/json'];
+        const isText = TEXT_PREFIXES.some((p) => entry.contentType.startsWith(p));
+        return {
+          path,
+          content: isText ? Buffer.from(bytes).toString('utf8') : Buffer.from(bytes),
+        };
+      }),
+    );
+
+    const { exportGameArtifact } = await import('@playforge/exporters');
+    const tmpPath = join(tmpdir(), `playforge-${randomUUID()}.zip`);
+    try {
+      await exportGameArtifact('game-zip', tmpPath, {
+        files,
+        designName: project.name,
+        engine: (project.engine ?? 'phaser') as 'phaser' | 'three',
+      });
+      const { readFile } = await import('node:fs/promises');
+      const zipBytes = await readFile(tmpPath);
+      const safeName = project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40) || 'game';
+      return reply
+        .header('Content-Type', 'application/zip')
+        .header('Content-Disposition', `attachment; filename="${safeName}.zip"`)
+        .send(zipBytes);
+    } finally {
+      await rm(tmpPath, { force: true }).catch(() => {});
     }
   });
 

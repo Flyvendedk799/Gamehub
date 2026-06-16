@@ -19,4 +19,10 @@ export {
 } from './repo';
 export { type Run, type RunRepo, InMemoryRunRepo } from './run-repo';
 export { type ChatMessage, type ChatRepo, InMemoryChatRepo } from './chat-repo';
+export {
+  type PublishedGame,
+  type PublishRepo,
+  InMemoryPublishRepo,
+  DrizzlePublishRepo,
+} from './publish-repo';
 export { DrizzleProjectRepo, DrizzleRunRepo, DrizzleChatRepo } from './drizzle-repos';

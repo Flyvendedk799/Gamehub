@@ -24,6 +24,7 @@ import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
 import { enqueueRun } from '../../worker/src/queue';
 import { HeaderAuthenticator } from './auth';
 import { DrizzleChatRepo, DrizzleProjectRepo, DrizzleRunRepo } from './drizzle-repos';
+import { DrizzlePublishRepo } from './publish-repo';
 import { buildServer, type EnqueueFn } from './server';
 
 function requireEnv(name: string): string {
@@ -50,6 +51,7 @@ async function main() {
   const projectRepo = new DrizzleProjectRepo(db);
   const runRepo = new DrizzleRunRepo(db);
   const chatRepo = new DrizzleChatRepo(db);
+  const publishRepo = new DrizzlePublishRepo(db);
 
   const enqueue: EnqueueFn = async ({ runId, projectId, userId, prompt, parentManifestKey }) => {
     // Fire-and-forget: the worker publishes events to bus as it runs.
@@ -90,6 +92,7 @@ async function main() {
     bus,
     runRepo,
     chatRepo,
+    publishRepo,
     enqueue,
     store,
   });

@@ -61,6 +61,17 @@ export async function getChatHistory(projectId: string): Promise<ChatHistoryResp
   return apiFetch<ChatHistoryResponse>(`/v1/projects/${projectId}/chat`);
 }
 
+// ─── Publish ─────────────────────────────────────────────────────────────────
+
+export interface PublishResponse {
+  slug: string;
+  publishUrl: string;
+}
+
+export async function publishProject(projectId: string): Promise<PublishResponse> {
+  return apiFetch<PublishResponse>(`/v1/projects/${projectId}/publish`, { method: 'POST' });
+}
+
 // ─── Generation ──────────────────────────────────────────────────────────────
 
 export async function generateGame(

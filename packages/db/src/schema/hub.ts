@@ -48,7 +48,6 @@ export const publishedGames = pgTable(
       .notNull()
       .references(() => projects.id, { onDelete: 'cascade' }),
     snapshotId: uuid('snapshot_id')
-      .notNull()
       .references(() => snapshots.id, { onDelete: 'restrict' }),
     publishSlug: text('publish_slug').notNull(),
     title: text('title').notNull(),

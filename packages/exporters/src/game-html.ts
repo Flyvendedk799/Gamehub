@@ -71,10 +71,7 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export async function exportGameHtml(
-  destinationPath: string,
-  opts: ExportGameHtmlOptions,
-): Promise<ExportResult> {
+export async function buildGameHtml(opts: ExportGameHtmlOptions): Promise<string> {
   if (opts.engine !== 'three' && opts.engine !== 'phaser') {
     throw new CodesignError(
       `game-html exporter does not support engine "${opts.engine}". Use game-py for pygame, game-godot-project for godot.`,
@@ -186,6 +183,14 @@ export async function exportGameHtml(
   // doesn't try to resolve relatives against the protocol.
   html = html.replace(/<base\s+href=["'][^"']*["']\s*\/?\s*>\s*/i, '');
 
+  return html;
+}
+
+export async function exportGameHtml(
+  destinationPath: string,
+  opts: ExportGameHtmlOptions,
+): Promise<ExportResult> {
+  const html = await buildGameHtml(opts);
   const { writeFile, stat } = await import('node:fs/promises');
   await writeFile(destinationPath, html, 'utf8');
   const s = await stat(destinationPath);

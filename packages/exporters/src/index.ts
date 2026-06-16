@@ -27,6 +27,7 @@ export type { ExportZipOptions, ZipAsset } from './zip';
 export type { ExportMarkdownOptions, MarkdownMeta } from './markdown';
 export type { ExportGameZipOptions } from './game-zip';
 export type { ExportGameHtmlOptions } from './game-html';
+export { buildGameHtml } from './game-html';
 export { htmlToMarkdown } from './markdown';
 
 /**

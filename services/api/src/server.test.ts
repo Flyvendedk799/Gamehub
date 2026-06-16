@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { InMemoryEventBus, runChannel } from '@playforge/bus';
 import { InMemoryBlobStore, SnapshotStore } from '@playforge/storage';
 import { HeaderAuthenticator } from './auth';
+import { InMemoryPublishRepo } from './publish-repo';
 import { InMemoryProjectRepo } from './repo';
 import { InMemoryRunRepo } from './run-repo';
 import { buildServer, type EnqueueFn } from './server';
@@ -9,16 +10,19 @@ import { buildServer, type EnqueueFn } from './server';
 function makeApp(overrides?: {
   bus?: InstanceType<typeof InMemoryEventBus>;
   runRepo?: InstanceType<typeof InMemoryRunRepo>;
+  repo?: InstanceType<typeof InMemoryProjectRepo>;
   enqueue?: EnqueueFn;
   store?: SnapshotStore;
+  publishRepo?: InMemoryPublishRepo;
 }) {
   return buildServer({
-    repo: new InMemoryProjectRepo(),
+    repo: overrides?.repo ?? new InMemoryProjectRepo(),
     auth: new HeaderAuthenticator(),
     bus: overrides?.bus ?? new InMemoryEventBus(),
     runRepo: overrides?.runRepo ?? new InMemoryRunRepo(),
     enqueue: overrides?.enqueue ?? (async () => {}),
     ...(overrides?.store !== undefined ? { store: overrides.store } : {}),
+    ...(overrides?.publishRepo !== undefined ? { publishRepo: overrides.publishRepo } : {}),
   });
 }
 
@@ -282,6 +286,61 @@ describe('SSE event relay', () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('"type":"run_complete"');
+  });
+});
+
+describe('publish + play routes', () => {
+  it('returns 409 when project has no snapshot', async () => {
+    const repo = new InMemoryProjectRepo();
+    const proj = await repo.create({ ownerId: 'alice', name: 'My Game', engine: 'phaser' });
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const publishRepo = new InMemoryPublishRepo();
+
+    const app = makeApp({ repo, store, publishRepo });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${proj.id}/publish`,
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: string }).error).toBe('no_snapshot');
+  });
+
+  it('returns 503 when store/publishRepo not configured', async () => {
+    const repo = new InMemoryProjectRepo();
+    const proj = await repo.create({ ownerId: 'alice', name: 'My Game', engine: 'phaser' });
+
+    const app = makeApp({ repo }); // no store or publishRepo
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${proj.id}/publish`,
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(503);
+  });
+
+  it('returns 404 for unknown slug on play route', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const publishRepo = new InMemoryPublishRepo();
+
+    const app = makeApp({ store, publishRepo });
+    const res = await app.inject({ method: 'GET', url: '/v1/play/missing-slug' });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('get publish-info returns null when not published', async () => {
+    const repo = new InMemoryProjectRepo();
+    const proj = await repo.create({ ownerId: 'alice', name: 'Test', engine: 'phaser' });
+    const publishRepo = new InMemoryPublishRepo();
+
+    const app = makeApp({ repo, publishRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${proj.id}/publish-info`,
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { published: null }).published).toBeNull();
   });
 });
 

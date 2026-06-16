@@ -1,0 +1,1 @@
+ALTER TABLE "published_games" ALTER COLUMN "snapshot_id" DROP NOT NULL;
