@@ -25,7 +25,7 @@ import { exportGameZip } from '@playforge/exporters/game-zip';
 import { type SnapshotStore, contentTypeFor } from '@playforge/storage';
 import type { Authenticator, AuthedUser } from './auth';
 import { generateSessionToken, hashPassword, sessionExpiresAt, verifyPassword } from './auth';
-import { eq as drizzleEq, or as drizzleOr } from 'drizzle-orm';
+import { eq as drizzleEq, or as drizzleOr, sql as drizzleSql } from 'drizzle-orm';
 import type { BrowserJobQueue, RuntimeVerifyResult, ThumbnailResult } from './browser-queue';
 import type { ChatRepo } from './chat-repo';
 import type { HubRepo } from './hub-repo';
@@ -131,9 +131,43 @@ const presenceSockets = new Map<string, Set<(msg: string) => void>>();
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const collabRooms = new Map<string, Set<any>>();
 
+const FREE_TIER_CREDITS = 100;
+const CREDITS_PER_RUN = 10;
+
 export function buildServer(deps: ServerDeps): FastifyInstance {
   const app = Fastify({ logger: false });
   void app.register(websocketPlugin);
+
+  // ── Auth rate limiting (in-memory, per-server-instance) ──────────────────
+  const authAttempts = new Map<string, { count: number; resetAt: number }>();
+  const AUTH_WINDOW_MS = 15 * 60 * 1000;
+  const AUTH_MAX_ATTEMPTS = 10;
+
+  function checkAuthRateLimit(key: string): boolean {
+    const now = Date.now();
+    const entry = authAttempts.get(key);
+    if (!entry || entry.resetAt < now) {
+      authAttempts.set(key, { count: 1, resetAt: now + AUTH_WINDOW_MS });
+      return true;
+    }
+    if (entry.count >= AUTH_MAX_ATTEMPTS) return false;
+    entry.count++;
+    return true;
+  }
+
+  function clearAuthRateLimit(key: string): void {
+    authAttempts.delete(key);
+  }
+
+  async function getUserBalance(userId: string): Promise<number> {
+    if (!deps.authDb) return Infinity;
+    const { schema: s } = await import('@playforge/db');
+    const [row] = await deps.authDb
+      .select({ bal: drizzleSql<number>`COALESCE(SUM(${s.creditLedger.delta}), 0)` })
+      .from(s.creditLedger)
+      .where(drizzleEq(s.creditLedger.userId, userId));
+    return Number(row?.bal ?? 0);
+  }
 
   async function requireUser(req: FastifyRequest, reply: FastifyReply): Promise<AuthedUser | null> {
     const q = req.query as Record<string, string | undefined>;
@@ -174,6 +208,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!password || password.length < 8) return reply.code(400).send({ error: 'password_too_short', min: 8 });
     if (!handle || handle.length < 2) return reply.code(400).send({ error: 'invalid_handle' });
 
+    // Rate-limit registrations per IP to prevent bulk account creation.
+    if (!checkAuthRateLimit(`register:${req.ip ?? 'unknown'}`)) {
+      return reply.code(429).send({ error: 'too_many_attempts', retryAfterMs: AUTH_WINDOW_MS });
+    }
+
     // Check uniqueness
     const existing = await deps.authDb.select({ id: s.users.id })
       .from(s.users)
@@ -190,6 +229,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const token = generateSessionToken();
     await deps.authDb.insert(s.sessions).values({ token, userId: user.id, expiresAt: sessionExpiresAt() });
 
+    // Grant free tier credits — non-blocking, don't fail registration on credit error.
+    void deps.authDb.insert(s.creditLedger)
+      .values({ userId: user.id, delta: FREE_TIER_CREDITS, reason: 'welcome_grant' })
+      .catch((err: unknown) => { console.error('[register] credit grant failed:', err); });
+
     return reply.code(201).send({ token, user: { id: user.id, handle: user.handle, displayName: user.displayName } });
   });
 
@@ -200,6 +244,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : null;
     const password = typeof body.password === 'string' ? body.password : null;
     if (!email || !password) return reply.code(400).send({ error: 'email_and_password_required' });
+
+    // Rate-limit login attempts per email to prevent brute-force.
+    if (!checkAuthRateLimit(`login:${email}`)) {
+      return reply.code(429).send({ error: 'too_many_attempts', retryAfterMs: AUTH_WINDOW_MS });
+    }
 
     const [user] = await deps.authDb.select({
       id: s.users.id, handle: s.users.handle, displayName: s.users.displayName, passwordHash: s.users.passwordHash,
@@ -213,6 +262,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
     const token = generateSessionToken();
     await deps.authDb.insert(s.sessions).values({ token, userId: user.id, expiresAt: sessionExpiresAt() });
+
+    clearAuthRateLimit(`login:${email}`);
 
     return reply.send({ token, user: { id: user.id, handle: user.handle, displayName: user.displayName } });
   });
@@ -232,7 +283,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   app.get('/v1/auth/me', async (req, reply) => {
     const user = await requireUser(req, reply);
     if (!user) return;
-    return reply.send({ userId: user.userId, handle: user.handle });
+    const balance = await getUserBalance(user.userId);
+    return reply.send({ userId: user.userId, handle: user.handle, ...(balance !== Infinity ? { balance } : {}) });
   });
 
   // ── projects CRUD ─────────────────────────────────────────────────────────
@@ -323,6 +375,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       const active = await deps.runRepo.countActiveByUser(user.userId);
       if (active >= deps.maxConcurrentRunsPerUser) {
         return reply.code(429).send({ error: 'concurrent_run_limit', active, limit: deps.maxConcurrentRunsPerUser });
+      }
+    }
+
+    // Credit pre-check — reject if balance is too low to cover one run.
+    if (deps.authDb) {
+      const balance = await getUserBalance(user.userId);
+      if (balance < CREDITS_PER_RUN) {
+        return reply.code(402).send({ error: 'insufficient_credits', balance, required: CREDITS_PER_RUN });
       }
     }
 

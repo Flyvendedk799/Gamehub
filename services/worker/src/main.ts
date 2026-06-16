@@ -49,6 +49,8 @@ function parseRedisUrl(url: string): { host: string; port: number } {
   }
 }
 
+const CREDITS_PER_RUN = 10;
+
 interface GenerateJobData {
   runId: string;
   projectId: string;
@@ -210,6 +212,16 @@ async function main() {
           },
         }),
       ]);
+
+      // Deduct generation credits from the user's ledger.
+      await db.insert(schema.creditLedger).values({
+        userId: job.data.userId,
+        delta: -CREDITS_PER_RUN,
+        reason: 'generation',
+        runId,
+      }).catch((err: unknown) => {
+        console.error(`[worker] credit deduction failed for run ${runId}:`, err);
+      });
 
       console.log(`[worker] completed job ${job.id} run=${runId} manifest=${manifestKey}`);
       return { manifestKey };

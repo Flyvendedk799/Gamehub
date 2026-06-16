@@ -620,4 +620,22 @@ describe('concurrent run cap', () => {
     });
     expect(res.statusCode).toBe(202);
   });
+
+  it('returns 503 on register when authDb is not configured', async () => {
+    const res = await makeApp().inject({
+      method: 'POST',
+      url: '/v1/auth/register',
+      payload: { email: 'x@example.com', password: 'pass1234', handle: 'xuser' },
+    });
+    expect(res.statusCode).toBe(503);
+  });
+
+  it('returns 503 on login when authDb is not configured', async () => {
+    const res = await makeApp().inject({
+      method: 'POST',
+      url: '/v1/auth/login',
+      payload: { email: 'x@example.com', password: 'pass1234' },
+    });
+    expect(res.statusCode).toBe(503);
+  });
 });
