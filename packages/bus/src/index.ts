@@ -1,3 +1,5 @@
+import Redis from 'ioredis';
+
 /**
  * @playforge/bus — the run event transport between the generation worker and
  * the API's SSE relay.
@@ -67,4 +69,94 @@ export class InMemoryEventBus implements EventBus {
 /** Channel name for a run's event stream. */
 export function runChannel(runId: string): string {
   return `run:${runId}`;
+}
+
+/**
+ * Production event bus backed by Redis Streams.
+ *
+ * Uses XADD for publish and XRANGE + XREAD(BLOCK) for subscribe-with-replay:
+ *   - XRANGE '-' '+' replays all history on subscribe (catches up late joiners).
+ *   - XREAD BLOCK polls for new entries after the last-seen ID.
+ *
+ * This matches the design intent in the comment at the top of this module:
+ * any API instance can subscribe to any run's channel and get the full event
+ * history, so the browser can reconnect to a different instance without
+ * missing events.
+ */
+export class RedisEventBus implements EventBus {
+  private redisUrl: string;
+
+  constructor(redisUrl: string) {
+    this.redisUrl = redisUrl;
+  }
+
+  private makeClient() {
+    return new Redis(this.redisUrl, { lazyConnect: false, maxRetriesPerRequest: null });
+  }
+
+  async publish(channel: string, message: unknown): Promise<void> {
+    const client = this.makeClient();
+    try {
+      await client.xadd(channel, '*', 'data', JSON.stringify(message));
+    } finally {
+      client.disconnect();
+    }
+  }
+
+  async subscribe(channel: string, handler: BusHandler): Promise<Unsubscribe> {
+    const reader = this.makeClient();
+    const replayer = this.makeClient();
+
+    type XEntry = [id: string, fields: string[]];
+    type XResult = Array<[stream: string, entries: XEntry[]]>;
+
+    // 1. Replay all history synchronously via XRANGE.
+    const history = (await replayer.xrange(channel, '-', '+')) as XEntry[];
+    replayer.disconnect();
+
+    let lastId = '0-0';
+    for (const [id, fields] of history) {
+      const dataIdx = fields.indexOf('data');
+      if (dataIdx !== -1) {
+        const raw = fields[dataIdx + 1];
+        if (raw !== undefined) handler(JSON.parse(raw) as unknown);
+      }
+      lastId = id;
+    }
+
+    // 2. Poll for new entries via blocking XREAD.
+    let active = true;
+    void (async () => {
+      while (active) {
+        let result: XResult | null = null;
+        try {
+          result = (await reader.xread(
+            'COUNT', '100', 'BLOCK', '5000', 'STREAMS', channel, lastId,
+          )) as XResult | null;
+        } catch {
+          if (!active) break;
+          await new Promise((r) => setTimeout(r, 500));
+          continue;
+        }
+        if (!active) break;
+        if (result) {
+          for (const [, entries] of result) {
+            for (const [id, fields] of entries) {
+              const dataIdx = fields.indexOf('data');
+              if (dataIdx !== -1) {
+                const raw = fields[dataIdx + 1];
+                if (raw !== undefined) handler(JSON.parse(raw) as unknown);
+              }
+              lastId = id;
+            }
+          }
+        }
+      }
+      reader.disconnect();
+    })();
+
+    return () => {
+      active = false;
+    };
+  }
 }

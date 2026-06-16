@@ -16,6 +16,7 @@
     "@playforge/exporters": "workspace:*",
     "@playforge/shared": "workspace:*",
     "@playforge/storage": "workspace:*",
+    "bullmq": "^5.78.1",
     "drizzle-orm": "^0.38.3",
     "fastify": "^5.2.0"
   },

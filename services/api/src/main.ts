@@ -1,25 +1,26 @@
 /**
- * Live API entry point — wires real infrastructure for Phase 0.
+ * Live API entry point.
  *
- * Phase 0 strategy: generation runs in-process (the EnqueueFn calls
- * enqueueRun directly, no BullMQ) and events flow through InMemoryEventBus
- * (no Redis). This proves the full path — POST generate → SSE stream → PG
- * snapshot — without requiring a queue. BullMQ + RedisEventBus swap in at
- * Phase 1 with zero changes to routes or worker logic.
+ * When REDIS_URL is set: events flow through RedisEventBus; generation jobs
+ * are enqueued to BullMQ for the dedicated worker service to consume.
+ *
+ * When REDIS_URL is absent (dev without Redis): falls back to InMemoryEventBus
+ * + in-process generation (enqueueRun called directly).
  *
  * Required env vars:
  *   DATABASE_URL        Postgres connection string (postgres://...)
  *   PLATFORM_API_KEY    Anthropic/OpenAI key for the platform account
- *   PLATFORM_MODEL_ID   e.g. claude-opus-4-8
- *   PLATFORM_PROVIDER   e.g. anthropic (default)
  *
  * Optional:
+ *   REDIS_URL           Redis connection string (default: none → in-process mode)
+ *   PLATFORM_MODEL_ID   e.g. o4-mini (default)
+ *   PLATFORM_PROVIDER   e.g. openai (default)
  *   PORT                HTTP listen port (default 3100)
- *   DEV_USER_ID         UUID of a pre-seeded dev user in the DB (for x-user-id
- *                       testing without Clerk). Leave unset in production.
+ *   BLOB_DIR            local blob-store root (default: .playforge-blobs)
  */
+import { Queue } from 'bullmq';
 import { createDb } from '@playforge/db';
-import { InMemoryEventBus } from '@playforge/bus';
+import { InMemoryEventBus, RedisEventBus, type EventBus } from '@playforge/bus';
 import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
 import { enqueueRun } from '../../worker/src/queue';
 import { HeaderAuthenticator } from './auth';
@@ -34,19 +35,27 @@ function requireEnv(name: string): string {
   return val;
 }
 
+function parseRedisUrl(url: string): { host: string; port: number } {
+  try {
+    const u = new URL(url);
+    return { host: u.hostname, port: Number(u.port) || 6379 };
+  } catch {
+    return { host: '127.0.0.1', port: 6379 };
+  }
+}
+
 async function main() {
   const databaseUrl = requireEnv('DATABASE_URL');
   const apiKey = requireEnv('PLATFORM_API_KEY');
-  const modelId = process.env['PLATFORM_MODEL_ID'] ?? 'claude-opus-4-8';
-  const modelProvider = process.env['PLATFORM_PROVIDER'] ?? 'anthropic';
+  const modelId = process.env['PLATFORM_MODEL_ID'] ?? 'o4-mini';
+  const modelProvider = process.env['PLATFORM_PROVIDER'] ?? 'openai';
   const port = Number(process.env['PORT'] ?? '3100');
+  const redisUrl = process.env['REDIS_URL'];
+  const blobDir = process.env['BLOB_DIR'] ?? '.playforge-blobs';
 
   const db = createDb(databaseUrl);
-  const bus = new InMemoryEventBus();
 
-  // Object storage: local filesystem under .playforge-blobs/ for Phase 0.
-  // Swap for S3BlobStore / R2BlobStore when cloud storage is wired.
-  const blobDir = process.env['BLOB_DIR'] ?? '.playforge-blobs';
+  const bus: EventBus = redisUrl ? new RedisEventBus(redisUrl) : new InMemoryEventBus();
   const store = new SnapshotStore(new LocalFsBlobStore(blobDir));
 
   const projectRepo = new DrizzleProjectRepo(db);
@@ -55,8 +64,32 @@ async function main() {
   const publishRepo = new DrizzlePublishRepo(db);
   const hubRepo = new DrizzleHubRepo(db);
 
+  let queue: Queue | undefined;
+  if (redisUrl) {
+    queue = new Queue('generate', { connection: parseRedisUrl(redisUrl) });
+    console.log('[playforge-api] BullMQ queue connected to Redis');
+  } else {
+    console.log('[playforge-api] no REDIS_URL — running generation in-process');
+  }
+
   const enqueue: EnqueueFn = async ({ runId, projectId, userId, prompt, parentManifestKey }) => {
-    // Fire-and-forget: the worker publishes events to bus as it runs.
+    if (queue) {
+      await queue.add(
+        'generate',
+        {
+          runId,
+          projectId,
+          userId,
+          prompt,
+          model: { provider: modelProvider, modelId },
+          ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
+        },
+        { jobId: runId },
+      );
+      return;
+    }
+
+    // In-process fallback (dev without Redis).
     void enqueueRun(
       {
         runId,
@@ -69,7 +102,6 @@ async function main() {
       { bus, store },
     ).then(async (result) => {
       const manifestKey = result.snapshot.manifestKey;
-      // Persist snapshot key + update project's HEAD manifest in parallel.
       await Promise.all([
         runRepo.setSnapshot(runId, manifestKey),
         projectRepo.setCurrentManifestKey(projectId, manifestKey),
@@ -85,7 +117,6 @@ async function main() {
       console.error(`[run:${runId}] generation failed:`, err);
       await runRepo.updateStatus(runId, 'failed').catch(() => {});
     });
-    // Return immediately — the caller streams events via SSE.
   };
 
   const server = buildServer({
