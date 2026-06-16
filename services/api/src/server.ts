@@ -187,16 +187,21 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       void deps.chatRepo.add(project.id, 'user', { text: body.prompt.trim(), runId: run.id });
     }
 
+    // Check for a paused continuation from a previous run on this project.
+    const paused = await deps.runRepo.getPausedContinuation(project.id);
+
     // Fire-and-forget — the worker publishes events; the browser streams via SSE.
-    // Pass the project's current manifest key so the agent can build on previous files.
     void deps.enqueue({
       runId: run.id,
       projectId: project.id,
       userId: user.userId,
       prompt: body.prompt.trim(),
-      ...(project.currentManifestKey !== null
-        ? { parentManifestKey: project.currentManifestKey }
-        : {}),
+      ...(paused?.snapshotManifestKey !== null && paused?.snapshotManifestKey !== undefined
+        ? { parentManifestKey: paused.snapshotManifestKey }
+        : project.currentManifestKey !== null
+          ? { parentManifestKey: project.currentManifestKey }
+          : {}),
+      ...(paused !== null ? { continuation: paused.continuation } : {}),
     });
     return reply.code(202).send({ runId: run.id });
   });

@@ -6,6 +6,13 @@
  * Events are published to Redis Streams via RedisEventBus so the API's SSE
  * relay can stream them to any browser, on any API instance.
  *
+ * Continuation / resume:
+ *   When the agent pauses at a safe boundary (output.interrupted), the job
+ *   saves the ContinuationPromptInput to runs.continuation and marks the run
+ *   as 'paused' rather than 'completed'. The API re-enqueues with the stored
+ *   continuation on the next user prompt, and queue.ts calls
+ *   buildContinuationPrompt() to reconstruct the resume prompt.
+ *
  * Required env vars:
  *   DATABASE_URL        Postgres connection string
  *   PLATFORM_API_KEY    LLM API key (used when job doesn't carry apiKey)
@@ -22,7 +29,9 @@ import { Worker } from 'bullmq';
 import { RedisEventBus } from '@playforge/bus';
 import { createDb, schema } from '@playforge/db';
 import type { ModelRef } from '@playforge/shared';
+import { classifyAbortKind } from '@playforge/shared';
 import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
+import type { ContinuationPromptInput } from '@playforge/agent-core';
 import { enqueueRun } from './queue';
 
 function requireEnv(name: string): string {
@@ -49,6 +58,8 @@ interface GenerateJobData {
   /** BYOK: per-job API key override. */
   apiKey?: string;
   model?: ModelRef;
+  /** Resume a previously paused run — replaces prompt with buildContinuationPrompt. */
+  continuation?: ContinuationPromptInput;
 }
 
 async function main() {
@@ -68,11 +79,11 @@ async function main() {
   const worker = new Worker<GenerateJobData>(
     'generate',
     async (job) => {
-      const { runId, projectId, prompt, parentManifestKey, apiKey: jobApiKey, model: jobModel } = job.data;
+      const { runId, projectId, prompt, parentManifestKey, apiKey: jobApiKey, model: jobModel, continuation } = job.data;
       const apiKey = jobApiKey ?? platformApiKey;
       const model: ModelRef = jobModel ?? { provider: modelProvider, modelId };
 
-      console.log(`[worker] starting job ${job.id} run=${runId}`);
+      console.log(`[worker] starting job ${job.id} run=${runId}${continuation ? ' (resume)' : ''}`);
 
       await db
         .update(schema.runs)
@@ -87,18 +98,46 @@ async function main() {
           model,
           apiKey,
           ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
+          ...(continuation !== undefined ? { continuation } : {}),
         },
         { bus, store },
       );
 
       const manifestKey = result.snapshot.manifestKey;
 
-      // Compute next chat seq atomically enough for single-worker Phase 3.
+      // Compute next chat seq atomically enough for single-worker concurrency.
       const [seqRow] = await db
         .select({ val: sql<number>`COALESCE(MAX(${schema.chatMessages.seq}), -1)` })
         .from(schema.chatMessages)
         .where(eq(schema.chatMessages.projectId, projectId));
       const nextSeq = (seqRow?.val ?? -1) + 1;
+
+      if (result.pausedContinuation) {
+        // Agent paused at a safe boundary. Persist continuation state + chat row.
+        await Promise.all([
+          db
+            .update(schema.runs)
+            .set({
+              snapshotManifestKey: manifestKey,
+              status: 'paused',
+              continuation: result.pausedContinuation as unknown,
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.runs.id, runId)),
+          db
+            .update(schema.projects)
+            .set({ currentManifestKey: manifestKey, updatedAt: new Date() })
+            .where(eq(schema.projects.id, projectId)),
+          db.insert(schema.chatMessages).values({
+            projectId,
+            seq: nextSeq,
+            kind: 'continuation_pending',
+            payload: { runId, manifestKey },
+          }),
+        ]);
+        console.log(`[worker] paused job ${job.id} run=${runId} manifest=${manifestKey}`);
+        return { manifestKey, paused: true };
+      }
 
       await Promise.all([
         db
@@ -134,11 +173,12 @@ async function main() {
 
   worker.on('failed', async (job, err) => {
     const runId = job?.data.runId;
-    console.error(`[worker] job ${job?.id ?? '?'} run=${runId ?? '?'} failed:`, err);
+    const abortKind = classifyAbortKind(err instanceof Error ? err.message : String(err));
+    console.error(`[worker] job ${job?.id ?? '?'} run=${runId ?? '?'} failed (${abortKind}):`, err);
     if (runId) {
       await db
         .update(schema.runs)
-        .set({ status: 'failed', updatedAt: new Date() })
+        .set({ status: 'failed', abortKind, updatedAt: new Date() })
         .where(eq(schema.runs.id, runId))
         .catch(() => {});
     }

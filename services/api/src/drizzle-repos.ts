@@ -202,6 +202,15 @@ export class DrizzleRunRepo implements RunRepo {
       );
     return row?.count ?? 0;
   }
+
+  async getPausedContinuation(projectId: string): Promise<{ continuation: unknown; snapshotManifestKey: string | null } | null> {
+    const row = await this.db.query.runs.findFirst({
+      where: and(eq(schema.runs.projectId, projectId), eq(schema.runs.status, 'paused')),
+      orderBy: [desc(schema.runs.createdAt)],
+    });
+    if (!row?.continuation) return null;
+    return { continuation: row.continuation, snapshotManifestKey: row.snapshotManifestKey ?? null };
+  }
 }
 
 // ── ChatRepo ──────────────────────────────────────────────────────────────────

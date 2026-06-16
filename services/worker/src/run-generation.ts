@@ -69,6 +69,8 @@ export interface GenerationResult {
   spec: GameSpec | null;
   snapshot: WriteResult;
   fileCount: number;
+  /** File listing at run end — used to build continuation fsState. */
+  fsState: Array<{ path: string; bytes: number }>;
 }
 
 const PASS_VALIDATOR: SceneValidator = (engine) => ({ ok: true, engine, issues: [] });
@@ -116,5 +118,11 @@ export async function runGeneration(
   const output = await generate(input, deps);
   const snapshot = await tree.persist(ports.store);
 
-  return { output, engine: state.engine, spec: state.spec, snapshot, fileCount: tree.size };
+  const encoder = new TextEncoder();
+  const fsState = tree.toSnapshotInput().map((f) => ({
+    path: f.path,
+    bytes: f.bytes instanceof Uint8Array ? f.bytes.length : encoder.encode(f.bytes as string).length,
+  }));
+
+  return { output, engine: state.engine, spec: state.spec, snapshot, fileCount: tree.size, fsState };
 }

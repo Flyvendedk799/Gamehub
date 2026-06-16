@@ -25,6 +25,8 @@ export interface RunRepo {
   setSnapshot(id: string, manifestKey: string): Promise<void>;
   /** Count queued/running runs for a user (for concurrent run cap). */
   countActiveByUser(userId: string): Promise<number>;
+  /** Load the continuation payload (jsonb) from a paused run, if any. */
+  getPausedContinuation(projectId: string): Promise<{ continuation: unknown; snapshotManifestKey: string | null } | null>;
 }
 
 export class InMemoryRunRepo implements RunRepo {
@@ -57,5 +59,9 @@ export class InMemoryRunRepo implements RunRepo {
     return [...this.byId.values()].filter(
       (r) => r.userId === userId && (r.status === 'queued' || r.status === 'running'),
     ).length;
+  }
+
+  async getPausedContinuation(_projectId: string): Promise<{ continuation: unknown; snapshotManifestKey: string | null } | null> {
+    return null; // InMemory: no paused runs
   }
 }
