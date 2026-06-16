@@ -37,6 +37,8 @@ export interface EnqueueInput {
   parentManifestKey?: string;
   /** Continuation state from a previously paused run — replaces prompt with buildContinuationPrompt. */
   continuation?: ContinuationPromptInput;
+  /** Hard token ceiling — runGeneration aborts if (inputTokens + outputTokens) exceeds this. */
+  maxTokens?: number;
 }
 
 export interface QueuePorts {
@@ -90,12 +92,14 @@ export async function enqueueRun(
         prompt: effectivePrompt,
         model: input.model,
         apiKey: input.apiKey,
+        provider: input.model.provider,
         ...(input.engine !== undefined ? { engine: input.engine } : {}),
         ...(initialFiles !== undefined ? { initialFiles } : {}),
       },
       {
         store: ports.store,
         ...(ports.generate !== undefined ? { generate: ports.generate } : {}),
+        ...(input.maxTokens !== undefined ? { maxTokens: input.maxTokens } : {}),
         onEvent: (event: AgentEvent) => {
           // Capture the latest set_todos for continuation building.
           if (

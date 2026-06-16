@@ -7,6 +7,7 @@ import { ChatPanel } from '@/components/ChatPanel';
 import { PreviewPane } from '@/components/PreviewPane';
 import { generateGame, getChatHistory, getProject, publishProject, streamRun } from '@/lib/api';
 import { useCollab } from '@/lib/use-collab';
+import { usePresence } from '@/lib/use-presence';
 import type { ChatHistoryMessage, Project, RunCompleteEvent, RunErrorEvent, SseEvent } from '@/lib/types';
 
 const BASE = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3191';
@@ -54,6 +55,16 @@ export default function BuilderPage() {
 
   // CRDT collab — syncs a shared Y.Doc across all browser tabs on this project
   const { peerCount, connected: collabConnected } = useCollab(projectId || null);
+
+  // Presence — tracks viewer count and handles live preview push from other collaborators
+  const { viewerCount } = usePresence(projectId || null, {
+    onPreviewUpdated: (url) => {
+      if (!isStreaming) {
+        const full = url.startsWith('http') ? url : `${BASE}${url}`;
+        setPreviewUrl(full);
+      }
+    },
+  });
 
   // Track active SSE controller so we can close it on unmount / new run
   const streamCtrlRef = useRef<{ close: () => void } | null>(null);
@@ -271,10 +282,10 @@ export default function BuilderPage() {
               )}
             </>
           )}
-          {collabConnected && peerCount > 0 && (
+          {(viewerCount > 1 || (collabConnected && peerCount > 0)) && (
             <span className="flex items-center gap-1 text-xs text-emerald-400 font-medium" title="Live collaborators">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              {peerCount} with you
+              {Math.max(viewerCount - 1, peerCount)} with you
             </span>
           )}
           <Link

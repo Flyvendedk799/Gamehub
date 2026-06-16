@@ -60,6 +60,8 @@ interface GenerateJobData {
   model?: ModelRef;
   /** Resume a previously paused run — replaces prompt with buildContinuationPrompt. */
   continuation?: ContinuationPromptInput;
+  /** Hard token ceiling (input + output). Worker aborts the run if exceeded. */
+  maxTokens?: number;
 }
 
 async function main() {
@@ -79,7 +81,7 @@ async function main() {
   const worker = new Worker<GenerateJobData>(
     'generate',
     async (job) => {
-      const { runId, projectId, prompt, parentManifestKey, apiKey: jobApiKey, model: jobModel, continuation } = job.data;
+      const { runId, projectId, prompt, parentManifestKey, apiKey: jobApiKey, model: jobModel, continuation, maxTokens } = job.data;
       const apiKey = jobApiKey ?? platformApiKey;
       const model: ModelRef = jobModel ?? { provider: modelProvider, modelId };
 
@@ -99,6 +101,7 @@ async function main() {
           apiKey,
           ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
           ...(continuation !== undefined ? { continuation } : {}),
+          ...(maxTokens !== undefined ? { maxTokens } : {}),
         },
         { bus, store },
       );

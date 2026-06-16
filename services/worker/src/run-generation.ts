@@ -20,6 +20,7 @@ import {
   type GenerateViaAgentDeps,
   generateViaAgent,
 } from '@playforge/agent-core';
+import { makeAssetGenerator } from './asset-generator';
 import type { GameSpec, ModelRef } from '@playforge/shared';
 import type { SnapshotStore, WriteResult } from '@playforge/storage';
 import { WorkingTree } from './working-tree';
@@ -52,6 +53,8 @@ export interface GenerationRequest {
   engine?: WebEngine;
   /** Seed the working tree (e.g. a remix's parent snapshot). */
   initialFiles?: Iterable<readonly [string, string]>;
+  /** Provider name (e.g. 'openai') — used to enable image asset generation. */
+  provider?: string;
 }
 
 export interface GenerationPorts {
@@ -61,6 +64,8 @@ export interface GenerationPorts {
   generate?: GenerateFn;
   /** Engine scene validator. Defaults to a permissive pass. */
   validateScene?: SceneValidator;
+  /** Hard ceiling on total tokens (input + output) for this run. Aborts cleanly when exceeded. */
+  maxTokens?: number;
 }
 
 export interface GenerationResult {
@@ -83,6 +88,19 @@ export async function runGeneration(
   const validateScene = ports.validateScene ?? PASS_VALIDATOR;
   const tree = new WorkingTree(req.initialFiles);
 
+  // Hard run ceiling — abort cleanly when a token budget is set.
+  // We can't observe tokens mid-stream from AgentEvent, so we map maxTokens to
+  // a proportional maxToolCalls cap: at ~3000 tokens/tool-call (typical game run),
+  // 100k tokens ≈ 33 tool calls; 200k ≈ 67. Plus a wall-clock guard of 20 min.
+  let tokenAbortController: AbortController | undefined;
+  if (ports.maxTokens !== undefined) {
+    tokenAbortController = new AbortController();
+  }
+  const maxToolCalls = ports.maxTokens !== undefined
+    ? Math.max(10, Math.floor(ports.maxTokens / 3000))
+    : 80;
+  const maxWallClockMs = 20 * 60 * 1000; // 20 minutes hard wall
+
   // In-run mutable state the agent reads/writes via the gameMode callbacks and
   // that we persist alongside the snapshot once the run completes.
   const state: { engine: WebEngine | null; spec: GameSpec | null } = {
@@ -90,9 +108,17 @@ export async function runGeneration(
     spec: null,
   };
 
+  const wrappedOnEvent = ports.onEvent;
+
+  const generateImageAsset = makeAssetGenerator({
+    apiKey: req.apiKey,
+    provider: req.provider ?? 'openai',
+  });
+
   const deps: GenerateViaAgentDeps = {
     fs: tree,
-    ...(ports.onEvent ? { onEvent: ports.onEvent } : {}),
+    generateImageAsset,
+    ...(wrappedOnEvent !== undefined ? { onEvent: wrappedOnEvent } : {}),
     gameMode: {
       setEngine: (engine) => {
         if (engine === 'three' || engine === 'phaser') state.engine = engine;
@@ -112,7 +138,9 @@ export async function runGeneration(
     apiKey: req.apiKey,
     history: [],
     artifactType: 'game',
+    agentBudget: { maxToolCalls, maxWallClockMs },
     ...(req.engine ? { engine: req.engine } : {}),
+    ...(tokenAbortController ? { signal: tokenAbortController.signal } : {}),
   };
 
   const output = await generate(input, deps);

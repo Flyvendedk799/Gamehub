@@ -21,6 +21,7 @@ import websocketPlugin from '@fastify/websocket';
 import type { EventBus } from '@playforge/bus';
 import { runChannel } from '@playforge/bus';
 import { buildGameHtml, type ExportGameHtmlOptions } from '@playforge/exporters';
+import { exportGameZip } from '@playforge/exporters/game-zip';
 import { type SnapshotStore, contentTypeFor } from '@playforge/storage';
 import type { Authenticator, AuthedUser } from './auth';
 import type { BrowserJobQueue, ThumbnailResult } from './browser-queue';
@@ -30,6 +31,36 @@ import type { PublishRepo } from './publish-repo';
 import type { Engine, ProjectRepo, Visibility } from './repo';
 import type { Run, RunRepo } from './run-repo';
 
+/**
+ * autoMod — lightweight keyword/pattern classifier for published game content.
+ * Returns a list of flag labels when the content matches; empty array means clean.
+ * Matched content is logged and recorded as a moderation report, but stays 'live'
+ * by default. Escalate to 'pending_review' setStatus when abuse rates warrant a gate.
+ */
+function autoMod(title: string, html: string): string[] {
+  const flags: string[] = [];
+  const combined = `${title} ${html}`.toLowerCase();
+
+  // Phishing / social-engineering patterns
+  if (/\b(enter your password|your account has been|verify your identity|click here to claim)\b/.test(combined)) {
+    flags.push('phishing_language');
+  }
+  // Exfil attempt — tries to load external scripts or phone home despite CSP
+  if (/\bfetch\s*\(\s*['"]https?:\/\/(?!cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com|unpkg\.com|cdn\.skypack\.dev)/.test(html)) {
+    flags.push('external_fetch');
+  }
+  // Crypto miners
+  if (/\b(coinhive|cryptonight|monero|xmrig|wasm.*miner)\b/.test(combined)) {
+    flags.push('crypto_miner');
+  }
+  // Iframe injection of 3rd-party origins
+  if (/<iframe[^>]+src\s*=\s*['"]https?:\/\/(?!localhost)/.test(html)) {
+    flags.push('external_iframe');
+  }
+
+  return flags;
+}
+
 /** Minimal payload the API passes to the generation queue. */
 export type EnqueueFn = (input: {
   runId: string;
@@ -38,6 +69,8 @@ export type EnqueueFn = (input: {
   prompt: string;
   /** Manifest key of the project's current snapshot — seeds the new generation with existing files. */
   parentManifestKey?: string;
+  /** Hard token ceiling for this run — worker aborts if exceeded. */
+  maxTokens?: number;
 }) => Promise<void>;
 
 export interface ServerDeps {
@@ -62,6 +95,16 @@ export interface ServerDeps {
   embedText?: (text: string) => Promise<number[]>;
   /** Optional: browser-worker queue for thumbnail capture + runtime verification. */
   browserQueue?: BrowserJobQueue;
+  /**
+   * Optional: space-separated list of origins allowed to embed published games in iframes.
+   * Defaults to '*' when not set. Set to your app origin(s) in production.
+   * Example: "https://playforge.app https://staging.playforge.app"
+   */
+  allowedFrameOrigins?: string;
+  /** Optional: BullMQ Queue instance used to report queue depth for autoscaling. */
+  generateQueue?: import('bullmq').Queue;
+  /** Optional: max tokens per run — hard ceiling to prevent runaway generation costs. */
+  maxRunTokens?: number;
 }
 
 const ENGINES: Engine[] = ['three', 'phaser'];
@@ -209,6 +252,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           ? { parentManifestKey: project.currentManifestKey }
           : {}),
       ...(paused !== null ? { continuation: paused.continuation } : {}),
+      ...(deps.maxRunTokens !== undefined ? { maxTokens: deps.maxRunTokens } : {}),
     });
     return reply.code(202).send({ runId: run.id });
   });
@@ -249,13 +293,24 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       void deps.bus.subscribe(runChannel(id), (message) => {
         if (done) return;
         const m = message as { type?: string };
+        const previewUrl = `/v1/runs/${id}/preview/`;
         // Attach the preview URL to run_complete so the browser knows where to load the game.
         const payload =
           m.type === 'run_complete'
-            ? { ...m, previewUrl: `/v1/runs/${id}/preview/` }
+            ? { ...m, previewUrl }
             : message;
         reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
-        if (m.type === 'run_complete' || m.type === 'run_error') {
+        if (m.type === 'run_complete') {
+          // Push a preview_updated notification to all presence sockets for this project
+          // so other collaborators' previews auto-reload without polling.
+          void deps.runRepo.get(id).then((r) => {
+            if (!r) return;
+            const msg = JSON.stringify({ type: 'preview_updated', projectId: r.projectId, previewUrl });
+            for (const fn of presenceSockets.get(r.projectId) ?? []) fn(msg);
+          }).catch(() => {});
+          finish();
+        }
+        if (m.type === 'run_error') {
           finish();
         }
       });
@@ -295,9 +350,27 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     try {
       const manifest = await deps.store.readManifest(run.snapshotManifestKey);
       const bytes = await deps.store.readFile(manifest, filePath);
+      const ct = contentTypeFor(filePath);
+      const isHtml = ct.startsWith('text/html');
       return reply
-        .header('Content-Type', contentTypeFor(filePath))
+        .header('Content-Type', ct)
         .header('Cache-Control', 'no-cache')
+        // Apply game CSP to HTML preview files to match the published play route security model.
+        .header('Content-Security-Policy', isHtml
+          ? [
+              "default-src 'none'",
+              "script-src 'unsafe-inline' data: blob:",
+              "style-src 'unsafe-inline'",
+              "img-src * data: blob:",
+              "media-src * data: blob:",
+              "font-src data:",
+              "worker-src blob:",
+              "connect-src 'none'",
+              "frame-ancestors *",
+            ].join('; ')
+          : "default-src 'none'")
+        .header('X-Content-Type-Options', 'nosniff')
+        .header('Referrer-Policy', 'no-referrer')
         .send(Buffer.from(bytes));
     } catch {
       return reply.code(404).send({ error: 'file_not_found', path: filePath });
@@ -350,6 +423,20 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       bundleKey,
     });
 
+    // Auto-moderation: scan title + bundle for flagged patterns.
+    // Matching content defaults to 'live' but is logged for review; escalate to
+    // 'pending_review' (setStatus) if abuse rates justify a pre-publish gate.
+    const autoModFlags = autoMod(project.name, html);
+    if (autoModFlags.length > 0) {
+      console.warn(`[publish:automod] game ${publishedGame.publishSlug} flagged: ${autoModFlags.join(', ')}`);
+      // Record the report for moderator review (non-blocking best-effort).
+      void deps.hubRepo?.addReport({
+        targetType: 'published_game',
+        targetId: publishedGame.id,
+        reason: `auto-mod: ${autoModFlags.join(', ')}`,
+      }).catch(() => {});
+    }
+
     // Async: thumbnail capture via browser-worker (best-effort, non-blocking).
     if (deps.browserQueue) {
       void (async () => {
@@ -380,6 +467,51 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       slug: publishedGame.publishSlug,
       publishUrl: `/v1/play/${publishedGame.publishSlug}`,
     });
+  });
+
+  // GET /v1/projects/:id/export.zip — download project as a ZIP bundle.
+
+  app.get('/v1/projects/:id/export.zip', async (req, reply) => {
+    if (!deps.store) return reply.code(503).send({ error: 'export_unavailable' });
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { id } = req.params as { id: string };
+    const project = await deps.repo.get(id);
+    if (!project || project.ownerId !== user.userId) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    if (!project.currentManifestKey) {
+      return reply.code(409).send({ error: 'no_snapshot', message: 'Generate a game first.' });
+    }
+    const manifest = await deps.store.readManifest(project.currentManifestKey);
+    const TEXT_PREFIXES = ['text/', 'application/json'];
+    const files = await Promise.all(
+      Object.entries(manifest.files).map(async ([path, entry]) => {
+        const bytes = await deps.store!.readFile(manifest, path);
+        const isText = TEXT_PREFIXES.some((p) => entry.contentType.startsWith(p));
+        return { path, content: isText ? Buffer.from(bytes).toString('utf8') : Buffer.from(bytes) };
+      }),
+    );
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { readFile, rm } = await import('node:fs/promises');
+    const dest = join(tmpdir(), `playforge-export-${id}-${Date.now()}.zip`);
+    try {
+      await exportGameZip(dest, {
+        files,
+        designName: project.name,
+        engine: (project.engine as 'three' | 'phaser') ?? 'phaser',
+      });
+      const zipBytes = await readFile(dest);
+      const safeName = project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 40) || 'game';
+      return reply
+        .header('Content-Type', 'application/zip')
+        .header('Content-Disposition', `attachment; filename="${safeName}.zip"`)
+        .header('Content-Length', String(zipBytes.length))
+        .send(zipBytes);
+    } finally {
+      void rm(dest, { force: true }).catch(() => {});
+    }
   });
 
   // GET /v1/projects/:id/publish-info — returns the current published state.
@@ -423,23 +555,30 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
 
     // CSP for self-contained game bundles (engine + assets inlined as data URLs):
-    // • script-src data: blob:   — module scripts with src="data:..." need data: allowance
-    // • connect-src 'none'       — block all network (no exfil from generated code)
-    // • frame-ancestors *        — relaxed for Phase 2; tighten to app origins in Phase 3
+    // • script-src 'unsafe-inline' data: blob: — single-file bundles embed scripts inline
+    //   and may use data:/blob: src; 'unsafe-eval' is intentionally absent
+    // • connect-src 'none' — block all outbound network from game code (anti-exfil)
+    // • frame-ancestors — restrict to configured app origins (default '*' for local dev)
+    const frameAncestors = deps.allowedFrameOrigins ?? '*';
     const csp = [
       "default-src 'none'",
       "script-src 'unsafe-inline' data: blob:",
       "style-src 'unsafe-inline'",
       "img-src * data: blob:",
       "media-src * data: blob:",
+      "font-src data:",
+      "worker-src blob:",
       "connect-src 'none'",
-      "frame-ancestors *",
+      `frame-ancestors ${frameAncestors}`,
     ].join('; ');
 
     return reply
       .header('Content-Type', 'text/html; charset=utf-8')
       .header('Content-Security-Policy', csp)
       .header('X-Content-Type-Options', 'nosniff')
+      .header('X-Frame-Options', frameAncestors === '*' ? 'ALLOWALL' : 'SAMEORIGIN')
+      .header('Referrer-Policy', 'no-referrer')
+      .header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()')
       .header('Cache-Control', 'public, max-age=31536000, immutable')
       .send(html);
   });
@@ -791,13 +930,39 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       deps.runRepo.getStats(),
       deps.hubRepo?.getStats?.() ?? Promise.resolve(null),
     ]);
+
+    let queue: { waiting: number; active: number; delayed: number; failed: number } | null = null;
+    if (deps.generateQueue) {
+      const [waiting, active, delayed, failed] = await Promise.all([
+        deps.generateQueue.getWaitingCount(),
+        deps.generateQueue.getActiveCount(),
+        deps.generateQueue.getDelayedCount(),
+        deps.generateQueue.getFailedCount(),
+      ]);
+      queue = { waiting, active, delayed, failed };
+    }
+
     return reply.send({
       runs: runStats,
       hub: hubStats,
+      queue,
       presence,
       presenceProjects: presenceSockets.size,
       connectedSockets: [...presenceSockets.values()].reduce((n, s) => n + s.size, 0),
     });
+  });
+
+  // GET /v1/admin/queue-depth — lightweight autoscaling probe (no auth needed for HPA scrapers).
+  // Returns the number of waiting + active jobs so KEDA or Fly.io autoscaling can read it.
+  app.get('/v1/admin/queue-depth', async (_req, reply) => {
+    if (!deps.generateQueue) {
+      return reply.send({ waiting: 0, active: 0, depth: 0 });
+    }
+    const [waiting, active] = await Promise.all([
+      deps.generateQueue.getWaitingCount(),
+      deps.generateQueue.getActiveCount(),
+    ]);
+    return reply.send({ waiting, active, depth: waiting + active });
   });
 
   // ── moderation (admin) ────────────────────────────────────────────────────

@@ -55,6 +55,7 @@ async function main() {
   const blobDir = process.env['BLOB_DIR'] ?? '.playforge-blobs';
   const adminToken = process.env['ADMIN_TOKEN'];
   const maxConcurrentRunsPerUser = Number(process.env['MAX_CONCURRENT_RUNS'] ?? '1');
+  const maxRunTokens = process.env['MAX_RUN_TOKENS'] ? Number(process.env['MAX_RUN_TOKENS']) : undefined;
 
   const db = createDb(databaseUrl);
 
@@ -77,7 +78,7 @@ async function main() {
     console.log('[playforge-api] no REDIS_URL — running generation in-process');
   }
 
-  const enqueue: EnqueueFn = async ({ runId, projectId, userId, prompt, parentManifestKey }) => {
+  const enqueue: EnqueueFn = async ({ runId, projectId, userId, prompt, parentManifestKey, maxTokens }) => {
     if (queue) {
       await queue.add(
         'generate',
@@ -88,6 +89,7 @@ async function main() {
           prompt,
           model: { provider: modelProvider, modelId },
           ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
+          ...(maxTokens !== undefined ? { maxTokens } : {}),
         },
         { jobId: runId },
       );
@@ -153,6 +155,8 @@ async function main() {
     maxConcurrentRunsPerUser,
     ...(embedText !== undefined ? { embedText } : {}),
     ...(browserQueue !== undefined ? { browserQueue } : {}),
+    ...(maxRunTokens !== undefined ? { maxRunTokens } : {}),
+    ...(queue !== undefined ? { generateQueue: queue } : {}),
   });
 
   try {

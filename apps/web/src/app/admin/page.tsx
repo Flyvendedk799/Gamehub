@@ -19,9 +19,17 @@ interface HubStats {
   totalComments: number;
 }
 
+interface QueueStats {
+  waiting: number;
+  active: number;
+  delayed: number;
+  failed: number;
+}
+
 interface Metrics {
   runs: RunStats;
   hub: HubStats | null;
+  queue: QueueStats | null;
   presenceProjects: number;
   connectedSockets: number;
 }
@@ -167,6 +175,19 @@ export default function AdminDashboard() {
                 <StatCard label="Total Plays" value={hub.totalPlays.toLocaleString()} />
                 <StatCard label="Likes" value={hub.totalLikes.toLocaleString()} />
                 <StatCard label="Comments" value={hub.totalComments.toLocaleString()} />
+              </div>
+            </section>
+          )}
+
+          {/* BullMQ queue depth */}
+          {metrics.queue && (
+            <section>
+              <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wide mb-4">Generation Queue (BullMQ)</h2>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <StatCard label="Waiting" value={metrics.queue.waiting} />
+                <StatCard label="Active" value={metrics.queue.active} />
+                <StatCard label="Delayed" value={metrics.queue.delayed} />
+                <StatCard label="Failed" value={metrics.queue.failed} />
               </div>
             </section>
           )}
