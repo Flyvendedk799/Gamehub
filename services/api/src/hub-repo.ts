@@ -25,6 +25,8 @@ export interface HubComment {
 
 export interface HubRepo {
   feed(opts: { limit: number; offset: number; sort: 'recent' | 'popular' }): Promise<HubGame[]>;
+  /** Full-text/semantic search. Pass embedding for pgvector; omit for text fallback. */
+  search(opts: { query: string; embedding?: number[]; limit: number }): Promise<HubGame[]>;
   incrementPlayCount(id: string): Promise<void>;
   getLike(userId: string, publishedGameId: string): Promise<boolean>;
   toggleLike(userId: string, publishedGameId: string): Promise<boolean>; // returns new liked state
@@ -32,6 +34,7 @@ export interface HubRepo {
   listComments(publishedGameId: string): Promise<HubComment[]>;
   addComment(publishedGameId: string, userId: string, body: string, parentCommentId?: string): Promise<HubComment>;
   addReport(input: { reporterId?: string; targetType: string; targetId: string; reason?: string }): Promise<void>;
+  setEmbedding(id: string, embedding: number[]): Promise<void>;
 }
 
 // ── InMemoryHubRepo ────────────────────────────────────────────────────────
@@ -120,6 +123,16 @@ export class InMemoryHubRepo implements HubRepo {
 
   async addReport(input: { reporterId?: string; targetType: string; targetId: string; reason?: string }): Promise<void> {
     this.reports.push(input);
+  }
+
+  async search(opts: { query: string; embedding?: number[]; limit: number }): Promise<HubGame[]> {
+    const q = opts.query.toLowerCase();
+    const live = [...this.games.values()].filter((g) => g.status === 'live');
+    return live.filter((g) => g.title.toLowerCase().includes(q)).slice(0, opts.limit);
+  }
+
+  async setEmbedding(_id: string, _embedding: number[]): Promise<void> {
+    // No-op for in-memory (tests don't need vector search)
   }
 }
 
@@ -282,5 +295,46 @@ export class DrizzleHubRepo implements HubRepo {
       ...(input.reporterId !== undefined ? { reporterId: input.reporterId } : {}),
       ...(input.reason !== undefined ? { reason: input.reason } : {}),
     });
+  }
+
+  async search(opts: { query: string; embedding?: number[]; limit: number }): Promise<HubGame[]> {
+    if (opts.embedding) {
+      // pgvector cosine similarity — find games with embeddings closest to the query vector.
+      const vectorLiteral = `[${opts.embedding.join(',')}]`;
+      const rows = await this.db
+        .select()
+        .from(schema.publishedGames)
+        .where(
+          and(
+            eq(schema.publishedGames.status, 'live'),
+            sql`${schema.publishedGames.embedding} IS NOT NULL`,
+          ),
+        )
+        .orderBy(sql`${schema.publishedGames.embedding} <=> ${vectorLiteral}::vector`)
+        .limit(opts.limit);
+      return rows.map(rowToHubGame);
+    }
+
+    // Text fallback: ILIKE on title and description.
+    const rows = await this.db
+      .select()
+      .from(schema.publishedGames)
+      .where(
+        and(
+          eq(schema.publishedGames.status, 'live'),
+          sql`(${schema.publishedGames.title} ILIKE ${'%' + opts.query + '%'}
+           OR ${schema.publishedGames.description} ILIKE ${'%' + opts.query + '%'})`,
+        ),
+      )
+      .orderBy(desc(schema.publishedGames.publishedAt))
+      .limit(opts.limit);
+    return rows.map(rowToHubGame);
+  }
+
+  async setEmbedding(id: string, embedding: number[]): Promise<void> {
+    await this.db
+      .update(schema.publishedGames)
+      .set({ embedding } as Record<string, unknown>)
+      .where(eq(schema.publishedGames.id, id));
   }
 }

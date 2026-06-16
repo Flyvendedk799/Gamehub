@@ -11,6 +11,7 @@ import {
   bigint,
   bigserial,
   boolean,
+  customType,
   index,
   integer,
   jsonb,
@@ -24,6 +25,23 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
+
+/** pgvector column — stored as float4[] in Postgres, surfaced as number[] in TS. */
+const vector = customType<{ data: number[]; driverData: string; config: { dimensions?: number } }>({
+  dataType(config) {
+    return config?.dimensions !== undefined ? `vector(${config.dimensions})` : 'vector';
+  },
+  fromDriver(value: string): number[] {
+    return value
+      .replace(/^\[/, '')
+      .replace(/\]$/, '')
+      .split(',')
+      .map(Number);
+  },
+  toDriver(value: number[]): string {
+    return `[${value.join(',')}]`;
+  },
+});
 import { users } from './identity';
 import { projects, snapshots } from './projects';
 
@@ -58,6 +76,8 @@ export const publishedGames = pgTable(
     thumbnailUrl: text('thumbnail_url'),
     gameSpec: jsonb('game_spec').$type<GameSpec>(),
     status: publishedStatus('status').notNull().default('live'),
+    /** 1536-dim embedding for pgvector cosine similarity search. Null until indexed. */
+    embedding: vector('embedding', { dimensions: 1536 }),
     playCount: bigint('play_count', { mode: 'number' }).notNull().default(0),
     ratingAvg: numeric('rating_avg', { precision: 3, scale: 2 }).notNull().default('0'),
     ratingCount: integer('rating_count').notNull().default(0),

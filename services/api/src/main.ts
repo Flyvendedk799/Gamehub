@@ -121,6 +121,21 @@ async function main() {
     });
   };
 
+  // OpenAI embeddings for Hub semantic search — only wired when provider is OpenAI.
+  const embedText = modelProvider === 'openai'
+    ? async (text: string): Promise<number[]> => {
+        const res = await fetch('https://api.openai.com/v1/embeddings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({ input: text, model: 'text-embedding-3-small' }),
+        });
+        const json = await res.json() as { data?: Array<{ embedding: number[] }> };
+        const embedding = json.data?.[0]?.embedding;
+        if (!embedding) throw new Error('Embedding API returned no vector');
+        return embedding;
+      }
+    : undefined;
+
   const server = buildServer({
     repo: projectRepo,
     auth: new HeaderAuthenticator(),
@@ -133,6 +148,7 @@ async function main() {
     store,
     ...(adminToken !== undefined ? { adminToken } : {}),
     maxConcurrentRunsPerUser,
+    ...(embedText !== undefined ? { embedText } : {}),
   });
 
   try {

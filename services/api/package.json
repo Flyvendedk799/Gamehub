@@ -11,6 +11,7 @@
     "start": "tsx src/main.ts"
   },
   "dependencies": {
+    "@fastify/websocket": "^11.2.0",
     "@playforge/bus": "workspace:*",
     "@playforge/db": "workspace:*",
     "@playforge/exporters": "workspace:*",

@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import websocketPlugin from '@fastify/websocket';
 import type { EventBus } from '@playforge/bus';
 import { runChannel } from '@playforge/bus';
 import { buildGameHtml, type ExportGameHtmlOptions } from '@playforge/exporters';
@@ -56,13 +57,19 @@ export interface ServerDeps {
   maxConcurrentRunsPerUser?: number;
   /** Optional: admin token for moderation endpoints. */
   adminToken?: string;
+  /** Optional: async function to embed text for pgvector Hub search. */
+  embedText?: (text: string) => Promise<number[]>;
 }
 
 const ENGINES: Engine[] = ['three', 'phaser'];
 const VISIBILITIES: Visibility[] = ['private', 'unlisted', 'public'];
 
+/** Per-project WebSocket presence: projectId → Set of connected socket send functions. */
+const presenceSockets = new Map<string, Set<(msg: string) => void>>();
+
 export function buildServer(deps: ServerDeps): FastifyInstance {
   const app = Fastify({ logger: false });
+  void app.register(websocketPlugin);
 
   async function requireUser(req: FastifyRequest, reply: FastifyReply): Promise<AuthedUser | null> {
     // EventSource cannot set custom headers; fall back to ?userId= query param.
@@ -330,6 +337,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       title: project.name,
       bundleKey,
     });
+
+    // Async: index embedding for Hub semantic search (best-effort, non-blocking).
+    if (deps.embedText && deps.hubRepo) {
+      const textToEmbed = `${project.name}`;
+      void deps.embedText(textToEmbed)
+        .then((embedding) => deps.hubRepo!.setEmbedding(publishedGame.id, embedding))
+        .catch(() => {});
+    }
 
     return reply.code(200).send({
       slug: publishedGame.publishSlug,
@@ -607,6 +622,84 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       ...(reason !== undefined ? { reason } : {}),
     });
     return reply.code(202).send({ ok: true });
+  });
+
+  // ── Hub search ────────────────────────────────────────────────────────────
+
+  app.get('/v1/hub/search', async (req, reply) => {
+    if (!deps.hubRepo || !deps.publishRepo) {
+      return reply.code(503).send({ error: 'hub_unavailable' });
+    }
+    const { q, limit: limitStr } = req.query as Record<string, string | undefined>;
+    if (!q || q.trim() === '') {
+      return reply.code(400).send({ error: 'q_required' });
+    }
+    const limit = Math.min(Number(limitStr ?? '20'), 50);
+    let embedding: number[] | undefined;
+    if (deps.embedText) {
+      try {
+        embedding = await deps.embedText(q.trim());
+      } catch {
+        // Fall through to text search if embedding fails.
+      }
+    }
+    const results = await deps.hubRepo.search({
+      query: q.trim(),
+      limit,
+      ...(embedding !== undefined ? { embedding } : {}),
+    });
+    return reply.send({ results });
+  });
+
+  // ── WebSocket co-presence ─────────────────────────────────────────────────
+
+  app.get('/v1/projects/:id/presence', { websocket: true }, (socket, req) => {
+    const { id } = req.params as { id: string };
+    let sockets = presenceSockets.get(id);
+    if (!sockets) {
+      sockets = new Set();
+      presenceSockets.set(id, sockets);
+    }
+
+    const send = (msg: string) => {
+      try { socket.send(msg); } catch { /* disconnected */ }
+    };
+    sockets.add(send);
+
+    const broadcast = () => {
+      const count = presenceSockets.get(id)?.size ?? 0;
+      const msg = JSON.stringify({ type: 'presence', projectId: id, count });
+      for (const fn of presenceSockets.get(id) ?? []) fn(msg);
+    };
+
+    broadcast();
+
+    socket.on('close', () => {
+      presenceSockets.get(id)?.delete(send);
+      if (presenceSockets.get(id)?.size === 0) presenceSockets.delete(id);
+      broadcast();
+    });
+  });
+
+  // ── admin metrics (autoscaling signal) ────────────────────────────────────
+
+  app.get('/v1/admin/metrics', async (req, reply) => {
+    if (deps.adminToken) {
+      const provided = req.headers['x-admin-token'];
+      const token = Array.isArray(provided) ? provided[0] : provided;
+      if (token !== deps.adminToken) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
+    }
+    const presence: Record<string, number> = {};
+    for (const [projectId, sockets] of presenceSockets) {
+      presence[projectId] = sockets.size;
+    }
+    return reply.send({
+      presence,
+      presenceProjects: presenceSockets.size,
+      connectedSockets: [...presenceSockets.values()].reduce((n, s) => n + s.size, 0),
+    });
   });
 
   // ── moderation (admin) ────────────────────────────────────────────────────
