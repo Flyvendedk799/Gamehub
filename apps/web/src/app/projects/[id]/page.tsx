@@ -5,10 +5,34 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChatPanel } from '@/components/ChatPanel';
 import { PreviewPane } from '@/components/PreviewPane';
-import { generateGame, getProject, streamRun } from '@/lib/api';
-import type { Project, RunCompleteEvent, RunErrorEvent, SseEvent } from '@/lib/types';
+import { generateGame, getChatHistory, getProject, streamRun } from '@/lib/api';
+import type { ChatHistoryMessage, Project, RunCompleteEvent, RunErrorEvent, SseEvent } from '@/lib/types';
 
 const BASE = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3191';
+
+function chatMessageToEvents(msg: ChatHistoryMessage): SseEvent[] {
+  if (msg.kind === 'user') {
+    const p = msg.payload as { text?: string; runId?: string } | null;
+    return [{
+      type: 'message_update',
+      runId: p?.runId ?? '',
+      role: 'assistant',
+      content: `> ${p?.text ?? ''}`,
+      timestamp: msg.createdAt,
+    }];
+  }
+  if (msg.kind === 'artifact_delivered') {
+    const p = msg.payload as { runId?: string; previewUrl?: string } | null;
+    return [{
+      type: 'run_complete',
+      runId: p?.runId ?? '',
+      snapshotPath: '',
+      previewUrl: p?.previewUrl ?? '',
+      timestamp: msg.createdAt,
+    }];
+  }
+  return [];
+}
 
 export default function BuilderPage() {
   const params = useParams();
@@ -28,14 +52,38 @@ export default function BuilderPage() {
   // Track active SSE controller so we can close it on unmount / new run
   const streamCtrlRef = useRef<{ close: () => void } | null>(null);
 
-  // ─── Load project metadata ─────────────────────────────────────────────────
+  // ─── Load project metadata + chat history ─────────────────────────────────
   useEffect(() => {
     if (!projectId) return;
-    getProject(projectId)
+    void getProject(projectId)
       .then(({ project }) => setProject(project))
-      .catch(() => {
-        // Non-fatal — project name just won't show
-      });
+      .catch(() => {});
+
+    void getChatHistory(projectId)
+      .then(({ messages }) => {
+        if (messages.length === 0) return;
+
+        const syntheticEvents: SseEvent[] = [];
+        let lastPreviewUrl: string | null = null;
+
+        for (const msg of messages) {
+          syntheticEvents.push(...chatMessageToEvents(msg));
+          if (msg.kind === 'artifact_delivered') {
+            const p = (msg.payload as { previewUrl?: string } | null);
+            if (p?.previewUrl) lastPreviewUrl = p.previewUrl;
+          }
+        }
+
+        setEvents(syntheticEvents);
+        if (lastPreviewUrl) {
+          const url = lastPreviewUrl.startsWith('http')
+            ? lastPreviewUrl
+            : `${BASE}${lastPreviewUrl}`;
+          setPreviewUrl(url);
+        }
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   // ─── Start streaming when runId changes ───────────────────────────────────
@@ -45,7 +93,6 @@ export default function BuilderPage() {
     setIsStreaming(true);
     setHasError(false);
     setErrorMessage(undefined);
-    setPreviewUrl(null);
 
     const ctrl = streamRun(
       runId,

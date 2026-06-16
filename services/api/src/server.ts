@@ -17,6 +17,7 @@ import type { EventBus } from '@playforge/bus';
 import { runChannel } from '@playforge/bus';
 import { type SnapshotStore, contentTypeFor } from '@playforge/storage';
 import type { Authenticator, AuthedUser } from './auth';
+import type { ChatRepo } from './chat-repo';
 import type { Engine, ProjectRepo, Visibility } from './repo';
 import type { Run, RunRepo } from './run-repo';
 
@@ -26,6 +27,8 @@ export type EnqueueFn = (input: {
   projectId: string;
   userId: string;
   prompt: string;
+  /** Manifest key of the project's current snapshot — seeds the new generation with existing files. */
+  parentManifestKey?: string;
 }) => Promise<void>;
 
 export interface ServerDeps {
@@ -36,6 +39,8 @@ export interface ServerDeps {
   enqueue: EnqueueFn;
   /** Optional: enables GET /v1/runs/:id/preview/* to serve generated game files. */
   store?: SnapshotStore;
+  /** Optional: persists chat history (user prompts + artifact notifications). */
+  chatRepo?: ChatRepo;
 }
 
 const ENGINES: Engine[] = ['three', 'phaser'];
@@ -146,8 +151,23 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(400).send({ error: 'prompt_required' });
     }
     const run = await deps.runRepo.create({ projectId: project.id, userId: user.userId });
+
+    // Persist the user's prompt to chat history so it survives page reloads.
+    if (deps.chatRepo) {
+      void deps.chatRepo.add(project.id, 'user', { text: body.prompt.trim(), runId: run.id });
+    }
+
     // Fire-and-forget — the worker publishes events; the browser streams via SSE.
-    void deps.enqueue({ runId: run.id, projectId: project.id, userId: user.userId, prompt: body.prompt });
+    // Pass the project's current manifest key so the agent can build on previous files.
+    void deps.enqueue({
+      runId: run.id,
+      projectId: project.id,
+      userId: user.userId,
+      prompt: body.prompt.trim(),
+      ...(project.currentManifestKey !== null
+        ? { parentManifestKey: project.currentManifestKey }
+        : {}),
+    });
     return reply.code(202).send({ runId: run.id });
   });
 
@@ -198,6 +218,20 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         }
       });
     });
+  });
+
+  // ── chat history ──────────────────────────────────────────────────────────
+
+  app.get('/v1/projects/:id/chat', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { id } = req.params as { id: string };
+    const project = await deps.repo.get(id);
+    if (!project || (project.ownerId !== user.userId && project.visibility === 'private')) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    const messages = deps.chatRepo ? await deps.chatRepo.list(id) : [];
+    return reply.send({ messages });
   });
 
   // ── game preview file serving ─────────────────────────────────────────────

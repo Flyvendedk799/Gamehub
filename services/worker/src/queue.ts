@@ -22,6 +22,8 @@ export interface EnqueueInput {
   model: ModelRef;
   apiKey: string;
   engine?: WebEngine;
+  /** Manifest key of the previous snapshot to seed the working tree for iteration. */
+  parentManifestKey?: string;
 }
 
 export interface QueuePorts {
@@ -36,6 +38,26 @@ export async function enqueueRun(
   ports: QueuePorts,
 ): Promise<GenerationResult> {
   const channel = runChannel(input.runId);
+
+  // Seed the working tree from the parent snapshot for iteration.
+  let initialFiles: Map<string, string> | undefined;
+  if (input.parentManifestKey) {
+    try {
+      const manifest = await ports.store.readManifest(input.parentManifestKey);
+      const files = new Map<string, string>();
+      const TEXT_PREFIXES = ['text/', 'application/json'];
+      for (const [path, entry] of Object.entries(manifest.files)) {
+        if (TEXT_PREFIXES.some((p) => entry.contentType.startsWith(p))) {
+          const bytes = await ports.store.readFile(manifest, path);
+          files.set(path, Buffer.from(bytes).toString());
+        }
+      }
+      if (files.size > 0) initialFiles = files;
+    } catch (err) {
+      console.warn(`[enqueueRun] could not load parent snapshot ${input.parentManifestKey}: ${String(err)}`);
+    }
+  }
+
   try {
     const result = await runGeneration(
       {
@@ -43,6 +65,7 @@ export async function enqueueRun(
         model: input.model,
         apiKey: input.apiKey,
         ...(input.engine !== undefined ? { engine: input.engine } : {}),
+        ...(initialFiles !== undefined ? { initialFiles } : {}),
       },
       {
         store: ports.store,

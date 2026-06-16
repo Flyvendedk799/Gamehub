@@ -48,6 +48,8 @@ export const projects = pgTable(
     remixOfProjectId: uuid('remix_of_project_id'),
     remixOfSnapshotId: uuid('remix_of_snapshot_id'),
     thumbnailUrl: text('thumbnail_url'),
+    /** Manifest key of the most recent completed generation for this project. */
+    currentManifestKey: text('current_manifest_key'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

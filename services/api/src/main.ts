@@ -23,7 +23,7 @@ import { InMemoryEventBus } from '@playforge/bus';
 import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
 import { enqueueRun } from '../../worker/src/queue';
 import { HeaderAuthenticator } from './auth';
-import { DrizzleProjectRepo, DrizzleRunRepo } from './drizzle-repos';
+import { DrizzleChatRepo, DrizzleProjectRepo, DrizzleRunRepo } from './drizzle-repos';
 import { buildServer, type EnqueueFn } from './server';
 
 function requireEnv(name: string): string {
@@ -47,16 +47,36 @@ async function main() {
   const blobDir = process.env['BLOB_DIR'] ?? '.playforge-blobs';
   const store = new SnapshotStore(new LocalFsBlobStore(blobDir));
 
+  const projectRepo = new DrizzleProjectRepo(db);
   const runRepo = new DrizzleRunRepo(db);
+  const chatRepo = new DrizzleChatRepo(db);
 
-  const enqueue: EnqueueFn = async ({ runId, projectId, userId, prompt }) => {
+  const enqueue: EnqueueFn = async ({ runId, projectId, userId, prompt, parentManifestKey }) => {
     // Fire-and-forget: the worker publishes events to bus as it runs.
     void enqueueRun(
-      { runId, projectId, prompt, model: { provider: modelProvider, modelId }, apiKey },
+      {
+        runId,
+        projectId,
+        prompt,
+        model: { provider: modelProvider, modelId },
+        apiKey,
+        ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
+      },
       { bus, store },
     ).then(async (result) => {
-      // Store the manifest key so the preview route can serve the game files.
-      await runRepo.setSnapshot(runId, result.snapshot.manifestKey);
+      const manifestKey = result.snapshot.manifestKey;
+      // Persist snapshot key + update project's HEAD manifest in parallel.
+      await Promise.all([
+        runRepo.setSnapshot(runId, manifestKey),
+        projectRepo.setCurrentManifestKey(projectId, manifestKey),
+        chatRepo.add(projectId, 'artifact_delivered', {
+          runId,
+          previewUrl: `/v1/runs/${runId}/preview/`,
+          engine: result.engine,
+        }),
+      ]).catch((err: unknown) => {
+        console.error(`[run:${runId}] post-completion update failed:`, err);
+      });
     }).catch(async (err: unknown) => {
       console.error(`[run:${runId}] generation failed:`, err);
       await runRepo.updateStatus(runId, 'failed').catch(() => {});
@@ -65,10 +85,11 @@ async function main() {
   };
 
   const server = buildServer({
-    repo: new DrizzleProjectRepo(db),
+    repo: projectRepo,
     auth: new HeaderAuthenticator(),
     bus,
     runRepo,
+    chatRepo,
     enqueue,
     store,
   });

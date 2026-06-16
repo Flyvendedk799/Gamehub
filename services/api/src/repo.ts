@@ -14,6 +14,8 @@ export interface Project {
   engine: Engine | null;
   visibility: Visibility;
   currentSnapshotId: string | null;
+  /** Manifest key of the most recent completed build — used to seed the next generation. */
+  currentManifestKey: string | null;
   remixOfProjectId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -33,6 +35,7 @@ export interface ProjectRepo {
   listByOwner(ownerId: string): Promise<Project[]>;
   rename(id: string, ownerId: string, name: string): Promise<Project | null>;
   softDelete(id: string, ownerId: string): Promise<boolean>;
+  setCurrentManifestKey(id: string, manifestKey: string): Promise<void>;
 }
 
 function slugify(name: string, id: string): string {
@@ -68,6 +71,7 @@ export class InMemoryProjectRepo implements ProjectRepo {
       engine: input.engine ?? null,
       visibility: input.visibility ?? 'private',
       currentSnapshotId: null,
+      currentManifestKey: null,
       remixOfProjectId: input.remixOfProjectId ?? null,
       createdAt: ts,
       updatedAt: ts,
@@ -99,5 +103,10 @@ export class InMemoryProjectRepo implements ProjectRepo {
     if (!p || p.ownerId !== ownerId) return false;
     this.byId.delete(id);
     return true;
+  }
+
+  async setCurrentManifestKey(id: string, manifestKey: string): Promise<void> {
+    const p = this.byId.get(id);
+    if (p) this.byId.set(id, { ...p, currentManifestKey: manifestKey });
   }
 }

@@ -18,4 +18,5 @@ export {
   InMemoryProjectRepo,
 } from './repo';
 export { type Run, type RunRepo, InMemoryRunRepo } from './run-repo';
-export { DrizzleProjectRepo, DrizzleRunRepo } from './drizzle-repos';
+export { type ChatMessage, type ChatRepo, InMemoryChatRepo } from './chat-repo';
+export { DrizzleProjectRepo, DrizzleRunRepo, DrizzleChatRepo } from './drizzle-repos';

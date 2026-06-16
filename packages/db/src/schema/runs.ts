@@ -67,6 +67,8 @@ export const runs = pgTable(
     abortKind: text('abort_kind').$type<AbortKind>(),
     /** Cache-aligned resume state (decisionRecap, todoSnapshotSeq, lastUserBrief…). */
     continuation: jsonb('continuation').$type<unknown>(),
+    /** Content-addressed manifest key for the game files produced by this run. */
+    snapshotManifestKey: text('snapshot_manifest_key'),
     parentSnapshotId: uuid('parent_snapshot_id').references(() => snapshots.id, {
       onDelete: 'set null',
     }),

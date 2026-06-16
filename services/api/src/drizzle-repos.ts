@@ -1,13 +1,15 @@
 /**
- * Drizzle-backed implementations of ProjectRepo and RunRepo over @playforge/db.
+ * Drizzle-backed implementations of ProjectRepo, RunRepo, and ChatRepo over
+ * @playforge/db.
  *
- * Swap InMemoryProjectRepo / InMemoryRunRepo for these at boot when a real
- * DATABASE_URL is available. The interface contracts are identical; callers
- * (routes + SSE relay) need no changes.
+ * Swap InMemory* for these at boot when DATABASE_URL is available. Interface
+ * contracts are identical; routes and tests need no changes.
  */
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { type Db, schema } from '@playforge/db';
+import type { ChatMessageKind } from '@playforge/shared';
+import type { ChatMessage, ChatRepo } from './chat-repo';
 import type { CreateProjectInput, Engine, Project, ProjectRepo, Visibility } from './repo';
 import type { CreateRunInput, Run, RunRepo } from './run-repo';
 
@@ -29,6 +31,7 @@ function rowToProject(row: typeof schema.projects.$inferSelect): Project {
     engine: (row.engine ?? null) as Engine | null,
     visibility: row.visibility as Visibility,
     currentSnapshotId: row.currentSnapshotId ?? null,
+    currentManifestKey: row.currentManifestKey ?? null,
     remixOfProjectId: row.remixOfProjectId ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -51,8 +54,24 @@ function rowToRun(row: typeof schema.runs.$inferSelect): Run {
     userId: row.userId,
     status: RUN_STATUS_MAP[row.status] ?? 'failed',
     createdAt: row.createdAt.toISOString(),
+    ...(row.snapshotManifestKey !== null
+      ? { snapshotManifestKey: row.snapshotManifestKey }
+      : {}),
   };
 }
+
+function rowToChatMessage(row: typeof schema.chatMessages.$inferSelect): ChatMessage {
+  return {
+    id: Number(row.id),
+    projectId: row.projectId,
+    seq: row.seq,
+    kind: row.kind,
+    payload: row.payload,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+// ── ProjectRepo ───────────────────────────────────────────────────────────────
 
 export class DrizzleProjectRepo implements ProjectRepo {
   constructor(private readonly db: Db) {}
@@ -123,12 +142,18 @@ export class DrizzleProjectRepo implements ProjectRepo {
       .returning({ id: schema.projects.id });
     return result.length > 0;
   }
+
+  async setCurrentManifestKey(id: string, manifestKey: string): Promise<void> {
+    await this.db
+      .update(schema.projects)
+      .set({ currentManifestKey: manifestKey, updatedAt: new Date() })
+      .where(eq(schema.projects.id, id));
+  }
 }
 
-export class DrizzleRunRepo implements RunRepo {
-  // Phase 1 temp: snapshotManifestKey lives in memory until a DB column is added.
-  private readonly manifestKeys = new Map<string, string>();
+// ── RunRepo ───────────────────────────────────────────────────────────────────
 
+export class DrizzleRunRepo implements RunRepo {
   constructor(private readonly db: Db) {}
 
   async create(input: CreateRunInput): Promise<Run> {
@@ -143,10 +168,7 @@ export class DrizzleRunRepo implements RunRepo {
 
   async get(id: string): Promise<Run | null> {
     const row = await this.db.query.runs.findFirst({ where: eq(schema.runs.id, id) });
-    if (!row) return null;
-    const run = rowToRun(row);
-    const manifestKey = this.manifestKeys.get(id);
-    return manifestKey !== undefined ? { ...run, snapshotManifestKey: manifestKey } : run;
+    return row ? rowToRun(row) : null;
   }
 
   async updateStatus(id: string, status: Run['status']): Promise<void> {
@@ -157,10 +179,43 @@ export class DrizzleRunRepo implements RunRepo {
   }
 
   async setSnapshot(id: string, manifestKey: string): Promise<void> {
-    this.manifestKeys.set(id, manifestKey);
     await this.db
       .update(schema.runs)
-      .set({ status: 'completed', updatedAt: new Date(), finishedAt: new Date() })
+      .set({
+        snapshotManifestKey: manifestKey,
+        status: 'completed',
+        updatedAt: new Date(),
+        finishedAt: new Date(),
+      })
       .where(eq(schema.runs.id, id));
+  }
+}
+
+// ── ChatRepo ──────────────────────────────────────────────────────────────────
+
+export class DrizzleChatRepo implements ChatRepo {
+  constructor(private readonly db: Db) {}
+
+  async add(projectId: string, kind: ChatMessageKind, payload: unknown): Promise<ChatMessage> {
+    const [maxRow] = await this.db
+      .select({ val: sql<number>`COALESCE(MAX(${schema.chatMessages.seq}), -1)` })
+      .from(schema.chatMessages)
+      .where(eq(schema.chatMessages.projectId, projectId));
+    const nextSeq = (maxRow?.val ?? -1) + 1;
+    const [row] = await this.db
+      .insert(schema.chatMessages)
+      .values({ projectId, seq: nextSeq, kind, payload })
+      .returning();
+    if (!row) throw new Error('chat insert returned no row');
+    return rowToChatMessage(row);
+  }
+
+  async list(projectId: string): Promise<ChatMessage[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.chatMessages)
+      .where(eq(schema.chatMessages.projectId, projectId))
+      .orderBy(asc(schema.chatMessages.seq));
+    return rows.map(rowToChatMessage);
   }
 }

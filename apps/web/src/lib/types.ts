@@ -115,6 +115,21 @@ export type SseEvent =
   | ToolResultEvent
   | ThinkingDeltaEvent;
 
+// ─── Chat history ─────────────────────────────────────────────────────────────
+
+export interface ChatHistoryMessage {
+  id: number;
+  projectId: string;
+  seq: number;
+  kind: string;
+  payload: unknown;
+  createdAt: string;
+}
+
+export interface ChatHistoryResponse {
+  messages: ChatHistoryMessage[];
+}
+
 // ─── API response shapes ──────────────────────────────────────────────────────
 
 export interface CreateProjectResponse {

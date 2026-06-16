@@ -1,4 +1,5 @@
 import type {
+  ChatHistoryResponse,
   CreateProjectResponse,
   Engine,
   GenerateGameResponse,
@@ -52,6 +53,12 @@ export async function listProjects(): Promise<ListProjectsResponse> {
 
 export async function getProject(id: string): Promise<GetProjectResponse> {
   return apiFetch<GetProjectResponse>(`/v1/projects/${id}`);
+}
+
+// ─── Chat history ────────────────────────────────────────────────────────────
+
+export async function getChatHistory(projectId: string): Promise<ChatHistoryResponse> {
+  return apiFetch<ChatHistoryResponse>(`/v1/projects/${projectId}/chat`);
 }
 
 // ─── Generation ──────────────────────────────────────────────────────────────
