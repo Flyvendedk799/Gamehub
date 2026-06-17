@@ -148,6 +148,33 @@ export const playEvents = pgTable(
   (t) => ({ gameIdx: index('play_events_game_idx').on(t.publishedGameId, t.createdAt) }),
 );
 
+/**
+ * Per-game leaderboard scores (Phase 3.8). A game calls
+ * `window.__game.reportScore(n)`; the play page POSTs it to
+ * `/v1/play/:slug/score`, which inserts one row here. `userId` is null for
+ * anonymous players. The submit route rate-caps per salted-IP session (reusing
+ * the play-count throttle) so the board can't be spammed. Cascade-deletes with
+ * the game and (for signed-in scores) the user.
+ */
+export const gameScores = pgTable(
+  'game_scores',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    publishedGameId: uuid('published_game_id')
+      .notNull()
+      .references(() => publishedGames.id, { onDelete: 'cascade' }),
+    /** Null for an anonymous play. */
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    score: integer('score').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Top-N-by-game: filter on the game, order by score desc. created_at breaks
+    // ties toward the earliest submission (descending id would do too).
+    gameScoreIdx: index('game_scores_game_score_idx').on(t.publishedGameId, t.score),
+  }),
+);
+
 export const remixEdges = pgTable(
   'remix_edges',
   {

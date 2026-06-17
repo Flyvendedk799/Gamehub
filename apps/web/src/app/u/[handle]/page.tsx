@@ -5,8 +5,14 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { GameCard } from '@/components/GameCard';
 import type { GameCardData } from '@/components/GameCard';
-import { getCreatorGames } from '@/lib/api';
-import type { CreatorGame } from '@/lib/api';
+import {
+  followUser,
+  getCreatorGames,
+  getCreatorProfile,
+  unfollowUser,
+} from '@/lib/api';
+import type { CreatorGame, CreatorProfile } from '@/lib/api';
+import { isAuthenticated } from '@/lib/auth';
 
 /** Map a creator's published game onto the shared gallery-card shape (#3.1). */
 function toCardData(game: CreatorGame): GameCardData {
@@ -28,17 +34,54 @@ export default function CreatorProfilePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Follow state (Phase 3.9). signedIn gates the Follow button.
+  const [profile, setProfile] = useState<CreatorProfile | null>(null);
+  const [following, setFollowing] = useState(false);
+  const [followerCount, setFollowerCount] = useState(0);
+  const [followBusy, setFollowBusy] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
+
+  useEffect(() => {
+    setSignedIn(isAuthenticated());
+  }, []);
+
   useEffect(() => {
     if (!handle) return;
     setLoading(true);
     setError(null);
-    getCreatorGames(handle, { limit: 50 })
-      .then(({ games: g }) => setGames(g))
+    // Games + profile (follow stats) load together; the profile is best-effort
+    // so a failure there doesn't blank the gallery.
+    Promise.all([
+      getCreatorGames(handle, { limit: 50 }),
+      getCreatorProfile(handle).catch(() => null),
+    ])
+      .then(([{ games: g }, p]) => {
+        setGames(g);
+        setProfile(p);
+        if (p) {
+          setFollowing(p.isFollowing);
+          setFollowerCount(p.followerCount);
+        }
+      })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'Failed to load profile');
       })
       .finally(() => setLoading(false));
   }, [handle]);
+
+  async function handleToggleFollow() {
+    if (followBusy) return;
+    setFollowBusy(true);
+    try {
+      const res = following ? await unfollowUser(handle) : await followUser(handle);
+      setFollowing(res.following);
+      setFollowerCount(res.followerCount);
+    } catch {
+      // swallow — keep prior state
+    } finally {
+      setFollowBusy(false);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[#0a0a0a]">
@@ -118,11 +161,39 @@ export default function CreatorProfilePage() {
         {!loading && !error && (
           <>
             {/* Hero */}
-            <div className="mb-10">
-              <h1 className="text-3xl font-bold text-[#f4f4f5] tracking-tight">@{handle}</h1>
-              <p className="text-sm text-[#52525b] mt-1">
-                {games.length} published {games.length === 1 ? 'game' : 'games'}
-              </p>
+            <div className="mb-10 flex items-start justify-between gap-4 flex-wrap">
+              <div>
+                <h1 className="text-3xl font-bold text-[#f4f4f5] tracking-tight">@{handle}</h1>
+                <p className="text-sm text-[#52525b] mt-1">
+                  {games.length} published {games.length === 1 ? 'game' : 'games'}
+                  {profile && (
+                    <>
+                      {' · '}
+                      <span className="text-[#71717a]">
+                        {followerCount.toLocaleString()}{' '}
+                        {followerCount === 1 ? 'follower' : 'followers'}
+                      </span>
+                    </>
+                  )}
+                </p>
+              </div>
+
+              {/* Follow / Unfollow (#3.9) — auth-gated. */}
+              {profile && signedIn && (
+                <button
+                  onClick={() => {
+                    void handleToggleFollow();
+                  }}
+                  disabled={followBusy}
+                  className={`text-xs px-4 py-2 rounded-lg border transition-colors font-medium disabled:opacity-50 ${
+                    following
+                      ? 'bg-[#1a1a1a] text-[#a1a1aa] border-[#2a2a2a] hover:text-[#f4f4f5] hover:border-[#333333]'
+                      : 'bg-[#6366f1] hover:bg-[#4f46e5] text-white border-transparent'
+                  }`}
+                >
+                  {following ? 'Following' : 'Follow'}
+                </button>
+              )}
             </div>
 
             {/* Thumbnail gallery (#3.1) */}

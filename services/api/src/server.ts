@@ -316,6 +316,21 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     return true;
   }
 
+  // Leaderboard submit rate-cap (Phase 3.8, in-memory per-instance): one
+  // session (salted-IP `slug:ip` hash, same shape as the play-count throttle)
+  // can only submit one score per window, so a single client can't spam the
+  // board. Separate map from playCountSeen so a play and a score don't share
+  // the throttle. Multi-instance Redis dedup is a follow-up like #35a.
+  const scoreSubmitSeen = new Map<string, number>();
+  const SCORE_SUBMIT_WINDOW_MS = 60 * 1000;
+  function shouldAcceptScore(key: string): boolean {
+    const now = Date.now();
+    const last = scoreSubmitSeen.get(key);
+    if (last !== undefined && now - last < SCORE_SUBMIT_WINDOW_MS) return false;
+    scoreSubmitSeen.set(key, now);
+    return true;
+  }
+
   async function getUserBalance(userId: string): Promise<number> {
     if (!deps.authDb) return Infinity;
     const { schema: s } = await import('@playforge/db');
@@ -1367,6 +1382,60 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       .send(html);
   });
 
+  // ── Leaderboards (Phase 3.8) ───────────────────────────────────────────────
+  // POST /v1/play/:slug/score {score} — record a leaderboard score. No auth
+  // required (anonymous play is allowed); a signed-in submitter is attributed
+  // so the board can show a @handle. Rate-capped per salted-IP session so one
+  // client can't spam the board (reuses the play-throttle `slug:ip` key shape).
+
+  app.post('/v1/play/:slug/score', async (req, reply) => {
+    if (!deps.hubRepo || !deps.publishRepo) {
+      return reply.code(503).send({ error: 'hub_unavailable' });
+    }
+    const { slug } = req.params as { slug: string };
+    const published = await deps.publishRepo.getBySlug(slug);
+    if (!published || published.status !== 'live') {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    const body = (req.body ?? {}) as { score?: unknown };
+    const score = Number(body.score);
+    // Scores are integers; reject NaN/Infinity/floats and absurd magnitudes so a
+    // bad client can't poison the board. A 32-bit-ish ceiling is ample.
+    if (!Number.isInteger(score) || score < 0 || score > 2_000_000_000) {
+      return reply.code(400).send({ error: 'invalid_score', message: 'score must be a non-negative integer' });
+    }
+
+    // Per-session cap (#3.8): one accepted submission per window per salted-IP
+    // session. Reject the spammy ones with 429 rather than silently dropping.
+    const sessionHash = `${slug}:${req.ip ?? 'anon'}`;
+    if (!shouldAcceptScore(sessionHash)) {
+      return reply.code(429).send({ error: 'score_rate_limited' });
+    }
+
+    // Attribute the score to the signed-in user when present; anonymous otherwise.
+    const user = await authenticateRequest(req);
+    await deps.hubRepo.addScore({
+      publishedGameId: published.id,
+      score,
+      ...(user ? { userId: user.userId } : {}),
+    });
+    return reply.code(201).send({ ok: true });
+  });
+
+  // GET /v1/play/:slug/leaderboard — top-10 scores with display handles.
+  app.get('/v1/play/:slug/leaderboard', async (req, reply) => {
+    if (!deps.hubRepo || !deps.publishRepo) {
+      return reply.code(503).send({ error: 'hub_unavailable' });
+    }
+    const { slug } = req.params as { slug: string };
+    const published = await deps.publishRepo.getBySlug(slug);
+    if (!published || published.status !== 'live') {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    const entries = await deps.hubRepo.topScores(published.id, 10);
+    return reply.send({ entries });
+  });
+
   // ── blob serving ─────────────────────────────────────────────────────────
   // GET /v1/blobs/:key — serve a content-addressed blob (thumbnails, etc.)
   // The key is the SHA-256 hash of the blob bytes. No auth — keys are unguessable.
@@ -1520,9 +1589,20 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (ownerId === null) return reply.code(404).send({ error: 'user_not_found' });
     const projects = await deps.repo.listByOwner(ownerId);
     const publicProjects = projects.filter((p) => p.visibility === 'public');
+    // Follow stats (Phase 3.9): follower count + whether the (optional) viewer
+    // follows this creator. isFollowing is false when unauthenticated.
+    const viewer = await authenticateRequest(req);
+    const [followerCount, isFollowing] = await Promise.all([
+      deps.hubRepo ? deps.hubRepo.countFollowers(ownerId) : Promise.resolve(0),
+      deps.hubRepo && viewer
+        ? deps.hubRepo.isFollowing(viewer.userId, ownerId)
+        : Promise.resolve(false),
+    ]);
     return reply.send({
       handle,
       projectCount: publicProjects.length,
+      followerCount,
+      isFollowing,
       projects: publicProjects.map((p) => ({
         id: p.id,
         slug: p.slug,
@@ -1532,6 +1612,36 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         updatedAt: p.updatedAt,
       })),
     });
+  });
+
+  // POST /v1/users/:handle/follow — follow a creator (Phase 3.9). Auth required;
+  // self-follow rejected; idempotent via the unique (follower, followee) edge.
+  app.post('/v1/users/:handle/follow', async (req, reply) => {
+    if (!deps.hubRepo) return reply.code(503).send({ error: 'hub_unavailable' });
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { handle } = req.params as { handle: string };
+    const followeeId = await resolveHandleToOwnerId(handle);
+    if (followeeId === null) return reply.code(404).send({ error: 'user_not_found' });
+    if (followeeId === user.userId) {
+      return reply.code(400).send({ error: 'cannot_follow_self' });
+    }
+    await deps.hubRepo.addFollow(user.userId, followeeId);
+    const followerCount = await deps.hubRepo.countFollowers(followeeId);
+    return reply.send({ following: true, followerCount });
+  });
+
+  // DELETE /v1/users/:handle/follow — unfollow (Phase 3.9). Idempotent.
+  app.delete('/v1/users/:handle/follow', async (req, reply) => {
+    if (!deps.hubRepo) return reply.code(503).send({ error: 'hub_unavailable' });
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { handle } = req.params as { handle: string };
+    const followeeId = await resolveHandleToOwnerId(handle);
+    if (followeeId === null) return reply.code(404).send({ error: 'user_not_found' });
+    await deps.hubRepo.removeFollow(user.userId, followeeId);
+    const followerCount = await deps.hubRepo.countFollowers(followeeId);
+    return reply.send({ following: false, followerCount });
   });
 
   app.get('/v1/users/:handle/games', async (req, reply) => {

@@ -19,6 +19,42 @@ export type GameEngineId = 'three' | 'phaser';
 export const TWEAKS_UPDATE_MESSAGE_TYPE = 'playforge:tweaks:update' as const;
 export type TweaksUpdateMessageType = typeof TWEAKS_UPDATE_MESSAGE_TYPE;
 
+/**
+ * postMessage protocol constant for the iframe→host leaderboard bridge (Phase
+ * 3.8). The generated game calls `window.__game.reportScore(n)` on game-over /
+ * score-change; the shim posts `{ type: SCORE_MESSAGE_TYPE, score }` to the
+ * parent, which submits it to `POST /v1/play/:slug/score`. CSP-safe: this is a
+ * same-window postMessage to the embedder, not a new network origin (the locked
+ * `connect-src 'none'` game CSP is untouched).
+ *
+ * Prompt directive (deferred follow-up): the generation prompt must instruct
+ * games to call `window.__game.reportScore(finalScore)` once the run ends and
+ * whenever the score changes. That one-line directive lives in
+ * `packages/core/src/prompts/` — another agent's boundary — so it lands
+ * separately. The shim contract here is the prerequisite; the prompt line can
+ * be added later without any change to this code.
+ */
+export const SCORE_MESSAGE_TYPE = 'playforge:score' as const;
+export type ScoreMessageType = typeof SCORE_MESSAGE_TYPE;
+
+/** Frame posted to the host when a game reports a score (Phase 3.8). */
+export interface ScoreMessage {
+  type: ScoreMessageType;
+  /** Final/current score the game reported. Coerced to a finite number. */
+  score: number;
+}
+
+/** Type guard for an inbound score frame on the host's `message` listener. */
+export function isScoreMessage(data: unknown): data is ScoreMessage {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    (data as { type?: unknown }).type === SCORE_MESSAGE_TYPE &&
+    typeof (data as { score?: unknown }).score === 'number' &&
+    Number.isFinite((data as { score: number }).score)
+  );
+}
+
 export interface BootstrapOptions {
   /** UUID of the design row this game belongs to. Used to build the
    *  game-files:// base URL the iframe resolves relative imports against. */
@@ -102,12 +138,26 @@ export function gameGlobalSetupSnippet(opts: {
 }): string {
   const params = JSON.stringify(opts.initialParams);
   const config = JSON.stringify({ startMuted: opts.startMuted, initialAspect: '16:9' });
+  const scoreType = JSON.stringify(SCORE_MESSAGE_TYPE);
   return `<script>
 window.__game = window.__game || {};
 window.__game.engine = ${JSON.stringify(opts.engine)};
 window.__game.params = ${params};
 window.__game.config = ${config};
 window.__game.debug = window.__game.debug || { snapshot: function () { return null; } };
+// Phase 3.8 — per-game leaderboards. Games call window.__game.reportScore(n)
+// on game-over / score-change. We post a same-window frame to the embedder,
+// which submits it to POST /v1/play/:slug/score. CSP-safe: a postMessage to the
+// parent is not a network connection, so connect-src 'none' is untouched.
+window.__game.reportScore = window.__game.reportScore || function (score) {
+  var n = Number(score);
+  if (!isFinite(n)) return;
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: ${scoreType}, score: n }, '*');
+    }
+  } catch (e) { /* cross-origin parent may throw; ignore */ }
+};
 window.addEventListener('message', function (e) {
   if (e && e.data && e.data.type === 'game:setParams' && e.data.params) {
     Object.assign(window.__game.params, e.data.params);

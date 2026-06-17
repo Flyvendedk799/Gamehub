@@ -678,6 +678,171 @@ describe('hub discovery + virality (Phase 3)', () => {
   });
 });
 
+describe('leaderboards (Phase 3.8)', () => {
+  async function seedGame(publishRepo: InMemoryPublishRepo, slug: string): Promise<void> {
+    await publishRepo.upsert({ projectId: `proj-${slug}`, publishSlug: slug, title: slug, bundleKey: 'k' });
+  }
+
+  it('POST /score returns 404 for an unknown slug', async () => {
+    const hubRepo = new InMemoryHubRepo();
+    const publishRepo = new InMemoryPublishRepo();
+    const app = makeApp({ hubRepo, publishRepo });
+    const res = await app.inject({ method: 'POST', url: '/v1/play/nope/score', payload: { score: 5 } });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('POST /score rejects a non-integer/negative score with 400', async () => {
+    const hubRepo = new InMemoryHubRepo();
+    const publishRepo = new InMemoryPublishRepo();
+    await seedGame(publishRepo, 'game');
+    const app = makeApp({ hubRepo, publishRepo });
+
+    const bad = await app.inject({ method: 'POST', url: '/v1/play/game/score', payload: { score: 1.5 } });
+    expect(bad.statusCode).toBe(400);
+    const neg = await app.inject({ method: 'POST', url: '/v1/play/game/score', payload: { score: -1 } });
+    expect(neg.statusCode).toBe(400);
+  });
+
+  it('records a score and surfaces it in the top-10 leaderboard, highest first', async () => {
+    const hubRepo = new InMemoryHubRepo();
+    const publishRepo = new InMemoryPublishRepo();
+    await seedGame(publishRepo, 'game');
+    // Seed handles so signed-in scores resolve a @handle in the response.
+    hubRepo.seedUser('alice', { handle: 'alice' });
+    hubRepo.seedUser('bob', { handle: 'bob' });
+    const app = makeApp({ hubRepo, publishRepo });
+
+    // alice submits 100, bob submits 250 (different sessions via different IP isn't
+    // testable through inject, so submit directly through the repo for ordering and
+    // use the route for the happy-path acceptance below).
+    await hubRepo.addScore({ publishedGameId: (await publishRepo.getBySlug('game'))!.id, userId: 'alice', score: 100 });
+    await hubRepo.addScore({ publishedGameId: (await publishRepo.getBySlug('game'))!.id, userId: 'bob', score: 250 });
+
+    const res = await app.inject({ method: 'GET', url: '/v1/play/game/leaderboard' });
+    expect(res.statusCode).toBe(200);
+    const entries = (res.json() as { entries: Array<{ score: number; handle: string | null }> }).entries;
+    expect(entries).toHaveLength(2);
+    // Highest score first.
+    expect(entries[0]).toMatchObject({ score: 250, handle: 'bob' });
+    expect(entries[1]).toMatchObject({ score: 100, handle: 'alice' });
+  });
+
+  it('caps to top-10 even when more scores were submitted', async () => {
+    const hubRepo = new InMemoryHubRepo();
+    const publishRepo = new InMemoryPublishRepo();
+    await seedGame(publishRepo, 'game');
+    const app = makeApp({ hubRepo, publishRepo });
+    const gameId = (await publishRepo.getBySlug('game'))!.id;
+    for (let i = 1; i <= 15; i++) {
+      await hubRepo.addScore({ publishedGameId: gameId, score: i });
+    }
+    const res = await app.inject({ method: 'GET', url: '/v1/play/game/leaderboard' });
+    const entries = (res.json() as { entries: Array<{ score: number }> }).entries;
+    expect(entries).toHaveLength(10);
+    // Top is the highest score (15), tenth is 6.
+    expect(entries[0]?.score).toBe(15);
+    expect(entries[9]?.score).toBe(6);
+  });
+
+  it('rate-caps repeated submissions from the same session to one per window', async () => {
+    const hubRepo = new InMemoryHubRepo();
+    const publishRepo = new InMemoryPublishRepo();
+    await seedGame(publishRepo, 'game');
+    const app = makeApp({ hubRepo, publishRepo });
+
+    // First submission from this session is accepted.
+    const first = await app.inject({ method: 'POST', url: '/v1/play/game/score', payload: { score: 10 } });
+    expect(first.statusCode).toBe(201);
+    // Second from the same session (same ip) is rate-limited.
+    const second = await app.inject({ method: 'POST', url: '/v1/play/game/score', payload: { score: 999 } });
+    expect(second.statusCode).toBe(429);
+
+    // Only the first score landed on the board.
+    const board = await app.inject({ method: 'GET', url: '/v1/play/game/leaderboard' });
+    const entries = (board.json() as { entries: Array<{ score: number }> }).entries;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.score).toBe(10);
+  });
+});
+
+describe('creator follow + profile (Phase 3.9)', () => {
+  it('GET /v1/users/:handle includes followerCount + isFollowing', async () => {
+    const repo = new InMemoryProjectRepo();
+    const hubRepo = new InMemoryHubRepo();
+    const app = makeApp({ repo, hubRepo });
+    // In the header-auth harness, the URL "handle" == the followee's userId.
+    const res = await app.inject({ method: 'GET', url: '/v1/users/creator' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ handle: 'creator', followerCount: 0, isFollowing: false });
+  });
+
+  it('follow is idempotent and increments followerCount; isFollowing reflects the viewer', async () => {
+    const repo = new InMemoryProjectRepo();
+    const hubRepo = new InMemoryHubRepo();
+    const app = makeApp({ repo, hubRepo });
+
+    // alice follows creator.
+    const follow = await app.inject({ method: 'POST', url: '/v1/users/creator/follow', headers: AS_ALICE });
+    expect(follow.statusCode).toBe(200);
+    expect(follow.json()).toMatchObject({ following: true, followerCount: 1 });
+
+    // Following again is a no-op — count stays 1 (idempotent via the unique edge).
+    const again = await app.inject({ method: 'POST', url: '/v1/users/creator/follow', headers: AS_ALICE });
+    expect((again.json() as { followerCount: number }).followerCount).toBe(1);
+
+    // The profile now reports isFollowing=true for alice, false for bob.
+    const asAlice = await app.inject({ method: 'GET', url: '/v1/users/creator', headers: AS_ALICE });
+    expect(asAlice.json()).toMatchObject({ followerCount: 1, isFollowing: true });
+    const asBob = await app.inject({ method: 'GET', url: '/v1/users/creator', headers: AS_BOB });
+    expect(asBob.json()).toMatchObject({ followerCount: 1, isFollowing: false });
+
+    // Unfollow drops the count back to 0.
+    const unfollow = await app.inject({ method: 'DELETE', url: '/v1/users/creator/follow', headers: AS_ALICE });
+    expect(unfollow.json()).toMatchObject({ following: false, followerCount: 0 });
+  });
+
+  it('rejects a self-follow with 400', async () => {
+    const repo = new InMemoryProjectRepo();
+    const hubRepo = new InMemoryHubRepo();
+    const app = makeApp({ repo, hubRepo });
+    // alice's userId == the URL handle "alice" → self-follow.
+    const res = await app.inject({ method: 'POST', url: '/v1/users/alice/follow', headers: AS_ALICE });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'cannot_follow_self' });
+  });
+
+  it('follow requires auth', async () => {
+    const hubRepo = new InMemoryHubRepo();
+    const app = makeApp({ hubRepo });
+    const res = await app.inject({ method: 'POST', url: '/v1/users/creator/follow' });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('listComments author-resolves a handle for the web to link to /u/:handle', async () => {
+    const hubRepo = new InMemoryHubRepo();
+    const publishRepo = new InMemoryPublishRepo();
+    await publishRepo.upsert({ projectId: 'p1', publishSlug: 'my-game', title: 'My Game', bundleKey: 'k' });
+    hubRepo.seedUser('alice', { handle: 'alice', displayName: 'Alice A' });
+    const app = makeApp({ hubRepo, publishRepo });
+
+    // alice comments.
+    const post = await app.inject({
+      method: 'POST',
+      url: '/v1/hub/games/my-game/comments',
+      headers: AS_ALICE,
+      payload: { body: 'nice game' },
+    });
+    expect(post.statusCode).toBe(201);
+    expect((post.json() as { comment: { authorHandle: string | null } }).comment.authorHandle).toBe('alice');
+
+    // The list carries the resolved author handle + displayName.
+    const list = await app.inject({ method: 'GET', url: '/v1/hub/games/my-game/comments' });
+    const comments = (list.json() as { comments: Array<{ authorHandle: string | null; authorDisplayName: string | null }> }).comments;
+    expect(comments).toHaveLength(1);
+    expect(comments[0]).toMatchObject({ authorHandle: 'alice', authorDisplayName: 'Alice A' });
+  });
+});
+
 describe('preview route', () => {
   it('serves index.html from a run snapshot', async () => {
     const blobStore = new InMemoryBlobStore();

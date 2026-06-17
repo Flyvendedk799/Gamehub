@@ -16,6 +16,9 @@ import { threeAdapter } from './three';
 import type { GameEngineAdapter, GameEngineId } from './types';
 
 export type { GameEngineAdapter, GameEngineId, ValidationIssue, ValidationResult } from './types';
+// Phase 3.8 — leaderboard score bridge protocol (iframe → host).
+export { isScoreMessage, SCORE_MESSAGE_TYPE } from './types';
+export type { ScoreMessage, ScoreMessageType } from './types';
 
 /** Adapters registered for the current ship. The `Record` key type is
  *  exhaustive over `GameEngineId`, so the registry must cover every engine

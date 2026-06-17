@@ -60,6 +60,12 @@ export type {
   ValidationIssue,
   ValidationResult,
 } from './engines';
+// Phase 3.8 — leaderboard score bridge. The in-iframe `window.__game.reportScore(n)`
+// shim (see `gameGlobalSetupSnippet` in engines/types.ts) posts a
+// `{ type: SCORE_MESSAGE_TYPE, score }` frame to the host; the play page submits
+// it to POST /v1/play/:slug/score. `isScoreMessage` validates the inbound frame.
+export { isScoreMessage, SCORE_MESSAGE_TYPE } from './engines';
+export type { ScoreMessage, ScoreMessageType } from './engines';
 
 const JSX_TEMPLATE_BEGIN = '<!-- AGENT_BODY_BEGIN -->';
 const JSX_TEMPLATE_END = '<!-- AGENT_BODY_END -->';

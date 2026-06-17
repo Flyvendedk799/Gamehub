@@ -6,15 +6,36 @@ import { useEffect, useState } from 'react';
 import {
   addComment,
   getComments,
+  getLeaderboard,
   remixGame,
   reportGame,
   setRating,
+  submitScore,
   toggleLike,
 } from '@/lib/api';
-import type { HubComment } from '@/lib/api';
+import type { HubComment, LeaderboardEntry } from '@/lib/api';
 import { API_BASE } from '@/lib/config';
 
 const BASE = API_BASE;
+
+/**
+ * postMessage `type` the in-iframe `window.__game.reportScore(n)` shim posts to
+ * us (Phase 3.8). Mirrored from `@playforge/runtime` (SCORE_MESSAGE_TYPE) — the
+ * web app deliberately doesn't depend on the runtime package, so the literal is
+ * kept in lockstep here, like the tweak-bridge type in iframe-bridge.ts.
+ */
+const SCORE_MESSAGE_TYPE = 'playforge:score';
+
+/** Type guard for an inbound score frame on the window message listener. */
+function isScoreFrame(data: unknown): data is { type: string; score: number } {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    (data as { type?: unknown }).type === SCORE_MESSAGE_TYPE &&
+    typeof (data as { score?: unknown }).score === 'number' &&
+    Number.isFinite((data as { score: number }).score)
+  );
+}
 
 interface Props {
   slug: string;
@@ -112,6 +133,42 @@ export default function PlayClient({
       .then(({ comments: c }) => setComments(c))
       .catch(() => {})
       .finally(() => setCommentsLoading(false));
+  }, [slug]);
+
+  // ─── Leaderboard (Phase 3.8) ────────────────────────────────────────────────
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+
+  async function refreshLeaderboard() {
+    try {
+      const { entries } = await getLeaderboard(slug);
+      setLeaderboard(entries);
+    } catch {
+      // swallow — leaderboard is best-effort
+    }
+  }
+
+  // Initial load.
+  useEffect(() => {
+    if (!slug) return;
+    void refreshLeaderboard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
+
+  // Listen for the game's `window.__game.reportScore(n)` frames, submit them,
+  // then refresh the board. Best-effort: a 429 (rate-cap) is swallowed.
+  useEffect(() => {
+    if (!slug) return;
+    function onMessage(e: MessageEvent) {
+      if (!isScoreFrame(e.data)) return;
+      const score = Math.trunc(e.data.score);
+      if (score < 0) return;
+      void submitScore(slug, score)
+        .then(() => refreshLeaderboard())
+        .catch(() => {});
+    }
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   async function handleAddComment(e: React.FormEvent) {
@@ -268,6 +325,46 @@ export default function PlayClient({
         </button>
       </div>
 
+      {/* Leaderboard (#3.8) — top-10 scores reported by the game. */}
+      {leaderboard.length > 0 && (
+        <div className="px-4 sm:px-6 lg:px-8 py-8 max-w-3xl mx-auto w-full">
+          <h2 className="text-sm font-semibold text-[#f4f4f5] mb-4 flex items-center gap-2">
+            <TrophyIcon />
+            Leaderboard
+          </h2>
+          <div className="bg-[#111111] border border-[#222222] rounded-xl overflow-hidden">
+            {leaderboard.map((entry, i) => (
+              <div
+                key={`${entry.userId ?? 'anon'}-${entry.createdAt}-${i}`}
+                className="flex items-center gap-3 px-4 py-2.5 border-b border-[#1a1a1a] last:border-b-0"
+              >
+                <span
+                  className={`w-6 text-xs font-mono tabular-nums ${
+                    i === 0 ? 'text-[#f59e0b]' : i < 3 ? 'text-[#a1a1aa]' : 'text-[#52525b]'
+                  }`}
+                >
+                  {i + 1}
+                </span>
+                {entry.handle ? (
+                  <Link
+                    href={`/u/${entry.handle}`}
+                    className="text-sm text-[#a1a1aa] hover:text-[#6366f1] transition-colors font-medium truncate"
+                  >
+                    @{entry.handle}
+                  </Link>
+                ) : (
+                  <span className="text-sm text-[#52525b] italic truncate">anonymous</span>
+                )}
+                <span className="flex-1" />
+                <span className="text-sm font-semibold text-[#f4f4f5] tabular-nums">
+                  {entry.score.toLocaleString()}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Comments section */}
       <div className="px-4 sm:px-6 lg:px-8 py-8 max-w-3xl mx-auto w-full">
         <h2 className="text-sm font-semibold text-[#f4f4f5] mb-6">Comments</h2>
@@ -333,13 +430,44 @@ function CommentCard({ comment }: { comment: HubComment }) {
   return (
     <div className="bg-[#111111] border border-[#222222] rounded-xl p-4">
       <div className="flex items-center gap-2 mb-2">
-        <span className="text-xs text-[#52525b] font-mono">
-          {comment.userId.slice(0, 8)}
-        </span>
+        {comment.authorHandle ? (
+          // Author-resolved (#3.9): link the @handle to the creator profile.
+          <Link
+            href={`/u/${comment.authorHandle}`}
+            className="text-xs text-[#71717a] hover:text-[#6366f1] transition-colors font-medium"
+          >
+            {comment.authorDisplayName ?? `@${comment.authorHandle}`}
+          </Link>
+        ) : (
+          <span className="text-xs text-[#52525b] font-mono">{comment.userId.slice(0, 8)}</span>
+        )}
         <span className="text-xs text-[#3f3f46]">{date}</span>
       </div>
       <p className="text-sm text-[#a1a1aa] leading-relaxed">{comment.body}</p>
     </div>
+  );
+}
+
+function TrophyIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#f59e0b"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
+      <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+      <path d="M4 22h16" />
+      <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
+      <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
+      <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
+    </svg>
   );
 }
 

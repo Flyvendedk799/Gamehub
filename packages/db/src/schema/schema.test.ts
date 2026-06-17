@@ -7,6 +7,8 @@ import {
   chatMessages,
   creditLedger,
   engineKind,
+  follows,
+  gameScores,
   passwordResetTokens,
   projects,
   publishedGames,
@@ -132,5 +134,25 @@ describe('schema', () => {
 
   it('engine enum is web-only (three + phaser)', () => {
     expect(engineKind.enumValues).toEqual(['three', 'phaser']);
+  });
+
+  it('game_scores carries the leaderboard columns + a (game, score) index (Phase 3.8)', () => {
+    const cfg = getTableConfig(gameScores);
+    expect(cfg.name).toBe('game_scores');
+    expect(columnNames(gameScores)).toEqual(
+      expect.arrayContaining(['id', 'published_game_id', 'user_id', 'score', 'created_at']),
+    );
+    expect(indexNames(gameScores)).toContain('game_scores_game_score_idx');
+  });
+
+  it('follows is a directed edge with a unique (follower, followee) PK + followee index (Phase 3.9)', () => {
+    const cfg = getTableConfig(follows);
+    expect(cfg.name).toBe('follows');
+    expect(columnNames(follows)).toEqual(
+      expect.arrayContaining(['follower_id', 'followee_id', 'created_at']),
+    );
+    // Composite PK on (follower_id, followee_id) makes a follow idempotent.
+    expect(cfg.primaryKeys[0]?.columns.map((c) => c.name)).toEqual(['follower_id', 'followee_id']);
+    expect(indexNames(follows)).toContain('follows_followee_idx');
   });
 });

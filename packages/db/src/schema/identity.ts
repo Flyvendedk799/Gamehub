@@ -13,6 +13,7 @@ import {
   integer,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -56,6 +57,31 @@ export const sessions = pgTable(
     // same created_at; a unique index here would 500 the second login. This is
     // a plain lookup index, not a constraint.
     userIdx: index('sessions_user_idx').on(t.userId, t.createdAt),
+  }),
+);
+
+/**
+ * Creator follows (Phase 3.9). A directed edge: `followerId` follows
+ * `followeeId`. UNIQUE(follower_id, followee_id) makes follow idempotent
+ * (the route uses onConflictDoNothing); self-follows are rejected at the route.
+ * The followee_id index backs the follower-count + isFollowing reads on the
+ * creator-profile response. Both columns cascade-delete with the user.
+ */
+export const follows = pgTable(
+  'follows',
+  {
+    followerId: uuid('follower_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    followeeId: uuid('followee_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.followerId, t.followeeId] }),
+    // Count a creator's followers / check isFollowing without scanning.
+    followeeIdx: index('follows_followee_idx').on(t.followeeId),
   }),
 );
 

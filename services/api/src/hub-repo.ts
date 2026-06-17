@@ -31,6 +31,23 @@ export interface HubComment {
   body: string;
   parentCommentId: string | null;
   createdAt: string;
+  /**
+   * Author-resolved fields (Phase 3.9). Null when the author can't be resolved
+   * (the in-memory harness with no seeded user). The web links the handle to
+   * `/u/:handle`.
+   */
+  authorHandle: string | null;
+  authorDisplayName: string | null;
+}
+
+/** One leaderboard row (Phase 3.8) — a score plus the author's display handle. */
+export interface LeaderboardEntry {
+  score: number;
+  /** Null for an anonymous score. */
+  userId: string | null;
+  /** Author's @handle, resolved for display. Null when anonymous/unresolved. */
+  handle: string | null;
+  createdAt: string;
 }
 
 export interface HubStats {
@@ -78,6 +95,25 @@ export interface HubRepo {
   addRemixEdge(input: { ancestorProjectId: string; descendantProjectId: string }): Promise<void>;
   /** Count of direct (depth-1) remixes of a published game's project. */
   remixCount(projectId: string): Promise<number>;
+  /**
+   * Record a leaderboard score for a game (Phase 3.8). `userId` is omitted for
+   * an anonymous play. The route rate-caps submissions per salted-IP session
+   * before calling this; this method just persists.
+   */
+  addScore(input: { publishedGameId: string; userId?: string; score: number }): Promise<void>;
+  /** Top-N leaderboard for a game, ordered by score desc (Phase 3.8). Default 10. */
+  topScores(publishedGameId: string, limit?: number): Promise<LeaderboardEntry[]>;
+  /**
+   * Follow a creator (Phase 3.9). Idempotent on (followerId, followeeId) — a
+   * repeat follow is a no-op. The route rejects self-follows before calling.
+   */
+  addFollow(followerId: string, followeeId: string): Promise<void>;
+  /** Unfollow a creator (Phase 3.9). Idempotent — unfollowing a non-followed user is a no-op. */
+  removeFollow(followerId: string, followeeId: string): Promise<void>;
+  /** Number of followers a creator has (Phase 3.9). */
+  countFollowers(followeeId: string): Promise<number>;
+  /** Whether `followerId` currently follows `followeeId` (Phase 3.9). */
+  isFollowing(followerId: string, followeeId: string): Promise<boolean>;
   getStats?(): Promise<HubStats>;
 }
 
@@ -114,8 +150,23 @@ export class InMemoryHubRepo implements HubRepo {
   private readonly playEvents = new Map<string, number[]>();
   // remix lineage edges: `${ancestorProjectId}:${descendantProjectId}` → depth
   private readonly remixEdges = new Map<string, number>();
+  // leaderboard scores (Phase 3.8): gameId → submitted score rows.
+  private readonly scores = new Map<string, Array<{ userId: string | null; score: number; createdAt: string }>>();
+  // creator follows (Phase 3.9): set of `${followerId}:${followeeId}`.
+  private readonly follows = new Set<string>();
+  // user directory for author/handle resolution (Phase 3.9): userId → profile.
+  private readonly userProfiles = new Map<string, { handle: string; displayName: string }>();
   /** Injectable clock so trending tests are deterministic. */
   constructor(private readonly now: () => number = () => Date.now()) {}
+
+  /** Register a user so comment authors + leaderboard rows resolve a handle
+   *  (Phase 3.9). Tests seed this; production uses the Drizzle joins. */
+  seedUser(userId: string, profile: { handle: string; displayName?: string }): void {
+    this.userProfiles.set(userId, {
+      handle: profile.handle,
+      displayName: profile.displayName ?? profile.handle,
+    });
+  }
 
   /** Seed a game for testing. Missing optional fields default sensibly. */
   seedGame(game: Partial<HubGame> & Pick<HubGame, 'id' | 'projectId' | 'publishSlug' | 'title' | 'status' | 'publishedAt'>): void {
@@ -205,6 +256,53 @@ export class InMemoryHubRepo implements HubRepo {
     return this.directRemixCount(projectId);
   }
 
+  async addScore(input: { publishedGameId: string; userId?: string; score: number }): Promise<void> {
+    const list = this.scores.get(input.publishedGameId) ?? [];
+    list.push({
+      userId: input.userId ?? null,
+      score: input.score,
+      createdAt: new Date(this.now()).toISOString(),
+    });
+    this.scores.set(input.publishedGameId, list);
+  }
+
+  async topScores(publishedGameId: string, limit = 10): Promise<LeaderboardEntry[]> {
+    const list = this.scores.get(publishedGameId) ?? [];
+    return [...list]
+      // Highest score first; earliest submission wins ties.
+      .sort((a, b) => (b.score !== a.score ? b.score - a.score : a.createdAt < b.createdAt ? -1 : 1))
+      .slice(0, limit)
+      .map((row) => ({
+        score: row.score,
+        userId: row.userId,
+        handle: row.userId !== null ? this.userProfiles.get(row.userId)?.handle ?? null : null,
+        createdAt: row.createdAt,
+      }));
+  }
+
+  async addFollow(followerId: string, followeeId: string): Promise<void> {
+    // Idempotent on the unique edge; self-follows are rejected at the route.
+    this.follows.add(`${followerId}:${followeeId}`);
+  }
+
+  async removeFollow(followerId: string, followeeId: string): Promise<void> {
+    this.follows.delete(`${followerId}:${followeeId}`);
+  }
+
+  async countFollowers(followeeId: string): Promise<number> {
+    let n = 0;
+    for (const key of this.follows) {
+      // Split rather than endsWith so a followerId that happens to end with the
+      // followeeId string can't be miscounted.
+      if (key.slice(key.indexOf(':') + 1) === followeeId) n += 1;
+    }
+    return n;
+  }
+
+  async isFollowing(followerId: string, followeeId: string): Promise<boolean> {
+    return this.follows.has(`${followerId}:${followeeId}`);
+  }
+
   async getLike(userId: string, publishedGameId: string): Promise<boolean> {
     return this.likes.has(`${userId}:${publishedGameId}`);
   }
@@ -238,10 +336,21 @@ export class InMemoryHubRepo implements HubRepo {
     return { ratingAvg: avg, ratingCount: count };
   }
 
+  /** Resolve a comment's author fields from the seeded user directory. */
+  private resolveAuthor(comment: HubComment): HubComment {
+    const profile = this.userProfiles.get(comment.userId);
+    return {
+      ...comment,
+      authorHandle: profile?.handle ?? null,
+      authorDisplayName: profile?.displayName ?? null,
+    };
+  }
+
   async listComments(publishedGameId: string): Promise<HubComment[]> {
     return [...this.comments.values()]
       .filter((c) => c.publishedGameId === publishedGameId)
-      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1))
+      .map((c) => this.resolveAuthor(c));
   }
 
   async addComment(publishedGameId: string, userId: string, body: string, parentCommentId?: string): Promise<HubComment> {
@@ -252,9 +361,11 @@ export class InMemoryHubRepo implements HubRepo {
       body,
       parentCommentId: parentCommentId ?? null,
       createdAt: new Date().toISOString(),
+      authorHandle: null,
+      authorDisplayName: null,
     };
     this.comments.set(comment.id, comment);
-    return comment;
+    return this.resolveAuthor(comment);
   }
 
   async addReport(input: { reporterId?: string; targetType: string; targetId: string; reason?: string }): Promise<void> {
@@ -305,7 +416,10 @@ function rowToHubGame(row: typeof schema.publishedGames.$inferSelect, remixCount
   };
 }
 
-function rowToHubComment(row: typeof schema.commentsSocial.$inferSelect): HubComment {
+function rowToHubComment(
+  row: typeof schema.commentsSocial.$inferSelect,
+  author?: { handle: string | null; displayName: string | null },
+): HubComment {
   return {
     id: row.id,
     publishedGameId: row.publishedGameId,
@@ -313,6 +427,8 @@ function rowToHubComment(row: typeof schema.commentsSocial.$inferSelect): HubCom
     body: row.body,
     parentCommentId: row.parentCommentId ?? null,
     createdAt: row.createdAt.toISOString(),
+    authorHandle: author?.handle ?? null,
+    authorDisplayName: author?.displayName ?? null,
   };
 }
 
@@ -413,6 +529,76 @@ export class DrizzleHubRepo implements HubRepo {
     return Number(row?.n ?? 0);
   }
 
+  async addScore(input: { publishedGameId: string; userId?: string; score: number }): Promise<void> {
+    await this.db.insert(schema.gameScores).values({
+      publishedGameId: input.publishedGameId,
+      score: input.score,
+      ...(input.userId !== undefined ? { userId: input.userId } : {}),
+    });
+  }
+
+  async topScores(publishedGameId: string, limit = 10): Promise<LeaderboardEntry[]> {
+    // Left-join users so signed-in scores carry the player's @handle; anonymous
+    // (null user_id) scores resolve to a null handle. Highest score first, then
+    // earliest submission to break ties.
+    const rows = await this.db
+      .select({
+        score: schema.gameScores.score,
+        userId: schema.gameScores.userId,
+        handle: schema.users.handle,
+        createdAt: schema.gameScores.createdAt,
+      })
+      .from(schema.gameScores)
+      .leftJoin(schema.users, eq(schema.gameScores.userId, schema.users.id))
+      .where(eq(schema.gameScores.publishedGameId, publishedGameId))
+      .orderBy(desc(schema.gameScores.score), asc(schema.gameScores.createdAt))
+      .limit(limit);
+
+    return rows.map((r) => ({
+      score: r.score,
+      userId: r.userId ?? null,
+      handle: r.handle ?? null,
+      createdAt: r.createdAt.toISOString(),
+    }));
+  }
+
+  async addFollow(followerId: string, followeeId: string): Promise<void> {
+    // Idempotent on the (follower_id, followee_id) PK — a repeat follow no-ops.
+    await this.db
+      .insert(schema.follows)
+      .values({ followerId, followeeId })
+      .onConflictDoNothing();
+  }
+
+  async removeFollow(followerId: string, followeeId: string): Promise<void> {
+    await this.db
+      .delete(schema.follows)
+      .where(
+        and(
+          eq(schema.follows.followerId, followerId),
+          eq(schema.follows.followeeId, followeeId),
+        ),
+      );
+  }
+
+  async countFollowers(followeeId: string): Promise<number> {
+    const [row] = await this.db
+      .select({ n: sql<number>`COUNT(*)::int` })
+      .from(schema.follows)
+      .where(eq(schema.follows.followeeId, followeeId));
+    return Number(row?.n ?? 0);
+  }
+
+  async isFollowing(followerId: string, followeeId: string): Promise<boolean> {
+    const row = await this.db.query.follows.findFirst({
+      where: and(
+        eq(schema.follows.followerId, followerId),
+        eq(schema.follows.followeeId, followeeId),
+      ),
+    });
+    return row !== undefined;
+  }
+
   async getLike(userId: string, publishedGameId: string): Promise<boolean> {
     const row = await this.db.query.likes.findFirst({
       where: and(
@@ -479,9 +665,12 @@ export class DrizzleHubRepo implements HubRepo {
   }
 
   async listComments(publishedGameId: string): Promise<HubComment[]> {
+    // Author-resolve (Phase 3.9): left-join users so each comment carries the
+    // author's @handle + displayName for the web to link to /u/:handle.
     const rows = await this.db
-      .select()
+      .select({ comment: schema.commentsSocial, handle: schema.users.handle, displayName: schema.users.displayName })
       .from(schema.commentsSocial)
+      .leftJoin(schema.users, eq(schema.commentsSocial.userId, schema.users.id))
       .where(
         and(
           eq(schema.commentsSocial.publishedGameId, publishedGameId),
@@ -490,7 +679,9 @@ export class DrizzleHubRepo implements HubRepo {
       )
       .orderBy(asc(schema.commentsSocial.createdAt));
 
-    return rows.map(rowToHubComment);
+    return rows.map((r) =>
+      rowToHubComment(r.comment, { handle: r.handle ?? null, displayName: r.displayName ?? null }),
+    );
   }
 
   async addComment(publishedGameId: string, userId: string, body: string, parentCommentId?: string): Promise<HubComment> {
@@ -507,7 +698,15 @@ export class DrizzleHubRepo implements HubRepo {
       .returning();
 
     if (!row) throw new Error('addComment returned no row');
-    return rowToHubComment(row);
+    // Resolve the author so the created comment carries handle/displayName too.
+    const [author] = await this.db
+      .select({ handle: schema.users.handle, displayName: schema.users.displayName })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId));
+    return rowToHubComment(row, {
+      handle: author?.handle ?? null,
+      displayName: author?.displayName ?? null,
+    });
   }
 
   async addReport(input: { reporterId?: string; targetType: string; targetId: string; reason?: string }): Promise<void> {

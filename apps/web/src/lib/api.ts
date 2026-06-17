@@ -171,6 +171,9 @@ export interface HubComment {
   body: string;
   parentCommentId: string | null;
   createdAt: string;
+  /** Author-resolved fields (Phase 3.9). Null when the author can't be resolved. */
+  authorHandle: string | null;
+  authorDisplayName: string | null;
 }
 
 export type HubSort = 'recent' | 'popular' | 'trending';
@@ -270,11 +273,45 @@ export async function reportGame(slug: string, reason?: string): Promise<void> {
   });
 }
 
+// ─── Leaderboards (Phase 3.8) ──────────────────────────────────────────────────
+
+/** One leaderboard row — a score plus the (optional) author's display handle. */
+export interface LeaderboardEntry {
+  score: number;
+  /** Null for an anonymous score. */
+  userId: string | null;
+  /** Author's @handle, resolved for display. Null when anonymous/unresolved. */
+  handle: string | null;
+  createdAt: string;
+}
+
+/**
+ * Submit a leaderboard score for a game (Phase 3.8). No auth required — the
+ * server attributes a signed-in submitter so the board can show a @handle, and
+ * rate-caps per session. A 429 means "already submitted this window"; callers
+ * swallow it (the score the player already posted stands).
+ */
+export async function submitScore(slug: string, score: number): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`/v1/play/${slug}/score`, {
+    method: 'POST',
+    body: JSON.stringify({ score }),
+  });
+}
+
+/** Top-10 leaderboard for a game, highest score first (Phase 3.8). */
+export async function getLeaderboard(slug: string): Promise<{ entries: LeaderboardEntry[] }> {
+  return apiFetch<{ entries: LeaderboardEntry[] }>(`/v1/play/${slug}/leaderboard`);
+}
+
 // ─── Creator profiles ────────────────────────────────────────────────────────
 
 export interface CreatorProfile {
   handle: string;
   projectCount: number;
+  /** Follower count (Phase 3.9). */
+  followerCount: number;
+  /** Whether the current viewer follows this creator (false when signed-out). */
+  isFollowing: boolean;
   projects: Array<{
     id: string;
     slug: string;
@@ -287,6 +324,24 @@ export interface CreatorProfile {
 
 export async function getCreatorProfile(handle: string): Promise<CreatorProfile> {
   return apiFetch<CreatorProfile>(`/v1/users/${handle}`);
+}
+
+/** Follow a creator (Phase 3.9). Auth required; idempotent server-side. */
+export async function followUser(
+  handle: string,
+): Promise<{ following: boolean; followerCount: number }> {
+  return apiFetch<{ following: boolean; followerCount: number }>(`/v1/users/${handle}/follow`, {
+    method: 'POST',
+  });
+}
+
+/** Unfollow a creator (Phase 3.9). Auth required; idempotent server-side. */
+export async function unfollowUser(
+  handle: string,
+): Promise<{ following: boolean; followerCount: number }> {
+  return apiFetch<{ following: boolean; followerCount: number }>(`/v1/users/${handle}/follow`, {
+    method: 'DELETE',
+  });
 }
 
 /**
