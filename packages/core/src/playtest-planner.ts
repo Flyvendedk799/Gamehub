@@ -13,6 +13,14 @@
  * §5 hard constraint).
  */
 
+import type { GameGenre } from '@playforge/shared';
+import type { PlaytestPredicate } from './eval/playtest-score.js';
+import {
+  type PlaybookStep,
+  type PlaytestPlaybook,
+  getPlaytestPlaybook,
+} from './playtest-playbooks.js';
+
 export interface PlaytestStep {
   /** What the runtime should do. */
   action: 'click' | 'fill' | 'submit' | 'hover';
@@ -97,4 +105,90 @@ export function planPlaytest(html: string): PlaytestPlan {
     shouldPlaytest: steps.length > 0,
     steps: steps.slice(0, MAX_STEPS),
   };
+}
+
+// ---------------------------------------------------------------------------
+// #1.6 — game-mode playbook → synthetic-input plan selection.
+//
+// The design-mode `planPlaytest` above parses an HTML artifact. The
+// boot-and-repair loop (#1.6) needs the GAME-mode counterpart: given the
+// declared GameSpec genre, pick the canonical playbook (Phase 9) and project
+// it onto (a) the synthetic-input step list the browser-worker dispatches and
+// (b) the flattened machine-checkable predicate set (Phase 5.4) the pure
+// `scorePlaytest` evaluates the resulting trace against. Both pieces come from
+// the SAME playbook so the predicates' `{ step: n }` frame refs line up 1:1
+// with the steps we send (the trace's frame at index n is the snapshot after
+// the n-th step). No IO, no LLM — pure selection + projection.
+// ---------------------------------------------------------------------------
+
+/** Synthetic-input step shape the browser-worker dispatches. Structurally
+ *  identical to the agent `playtest_game` tool's union and the worker's
+ *  `BrowserJobsPort.playtest` steps; re-declared here so the planner has no
+ *  dependency on the tools layer or the worker. */
+export type GamePlaytestStep =
+  | { kind: 'key'; code: string; frames?: number }
+  | { kind: 'mouseMove'; x: number; y: number }
+  | { kind: 'mouseDown'; button?: number }
+  | { kind: 'mouseUp'; button?: number }
+  | { kind: 'wait'; frames: number };
+
+/** The genre-selected game playtest plan: the playbook it came from, the
+ *  ordered synthetic-input steps to dispatch, and the flattened predicate
+ *  set to score the trace against. `predicates` is empty when the playbook
+ *  carries only free-form English asserts (no machine-checkable rows) — the
+ *  repair loop treats an empty predicate set as "nothing to gate on". */
+export interface GamePlaytestPlan {
+  playbook: PlaytestPlaybook;
+  steps: GamePlaytestStep[];
+  predicates: PlaytestPredicate[];
+}
+
+/** Project one playbook step onto the browser-worker's synthetic-input
+ *  union. A `mouse` step with movement deltas becomes a `mouseMove` (the
+ *  worker's relative-pointer dispatch); a bare `mouse` (click) becomes a
+ *  `mouseDown`; `wait` maps its `durationFrames` onto `frames`. Returns
+ *  null for a step we can't faithfully dispatch so the caller drops it
+ *  rather than sending a malformed event. */
+function projectPlaybookStep(step: PlaybookStep): GamePlaytestStep | null {
+  if (step.kind === 'key') {
+    if (step.code === undefined) return null;
+    return step.frames !== undefined
+      ? { kind: 'key', code: step.code, frames: step.frames }
+      : { kind: 'key', code: step.code };
+  }
+  if (step.kind === 'wait') {
+    // Playbook waits carry `durationFrames`; the worker step uses `frames`.
+    const frames = step.durationFrames ?? step.frames ?? 1;
+    return { kind: 'wait', frames };
+  }
+  // kind === 'mouse' — a movement delta is a look/aim move; otherwise a click.
+  if (step.movementX !== undefined || step.movementY !== undefined) {
+    // The browser-worker's mouseMove takes a normalised viewport coordinate
+    // (0..1). The playbook authors relative pointer-lock deltas; we can't
+    // faithfully convert those to absolute coords, so we anchor the move to
+    // screen-centre — enough to drive a look handler that reads movementX via
+    // a pointer-lock listener. The predicate set is what actually gates, and
+    // the look-delta playbooks (fps) ship English asserts, not predicates.
+    return { kind: 'mouseMove', x: 0.5, y: 0.5 };
+  }
+  return step.button !== undefined
+    ? { kind: 'mouseDown', button: step.button }
+    : { kind: 'mouseDown' };
+}
+
+/**
+ * Select the canonical game playtest plan for a declared genre. Returns null
+ * when no playbook is bundled for the genre (the repair loop then has no
+ * deterministic verdict to gate on and ships as-is). Pure.
+ */
+export function selectGamePlaytestPlan(genre: GameGenre): GamePlaytestPlan | null {
+  const playbook = getPlaytestPlaybook(genre);
+  if (playbook === null) return null;
+  const steps: GamePlaytestStep[] = [];
+  for (const step of playbook.steps) {
+    const projected = projectPlaybookStep(step);
+    if (projected !== null) steps.push(projected);
+  }
+  const predicates = playbook.steps.flatMap((s) => s.predicates ?? []);
+  return { playbook, steps, predicates: [...predicates] };
 }

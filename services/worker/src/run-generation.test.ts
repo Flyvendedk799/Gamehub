@@ -341,3 +341,267 @@ describe('runGeneration browser-jobs wiring (#1.4 — out-of-process runtimeVeri
     expect(playtestOut!.bootErrors.length).toBeGreaterThan(0);
   });
 });
+
+describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic verdict)', () => {
+  /** A topdown_arcade game spec with a real fail state → completable, so the
+   *  predicate gate is live. */
+  const TOPDOWN_SPEC = {
+    schemaVersion: 1,
+    genre: 'topdown_arcade',
+    dimensions: '2d',
+    perspective: 'top_down',
+    cameraKind: 'follow_2d',
+    primaryInputs: ['keyboard'],
+    numActors: 1,
+    winCondition: 'Reach the exit tile.',
+    loseCondition: 'Touch an enemy.',
+    features: {},
+  } as unknown as GameSpec;
+
+  /** A trace whose WASD deltas satisfy the topdown playbook predicates:
+   *  W → y down, S → y up, A → x left, D → x right. Maps onto the browser-
+   *  worker PlaytestVerdict shape (baseline + per-step snapshotAfter). */
+  function passingPlaytest(): PlaytestVerdict {
+    return {
+      hasGameContract: true,
+      hasDebugContract: true,
+      baselineSnapshot: { playerPos: { x: 100, y: 100 } },
+      steps: [
+        { step: { kind: 'key', code: 'KeyW' }, snapshotAfter: { playerPos: { x: 100, y: 70 } }, errors: [] },
+        { step: { kind: 'key', code: 'KeyS' }, snapshotAfter: { playerPos: { x: 100, y: 110 } }, errors: [] },
+        { step: { kind: 'key', code: 'KeyA' }, snapshotAfter: { playerPos: { x: 70, y: 110 } }, errors: [] },
+        { step: { kind: 'key', code: 'KeyD' }, snapshotAfter: { playerPos: { x: 110, y: 110 } }, errors: [] },
+      ],
+      bootErrors: [],
+    };
+  }
+
+  /** The c44763af sign-error class: pressing D moves the player -x. Fails the
+   *  D → +x predicate deterministically. */
+  function invertedPlaytest(): PlaytestVerdict {
+    const v = passingPlaytest();
+    return {
+      ...v,
+      steps: [
+        v.steps[0]!,
+        v.steps[1]!,
+        v.steps[2]!,
+        { step: { kind: 'key', code: 'KeyD' }, snapshotAfter: { playerPos: { x: 40, y: 110 } }, errors: [] },
+      ],
+    };
+  }
+
+  /** A browser-jobs stub whose playtest verdicts come from a queue (one per
+   *  repair round); the last entry is reused once the queue drains. runtime-
+   *  verify is always clean here so only the predicate gate decides. */
+  function queuedBrowserJobs(playtests: PlaytestVerdict[]): BrowserJobsPort & {
+    playtestCalls: number;
+  } {
+    let idx = 0;
+    return {
+      playtestCalls: 0,
+      async runtimeVerify() {
+        return { hasGameContract: true, fatalErrors: [] } satisfies RuntimeVerifyVerdict;
+      },
+      async playtest(_html, _steps) {
+        this.playtestCalls += 1;
+        const v = playtests[Math.min(idx, playtests.length - 1)] ?? null;
+        idx += 1;
+        return v;
+      },
+    };
+  }
+
+  /** An agent that declares a topdown spec and writes a real index.html. The
+   *  per-call `onRound` hook lets a test observe how many times the agent was
+   *  re-invoked (round 0 + repair rounds). */
+  function specAgent(onRound?: (input: { history: unknown[] }) => void): GenerateFn {
+    return async (input, deps) => {
+      onRound?.({ history: input.history as unknown[] });
+      await deps.gameMode?.setSpec?.(TOPDOWN_SPEC);
+      await deps.fs?.create('index.html', RED_SQUARE);
+      return emptyOutput('built a topdown game');
+    };
+  }
+
+  it('a PASSING playtest ships with 0 repair rounds and shipReason=passed', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = queuedBrowserJobs([passingPlaytest()]);
+    let rounds = 0;
+    const agent = specAgent(() => {
+      rounds += 1;
+    });
+
+    const result = await runGeneration(
+      { prompt: 'topdown game', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      { store, generate: agent, browserJobs },
+    );
+
+    expect(result.repairRounds).toBe(0);
+    expect(result.shipReason).toBe('passed');
+    expect(rounds).toBe(1); // agent invoked once, no repair
+  });
+
+  it('a FAILING playtest triggers exactly one repair round, then a fixed playtest ships', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    // Round 0 inverted (fails) → repair; round 1 passes → ship.
+    const browserJobs = queuedBrowserJobs([invertedPlaytest(), passingPlaytest()]);
+    const promptsSeen: string[] = [];
+    const agent: GenerateFn = async (input, deps) => {
+      promptsSeen.push(input.prompt);
+      await deps.gameMode?.setSpec?.(TOPDOWN_SPEC);
+      await deps.fs?.create('index.html', RED_SQUARE);
+      return emptyOutput('built');
+    };
+
+    const result = await runGeneration(
+      { prompt: 'topdown game', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      { store, generate: agent, browserJobs },
+    );
+
+    expect(result.repairRounds).toBe(1);
+    expect(result.shipReason).toBe('passed');
+    // The repair round was re-invoked with a SPECIFIC instruction naming the field.
+    expect(promptsSeen).toHaveLength(2);
+    expect(promptsSeen[0]).toBe('topdown game');
+    expect(promptsSeen[1]).toContain('playerPos.x');
+    expect(promptsSeen[1]!.toLowerCase()).not.toContain('try again');
+    // Two playtest verdicts gathered (one per attempt).
+    expect(browserJobs.playtestCalls).toBe(2);
+  });
+
+  it('a persistently FAILING playtest stops at the ceiling with shipReason=repair_exhausted', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    // Always inverted — the agent never fixes it. Default budget = 2 rounds.
+    const browserJobs = queuedBrowserJobs([invertedPlaytest()]);
+    let rounds = 0;
+    const agent = specAgent(() => {
+      rounds += 1;
+    });
+
+    const result = await runGeneration(
+      { prompt: 'broken topdown', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      { store, generate: agent, browserJobs },
+    );
+
+    expect(result.repairRounds).toBe(2); // DEFAULT_MAX_REPAIR_ROUNDS
+    expect(result.shipReason).toBe('repair_exhausted');
+    expect(rounds).toBe(3); // round 0 + 2 repair rounds
+  });
+
+  it('honors a custom maxRepairRounds ceiling (clamped to the hard ceiling of 3)', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = queuedBrowserJobs([invertedPlaytest()]);
+    let rounds = 0;
+    const agent = specAgent(() => {
+      rounds += 1;
+    });
+
+    const result = await runGeneration(
+      { prompt: 'broken topdown', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      { store, generate: agent, browserJobs, maxRepairRounds: 99 },
+    );
+
+    expect(result.repairRounds).toBe(3); // capped at MAX_REPAIR_ROUNDS_CEILING
+    expect(result.shipReason).toBe('repair_exhausted');
+    expect(rounds).toBe(4);
+  });
+
+  it('maxRepairRounds=0 disables the loop — a failing playtest ships with repair_exhausted, 0 rounds', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = queuedBrowserJobs([invertedPlaytest()]);
+    let rounds = 0;
+    const agent = specAgent(() => {
+      rounds += 1;
+    });
+
+    const result = await runGeneration(
+      { prompt: 'topdown', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      { store, generate: agent, browserJobs, maxRepairRounds: 0 },
+    );
+
+    expect(result.repairRounds).toBe(0);
+    expect(result.shipReason).toBe('repair_exhausted');
+    expect(rounds).toBe(1);
+  });
+
+  it('a NON-COMPLETABLE spec (loseCondition —) ships with skipped_non_completable, no repair', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    // Even though the playtest fails, a no-fail-state spec skips the gate.
+    const browserJobs = queuedBrowserJobs([invertedPlaytest()]);
+    let rounds = 0;
+    const agent: GenerateFn = async (_input, deps) => {
+      rounds += 1;
+      await deps.gameMode?.setSpec?.({
+        ...TOPDOWN_SPEC,
+        winCondition: '—',
+        loseCondition: '—',
+      } as unknown as GameSpec);
+      await deps.fs?.create('index.html', RED_SQUARE);
+      return emptyOutput('endless toy');
+    };
+
+    const result = await runGeneration(
+      { prompt: 'endless topdown', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      { store, generate: agent, browserJobs },
+    );
+
+    expect(result.repairRounds).toBe(0);
+    expect(result.shipReason).toBe('skipped_non_completable');
+    expect(rounds).toBe(1);
+  });
+
+  it('a genre with no playbook predicates ships with no_verdict, no repair', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = queuedBrowserJobs([invertedPlaytest()]);
+    const agent: GenerateFn = async (_input, deps) => {
+      // 'rpg' has no bundled playbook → selectGamePlaytestPlan returns null.
+      await deps.gameMode?.setSpec?.({ ...TOPDOWN_SPEC, genre: 'rpg' } as unknown as GameSpec);
+      await deps.fs?.create('index.html', RED_SQUARE);
+      return emptyOutput('rpg');
+    };
+
+    const result = await runGeneration(
+      { prompt: 'an rpg', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      { store, generate: agent, browserJobs },
+    );
+
+    expect(result.repairRounds).toBe(0);
+    expect(result.shipReason).toBe('no_verdict');
+    // No playbook → no playtest round-trip for the verdict.
+    expect(browserJobs.playtestCalls).toBe(0);
+  });
+
+  it('budget exhaustion (interrupted run) stops the loop early with budget_exhausted', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = queuedBrowserJobs([invertedPlaytest()]);
+    let rounds = 0;
+    const agent: GenerateFn = async (_input, deps) => {
+      rounds += 1;
+      await deps.gameMode?.setSpec?.(TOPDOWN_SPEC);
+      await deps.fs?.create('index.html', RED_SQUARE);
+      // Agent gracefully checkpointed (wall-clock / output budget) — the
+      // validation tail is spent, so a repair round can't run.
+      return { ...emptyOutput('checkpointed'), interrupted: true };
+    };
+
+    const result = await runGeneration(
+      { prompt: 'topdown', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      { store, generate: agent, browserJobs },
+    );
+
+    expect(result.repairRounds).toBe(0);
+    expect(result.shipReason).toBe('budget_exhausted');
+    expect(rounds).toBe(1); // no repair round was attempted
+  });
+
+  it('without a browser-jobs port the loop is inert (no_verdict, 0 rounds)', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const result = await runGeneration(
+      { prompt: 'topdown', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      { store, generate: specAgent() },
+    );
+    expect(result.repairRounds).toBe(0);
+    expect(result.shipReason).toBe('no_verdict');
+  });
+});

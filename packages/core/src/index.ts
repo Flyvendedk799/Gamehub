@@ -89,9 +89,34 @@ export {
 } from './artifact-type-classifier.js';
 export {
   planPlaytest,
+  selectGamePlaytestPlan,
   type PlaytestPlan,
   type PlaytestStep as DesignPlaytestStep,
+  type GamePlaytestPlan,
+  type GamePlaytestStep,
 } from './playtest-planner.js';
+export {
+  getPlaytestPlaybook,
+  listSupportedGenres,
+  type PlaybookStep,
+  type PlaytestPlaybook,
+} from './playtest-playbooks.js';
+export {
+  DEFAULT_MAX_REPAIR_ROUNDS,
+  MAX_REPAIR_ROUNDS_CEILING,
+  resolveMaxRepairRounds,
+  buildRepairVerdict,
+  buildRepairInstruction,
+  decideRepairAction,
+  traceFromPlaytestResult,
+  type ShipReason,
+  type RepairVerdict,
+  type RepairAction,
+  type RepairLoopState,
+  type AttemptObservation,
+  type FailedPredicateSummary,
+  type PlaytestResultLike,
+} from './repair-loop.js';
 export {
   diffThemeTokens,
   extractCssTokens,
