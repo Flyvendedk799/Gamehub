@@ -91,6 +91,37 @@ export const ANTHROPIC_PRICING: Readonly<Record<string, ModelPricingEntry>> = de
   },
 });
 
+/**
+ * Phase 6 — purchasable credit packs (6.1). A run costs 10 credits, so the
+ * smallest pack buys ~10 runs. Prices are USD; `credits` is the ledger delta
+ * granted on a confirmed purchase. The catalogue is the single source of truth
+ * shared by the API (validates the requested pack id) and the frontend (renders
+ * the buy options) so the two can never drift on price or grant size.
+ *
+ * Frozen so an accidental mutation of a pack throws rather than silently
+ * mispricing a purchase.
+ */
+export interface CreditPack {
+  /** Stable identifier the purchase API accepts. */
+  id: string;
+  /** Credits granted to the ledger when the purchase confirms. */
+  credits: number;
+  /** Price in USD. */
+  priceUsd: number;
+}
+
+export const CREDIT_PACKS: readonly CreditPack[] = Object.freeze([
+  Object.freeze({ id: 'starter', credits: 100, priceUsd: 5 }),
+  Object.freeze({ id: 'builder', credits: 500, priceUsd: 20 }),
+  Object.freeze({ id: 'studio', credits: 1500, priceUsd: 50 }),
+]);
+
+/** Look up a credit pack by id. Returns undefined for an unknown id so the
+ *  purchase route can reject it with a 400 instead of granting nothing. */
+export function creditPackById(id: string): CreditPack | undefined {
+  return CREDIT_PACKS.find((p) => p.id === id);
+}
+
 /** Token-usage shape consumed by `computeImpliedCost`. Matches the columns
  *  on `run_usage` so callers can pass the row directly. */
 export interface UsageTokens {

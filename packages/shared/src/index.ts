@@ -559,8 +559,11 @@ export {
 } from './snapshot';
 export {
   ANTHROPIC_PRICING,
+  CREDIT_PACKS,
   computeImpliedCost,
   contextWindowFor,
+  type CreditPack,
+  creditPackById,
   type CumulativeContextBytes,
   estimateContextUsedPct,
   MODEL_CONTEXT_WINDOWS,

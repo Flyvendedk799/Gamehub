@@ -14,7 +14,7 @@
  */
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import websocketPlugin from '@fastify/websocket';
@@ -25,7 +25,9 @@ import { exportGameZip } from '@playforge/exporters/game-zip';
 import { type SnapshotStore, contentTypeFor } from '@playforge/storage';
 import type { Authenticator, AuthedUser } from './auth';
 import { generateSessionToken, hashPassword, sessionExpiresAt, verifyPassword } from './auth';
-import { eq as drizzleEq, or as drizzleOr, sql as drizzleSql } from 'drizzle-orm';
+import type { CreditPurchaseProvider } from './credit-purchase';
+import { buildPasswordResetEmail, type EmailPort } from './email';
+import { and as drizzleAnd, eq as drizzleEq, isNull as drizzleIsNull, or as drizzleOr, sql as drizzleSql } from 'drizzle-orm';
 import type { BrowserJobQueue, RuntimeVerifyResult, ThumbnailResult } from './browser-queue';
 import type { ChatRepo } from './chat-repo';
 import type { HubRepo } from './hub-repo';
@@ -158,6 +160,18 @@ export interface ServerDeps {
   sseHeartbeatMs?: number;
   /** Optional: hard cap on a single SSE stream (ms). Defaults to SSE_MAX_STREAM_MS. */
   sseMaxStreamMs?: number;
+  /**
+   * Optional (Phase 6.1): credit-purchase provider. When set, enables
+   * POST /v1/credits/purchase. Flag/env-gated — mock by default in dev, a real
+   * provider swaps in later behind the same port. Requires authDb to grant.
+   */
+  creditProvider?: CreditPurchaseProvider;
+  /**
+   * Optional (Phase 6.2): email transport for password-reset mail. When set
+   * (with authDb), enables /v1/auth/forgot-password + /v1/auth/reset-password.
+   * Console transport is the dev default; a real provider swaps in later.
+   */
+  email?: EmailPort;
 }
 
 const ENGINES: Engine[] = ['three', 'phaser'];
@@ -173,6 +187,19 @@ const collabRooms = new Map<string, Set<any>>();
 const FREE_TIER_CREDITS = 100;
 const CREDITS_PER_RUN = 10;
 
+/** Password-reset token lifetime (Phase 6.2). Short by design — long enough to
+ *  click through from an email, short enough to bound a leaked-token window. */
+const PASSWORD_RESET_TTL_MS = 30 * 60 * 1000; // 30 minutes
+/** Mirror the register route's password caps for the reset path. */
+const PASSWORD_MIN_LEN = 8;
+const PASSWORD_MAX_LEN = 200;
+
+/** SHA-256 hex of a raw reset token. Only the hash is persisted; the raw token
+ *  is mailed to the user. A presented token is re-hashed and matched here. */
+function hashResetToken(raw: string): string {
+  return createHash('sha256').update(raw).digest('hex');
+}
+
 /**
  * Sentinel thrown by the reservation transaction when the user's balance can't
  * cover one run. The generate route catches it, marks the just-created run
@@ -183,6 +210,19 @@ export class InsufficientCreditsError extends Error {
   constructor(readonly balance: number, readonly required: number) {
     super('insufficient_credits');
     this.name = 'InsufficientCreditsError';
+  }
+}
+
+/**
+ * Sentinel for the reset-password transaction: thrown when the token-burn UPDATE
+ * (guarded on `used_at IS NULL`) affects zero rows, i.e. a concurrent submit
+ * already consumed the token. The route maps it to the same 400 as an
+ * invalid/expired token so a racing double-submit can never reset twice.
+ */
+class ResetTokenRaceError extends Error {
+  constructor() {
+    super('reset_token_already_used');
+    this.name = 'ResetTokenRaceError';
   }
 }
 
@@ -497,6 +537,186 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!user) return;
     const balance = await getUserBalance(user.userId);
     return reply.send({ userId: user.userId, handle: user.handle, ...(balance !== Infinity ? { balance } : {}) });
+  });
+
+  // ── password reset (6.2) ────────────────────────────────────────────────────
+  // POST /v1/auth/forgot-password {email} — ALWAYS 202 (no account enumeration).
+  //   If the email maps to a live account, mint a single-use, short-TTL token,
+  //   store its HASH, and "send" the raw token via the EmailPort. Rate-limited.
+  // POST /v1/auth/reset-password {token, newPassword} — validate the token
+  //   (unexpired + unused), set the new password, mark the token used, and DELETE
+  //   ALL the user's sessions so a thief's stolen session can't survive a reset.
+
+  app.post('/v1/auth/forgot-password', async (req, reply) => {
+    // Gated on BOTH a DB and an email transport — without a way to send the
+    // token the flow is inert. 503 makes the missing wiring explicit.
+    if (!deps.authDb || !deps.email) return reply.code(503).send({ error: 'reset_unavailable' });
+    const { schema: s } = await import('@playforge/db');
+    const body = (req.body ?? {}) as { email?: unknown };
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : null;
+
+    // Rate-limit per IP so the endpoint can't be used to spray reset mail or
+    // probe which emails exist (timing). Keyed before the lookup.
+    if (!checkAuthRateLimit(`forgot:${req.ip ?? 'unknown'}`)) {
+      return reply.code(429).send({ error: 'too_many_attempts', retryAfterMs: AUTH_WINDOW_MS });
+    }
+
+    // Anti-enumeration: ALWAYS reply 202, whether or not the account exists. The
+    // mint + send only happens for a real, live account. A malformed email is
+    // also accepted silently (same 202) so the response can't be used to probe.
+    const accepted = reply.code(202).send({ ok: true });
+    if (!email || !email.includes('@') || email.length > 320) return accepted;
+
+    const [user] = await deps.authDb
+      .select({ id: s.users.id })
+      .from(s.users)
+      .where(drizzleAnd(drizzleEq(s.users.email, email), drizzleIsNull(s.users.deletedAt)))
+      .catch(() => []);
+    if (!user) return accepted;
+
+    const rawToken = randomBytes(32).toString('base64url');
+    const tokenHash = hashResetToken(rawToken);
+    const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MS);
+    try {
+      await deps.authDb
+        .insert(s.passwordResetTokens)
+        .values({ userId: user.id, tokenHash, expiresAt });
+      await deps.email.send(
+        buildPasswordResetEmail({
+          to: email,
+          token: rawToken,
+          ...(deps.appBaseUrl !== undefined ? { appBaseUrl: deps.appBaseUrl } : {}),
+          ttlMinutes: Math.round(PASSWORD_RESET_TTL_MS / 60_000),
+        }),
+      );
+    } catch (err) {
+      // Never leak failure to the caller (still 202); log for operators.
+      console.error('[forgot-password] mint/send failed:', err);
+    }
+    return accepted;
+  });
+
+  app.post('/v1/auth/reset-password', async (req, reply) => {
+    if (!deps.authDb) return reply.code(503).send({ error: 'reset_unavailable' });
+    const { schema: s } = await import('@playforge/db');
+    const body = (req.body ?? {}) as { token?: unknown; newPassword?: unknown };
+    const token = typeof body.token === 'string' ? body.token : null;
+    const newPassword = typeof body.newPassword === 'string' ? body.newPassword : null;
+    if (!token) return reply.code(400).send({ error: 'token_required' });
+    if (!newPassword || newPassword.length < PASSWORD_MIN_LEN) {
+      return reply.code(400).send({ error: 'password_too_short', min: PASSWORD_MIN_LEN });
+    }
+    if (newPassword.length > PASSWORD_MAX_LEN) {
+      return reply.code(400).send({ error: 'password_too_long', max: PASSWORD_MAX_LEN });
+    }
+    // Rate-limit reset attempts per IP so a stolen-token guess loop is bounded.
+    if (!checkAuthRateLimit(`reset:${req.ip ?? 'unknown'}`)) {
+      return reply.code(429).send({ error: 'too_many_attempts', retryAfterMs: AUTH_WINDOW_MS });
+    }
+
+    const tokenHash = hashResetToken(token);
+    const [row] = await deps.authDb
+      .select({ id: s.passwordResetTokens.id, userId: s.passwordResetTokens.userId })
+      .from(s.passwordResetTokens)
+      .where(
+        drizzleAnd(
+          drizzleEq(s.passwordResetTokens.tokenHash, tokenHash),
+          drizzleIsNull(s.passwordResetTokens.usedAt),
+          drizzleSql`${s.passwordResetTokens.expiresAt} > now()`,
+        ),
+      );
+    if (!row) return reply.code(400).send({ error: 'invalid_or_expired_token' });
+
+    const passwordHash = await hashPassword(newPassword);
+    // Atomic: set the new password, burn the token, kill every session. A reset
+    // is a security event — force re-login everywhere so a stolen live session
+    // (or a session on the attacker's device) is invalidated.
+    try {
+      await deps.authDb.transaction(async (tx) => {
+        // Burn the token first, guarded on still-unused, so a racing double-submit
+        // can only succeed once (the UPDATE … WHERE used_at IS NULL is the gate).
+        const used = await tx
+          .update(s.passwordResetTokens)
+          .set({ usedAt: new Date() })
+          .where(
+            drizzleAnd(
+              drizzleEq(s.passwordResetTokens.id, row.id),
+              drizzleIsNull(s.passwordResetTokens.usedAt),
+            ),
+          )
+          .returning({ id: s.passwordResetTokens.id });
+        if (used.length === 0) throw new ResetTokenRaceError();
+        await tx.update(s.users).set({ passwordHash }).where(drizzleEq(s.users.id, row.userId));
+        await tx.delete(s.sessions).where(drizzleEq(s.sessions.userId, row.userId));
+      });
+    } catch (err) {
+      if (err instanceof ResetTokenRaceError) {
+        return reply.code(400).send({ error: 'invalid_or_expired_token' });
+      }
+      console.error('[reset-password] reset transaction failed:', err);
+      return reply.code(500).send({ error: 'reset_failed' });
+    }
+    return reply.send({ ok: true });
+  });
+
+  // ── credit purchase (6.1) ────────────────────────────────────────────────────
+  // GET  /v1/credits/balance        — SUM(delta) balance (same as /auth/me).
+  // POST /v1/credits/purchase {pack} — buy a credit pack via the provider; the
+  //   webhook-style confirmation grants pack.credits to the ledger, idempotent on
+  //   the provider's external event id (reuses credit_ledger_user_event_key).
+
+  app.get('/v1/credits/balance', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const balance = await getUserBalance(user.userId);
+    return reply.send({ balance: balance === Infinity ? null : balance });
+  });
+
+  app.post('/v1/credits/purchase', async (req, reply) => {
+    if (!deps.creditProvider || !deps.authDb) {
+      return reply.code(503).send({ error: 'purchase_unavailable' });
+    }
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { schema: s } = await import('@playforge/db');
+    const body = (req.body ?? {}) as { pack?: unknown; packId?: unknown };
+    const packId =
+      typeof body.pack === 'string' ? body.pack : typeof body.packId === 'string' ? body.packId : null;
+    if (!packId) return reply.code(400).send({ error: 'pack_required' });
+
+    const confirmation = await deps.creditProvider.createPurchase({ userId: user.userId, packId });
+    if (!confirmation) return reply.code(400).send({ error: 'unknown_pack', pack: packId });
+
+    // Grant on confirmation. Idempotent on the external event id via the partial
+    // unique credit_ledger_user_event_key (user_id, stripe_event_id) — the
+    // stripe_event_id column is repurposed as the generic external event id, so a
+    // double-fired webhook (or a client retry) grants the credits exactly once.
+    if (confirmation.confirmed) {
+      try {
+        await deps.authDb
+          .insert(s.creditLedger)
+          .values({
+            userId: user.userId,
+            delta: confirmation.pack.credits,
+            reason: 'purchase',
+            stripeEventId: confirmation.externalEventId,
+          })
+          .onConflictDoNothing();
+      } catch (err) {
+        console.error('[purchase] credit grant failed:', err);
+        return reply.code(500).send({ error: 'grant_failed' });
+      }
+    }
+
+    const balance = await getUserBalance(user.userId);
+    return reply.send({
+      ok: true,
+      pack: { id: confirmation.pack.id, credits: confirmation.pack.credits, priceUsd: confirmation.pack.priceUsd },
+      eventId: confirmation.externalEventId,
+      checkoutUrl: confirmation.checkoutUrl,
+      confirmed: confirmation.confirmed,
+      ...(balance !== Infinity ? { balance } : {}),
+    });
   });
 
   // ── projects CRUD ─────────────────────────────────────────────────────────

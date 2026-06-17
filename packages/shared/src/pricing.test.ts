@@ -6,7 +6,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { ANTHROPIC_PRICING, type UsageTokens, computeImpliedCost } from './pricing';
+import {
+  ANTHROPIC_PRICING,
+  CREDIT_PACKS,
+  type UsageTokens,
+  computeImpliedCost,
+  creditPackById,
+} from './pricing';
 
 const FPS_RUN: UsageTokens = {
   // 2026-05-06 design ba2adf62 generation_id mouf8wgh-nazlpq — the actual
@@ -175,5 +181,39 @@ describe('computeImpliedCost (Phase 3)', () => {
       // biome-ignore lint/suspicious/noExplicitAny: deliberate mutation test
       (ANTHROPIC_PRICING as any)['claude-sonnet-4-6'].inputPerMillion = 999;
     }).toThrow();
+  });
+});
+
+describe('CREDIT_PACKS (Phase 6.1)', () => {
+  it('every pack has a positive credit grant and price, and a unique id', () => {
+    const ids = new Set<string>();
+    for (const pack of CREDIT_PACKS) {
+      expect(pack.credits).toBeGreaterThan(0);
+      expect(pack.priceUsd).toBeGreaterThan(0);
+      expect(ids.has(pack.id)).toBe(false);
+      ids.add(pack.id);
+    }
+    expect(CREDIT_PACKS.length).toBeGreaterThan(0);
+  });
+
+  it('creditPackById resolves a known pack and returns undefined otherwise', () => {
+    const first = CREDIT_PACKS[0];
+    expect(first).toBeDefined();
+    if (first) {
+      expect(creditPackById(first.id)).toEqual(first);
+    }
+    expect(creditPackById('no-such-pack')).toBeUndefined();
+  });
+
+  it('packs are frozen so accidental mutation throws', () => {
+    expect(() => {
+      // biome-ignore lint/suspicious/noExplicitAny: deliberate mutation test
+      (CREDIT_PACKS[0] as any).credits = 999_999;
+    }).toThrow();
+  });
+
+  it('the smallest pack buys at least one run (>= 10 credits)', () => {
+    const min = Math.min(...CREDIT_PACKS.map((p) => p.credits));
+    expect(min).toBeGreaterThanOrEqual(10);
   });
 });

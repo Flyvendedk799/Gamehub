@@ -7,6 +7,7 @@ import {
   chatMessages,
   creditLedger,
   engineKind,
+  passwordResetTokens,
   projects,
   publishedGames,
   runs,
@@ -105,6 +106,28 @@ describe('schema', () => {
     expect(seqKey?.config.unique).toBe(true);
     // The redundant non-unique index was dropped in favour of the unique one.
     expect(indexNames(snapshots)).not.toContain('snapshots_project_seq_idx');
+  });
+
+  it('password_reset_tokens stores only a token hash + lifecycle timestamps', () => {
+    const cfg = getTableConfig(passwordResetTokens);
+    expect(cfg.name).toBe('password_reset_tokens');
+    expect(columnNames(passwordResetTokens)).toEqual(
+      expect.arrayContaining(['id', 'user_id', 'token_hash', 'expires_at', 'used_at']),
+    );
+    // The raw token is never persisted — only its hash.
+    expect(columnNames(passwordResetTokens)).not.toContain('token');
+  });
+
+  it('password_reset_tokens has a unique hash index + a user lookup index', () => {
+    expect(indexNames(passwordResetTokens)).toEqual(
+      expect.arrayContaining([
+        'password_reset_tokens_hash_key',
+        'password_reset_tokens_user_idx',
+      ]),
+    );
+    const cfg = getTableConfig(passwordResetTokens);
+    const hashKey = cfg.indexes.find((i) => i.config.name === 'password_reset_tokens_hash_key');
+    expect(hashKey?.config.unique).toBe(true);
   });
 
   it('engine enum is web-only (three + phaser)', () => {

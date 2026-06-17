@@ -25,6 +25,8 @@ import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
 import { enqueueRun } from '../../worker/src/queue';
 import { SessionAuthenticator } from './auth';
 import { BrowserJobQueue } from './browser-queue';
+import { MockCreditProvider, type CreditPurchaseProvider } from './credit-purchase';
+import { ConsoleEmailTransport, type EmailPort } from './email';
 import { DrizzleChatRepo, DrizzleProjectRepo, DrizzleRunRepo, DrizzleSnapshotRepo } from './drizzle-repos';
 import { DrizzleHubRepo } from './hub-repo';
 import { DrizzlePublishRepo } from './publish-repo';
@@ -61,6 +63,20 @@ async function main() {
   const maxRunTokens = process.env['MAX_RUN_TOKENS'] ? Number(process.env['MAX_RUN_TOKENS']) : undefined;
   // Public app base URL for the exported game's "Remix this" CTA (#3.2). Configurable.
   const appBaseUrl = process.env['APP_BASE_URL'];
+
+  // Phase 6.1 — credit purchase. Flag/env-gated: enabled by default in dev with
+  // the MockCreditProvider; set CREDIT_PURCHASE_ENABLED=false to disable, or swap
+  // in a real (Stripe) provider here later. CREDIT_PROVIDER selects the impl.
+  const creditPurchaseEnabled = process.env['CREDIT_PURCHASE_ENABLED'] !== 'false';
+  const creditProvider: CreditPurchaseProvider | undefined =
+    creditPurchaseEnabled && (process.env['CREDIT_PROVIDER'] ?? 'mock') === 'mock'
+      ? new MockCreditProvider()
+      : undefined;
+
+  // Phase 6.2 — password-reset email. Console transport is the dev default
+  // (logs the reset link); a real provider swaps in behind EmailPort later.
+  const email: EmailPort | undefined =
+    (process.env['EMAIL_TRANSPORT'] ?? 'console') === 'console' ? new ConsoleEmailTransport() : undefined;
 
   const db = createDb(databaseUrl);
 
@@ -179,6 +195,8 @@ async function main() {
     ...(maxRunTokens !== undefined ? { maxRunTokens } : {}),
     ...(queue !== undefined ? { generateQueue: queue } : {}),
     ...(appBaseUrl !== undefined ? { appBaseUrl } : {}),
+    ...(creditProvider !== undefined ? { creditProvider } : {}),
+    ...(email !== undefined ? { email } : {}),
   });
 
   // ── Graceful shutdown (4.4) ─────────────────────────────────────────────────

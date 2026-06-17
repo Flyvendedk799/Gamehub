@@ -33,3 +33,15 @@ export {
   DrizzleHubRepo,
 } from './hub-repo';
 export { DrizzleProjectRepo, DrizzleRunRepo, DrizzleChatRepo } from './drizzle-repos';
+export {
+  type CreditPurchaseProvider,
+  type PurchaseConfirmation,
+  MockCreditProvider,
+} from './credit-purchase';
+export {
+  type EmailPort,
+  type EmailMessage,
+  ConsoleEmailTransport,
+  CapturingEmailTransport,
+  buildPasswordResetEmail,
+} from './email';

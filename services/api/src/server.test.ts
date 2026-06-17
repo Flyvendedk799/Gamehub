@@ -1272,3 +1272,371 @@ describe('SSE relay terminal-event set (2.5b)', () => {
     expect(res.body).toContain('"type":"run_canceled"');
   });
 });
+
+// ── Phase 6 fixtures: an in-memory authDb that mimics the slice of the Drizzle
+//    query surface the purchase + reset routes touch. It routes on the table
+//    object identity passed to .from()/.update()/.delete(), backs four arrays
+//    (users / credit ledger / reset tokens / sessions), and honours the partial
+//    unique on (user_id, stripe_event_id) for the idempotent purchase grant and
+//    the unused-token gate for the reset burn. Enough to exercise webhook
+//    idempotency, the balance<10→purchase→generate unlock, and the full reset
+//    round-trip without a live Postgres. ───────────────────────────────────────
+
+import { createHash } from 'node:crypto';
+import { schema as dbSchema } from '@playforge/db';
+import { hashPassword as hashPasswordReal, verifyPassword as verifyPasswordReal } from './auth';
+import { CapturingEmailTransport, MockCreditProvider } from './index';
+
+interface FakeUser { id: string; email: string; passwordHash: string; handle: string; deletedAt: Date | null }
+interface FakeLedger { userId: string; delta: number; reason: string; stripeEventId?: string | null; runId?: string | null }
+interface FakeResetToken { id: string; userId: string; tokenHash: string; expiresAt: Date; usedAt: Date | null }
+interface FakeSession { token: string; userId: string }
+
+function makePhase6Db(seed?: { users?: FakeUser[]; ledger?: FakeLedger[]; sessions?: FakeSession[] }) {
+  const users: FakeUser[] = seed?.users ?? [];
+  const ledger: FakeLedger[] = seed?.ledger ?? [];
+  const resetTokens: FakeResetToken[] = [];
+  const sessions: FakeSession[] = seed?.sessions ?? [];
+  let tokenSeq = 0;
+
+  const balanceOf = (userId: string) => ledger.filter((r) => r.userId === userId).reduce((n, r) => n + r.delta, 0);
+
+  // A query builder whose terminal `where`/result resolves against the stores.
+  // The select handlers are keyed by the table passed to from().
+  const makeBuilder = () => {
+    let table: unknown;
+    const builder: Record<string, unknown> = {
+      select: () => builder,
+      from: (t: unknown) => {
+        table = t;
+        return builder;
+      },
+      // Terminal: the route awaits where() (the last call). We can't see the
+      // predicate, so branch on the table captured by from() and resolve against
+      // the in-memory stores. Tests seed exactly one user/token so this is exact.
+      where: async () => {
+        if (table === dbSchema.users) {
+          return users.filter((u) => u.deletedAt === null).map((u) => ({ id: u.id }));
+        }
+        if (table === dbSchema.creditLedger) {
+          // getUserBalance + the reservation SUM, for the single seeded user.
+          const uid = users[0]?.id ?? '';
+          return [{ bal: balanceOf(uid) }];
+        }
+        if (table === dbSchema.passwordResetTokens) {
+          // Reset route: the single unexpired + unused token, if any.
+          const now = Date.now();
+          return resetTokens
+            .filter((t) => t.usedAt === null && t.expiresAt.getTime() > now)
+            .map((t) => ({ id: t.id, userId: t.userId }));
+        }
+        return [];
+      },
+    };
+    return builder;
+  };
+
+  const insertChain = (table: unknown) => ({
+    values: (row: Record<string, unknown>) => {
+      const apply = () => {
+        if (table === dbSchema.creditLedger) {
+          const r = row as unknown as FakeLedger;
+          // Honour the partial unique on (user_id, stripe_event_id).
+          if (r.stripeEventId != null) {
+            const dup = ledger.some((x) => x.userId === r.userId && x.stripeEventId === r.stripeEventId);
+            if (dup) return;
+          }
+          ledger.push({ ...r });
+        } else if (table === dbSchema.passwordResetTokens) {
+          const r = row as { userId: string; tokenHash: string; expiresAt: Date };
+          resetTokens.push({ id: `tok_${++tokenSeq}`, userId: r.userId, tokenHash: r.tokenHash, expiresAt: r.expiresAt, usedAt: null });
+        }
+      };
+      return {
+        // purchase grant awaits onConflictDoNothing() directly.
+        onConflictDoNothing: async () => { apply(); },
+        // token mint awaits values() result directly (no onConflict) — make the
+        // returned object thenable so `await db.insert().values(...)` applies it.
+        then: (resolve: (v: unknown) => void) => { apply(); resolve(undefined); },
+      };
+    },
+  });
+
+  // tx.update(t).set(p).where(...) is used two ways: the token-burn chains
+  // .returning(); the users password update awaits the .where(...) directly. So
+  // where(...) returns an object that is BOTH thenable (applies the users patch
+  // on await) AND exposes .returning() (applies the token burn). The applied
+  // side-effect depends on the table.
+  const txApi = {
+    // The credit-RESERVATION path runs inside a transaction: an advisory lock
+    // (execute), a balance SUM (select.from.where), then an idempotent negative
+    // insert. Mirror the db-level surface so a purchase-unlocked /generate works.
+    execute: async () => undefined,
+    select: () => makeBuilder(),
+    insert: (table: unknown) => insertChain(table),
+    update: (table: unknown) => ({
+      set: (patch: Record<string, unknown>) => ({
+        where: () => {
+          const applyUsers = () => {
+            if (table === dbSchema.users) {
+              const u = users[0];
+              if (u) u.passwordHash = patch['passwordHash'] as string;
+            }
+          };
+          const burnToken = (): Array<{ id: string }> => {
+            // Gate on used_at IS NULL — a racing double-submit burns once.
+            const tok = resetTokens.find((t) => t.usedAt === null);
+            if (!tok) return [];
+            tok.usedAt = (patch['usedAt'] as Date) ?? new Date();
+            return [{ id: tok.id }];
+          };
+          return {
+            // Awaited directly (users password update path).
+            then: (resolve: (v: unknown) => void) => { applyUsers(); resolve(undefined); },
+            // Chained for the token-burn path.
+            returning: async () => burnToken(),
+          };
+        },
+      }),
+    }),
+    delete: (table: unknown) => ({
+      where: async () => {
+        if (table === dbSchema.sessions) {
+          const uid = users[0]?.id;
+          for (let i = sessions.length - 1; i >= 0; i--) if (sessions[i]?.userId === uid) sessions.splice(i, 1);
+        }
+        return undefined;
+      },
+    }),
+  };
+
+  const db = {
+    select: () => makeBuilder(),
+    insert: (table: unknown) => insertChain(table),
+    transaction: async (fn: (tx: typeof txApi) => Promise<void>) => { await fn(txApi); },
+  } as unknown as NonNullable<ServerDeps['authDb']>;
+
+  return { db, users, ledger, resetTokens, sessions, balanceOf };
+}
+
+describe('credit purchase (6.1)', () => {
+  function makePurchaseApp(opts: {
+    authDb: NonNullable<ServerDeps['authDb']>;
+    eventId?: string;
+  }) {
+    return buildServer({
+      repo: new InMemoryProjectRepo(),
+      auth: new HeaderAuthenticator(),
+      bus: new InMemoryEventBus(),
+      runRepo: new InMemoryRunRepo(),
+      enqueue: async () => {},
+      authDb: opts.authDb,
+      creditProvider: new MockCreditProvider({ eventIdFactory: () => opts.eventId ?? 'evt_fixed' }),
+    });
+  }
+
+  it('grants the pack credits and returns the new balance', async () => {
+    const { db, ledger } = makePhase6Db({ users: [{ id: 'alice', email: 'a@x.io', passwordHash: 'h', handle: 'alice', deletedAt: null }] });
+    const app = makePurchaseApp({ authDb: db });
+    const res = await app.inject({ method: 'POST', url: '/v1/credits/purchase', headers: AS_ALICE, payload: { pack: 'starter' } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ok: true, pack: { id: 'starter', credits: 100 }, balance: 100, confirmed: true });
+    expect(ledger.filter((r) => r.reason === 'purchase')).toHaveLength(1);
+  });
+
+  it('is idempotent on the external event id — a re-fired webhook grants once', async () => {
+    const { db, balanceOf } = makePhase6Db({ users: [{ id: 'alice', email: 'a@x.io', passwordHash: 'h', handle: 'alice', deletedAt: null }] });
+    const app = makePurchaseApp({ authDb: db, eventId: 'evt_dup' });
+    await app.inject({ method: 'POST', url: '/v1/credits/purchase', headers: AS_ALICE, payload: { pack: 'starter' } });
+    await app.inject({ method: 'POST', url: '/v1/credits/purchase', headers: AS_ALICE, payload: { pack: 'starter' } });
+    // Same event id both times → exactly one +100 grant.
+    expect(balanceOf('alice')).toBe(100);
+  });
+
+  it('rejects an unknown pack with 400', async () => {
+    const { db } = makePhase6Db({ users: [{ id: 'alice', email: 'a@x.io', passwordHash: 'h', handle: 'alice', deletedAt: null }] });
+    const app = makePurchaseApp({ authDb: db });
+    const res = await app.inject({ method: 'POST', url: '/v1/credits/purchase', headers: AS_ALICE, payload: { pack: 'nope' } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'unknown_pack' });
+  });
+
+  it('503 when no credit provider is configured', async () => {
+    const { db } = makePhase6Db({ users: [{ id: 'alice', email: 'a@x.io', passwordHash: 'h', handle: 'alice', deletedAt: null }] });
+    const app = buildServer({
+      repo: new InMemoryProjectRepo(), auth: new HeaderAuthenticator(), bus: new InMemoryEventBus(),
+      runRepo: new InMemoryRunRepo(), enqueue: async () => {}, authDb: db,
+    });
+    const res = await app.inject({ method: 'POST', url: '/v1/credits/purchase', headers: AS_ALICE, payload: { pack: 'starter' } });
+    expect(res.statusCode).toBe(503);
+  });
+
+  it('GET /v1/credits/balance returns SUM(delta)', async () => {
+    const { db } = makePhase6Db({
+      users: [{ id: 'alice', email: 'a@x.io', passwordHash: 'h', handle: 'alice', deletedAt: null }],
+      ledger: [{ userId: 'alice', delta: 100, reason: 'welcome_grant' }, { userId: 'alice', delta: -10, reason: 'reservation' }],
+    });
+    const app = makePurchaseApp({ authDb: db });
+    const res = await app.inject({ method: 'GET', url: '/v1/credits/balance', headers: AS_ALICE });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ balance: 90 });
+  });
+
+  it('a balance<10 user can purchase and then /generate (was 402)', async () => {
+    // Seed alice with 5 credits — below the 10-credit run cost.
+    const { db, balanceOf } = makePhase6Db({
+      users: [{ id: 'alice', email: 'a@x.io', passwordHash: 'h', handle: 'alice', deletedAt: null }],
+      ledger: [{ userId: 'alice', delta: 5, reason: 'welcome_grant' }],
+    });
+    const repo = new InMemoryProjectRepo();
+    const runRepo = new InMemoryRunRepo();
+    const project = await repo.create({ ownerId: 'alice', name: 'Unlock', engine: 'phaser' });
+    const enqueued: string[] = [];
+    const app = buildServer({
+      repo, auth: new HeaderAuthenticator(), bus: new InMemoryEventBus(), runRepo,
+      enqueue: async (i) => { enqueued.push(i.runId); },
+      authDb: db,
+      creditProvider: new MockCreditProvider({ eventIdFactory: () => 'evt_unlock' }),
+    });
+
+    // Pre-purchase: generate is blocked with 402.
+    const before = await app.inject({ method: 'POST', url: `/v1/projects/${project.id}/generate`, headers: AS_ALICE, payload: { prompt: 'go' } });
+    expect(before.statusCode).toBe(402);
+    expect(enqueued).toHaveLength(0);
+
+    // Purchase a pack → balance jumps well above the run cost.
+    const buy = await app.inject({ method: 'POST', url: '/v1/credits/purchase', headers: AS_ALICE, payload: { pack: 'starter' } });
+    expect(buy.statusCode).toBe(200);
+    expect(balanceOf('alice')).toBe(105);
+
+    // Post-purchase: generate now succeeds (202) and enqueues.
+    const after = await app.inject({ method: 'POST', url: `/v1/projects/${project.id}/generate`, headers: AS_ALICE, payload: { prompt: 'go' } });
+    expect(after.statusCode).toBe(202);
+    expect(enqueued).toHaveLength(1);
+  });
+});
+
+describe('password reset (6.2)', () => {
+  const ALICE: FakeUser = { id: 'alice', email: 'alice@example.com', passwordHash: '', handle: 'alice', deletedAt: null };
+
+  async function seededAlice(oldPassword: string) {
+    const user = { ...ALICE, passwordHash: await hashPasswordReal(oldPassword) };
+    return user;
+  }
+
+  function makeResetApp(authDb: NonNullable<ServerDeps['authDb']>, email = new CapturingEmailTransport()) {
+    const app = buildServer({
+      repo: new InMemoryProjectRepo(), auth: new HeaderAuthenticator(), bus: new InMemoryEventBus(),
+      runRepo: new InMemoryRunRepo(), enqueue: async () => {}, authDb, email,
+    });
+    return { app, email };
+  }
+
+  it('forgot-password is 202 for an UNKNOWN email and mints no token (no enumeration)', async () => {
+    const { db, resetTokens } = makePhase6Db({ users: [] });
+    const { app, email } = makeResetApp(db);
+    const res = await app.inject({ method: 'POST', url: '/v1/auth/forgot-password', payload: { email: 'ghost@nowhere.io' } });
+    expect(res.statusCode).toBe(202);
+    expect(resetTokens).toHaveLength(0);
+    expect(email.sent).toHaveLength(0);
+  });
+
+  it('forgot-password is 202 for a KNOWN email and mints a single token + sends mail', async () => {
+    const user = await seededAlice('oldpass123');
+    const { db, resetTokens } = makePhase6Db({ users: [user] });
+    const { app, email } = makeResetApp(db);
+    const res = await app.inject({ method: 'POST', url: '/v1/auth/forgot-password', payload: { email: user.email } });
+    expect(res.statusCode).toBe(202);
+    expect(resetTokens).toHaveLength(1);
+    expect(email.sent).toHaveLength(1);
+    expect(email.sent[0]?.to).toBe(user.email);
+    // The mailed body carries the raw token; the stored row carries only its hash.
+    const body = email.sent[0]?.text ?? '';
+    const stored = resetTokens[0]?.tokenHash ?? '';
+    expect(stored).not.toBe('');
+    // The body actually contains a token that hashes to the stored value (proves
+    // the raw token is mailed but never persisted).
+    const matches = body.split(/\s+/).some((w) => createHash('sha256').update(w).digest('hex') === stored);
+    expect(matches).toBe(true);
+  });
+
+  it('reset round-trip: old password fails, new succeeds, all sessions invalidated', async () => {
+    const user = await seededAlice('oldpass123');
+    const { db, resetTokens, sessions } = makePhase6Db({
+      users: [user],
+      sessions: [{ token: 'sess1', userId: 'alice' }, { token: 'sess2', userId: 'alice' }],
+    });
+    const { app, email } = makeResetApp(db);
+
+    // Mint a token via forgot-password and recover the raw token from the email body.
+    await app.inject({ method: 'POST', url: '/v1/auth/forgot-password', payload: { email: user.email } });
+    const body = email.sent[0]?.text ?? '';
+    // The raw token is the base64url string in the body; recover it by hashing
+    // candidate tokens. Simpler: re-derive from the stored hash isn't possible, so
+    // pull the token out of the body. It's the last whitespace-delimited token
+    // that hashes to the stored value.
+    const stored = resetTokens[0]?.tokenHash;
+    const candidate = body.split(/\s+/).find((w) => createHash('sha256').update(w).digest('hex') === stored);
+    expect(candidate).toBeDefined();
+
+    const res = await app.inject({ method: 'POST', url: '/v1/auth/reset-password', payload: { token: candidate, newPassword: 'brandnew456' } });
+    expect(res.statusCode).toBe(200);
+
+    // Password actually changed: new verifies, old does not.
+    expect(await verifyPasswordReal('brandnew456', user.passwordHash)).toBe(true);
+    expect(await verifyPasswordReal('oldpass123', user.passwordHash)).toBe(false);
+    // Every session was deleted (force re-login).
+    expect(sessions).toHaveLength(0);
+    // Token is now marked used.
+    expect(resetTokens[0]?.usedAt).not.toBeNull();
+  });
+
+  it('reset rejects an unknown/garbage token with 400', async () => {
+    const user = await seededAlice('oldpass123');
+    const { db } = makePhase6Db({ users: [user] });
+    const { app } = makeResetApp(db);
+    const res = await app.inject({ method: 'POST', url: '/v1/auth/reset-password', payload: { token: 'not-a-real-token', newPassword: 'brandnew456' } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'invalid_or_expired_token' });
+  });
+
+  it('reset rejects an already-USED token with 400 (single-use)', async () => {
+    const user = await seededAlice('oldpass123');
+    const { db, resetTokens } = makePhase6Db({ users: [user] });
+    const { app, email } = makeResetApp(db);
+    await app.inject({ method: 'POST', url: '/v1/auth/forgot-password', payload: { email: user.email } });
+    const body = email.sent[0]?.text ?? '';
+    const stored = resetTokens[0]?.tokenHash;
+    const candidate = body.split(/\s+/).find((w) => createHash('sha256').update(w).digest('hex') === stored);
+
+    const first = await app.inject({ method: 'POST', url: '/v1/auth/reset-password', payload: { token: candidate, newPassword: 'brandnew456' } });
+    expect(first.statusCode).toBe(200);
+    const second = await app.inject({ method: 'POST', url: '/v1/auth/reset-password', payload: { token: candidate, newPassword: 'another789' } });
+    expect(second.statusCode).toBe(400);
+  });
+
+  it('reset rejects an EXPIRED token with 400', async () => {
+    const user = await seededAlice('oldpass123');
+    const { db, resetTokens } = makePhase6Db({ users: [user] });
+    const { app } = makeResetApp(db);
+    // Seed an expired token directly.
+    const raw = 'expired-raw-token-value';
+    resetTokens.push({ id: 'tok_exp', userId: 'alice', tokenHash: createHash('sha256').update(raw).digest('hex'), expiresAt: new Date(Date.now() - 1000), usedAt: null });
+    const res = await app.inject({ method: 'POST', url: '/v1/auth/reset-password', payload: { token: raw, newPassword: 'brandnew456' } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'invalid_or_expired_token' });
+  });
+
+  it('reset rejects a too-short new password with 400', async () => {
+    const { db } = makePhase6Db({ users: [] });
+    const { app } = makeResetApp(db);
+    const res = await app.inject({ method: 'POST', url: '/v1/auth/reset-password', payload: { token: 'x', newPassword: 'short' } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'password_too_short', min: 8 });
+  });
+
+  it('503 when authDb/email are not configured', async () => {
+    const res = await makeApp().inject({ method: 'POST', url: '/v1/auth/forgot-password', payload: { email: 'a@b.io' } });
+    expect(res.statusCode).toBe(503);
+  });
+});

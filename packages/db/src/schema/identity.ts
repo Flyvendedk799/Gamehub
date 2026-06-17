@@ -106,6 +106,35 @@ export const creditLedger = pgTable(
   }),
 );
 
+/**
+ * Single-use password-reset tokens (Phase 6.2). The forgot-password route mints
+ * a random token, stores ONLY its hash here (never the raw value), and "sends"
+ * the raw token to the user via the EmailPort. The reset route validates the
+ * presented token's hash against an unexpired, unused row, then sets `used_at`
+ * so the token can't be replayed. Rows cascade-delete with the user.
+ */
+export const passwordResetTokens = pgTable(
+  'password_reset_tokens',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** SHA-256 hex of the raw token — the raw value is never persisted. */
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    /** Set once when the token is consumed; a non-null value rejects replays. */
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Constant-time-ish single-row lookup by the presented token's hash.
+    tokenHashIdx: uniqueIndex('password_reset_tokens_hash_key').on(t.tokenHash),
+    // Lookup all of a user's outstanding tokens (e.g. to invalidate on reset).
+    userIdx: index('password_reset_tokens_user_idx').on(t.userId),
+  }),
+);
+
 /** BYOK provider keys, envelope-encrypted at rest (KMS). */
 export const apiKeys = pgTable('api_keys', {
   id: uuid('id').primaryKey().defaultRandom(),
