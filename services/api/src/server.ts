@@ -154,6 +154,10 @@ export interface ServerDeps {
    * Configurable, never hardcoded. When unset, no CTA is injected into bundles.
    */
   appBaseUrl?: string;
+  /** Optional: SSE keep-alive cadence (ms). Defaults to SSE_HEARTBEAT_MS. */
+  sseHeartbeatMs?: number;
+  /** Optional: hard cap on a single SSE stream (ms). Defaults to SSE_MAX_STREAM_MS. */
+  sseMaxStreamMs?: number;
 }
 
 const ENGINES: Engine[] = ['three', 'phaser'];
@@ -193,6 +197,43 @@ export function decideAffordability(
   required: number = CREDITS_PER_RUN,
 ): { ok: boolean; balance: number; required: number } {
   return { ok: balance >= required, balance, required };
+}
+
+/** SSE keep-alive comment frame. Ignored by EventSource (it's a comment, not a
+ *  `data:` line) but keeps idle proxies from dropping a long, quiet build. */
+export const SSE_HEARTBEAT_FRAME = ': ping\n\n';
+/** Default heartbeat cadence — under the ~30–60s idle-drop window of common
+ *  proxies/CDNs. */
+export const SSE_HEARTBEAT_MS = 20_000;
+/** Hard cap on a single SSE stream. Well above a legit long run (so real builds
+ *  are never cut), but bounds a wedged worker / forgotten tab from leaking a
+ *  connection + its bus subscription forever. */
+export const SSE_MAX_STREAM_MS = 25 * 60 * 1000;
+
+/**
+ * Wire the SSE keep-alive heartbeat + hard max-duration cap for one stream.
+ *
+ * Extracted so the timer behaviour is unit-testable in isolation (with fake
+ * timers): a `: ping` frame is written every `heartbeatMs`, the `onCap` fires
+ * once after `maxMs`, and the returned `stop()` clears BOTH timers so neither
+ * leaks after the stream closes/finishes. Both timers are `unref()`-ed so they
+ * never keep the process (or an inject() test) alive on their own.
+ */
+export function attachSseHeartbeat(
+  write: (chunk: string) => void,
+  onCap: () => void,
+  opts?: { heartbeatMs?: number; maxMs?: number },
+): () => void {
+  const heartbeatMs = opts?.heartbeatMs ?? SSE_HEARTBEAT_MS;
+  const maxMs = opts?.maxMs ?? SSE_MAX_STREAM_MS;
+  const heartbeat = setInterval(() => write(SSE_HEARTBEAT_FRAME), heartbeatMs);
+  heartbeat.unref?.();
+  const cap = setTimeout(onCap, maxMs);
+  cap.unref?.();
+  return () => {
+    clearInterval(heartbeat);
+    clearTimeout(cap);
+  };
 }
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
@@ -640,12 +681,34 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     let done = false;
 
     await new Promise<void>((resolve) => {
+      // ── SSE keep-alive + hard cap (4.2) ────────────────────────────────────
+      // Idle proxies (CDNs, load balancers, NAT middleboxes) drop a connection
+      // that's been silent for ~30–60s. A long agent build can be silent between
+      // events, so attachSseHeartbeat writes a `: ping` comment frame every
+      // SSE_HEARTBEAT_MS to keep the pipe warm (comment frames are ignored by
+      // EventSource), and a hard SSE_MAX_STREAM_MS cap closes any stream that runs
+      // absurdly long so the connection + its bus subscription can't leak forever.
+      // stopHeartbeat() clears BOTH timers; finish() calls it on every close path.
+      let stopHeartbeat: (() => void) | undefined;
+
       const finish = () => {
         if (done) return;
         done = true;
+        stopHeartbeat?.();
         reply.raw.end();
         resolve();
       };
+
+      stopHeartbeat = attachSseHeartbeat(
+        (chunk) => {
+          if (!done) reply.raw.write(chunk);
+        },
+        finish,
+        {
+          ...(deps.sseHeartbeatMs !== undefined ? { heartbeatMs: deps.sseHeartbeatMs } : {}),
+          ...(deps.sseMaxStreamMs !== undefined ? { maxMs: deps.sseMaxStreamMs } : {}),
+        },
+      );
 
       // `req.raw` is the underlying Node IncomingMessage.
       req.raw.on('close', finish);
@@ -1585,6 +1648,22 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       deps.hubRepo?.getStats?.() ?? Promise.resolve(null),
     ]);
 
+    // Reliability signal (4.1): how many runs the stuck-run reaper hard-failed
+    // (abort_kind = 'reaped'). A climbing reapedCount means worker crashes /
+    // lost jobs are stranding runs — page on it. Needs the Db; 0 when unwired.
+    let reapedCount = 0;
+    if (deps.authDb) {
+      const { schema: s } = await import('@playforge/db');
+      const [row] = await deps.authDb
+        .select({ count: drizzleSql<number>`count(*)::int` })
+        .from(s.runs)
+        // 'reaped' is the reaper-only abort_kind marker. The column is free text
+        // typed as AbortKind for the agent-classified kinds; the reaper writes
+        // 'reaped' via the same localized cast, so compare against the raw value.
+        .where(drizzleSql`${s.runs.abortKind} = 'reaped'`);
+      reapedCount = Number(row?.count ?? 0);
+    }
+
     let queue: { waiting: number; active: number; delayed: number; failed: number } | null = null;
     if (deps.generateQueue) {
       const [waiting, active, delayed, failed] = await Promise.all([
@@ -1598,6 +1677,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
     return reply.send({
       runs: runStats,
+      reapedCount,
       hub: hubStats,
       queue,
       presence,

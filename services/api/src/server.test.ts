@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InMemoryEventBus, runChannel } from '@playforge/bus';
 import { InMemoryBlobStore, SnapshotStore } from '@playforge/storage';
 import { HeaderAuthenticator } from './auth';
@@ -6,7 +6,14 @@ import { InMemoryHubRepo } from './hub-repo';
 import { InMemoryPublishRepo } from './publish-repo';
 import { InMemoryProjectRepo } from './repo';
 import { InMemoryRunRepo } from './run-repo';
-import { buildServer, decideAffordability, type EnqueueFn, type ServerDeps } from './server';
+import {
+  attachSseHeartbeat,
+  buildServer,
+  decideAffordability,
+  SSE_HEARTBEAT_FRAME,
+  type EnqueueFn,
+  type ServerDeps,
+} from './server';
 
 function makeApp(overrides?: {
   bus?: InstanceType<typeof InMemoryEventBus>;
@@ -345,6 +352,84 @@ describe('SSE event relay', () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('"type":"run_complete"');
+  });
+
+  it('a terminal stream does NOT emit a heartbeat frame (it finishes first)', async () => {
+    // The InMemoryEventBus replays run_complete synchronously, so finish() fires
+    // and clears the heartbeat before any 20s tick — the body has no `: ping`.
+    const bus = new InMemoryEventBus();
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+    await bus.publish(runChannel(run.id), { type: 'run_complete' });
+
+    const app = makeApp({ bus, runRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/runs/${run.id}/stream`,
+      headers: AS_ALICE,
+    });
+    expect(res.body).not.toContain(': ping');
+  });
+});
+
+describe('SSE heartbeat + max-duration cap (4.2)', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('writes a `: ping` comment frame every heartbeat interval', () => {
+    const writes: string[] = [];
+    const stop = attachSseHeartbeat((c) => writes.push(c), () => {}, {
+      heartbeatMs: 1_000,
+      maxMs: 60_000,
+    });
+
+    expect(writes).toHaveLength(0); // nothing yet
+    vi.advanceTimersByTime(1_000);
+    expect(writes).toEqual([SSE_HEARTBEAT_FRAME]);
+    vi.advanceTimersByTime(2_000);
+    expect(writes).toEqual([SSE_HEARTBEAT_FRAME, SSE_HEARTBEAT_FRAME, SSE_HEARTBEAT_FRAME]);
+    stop();
+  });
+
+  it('stop() clears the interval — no further frames after close', () => {
+    const writes: string[] = [];
+    const stop = attachSseHeartbeat((c) => writes.push(c), () => {}, {
+      heartbeatMs: 1_000,
+      maxMs: 60_000,
+    });
+    vi.advanceTimersByTime(1_000);
+    expect(writes).toHaveLength(1);
+
+    stop(); // stream closed/finished
+    vi.advanceTimersByTime(10_000);
+    expect(writes).toHaveLength(1); // interval was cleared — no leak
+  });
+
+  it('fires onCap exactly once after the max-duration cap, then stop() prevents leak', () => {
+    let capCount = 0;
+    const stop = attachSseHeartbeat(() => {}, () => { capCount += 1; }, {
+      heartbeatMs: 10_000,
+      maxMs: 25_000,
+    });
+
+    vi.advanceTimersByTime(24_999);
+    expect(capCount).toBe(0); // not yet
+    vi.advanceTimersByTime(1);
+    expect(capCount).toBe(1); // cap fired
+    stop();
+    vi.advanceTimersByTime(60_000);
+    expect(capCount).toBe(1); // one-shot timeout, no repeat
+  });
+
+  it('stop() also clears the cap timer (no cap after a normal close)', () => {
+    let capCount = 0;
+    const stop = attachSseHeartbeat(() => {}, () => { capCount += 1; }, {
+      heartbeatMs: 10_000,
+      maxMs: 25_000,
+    });
+    stop(); // run completed before the cap
+    vi.advanceTimersByTime(30_000);
+    expect(capCount).toBe(0);
   });
 });
 

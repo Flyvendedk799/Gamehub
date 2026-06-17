@@ -25,6 +25,12 @@ export interface EventBus {
    *  to the channel so far (in order), then every subsequent message until
    *  unsubscribed. */
   subscribe(channel: string, handler: BusHandler): Promise<Unsubscribe>;
+  /**
+   * Release any underlying transport resources (Redis connections). Called on
+   * graceful API/worker shutdown so the process can exit cleanly instead of
+   * hanging on open sockets. No-op for the in-memory impl.
+   */
+  close(): Promise<void>;
 }
 
 interface ChannelState {
@@ -64,6 +70,11 @@ export class InMemoryEventBus implements EventBus {
   clearChannel(channel: string): void {
     this.channels.delete(channel);
   }
+
+  /** No-op — the in-memory bus holds no external connections. */
+  async close(): Promise<void> {
+    /* nothing to release */
+  }
 }
 
 /** Channel name for a run's event stream. */
@@ -84,27 +95,54 @@ export function runChannel(runId: string): string {
  * missing events.
  */
 export class RedisEventBus implements EventBus {
-  private redisUrl: string;
+  private readonly redisUrl: string;
+
+  /**
+   * ONE persistent publisher connection, shared across all publish() calls.
+   *
+   * Previously publish() opened a fresh Redis client per event and disconnected
+   * it in `finally`. Under load that churns a connection for every agent token
+   * delta, spiking `connected_clients` and burning connect/teardown latency on
+   * the hot path. XADD is non-blocking, so a single long-lived client serves
+   * every publish safely. Created lazily so constructing the bus (e.g. in tests
+   * or a no-publish API instance) doesn't open a socket until first use.
+   *
+   * Subscribers MUST NOT share this client: a blocking XREAD would monopolise
+   * the connection and stall every publish. Each subscribe() gets its own
+   * dedicated reader (see below).
+   */
+  private publisher: Redis | null = null;
+
+  /** Live subscriber readers, so close() can tear them down on shutdown. */
+  private readonly readers = new Set<Redis>();
+
+  private closed = false;
 
   constructor(redisUrl: string) {
     this.redisUrl = redisUrl;
   }
 
-  private makeClient() {
+  private makeClient(): Redis {
     return new Redis(this.redisUrl, { lazyConnect: false, maxRetriesPerRequest: null });
   }
 
-  async publish(channel: string, message: unknown): Promise<void> {
-    const client = this.makeClient();
-    try {
-      await client.xadd(channel, '*', 'data', JSON.stringify(message));
-    } finally {
-      client.disconnect();
+  /** Lazily create + reuse the single shared publisher connection. */
+  private getPublisher(): Redis {
+    if (this.publisher === null) {
+      this.publisher = this.makeClient();
     }
+    return this.publisher;
+  }
+
+  async publish(channel: string, message: unknown): Promise<void> {
+    await this.getPublisher().xadd(channel, '*', 'data', JSON.stringify(message));
   }
 
   async subscribe(channel: string, handler: BusHandler): Promise<Unsubscribe> {
+    // A dedicated client per subscription: the blocking XREAD below must never
+    // share the publisher (it would block every publish for the BLOCK window).
     const reader = this.makeClient();
+    this.readers.add(reader);
     const replayer = this.makeClient();
 
     type XEntry = [id: string, fields: string[]];
@@ -152,11 +190,27 @@ export class RedisEventBus implements EventBus {
           }
         }
       }
+      this.readers.delete(reader);
       reader.disconnect();
     })();
 
     return () => {
       active = false;
     };
+  }
+
+  /**
+   * Release the shared publisher and every live subscriber reader. Idempotent —
+   * a double close() (e.g. SIGTERM then SIGINT) is a no-op.
+   */
+  async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    if (this.publisher !== null) {
+      this.publisher.disconnect();
+      this.publisher = null;
+    }
+    for (const reader of this.readers) reader.disconnect();
+    this.readers.clear();
   }
 }

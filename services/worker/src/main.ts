@@ -24,11 +24,11 @@
  *   BLOB_DIR            local blob-store root (default: .playforge-blobs)
  *   WORKER_CONCURRENCY  parallel jobs per instance (default: 2)
  */
-import { eq, sql } from 'drizzle-orm';
-import { Worker } from 'bullmq';
+import { and, eq, inArray, sql } from 'drizzle-orm';
+import { Queue, Worker } from 'bullmq';
 import { RedisEventBus } from '@playforge/bus';
 import { createDb, schema } from '@playforge/db';
-import type { ModelRef } from '@playforge/shared';
+import type { AbortKind, ModelRef } from '@playforge/shared';
 import { classifyAbortKind } from '@playforge/shared';
 import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
 import type { ContinuationPromptInput } from '@playforge/agent-core';
@@ -57,6 +57,93 @@ function parseRedisUrl(url: string): { host: string; port: number } {
 }
 
 const CREDITS_PER_RUN = 10;
+
+/**
+ * abortKind tag for runs the stuck-run reaper hard-fails. The `runs.abort_kind`
+ * column is a free-text column typed as AbortKind for the agent-classified
+ * kinds; 'reaped' is a reaper-only marker that never comes out of
+ * classifyAbortKind, so we tag it with a single localized cast here (rather
+ * than widening the shared AbortKind union, which is out of this change's
+ * scope). The metrics route counts rows WHERE abort_kind = 'reaped'.
+ */
+const REAPED_ABORT_KIND = 'reaped' as AbortKind;
+
+/** How long a run may sit in queued/running before it's eligible for reaping.
+ *  Default 30 min — comfortably above the SSE 25-min cap and any legit build,
+ *  so a slow-but-alive run is never reaped. Tunable via env. */
+const DEFAULT_REAP_STUCK_AFTER_MS = 30 * 60 * 1000;
+/** How often the reaper sweep runs. */
+const DEFAULT_REAP_INTERVAL_MS = 60 * 1000;
+
+/** A run row the reaper inspects. Minimal shape so the pure selector is trivial
+ *  to unit-test without a live Postgres. */
+export interface ReapCandidate {
+  id: string;
+  userId: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'paused' | 'canceled';
+  /** When the run was last touched (updatedAt), epoch ms. */
+  lastTouchedMs: number;
+}
+
+export interface ReapDecisionOptions {
+  /** Current wall-clock, epoch ms. */
+  nowMs: number;
+  /** A run is stale once (now - lastTouched) exceeds this. */
+  stuckAfterMs: number;
+}
+
+/**
+ * PURE — decide which runs are *candidates* for reaping based solely on status
+ * + staleness. A candidate is a run that is still non-terminal (queued/running)
+ * and has not been touched within the staleness window. The caller MUST still
+ * cross-check the BullMQ job's real state (job gone / failed) before reaping +
+ * refunding, because a slow-but-alive job updates `updatedAt` on completion,
+ * not continuously — so staleness alone is necessary, not sufficient.
+ *
+ * Extracted as a free function so the "which runs to reap" decision is unit
+ * testable in isolation: a run past the threshold is selected; a healthy/recent
+ * run, or one already in a terminal state, is not.
+ */
+export function selectRunsToReap(
+  runs: readonly ReapCandidate[],
+  opts: ReapDecisionOptions,
+): ReapCandidate[] {
+  return runs.filter(
+    (r) =>
+      (r.status === 'queued' || r.status === 'running') &&
+      opts.nowMs - r.lastTouchedMs > opts.stuckAfterMs,
+  );
+}
+
+/**
+ * PURE — given a stale candidate and the live BullMQ job state, decide whether
+ * to actually reap it. We reap only when the job is genuinely gone or failed
+ * (i.e. no worker will ever finish it). A job that is still 'active', 'waiting',
+ * or 'delayed' is alive — staleness is a false positive (a long-running active
+ * job, or one queued behind a backlog) and we leave it alone.
+ *
+ * `jobState` is null when getJob() found no job at all (job gone → reap).
+ */
+/** BullMQ JobState plus 'unknown', and null when no job exists at all. */
+export type ReapJobState =
+  | 'completed'
+  | 'failed'
+  | 'active'
+  | 'waiting'
+  | 'delayed'
+  | 'paused'
+  | 'prioritized'
+  | 'waiting-children'
+  | 'unknown'
+  | null;
+
+export function shouldReapStaleRun(jobState: ReapJobState): boolean {
+  if (jobState === null) return true; // job no longer exists → orphaned run
+  if (jobState === 'failed') return true; // job failed but run never transitioned
+  if (jobState === 'completed') return true; // job done but run never transitioned
+  // active / waiting / delayed / paused / prioritized → still alive, don't reap.
+  return false;
+}
 
 interface GenerateJobData {
   runId: string;
@@ -322,6 +409,100 @@ async function main() {
     { connection, concurrency },
   );
 
+  // ── Stuck-run reaper (4.1) ────────────────────────────────────────────────
+  // A run can strand in 'queued'/'running' if a worker process dies mid-job
+  // before the 'failed' handler fires, or the BullMQ job is otherwise lost. Such
+  // a run holds a credit reservation forever and shows as perpetually "active".
+  //
+  // The reaper periodically sweeps non-terminal runs that haven't been touched
+  // within the staleness window, cross-checks each one's REAL BullMQ job state
+  // (gone / failed / completed ⇒ no worker will finish it), then marks the run
+  // 'failed' (abortKind 'reaped') and REFUNDS the reservation EXACTLY ONCE via
+  // the same idempotent pattern as worker.on('failed') / the cancel route
+  // (insert +CREDITS_PER_RUN, reason 'refund', runId, onConflictDoNothing —
+  // guarded by the partial-unique 'credit_ledger_refund_key').
+  const reapQueue = new Queue('generate', { connection });
+  const stuckAfterMs = Number(process.env['REAP_STUCK_AFTER_MS'] ?? String(DEFAULT_REAP_STUCK_AFTER_MS));
+  const reapIntervalMs = Number(process.env['REAP_INTERVAL_MS'] ?? String(DEFAULT_REAP_INTERVAL_MS));
+
+  async function reapStuckRunsOnce(): Promise<number> {
+    // Pull non-terminal runs; the pure selector decides which are stale.
+    const rows = await db
+      .select({
+        id: schema.runs.id,
+        userId: schema.runs.userId,
+        status: schema.runs.status,
+        updatedAt: schema.runs.updatedAt,
+      })
+      .from(schema.runs)
+      .where(inArray(schema.runs.status, ['queued', 'running']));
+
+    const candidates = selectRunsToReap(
+      rows.map((r) => ({
+        id: r.id,
+        userId: r.userId,
+        status: r.status,
+        lastTouchedMs: r.updatedAt.getTime(),
+      })),
+      { nowMs: Date.now(), stuckAfterMs },
+    );
+
+    let reaped = 0;
+    for (const candidate of candidates) {
+      // Cross-check the REAL job state before reaping — staleness alone is not
+      // sufficient (a long-but-alive active job hasn't bumped updatedAt yet).
+      let jobState: ReapJobState = null;
+      try {
+        const job = await reapQueue.getJob(candidate.id);
+        jobState = job ? ((await job.getState()) as ReapJobState) : null;
+      } catch (err) {
+        console.error(`[reaper] could not read job state for run ${candidate.id}:`, err);
+        continue; // be conservative — skip rather than reap a possibly-live run
+      }
+      if (!shouldReapStaleRun(jobState)) continue;
+
+      // Mark failed. Guard the UPDATE on the still-non-terminal status so we
+      // never clobber a run that completed in the race between SELECT and here;
+      // .returning() tells us whether THIS sweep actually transitioned the run.
+      // If 0 rows changed (a concurrent completion/cancel won the race), we must
+      // NOT refund — a completed run legitimately keeps its reservation.
+      let transitioned = false;
+      try {
+        const updated = await db
+          .update(schema.runs)
+          .set({ status: 'failed', abortKind: REAPED_ABORT_KIND, updatedAt: new Date(), finishedAt: new Date() })
+          .where(and(eq(schema.runs.id, candidate.id), inArray(schema.runs.status, ['queued', 'running'])))
+          .returning({ id: schema.runs.id });
+        transitioned = updated.length > 0;
+      } catch (err) {
+        console.error(`[reaper] failed to mark run ${candidate.id} failed:`, err);
+        continue;
+      }
+      if (!transitioned) continue;
+
+      // Refund EXACTLY ONCE — idempotent via 'credit_ledger_refund_key'.
+      await db
+        .insert(schema.creditLedger)
+        .values({ userId: candidate.userId, delta: CREDITS_PER_RUN, reason: 'refund', runId: candidate.id })
+        .onConflictDoNothing()
+        .catch((refundErr: unknown) => {
+          console.error(`[reaper] credit refund failed for run ${candidate.id}:`, refundErr);
+        });
+
+      reaped += 1;
+      console.warn(`[reaper] reaped stuck run ${candidate.id} (state=${jobState ?? 'gone'})`);
+    }
+    return reaped;
+  }
+
+  const reaperTimer = setInterval(() => {
+    void reapStuckRunsOnce().catch((err: unknown) => {
+      console.error('[reaper] sweep failed:', err);
+    });
+  }, reapIntervalMs);
+  // Don't keep the event loop alive solely for the reaper.
+  reaperTimer.unref();
+
   worker.on('failed', async (job, err) => {
     const runId = job?.data.runId;
     const userId = job?.data.userId;
@@ -350,7 +531,37 @@ async function main() {
     }
   });
 
+  // ── Graceful shutdown (4.4) ───────────────────────────────────────────────
+  // Mirror the proven browser-worker pattern: on SIGTERM/SIGINT, stop the
+  // reaper, let the BullMQ Worker finish/release its active job, then close
+  // every Redis-backed handle (worker, reaper queue, browser-jobs client, bus)
+  // so the process exits instead of hanging on open connections.
+  let shuttingDown = false;
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(sig, () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      console.log(`[playforge-worker] ${sig} — draining…`);
+      void (async () => {
+        clearInterval(reaperTimer);
+        // worker.close() waits for the in-flight job to finish, then stops
+        // pulling new jobs and releases its Redis connection.
+        await worker.close().catch((err: unknown) => console.error('[worker] close failed:', err));
+        await reapQueue.close().catch((err: unknown) => console.error('[reaper] queue close failed:', err));
+        await browserClient?.close().catch((err: unknown) => console.error('[browser-jobs] close failed:', err));
+        await bus.close().catch((err: unknown) => console.error('[bus] close failed:', err));
+        process.exit(0);
+      })();
+    });
+  }
+
   console.log(`[playforge-worker] listening for generate jobs (concurrency=${concurrency})`);
 }
 
-void main();
+// Only auto-start when run as the entrypoint, not when a test imports the pure
+// selectRunsToReap / shouldReapStaleRun helpers (importing must not boot Redis
+// or require DATABASE_URL). Vitest sets VITEST=true; WORKER_NO_AUTOSTART=1 is
+// the explicit escape hatch for any other importer.
+if (process.env['WORKER_NO_AUTOSTART'] !== '1' && process.env['VITEST'] === undefined) {
+  void main();
+}

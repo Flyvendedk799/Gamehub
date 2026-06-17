@@ -181,6 +181,29 @@ async function main() {
     ...(appBaseUrl !== undefined ? { appBaseUrl } : {}),
   });
 
+  // ── Graceful shutdown (4.4) ─────────────────────────────────────────────────
+  // On SIGTERM/SIGINT: stop accepting new connections (server.close drains any
+  // in-flight requests), then release the Redis-backed handles — the shared
+  // event-bus publisher/readers and the BullMQ generate queue — so the process
+  // exits cleanly instead of hanging on open sockets. Mirrors the browser-worker
+  // pattern. Idempotent against a double signal.
+  let shuttingDown = false;
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(sig, () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      console.log(`[playforge-api] ${sig} — draining…`);
+      void (async () => {
+        await server.close().catch((err: unknown) => console.error('[playforge-api] server close failed:', err));
+        await bus.close().catch((err: unknown) => console.error('[playforge-api] bus close failed:', err));
+        if (queue) {
+          await queue.close().catch((err: unknown) => console.error('[playforge-api] queue close failed:', err));
+        }
+        process.exit(0);
+      })();
+    });
+  }
+
   try {
     const address = await server.listen({ port, host: '0.0.0.0' });
     console.log(`[playforge-api] listening on ${address}`);
