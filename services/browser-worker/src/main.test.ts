@@ -37,6 +37,7 @@ const isRequestAllowed: MainModule['isRequestAllowed'] = (u) => mod.isRequestAll
 const createHardenedContext: MainModule['createHardenedContext'] = (b, vp) =>
   mod.createHardenedContext(b, vp);
 const runRuntimeVerify: MainModule['runRuntimeVerify'] = (b, d) => mod.runRuntimeVerify(b, d);
+const runPlaytest: MainModule['runPlaytest'] = (b, d) => mod.runPlaytest(b, d);
 const withHardTimeout: MainModule['withHardTimeout'] = (fn, ms, label, onTimeout) =>
   mod.withHardTimeout(fn, ms, label, onTimeout);
 const assertBrowserAlive: MainModule['assertBrowserAlive'] = (b) => mod.assertBrowserAlive(b);
@@ -180,6 +181,112 @@ describe('runRuntimeVerify (real Chromium)', () => {
     expect(
       result.blockedRequests.some((u) => u.includes('10.0.0.5')),
     ).toBe(true);
+  }, 30_000);
+});
+
+describe('runPlaytest (synthetic input → snapshot diff, real Chromium)', () => {
+  // A minimal game whose debug snapshot exposes player x/rotation. KeyD moves
+  // +x; KeyA moves -x. The runtime listens for keydown/keyup and integrates a
+  // velocity each RAF frame so holding a key for N frames advances x by N.
+  const MOVE_GAME = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+    <script>
+      var state = { x: 0, rotationY: 0, vx: 0 };
+      window.addEventListener('keydown', function (e) {
+        if (e.code === 'KeyD') state.vx = 1;
+        if (e.code === 'KeyA') state.vx = -1;
+      });
+      window.addEventListener('keyup', function (e) {
+        if (e.code === 'KeyD' || e.code === 'KeyA') state.vx = 0;
+      });
+      function loop() { state.x += state.vx; requestAnimationFrame(loop); }
+      requestAnimationFrame(loop);
+      window.__game = {
+        debug: { snapshot: function () { return { x: state.x, rotationY: state.rotationY }; } },
+      };
+    </script>
+  </body></html>`;
+
+  it('(a) KeyD increases snapshotAfter.x; KeyA decreases it', async () => {
+    const result = await runPlaytest(browser, {
+      kind: 'playtest',
+      htmlContent: MOVE_GAME,
+      bootTimeoutMs: 5_000,
+      steps: [
+        { kind: 'key', code: 'KeyD', frames: 20 },
+        { kind: 'key', code: 'KeyA', frames: 5 },
+      ],
+    });
+    expect(result.hasGameContract).toBe(true);
+    expect(result.hasDebugContract).toBe(true);
+    expect(result.bootErrors).toEqual([]);
+    expect(result.steps).toHaveLength(2);
+
+    const baseX = (result.baselineSnapshot as { x: number }).x;
+    const afterD = (result.steps[0]!.snapshotAfter as { x: number }).x;
+    const afterA = (result.steps[1]!.snapshotAfter as { x: number }).x;
+    // Holding KeyD advanced x; the subsequent KeyA pulled it back down.
+    expect(afterD).toBeGreaterThan(baseX);
+    expect(afterA).toBeLessThan(afterD);
+  }, 30_000);
+
+  it('(b) a throwing boot surfaces in bootErrors, snapshots stay null', async () => {
+    const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+      <script>throw new Error('boot blew up: PLAYTEST_TEST_THROW');</script>
+    </body></html>`;
+    const result = await runPlaytest(browser, {
+      kind: 'playtest',
+      htmlContent: html,
+      bootTimeoutMs: 1_500,
+      steps: [{ kind: 'key', code: 'KeyD', frames: 5 }],
+    });
+    expect(result.hasGameContract).toBe(false);
+    expect(result.hasDebugContract).toBe(false);
+    expect(result.bootErrors.some((m) => m.includes('PLAYTEST_TEST_THROW'))).toBe(true);
+    expect(result.baselineSnapshot).toBeNull();
+  }, 30_000);
+
+  it('(c) a sign-inverted facing is detectable in the snapshot trace', async () => {
+    // Models the rotation.y = -playerAngle sign error: pressing ArrowRight sets
+    // a positive playerAngle but the exposed rotationY is its negation, so the
+    // playtest trace reveals facing that points the wrong way.
+    const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+      <script>
+        var playerAngle = 0;
+        window.addEventListener('keydown', function (e) {
+          if (e.code === 'ArrowRight') playerAngle += 1;
+        });
+        window.__game = {
+          debug: { snapshot: function () { return { playerAngle: playerAngle, rotationY: -playerAngle }; } },
+        };
+      </script>
+    </body></html>`;
+    const result = await runPlaytest(browser, {
+      kind: 'playtest',
+      htmlContent: html,
+      bootTimeoutMs: 5_000,
+      steps: [{ kind: 'key', code: 'ArrowRight', frames: 3 }],
+    });
+    expect(result.hasDebugContract).toBe(true);
+    const snap = result.steps[0]!.snapshotAfter as { playerAngle: number; rotationY: number };
+    expect(snap.playerAngle).toBeGreaterThan(0);
+    // The bug: rotationY is the NEGATION of the intended angle — detectable.
+    expect(snap.rotationY).toBe(-snap.playerAngle);
+  }, 30_000);
+
+  it('(d) booting __game with the default null snapshot reports no debug contract', async () => {
+    const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+      <script>window.__game = { debug: { snapshot: function () { return null; } } };</script>
+    </body></html>`;
+    const result = await runPlaytest(browser, {
+      kind: 'playtest',
+      htmlContent: html,
+      bootTimeoutMs: 5_000,
+      steps: [{ kind: 'wait', frames: 3 }],
+    });
+    expect(result.hasGameContract).toBe(true);
+    expect(result.hasDebugContract).toBe(false);
+    expect(result.baselineSnapshot).toBeNull();
+    expect(result.bootErrors).toEqual([]);
   }, 30_000);
 });
 

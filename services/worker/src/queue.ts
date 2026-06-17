@@ -24,7 +24,13 @@ import {
 import { type EventBus, runChannel } from '@playforge/bus';
 import type { ModelRef } from '@playforge/shared';
 import type { SnapshotStore } from '@playforge/storage';
-import { runGeneration, type GenerateFn, type GenerationResult, type WebEngine } from './run-generation';
+import {
+  runGeneration,
+  type BrowserJobsPort,
+  type GenerateFn,
+  type GenerationResult,
+  type WebEngine,
+} from './run-generation';
 
 export interface EnqueueInput {
   runId: string;
@@ -53,6 +59,13 @@ export interface QueuePorts {
   store: SnapshotStore;
   /** Injectable agent runner — defaults to the real generateViaAgent. */
   generate?: GenerateFn;
+  /**
+   * Out-of-process browser-jobs port (#1.4). Threaded into runGeneration so the
+   * agent's `done` runtime-verify + `playtest_game` tool round-trip to the
+   * browser-worker pool. Omitted in offline tests / no-Redis dev — the run then
+   * falls back to static-lint-only `done` with no playtest_game.
+   */
+  browserJobs?: BrowserJobsPort;
 }
 
 export interface EnqueueResult extends GenerationResult {
@@ -115,6 +128,7 @@ export async function enqueueRun(
       {
         store: ports.store,
         ...(ports.generate !== undefined ? { generate: ports.generate } : {}),
+        ...(ports.browserJobs !== undefined ? { browserJobs: ports.browserJobs } : {}),
         ...(input.maxTokens !== undefined ? { maxTokens: input.maxTokens } : {}),
         onEvent: (event: AgentEvent) => {
           // Capture the latest set_todos for continuation building.

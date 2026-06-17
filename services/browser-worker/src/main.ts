@@ -38,7 +38,7 @@
  *   DATABASE_URL        Postgres — for writing thumbnail_url back to published_games
  *   WORKER_CONCURRENCY  parallel browser jobs (default: 2)
  */
-import { chromium, type Browser, type BrowserContext, type Route } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Page, type Route } from 'playwright';
 import { Worker } from 'bullmq';
 import { execFileSync } from 'node:child_process';
 
@@ -397,6 +397,26 @@ export function readProcessRss(pid: number): number | undefined {
 
 export type BrowserJobKind = 'runtime-verify' | 'playtest' | 'thumbnail';
 
+/**
+ * One synthetic-input step in a playtest plan. Mirrors the agent-side
+ * `PlaytestStep` union in `@playforge/agent-core`
+ * (packages/core/src/tools/playtest-game.ts). The browser-worker dispatches
+ * each step against the booted game, ticking `frames` RAF frames where a
+ * frame count applies, and reads `window.__game.debug.snapshot()` before and
+ * after every step so a caller can diff input → state.
+ *
+ * `key`      — hold `code` down for `frames` RAF frames, then release.
+ * `mouseMove`— move the pointer to a normalised (0..1) viewport coordinate.
+ * `mouseDown`/`mouseUp` — press / release a mouse button (0=left,1=mid,2=right).
+ * `wait`     — tick `frames` RAF frames with no input (let physics settle).
+ */
+export type PlaytestStep =
+  | { kind: 'key'; code: string; frames?: number }
+  | { kind: 'mouseMove'; x: number; y: number }
+  | { kind: 'mouseDown'; button?: number }
+  | { kind: 'mouseUp'; button?: number }
+  | { kind: 'wait'; frames: number };
+
 export interface BrowserJobData {
   kind: BrowserJobKind;
   /** HTML content string or data URL of the game bundle. */
@@ -405,6 +425,8 @@ export interface BrowserJobData {
   viewport?: { width: number; height: number };
   /** Boot timeout in ms (default 10000). */
   bootTimeoutMs?: number;
+  /** For playtest jobs: the ordered synthetic-input plan to dispatch. */
+  steps?: PlaytestStep[];
 }
 
 export interface RuntimeVerifyResult {
@@ -422,7 +444,45 @@ export interface ThumbnailResult {
   height: number;
 }
 
-export type BrowserJobResult = RuntimeVerifyResult | ThumbnailResult;
+/** The serialised state read back after a single playtest step ran. Maps onto
+ *  the agent-side `PlaytestStepResult` (snapshotAfter + per-step errors). */
+export interface PlaytestStepResult {
+  /** The step that was dispatched (echoed back for trace alignment). */
+  step: PlaytestStep;
+  /** `window.__game.debug.snapshot()` evaluated AFTER the step ran. `null`
+   *  when the game never overrode the default getter (no debug contract) or
+   *  the snapshot threw / was unserialisable. */
+  snapshotAfter: unknown;
+  /** Page errors captured between this step and the previous one. */
+  errors: string[];
+}
+
+/**
+ * Result of a playtest job. Maps cleanly onto the host
+ * `PlaytesterOutput` contract in `@playforge/agent-core`:
+ *   hasDebugContract  ← `debugContractPresent`
+ *   baselineSnapshot  ← `baselineSnapshot`
+ *   steps[].snapshotAfter / errors ← per-step snapshots
+ *   bootErrors        ← `bootErrors`
+ */
+export interface PlaytestResult {
+  /** True when `window.__game` appeared within the boot timeout. */
+  hasGameContract: boolean;
+  /** True when the baseline `window.__game.debug.snapshot()` returned a
+   *  non-null value — i.e. the game wired a real debug getter. */
+  hasDebugContract: boolean;
+  /** Snapshot taken once after boot, before the first step ran. */
+  baselineSnapshot: unknown;
+  /** Per-step snapshot trace, in dispatch order. */
+  steps: PlaytestStepResult[];
+  /** Errors thrown during load / boot, before the first step ran (includes a
+   *  no-__game timeout marker when the game never booted). */
+  bootErrors: string[];
+  /** URLs blocked by the egress lockdown during this job (audit/telemetry). */
+  blockedRequests: string[];
+}
+
+export type BrowserJobResult = RuntimeVerifyResult | ThumbnailResult | PlaytestResult;
 
 /**
  * Optional hook invoked with each per-job context the moment it is created, so
@@ -499,6 +559,195 @@ export async function runThumbnail(
   }
 }
 
+/** Map the iphone/ipad/desktop viewport hints used elsewhere to a concrete
+ *  pixel size. Defaults to a 1280×720 desktop window — large enough that a
+ *  normalised mouseMove (x,y in 0..1) lands somewhere sensible. */
+const PLAYTEST_VIEWPORT = { width: 1280, height: 720 } as const;
+
+/** Tick N requestAnimationFrame frames inside the page, resolving once they
+ *  have all fired. Bounded by a wall-clock fallback so a page that never
+ *  paints (headless can throttle RAF) still resolves — the per-job hard
+ *  timeout is the ultimate backstop. */
+async function tickFrames(page: Page, frames: number): Promise<void> {
+  const n = Math.max(1, Math.min(240, Math.floor(frames)));
+  await page.evaluate(async (count: number) => {
+    await new Promise<void>((resolve) => {
+      let remaining = count;
+      const fallback = setTimeout(resolve, 50 + count * 20);
+      const step = (): void => {
+        remaining -= 1;
+        if (remaining <= 0) {
+          clearTimeout(fallback);
+          resolve();
+          return;
+        }
+        requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+  }, n);
+}
+
+/** Read `window.__game.debug.snapshot()` defensively. Returns null when no
+ *  debug contract is wired or the getter throws / yields an unserialisable
+ *  value (the page-side JSON round-trip guarantees a structured-clonable
+ *  result crosses the boundary). */
+async function readSnapshot(page: Page): Promise<unknown> {
+  try {
+    return await page.evaluate(() => {
+      const g = (window as Window & { __game?: { debug?: { snapshot?: () => unknown } } }).__game;
+      const snap = g?.debug?.snapshot;
+      if (typeof snap !== 'function') return null;
+      try {
+        const value = snap();
+        if (value === undefined) return null;
+        // Round-trip through JSON so only structured-clonable data crosses the
+        // CDP boundary; a snapshot returning a THREE.Vector3 / DOM node would
+        // otherwise reject the evaluate call.
+        return JSON.parse(JSON.stringify(value)) as unknown;
+      } catch {
+        return null;
+      }
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Boot the game HTML in a hardened per-job context, wait for `window.__game`,
+ * then dispatch each synthetic-input step — ticking RAF frames and reading
+ * `window.__game.debug.snapshot()` before and after — and return the trace.
+ *
+ * This is the real implementation behind `playtest_game`: it measures input →
+ * state so a game that moves +x on KeyD yields an increasing `snapshotAfter.x`,
+ * a `rotation.y = -playerAngle` sign error yields a detectably inverted facing,
+ * and a throwing boot surfaces in `bootErrors`.
+ */
+export async function runPlaytest(
+  browser: Browser,
+  data: BrowserJobData,
+  onContext?: ContextSink,
+): Promise<PlaytestResult> {
+  assertBrowserAlive(browser);
+  const { context, egress } = await createHardenedContext(browser, { ...PLAYTEST_VIEWPORT });
+  onContext?.(context);
+  const page = await context.newPage();
+
+  // Page errors land here; we drain into per-step buckets as we go so each
+  // snapshot trace row carries only the errors that fired during its step.
+  const pendingErrors: string[] = [];
+  page.on('pageerror', (err) => {
+    pendingErrors.push(err.message);
+  });
+  const drainErrors = (): string[] => pendingErrors.splice(0, pendingErrors.length);
+
+  const steps: PlaytestStep[] = data.steps ?? [];
+  const bootTimeoutMs = data.bootTimeoutMs ?? 10_000;
+  page.setDefaultTimeout(bootTimeoutMs);
+
+  const stepResults: PlaytestStepResult[] = [];
+  const bootErrors: string[] = [];
+
+  try {
+    await page.setContent(data.htmlContent, {
+      timeout: bootTimeoutMs,
+      waitUntil: 'domcontentloaded',
+    });
+
+    // Wait for window.__game to appear. A no-__game game can still be played
+    // against (the steps run, snapshots stay null) — but we record the failure
+    // in bootErrors so the caller can distinguish "booted, no debug contract"
+    // from "never booted".
+    let hasGameContract = false;
+    try {
+      await page.waitForFunction(
+        () => typeof (window as Window & { __game?: unknown }).__game === 'object',
+        { timeout: bootTimeoutMs },
+      );
+      hasGameContract = true;
+    } catch {
+      hasGameContract = false;
+      bootErrors.push(`window.__game did not appear within ${bootTimeoutMs}ms`);
+    }
+
+    // Capture any boot-time page errors that fired before the first step.
+    bootErrors.push(...drainErrors());
+
+    const baselineSnapshot = await readSnapshot(page);
+    const hasDebugContract = baselineSnapshot !== null;
+
+    for (const step of steps) {
+      switch (step.kind) {
+        case 'key': {
+          const frames = step.frames ?? 15;
+          await page.keyboard.down(step.code);
+          await tickFrames(page, frames);
+          await page.keyboard.up(step.code);
+          break;
+        }
+        case 'mouseMove': {
+          const x = Math.max(0, Math.min(1, step.x)) * PLAYTEST_VIEWPORT.width;
+          const y = Math.max(0, Math.min(1, step.y)) * PLAYTEST_VIEWPORT.height;
+          await page.mouse.move(x, y);
+          await tickFrames(page, 2);
+          break;
+        }
+        case 'mouseDown': {
+          await page.mouse.down({ button: mouseButton(step.button) });
+          await tickFrames(page, 2);
+          break;
+        }
+        case 'mouseUp': {
+          await page.mouse.up({ button: mouseButton(step.button) });
+          await tickFrames(page, 2);
+          break;
+        }
+        case 'wait': {
+          await tickFrames(page, step.frames);
+          break;
+        }
+      }
+
+      const snapshotAfter = await readSnapshot(page);
+      stepResults.push({ step, snapshotAfter, errors: drainErrors() });
+    }
+
+    return {
+      hasGameContract,
+      hasDebugContract,
+      baselineSnapshot,
+      steps: stepResults,
+      bootErrors,
+      blockedRequests: [...egress.blocked],
+    };
+  } catch (err) {
+    // A failure during setContent / step dispatch (e.g. an SSRF-blocked import
+    // that wedges the document) surfaces as a boot error rather than a thrown
+    // job — the caller wants the partial trace, not a 500.
+    bootErrors.push(err instanceof Error ? err.message : String(err));
+    bootErrors.push(...drainErrors());
+    return {
+      hasGameContract: false,
+      hasDebugContract: false,
+      baselineSnapshot: null,
+      steps: stepResults,
+      bootErrors,
+      blockedRequests: [...egress.blocked],
+    };
+  } finally {
+    await context.close();
+  }
+}
+
+/** Map a DOM MouseEvent.button index (0=left,1=middle,2=right) to the
+ *  Playwright button name. Defaults to left. */
+function mouseButton(button: number | undefined): 'left' | 'middle' | 'right' {
+  if (button === 1) return 'middle';
+  if (button === 2) return 'right';
+  return 'left';
+}
+
 /**
  * Dispatch a single job. Wrapped in the hard wall-clock timeout so no hostile
  * payload can pin a worker slot indefinitely.
@@ -534,9 +783,8 @@ export async function runJob(browser: Browser, data: BrowserJobData): Promise<Br
       if (data.kind === 'thumbnail') {
         return runThumbnail(browser, data, track);
       }
-      // playtest — simplified: just verify + return debug snapshot placeholder.
-      const verify = await runRuntimeVerify(browser, data, track);
-      return { ...verify, playtestSteps: [] };
+      // playtest — boot, drive synthetic input, snapshot debug state per step.
+      return runPlaytest(browser, data, track);
     },
     JOB_HARD_TIMEOUT_MS,
     data.kind,

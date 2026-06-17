@@ -15,9 +15,13 @@
  */
 import {
   type AgentEvent,
+  type DoneError,
   type GenerateInput,
   type GenerateOutput,
   type GenerateViaAgentDeps,
+  type PlaytesterInput,
+  type PlaytesterOutput,
+  type PlaytestStep,
   generateViaAgent,
 } from '@playforge/agent-core';
 // Import from the engines subpath, NOT the package root — the root re-exports the
@@ -61,6 +65,43 @@ export interface GenerationRequest {
   provider?: string;
 }
 
+/**
+ * Out-of-process browser-jobs port (#1.4). The worker NEVER boots untrusted
+ * game code in-process; instead it round-trips runtime-verify + playtest
+ * requests through this port to the dedicated browser-worker pool over the
+ * `browser-jobs` BullMQ queue. The concrete implementation
+ * (`BrowserJobsClient` in browser-jobs.ts) is constructed by the worker's
+ * main.ts against the shared REDIS_URL; offline tests inject a stub or omit it
+ * entirely (falling back to the current no-runtimeVerify / no-playtester
+ * behaviour). Returning `null` means "no verdict available" (queue down /
+ * timed out) — the caller degrades gracefully and treats it as no evidence,
+ * never as a hard failure.
+ */
+export interface BrowserJobsPort {
+  /** Boot the artifact, return whether window.__game appeared + any fatal
+   *  console errors. `null` when no verdict could be obtained. */
+  runtimeVerify(htmlContent: string): Promise<RuntimeVerifyVerdict | null>;
+  /** Boot the artifact, drive the synthetic-input plan, return the snapshot
+   *  trace. `null` when no verdict could be obtained. */
+  playtest(htmlContent: string, steps: ReadonlyArray<PlaytestStep>): Promise<PlaytestVerdict | null>;
+}
+
+/** Minimal runtime-verify verdict the worker consumes from the browser-jobs
+ *  round-trip (a subset of the browser-worker RuntimeVerifyResult). */
+export interface RuntimeVerifyVerdict {
+  hasGameContract: boolean;
+  fatalErrors: string[];
+}
+
+/** Playtest verdict the worker consumes — maps onto the agent PlaytesterOutput. */
+export interface PlaytestVerdict {
+  hasGameContract: boolean;
+  hasDebugContract: boolean;
+  baselineSnapshot: unknown;
+  steps: ReadonlyArray<{ step: PlaytestStep; snapshotAfter: unknown; errors: ReadonlyArray<string> }>;
+  bootErrors: ReadonlyArray<string>;
+}
+
 export interface GenerationPorts {
   store: SnapshotStore;
   onEvent?: (event: AgentEvent) => void;
@@ -70,6 +111,13 @@ export interface GenerationPorts {
   validateScene?: SceneValidator;
   /** Hard ceiling on total tokens (input + output) for this run. Aborts cleanly when exceeded. */
   maxTokens?: number;
+  /**
+   * Out-of-process browser-jobs port. When supplied, the agent's `done`
+   * runtime-verify and `playtest_game` tool become live (round-tripping to the
+   * browser-worker pool). When omitted (offline tests / no-Redis dev), the run
+   * falls back to static-lint-only `done` with no `playtest_game` registered.
+   */
+  browserJobs?: BrowserJobsPort;
 }
 
 export interface GenerationResult {
@@ -166,10 +214,70 @@ export async function runGeneration(
     provider: req.provider ?? 'openai',
   });
 
+  // #1.4 — wire the out-of-process browser-jobs port into the agent's runtime
+  // gates. Both adapters round-trip to the dedicated browser-worker pool; the
+  // gen worker itself never boots untrusted game code.
+  const browserJobs = ports.browserJobs;
+
+  // `done`'s runtime-load gate: boot the artifact in the browser-worker, return
+  // any fatal console errors so `done` reports status='has_errors' (instead of
+  // force-accepting on static lint alone). A `null` verdict (queue down) yields
+  // no errors so the run is not blocked by missing verification infra.
+  const runtimeVerify: GenerateViaAgentDeps['runtimeVerify'] | undefined =
+    browserJobs === undefined
+      ? undefined
+      : async (artifactSource: string): Promise<DoneError[]> => {
+          const verdict = await browserJobs.runtimeVerify(artifactSource);
+          if (verdict === null) return [];
+          const errors: DoneError[] = verdict.fatalErrors.map((message) => ({
+            message,
+            source: 'runtime',
+          }));
+          if (!verdict.hasGameContract) {
+            errors.push({
+              message:
+                'Runtime load: window.__game never appeared — the game did not boot. ' +
+                'Ensure the engine bootstrap runs and assigns window.__game before done.',
+              source: 'runtime',
+            });
+          }
+          return errors;
+        };
+
+  // `playtest_game`'s host playtester: drive the agent's synthetic-input plan
+  // in the browser-worker and map the trace back to the agent PlaytesterOutput.
+  const playtester: NonNullable<NonNullable<GenerateViaAgentDeps['gameMode']>['playtester']> | undefined =
+    browserJobs === undefined
+      ? undefined
+      : async (pInput: PlaytesterInput): Promise<PlaytesterOutput> => {
+          const verdict = await browserJobs.playtest(pInput.artifactSource, pInput.steps);
+          if (verdict === null) {
+            return {
+              hasDebugContract: false,
+              baselineSnapshot: null,
+              steps: [],
+              bootErrors: [
+                'playtest infrastructure unavailable — the browser-worker did not return a verdict.',
+              ],
+            };
+          }
+          return {
+            hasDebugContract: verdict.hasDebugContract,
+            baselineSnapshot: verdict.baselineSnapshot,
+            steps: verdict.steps.map((s) => ({
+              step: s.step,
+              snapshotAfter: s.snapshotAfter,
+              errors: s.errors,
+            })),
+            bootErrors: verdict.bootErrors,
+          };
+        };
+
   const deps: GenerateViaAgentDeps = {
     fs: tree,
     generateImageAsset,
     ...(wrappedOnEvent !== undefined ? { onEvent: wrappedOnEvent } : {}),
+    ...(runtimeVerify !== undefined ? { runtimeVerify } : {}),
     gameMode: {
       setEngine: (engine) => {
         if (engine === 'three' || engine === 'phaser') state.engine = engine;
@@ -183,6 +291,7 @@ export async function runGeneration(
         state.spec = spec;
       },
       getSpec: () => state.spec ?? undefined,
+      ...(playtester !== undefined ? { playtester } : {}),
     },
   };
 

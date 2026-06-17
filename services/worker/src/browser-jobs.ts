@@ -1,11 +1,22 @@
 /**
- * Thin wrapper to enqueue browser-worker jobs from the API.
- * Used for thumbnail capture on publish and smoke-test on publish.
+ * Out-of-process browser-jobs client for the generation worker.
+ *
+ * Phase-1b (#1.4) — the generation worker must NOT boot untrusted game code
+ * in-process. Instead it round-trips runtime-verify + playtest requests over a
+ * second BullMQ queue (`browser-jobs`) to the dedicated browser-worker pool,
+ * exactly like the API's `BrowserJobQueue` does for the publish smoke-test and
+ * thumbnail capture. This keeps the gen/credits worker free of any Playwright /
+ * Chromium dependency and preserves the isolation boundary: untrusted code only
+ * ever executes inside the hardened, egress-locked browser-worker context.
+ *
+ * This is a deliberate (small) duplicate of services/api/src/browser-queue.ts —
+ * the worker does not depend on @playforge/api, and the payload/result shapes
+ * are owned by the browser-worker contract, so each consumer keeps its own thin
+ * client rather than introducing a cross-service package dependency.
  */
 import { Queue } from 'bullmq';
 
-/** One synthetic-input step in a playtest plan. Kept structurally identical to
- *  the browser-worker `PlaytestStep` union so the job payload round-trips. */
+/** Synthetic-input step — structurally identical to the browser-worker union. */
 export type PlaytestStep =
   | { kind: 'key'; code: string; frames?: number }
   | { kind: 'mouseMove'; x: number; y: number }
@@ -13,10 +24,9 @@ export type PlaytestStep =
   | { kind: 'mouseUp'; button?: number }
   | { kind: 'wait'; frames: number };
 
-export interface BrowserJobData {
+interface BrowserJobData {
   kind: 'runtime-verify' | 'playtest' | 'thumbnail';
   htmlContent: string;
-  viewport?: { width: number; height: number };
   bootTimeoutMs?: number;
   steps?: PlaytestStep[];
 }
@@ -25,22 +35,15 @@ export interface RuntimeVerifyResult {
   hasGameContract: boolean;
   fatalErrors: string[];
   bootedIn: number;
+  blockedRequests?: string[];
 }
 
-export interface ThumbnailResult {
-  pngBase64: string;
-  width: number;
-  height: number;
-}
-
-/** Per-step snapshot trace row — mirrors the browser-worker result. */
 export interface PlaytestStepResult {
   step: PlaytestStep;
   snapshotAfter: unknown;
   errors: string[];
 }
 
-/** Result of a playtest job — mirrors the browser-worker `PlaytestResult`. */
 export interface PlaytestResult {
   hasGameContract: boolean;
   hasDebugContract: boolean;
@@ -50,7 +53,14 @@ export interface PlaytestResult {
   blockedRequests: string[];
 }
 
-export class BrowserJobQueue {
+/**
+ * Thin request/response client over the `browser-jobs` BullMQ queue. Enqueues a
+ * job, then polls for its terminal state — the same proven pattern the API uses
+ * (`waitForResult`). Returns `null` on timeout / failure / missing job so the
+ * caller can degrade gracefully (a missing verdict is treated as "no evidence",
+ * never as a hard failure of the whole generation).
+ */
+export class BrowserJobsClient {
   private readonly queue: Queue<BrowserJobData>;
 
   constructor(redisUrl: string) {
@@ -60,20 +70,11 @@ export class BrowserJobQueue {
     });
   }
 
-  async enqueueThumbnail(htmlContent: string): Promise<string> {
-    const job = await this.queue.add(
-      'thumbnail',
-      { kind: 'thumbnail', htmlContent, viewport: { width: 640, height: 360 }, bootTimeoutMs: 8000 },
-      { removeOnComplete: 10, removeOnFail: 10 },
-    );
-    return job.id ?? 'unknown';
-  }
-
   async enqueueRuntimeVerify(htmlContent: string): Promise<string> {
     const job = await this.queue.add(
       'runtime-verify',
       { kind: 'runtime-verify', htmlContent, bootTimeoutMs: 10_000 },
-      { removeOnComplete: 10, removeOnFail: 10 },
+      { removeOnComplete: 20, removeOnFail: 20 },
     );
     return job.id ?? 'unknown';
   }
@@ -82,7 +83,7 @@ export class BrowserJobQueue {
     const job = await this.queue.add(
       'playtest',
       { kind: 'playtest', htmlContent, steps, bootTimeoutMs: 10_000 },
-      { removeOnComplete: 10, removeOnFail: 10 },
+      { removeOnComplete: 20, removeOnFail: 20 },
     );
     return job.id ?? 'unknown';
   }
@@ -93,12 +94,14 @@ export class BrowserJobQueue {
       const job = await this.queue.getJob(jobId);
       if (!job) return null;
       const state = await job.getState();
-      if (state === 'completed') {
-        return job.returnvalue as T;
-      }
+      if (state === 'completed') return job.returnvalue as T;
       if (state === 'failed') return null;
       await new Promise((r) => setTimeout(r, 500));
     }
     return null;
+  }
+
+  async close(): Promise<void> {
+    await this.queue.close();
   }
 }

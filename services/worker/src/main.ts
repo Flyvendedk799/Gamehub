@@ -32,7 +32,14 @@ import type { ModelRef } from '@playforge/shared';
 import { classifyAbortKind } from '@playforge/shared';
 import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
 import type { ContinuationPromptInput } from '@playforge/agent-core';
+import {
+  BrowserJobsClient,
+  type PlaytestResult,
+  type PlaytestStep,
+  type RuntimeVerifyResult,
+} from './browser-jobs';
 import { enqueueRun } from './queue';
+import type { BrowserJobsPort } from './run-generation';
 
 function requireEnv(name: string): string {
   const val = process.env[name];
@@ -85,6 +92,39 @@ async function main() {
   const store = new SnapshotStore(new LocalFsBlobStore(blobDir));
   const connection = parseRedisUrl(redisUrl);
 
+  // #1.4 — out-of-process browser-jobs port. The gen worker NEVER boots
+  // untrusted game code in-process; it round-trips runtime-verify + playtest
+  // requests to the dedicated browser-worker pool over the `browser-jobs`
+  // BullMQ queue (same REDIS_URL). This makes the agent's `done` runtime-load
+  // gate and `playtest_game` tool live in production, replacing the previous
+  // static-lint-only force-accept. Set DISABLE_BROWSER_JOBS=1 to fall back to
+  // the no-verification behaviour (e.g. when no browser-worker is deployed).
+  const browserClient =
+    process.env['DISABLE_BROWSER_JOBS'] === '1' ? undefined : new BrowserJobsClient(redisUrl);
+  const browserJobs: BrowserJobsPort | undefined =
+    browserClient === undefined
+      ? undefined
+      : {
+          async runtimeVerify(htmlContent: string) {
+            const jobId = await browserClient.enqueueRuntimeVerify(htmlContent);
+            const result = await browserClient.waitForResult<RuntimeVerifyResult>(jobId, 20_000);
+            if (result === null) return null;
+            return { hasGameContract: result.hasGameContract, fatalErrors: result.fatalErrors };
+          },
+          async playtest(htmlContent: string, steps: ReadonlyArray<PlaytestStep>) {
+            const jobId = await browserClient.enqueuePlaytest(htmlContent, [...steps]);
+            const result = await browserClient.waitForResult<PlaytestResult>(jobId, 30_000);
+            if (result === null) return null;
+            return {
+              hasGameContract: result.hasGameContract,
+              hasDebugContract: result.hasDebugContract,
+              baselineSnapshot: result.baselineSnapshot,
+              steps: result.steps,
+              bootErrors: result.bootErrors,
+            };
+          },
+        };
+
   const worker = new Worker<GenerateJobData>(
     'generate',
     async (job) => {
@@ -111,7 +151,7 @@ async function main() {
           ...(maxTokens !== undefined ? { maxTokens } : {}),
           ...(isRemix === true ? { isRemix } : {}),
         },
-        { bus, store },
+        { bus, store, ...(browserJobs !== undefined ? { browserJobs } : {}) },
       );
 
       const manifestKey = result.snapshot.manifestKey;

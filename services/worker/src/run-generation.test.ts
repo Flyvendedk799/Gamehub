@@ -5,11 +5,18 @@
  * generateViaAgent would — then assert the snapshot persisted and the stream
  * fired. No provider key, no network: deterministic proof of the wiring.
  */
-import type { AgentEvent, GenerateOutput } from '@playforge/agent-core';
+import type { AgentEvent, GenerateOutput, PlaytestStep } from '@playforge/agent-core';
 import type { GameSpec } from '@playforge/shared';
 import { InMemoryBlobStore, SnapshotStore } from '@playforge/storage';
 import { describe, expect, it } from 'vitest';
-import { ENGINE_SCENE_VALIDATOR, type GenerateFn, runGeneration } from './run-generation';
+import {
+  type BrowserJobsPort,
+  ENGINE_SCENE_VALIDATOR,
+  type GenerateFn,
+  type PlaytestVerdict,
+  type RuntimeVerifyVerdict,
+  runGeneration,
+} from './run-generation';
 
 describe('ENGINE_SCENE_VALIDATOR (#1.1 — the worker now runs a REAL engine lint, not the old no-op)', () => {
   it('flags a Phaser add.image with no matching load.image as ok:false (was always ok:true)', () => {
@@ -162,5 +169,175 @@ describe('runGeneration token ceiling (#18)', () => {
     );
 
     expect(abortedSeen).toBe(false);
+  });
+});
+
+describe('runGeneration browser-jobs wiring (#1.4 — out-of-process runtimeVerify + playtester)', () => {
+  /** A stub browser-jobs port whose verdicts the test controls — stands in for
+   *  the real round-trip to the browser-worker pool. */
+  function stubBrowserJobs(opts: {
+    runtimeVerify?: RuntimeVerifyVerdict | null;
+    playtest?: PlaytestVerdict | null;
+  }): BrowserJobsPort & { calls: { verify: string[]; playtest: PlaytestStep[][] } } {
+    const calls = { verify: [] as string[], playtest: [] as PlaytestStep[][] };
+    return {
+      calls,
+      async runtimeVerify(html) {
+        calls.verify.push(html);
+        return opts.runtimeVerify ?? null;
+      },
+      async playtest(_html, steps) {
+        calls.playtest.push([...steps]);
+        return opts.playtest ?? null;
+      },
+    };
+  }
+
+  it('a throwing boot makes the injected runtimeVerify report errors (done → has_errors, not force-accept)', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = stubBrowserJobs({
+      // Browser-worker reports the game threw on boot and never set window.__game.
+      runtimeVerify: { hasGameContract: false, fatalErrors: ['Uncaught Error: boot blew up'] },
+    });
+
+    let runtimeErrors: Array<{ message: string }> = [];
+    let runtimeVerifyWasWired = false;
+    const agent: GenerateFn = async (_input, deps) => {
+      await deps.fs?.create('index.html', RED_SQUARE);
+      // The agent's `done` tool calls deps.runtimeVerify(source); emulate that.
+      if (deps.runtimeVerify) {
+        runtimeVerifyWasWired = true;
+        runtimeErrors = await deps.runtimeVerify('<html>broken</html>');
+      }
+      return emptyOutput('built');
+    };
+
+    await runGeneration(
+      { prompt: 'broken game', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      { store, generate: agent, browserJobs },
+    );
+
+    expect(runtimeVerifyWasWired).toBe(true);
+    expect(browserJobs.calls.verify).toHaveLength(1);
+    // The throwing boot surfaces as errors → done would report status='has_errors'.
+    expect(runtimeErrors.length).toBeGreaterThan(0);
+    expect(runtimeErrors.some((e) => e.message.includes('boot blew up'))).toBe(true);
+    // And the no-__game verdict adds the explicit "did not boot" advisory.
+    expect(runtimeErrors.some((e) => e.message.includes('did not boot'))).toBe(true);
+  });
+
+  it('a clean runtimeVerify verdict yields no errors (done accepts)', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = stubBrowserJobs({
+      runtimeVerify: { hasGameContract: true, fatalErrors: [] },
+    });
+
+    let runtimeErrors: Array<{ message: string }> = [];
+    const agent: GenerateFn = async (_input, deps) => {
+      await deps.fs?.create('index.html', RED_SQUARE);
+      if (deps.runtimeVerify) runtimeErrors = await deps.runtimeVerify(RED_SQUARE);
+      return emptyOutput('ok');
+    };
+
+    await runGeneration(
+      { prompt: 'good game', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      { store, generate: agent, browserJobs },
+    );
+
+    expect(runtimeErrors).toEqual([]);
+  });
+
+  it('the gameMode.playtester is wired and maps the verdict to PlaytesterOutput', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const steps: PlaytestStep[] = [{ kind: 'key', code: 'KeyD', frames: 20 }];
+    const browserJobs = stubBrowserJobs({
+      playtest: {
+        hasGameContract: true,
+        hasDebugContract: true,
+        baselineSnapshot: { x: 0 },
+        steps: [{ step: steps[0]!, snapshotAfter: { x: 20 }, errors: [] }],
+        bootErrors: [],
+      },
+    });
+
+    let playtesterWired = false;
+    let output: unknown = null;
+    const agent: GenerateFn = async (_input, deps) => {
+      await deps.fs?.create('index.html', RED_SQUARE);
+      const playtester = deps.gameMode?.playtester;
+      if (playtester) {
+        playtesterWired = true;
+        output = await playtester({ artifactSource: RED_SQUARE, viewport: 'desktop', steps });
+      }
+      return emptyOutput('ok');
+    };
+
+    await runGeneration(
+      { prompt: 'movement game', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      { store, generate: agent, browserJobs },
+    );
+
+    expect(playtesterWired).toBe(true);
+    expect(browserJobs.calls.playtest).toEqual([steps]);
+    expect(output).toMatchObject({
+      hasDebugContract: true,
+      baselineSnapshot: { x: 0 },
+      bootErrors: [],
+    });
+    // The +x-on-KeyD movement is visible in the mapped trace.
+    const out = output as { steps: Array<{ snapshotAfter: { x: number } }> };
+    expect(out.steps[0]!.snapshotAfter.x).toBe(20);
+  });
+
+  it('without a browser-jobs port, runtimeVerify + playtester are NOT wired (offline fallback)', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    let runtimeVerifyWired = false;
+    let playtesterWired = false;
+    const agent: GenerateFn = async (_input, deps) => {
+      await deps.fs?.create('index.html', RED_SQUARE);
+      runtimeVerifyWired = deps.runtimeVerify !== undefined;
+      playtesterWired = deps.gameMode?.playtester !== undefined;
+      return emptyOutput('ok');
+    };
+
+    await runGeneration(
+      { prompt: 'offline game', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      { store, generate: agent },
+    );
+
+    expect(runtimeVerifyWired).toBe(false);
+    expect(playtesterWired).toBe(false);
+  });
+
+  it('a null verdict (queue down) degrades gracefully — no errors, empty playtest', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = stubBrowserJobs({ runtimeVerify: null, playtest: null });
+
+    let runtimeErrors: Array<{ message: string }> = [];
+    let playtestOut: { bootErrors: ReadonlyArray<string> } | null = null;
+    const agent: GenerateFn = async (_input, deps) => {
+      await deps.fs?.create('index.html', RED_SQUARE);
+      if (deps.runtimeVerify) runtimeErrors = await deps.runtimeVerify(RED_SQUARE);
+      const playtester = deps.gameMode?.playtester;
+      if (playtester) {
+        playtestOut = await playtester({
+          artifactSource: RED_SQUARE,
+          viewport: 'desktop',
+          steps: [{ kind: 'wait', frames: 3 }],
+        });
+      }
+      return emptyOutput('ok');
+    };
+
+    await runGeneration(
+      { prompt: 'queue down', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      { store, generate: agent, browserJobs },
+    );
+
+    // runtimeVerify with a null verdict must NOT block done (no evidence ≠ failure).
+    expect(runtimeErrors).toEqual([]);
+    // playtester with a null verdict surfaces an infra-unavailable boot error.
+    expect(playtestOut).not.toBeNull();
+    expect(playtestOut!.bootErrors.length).toBeGreaterThan(0);
   });
 });
