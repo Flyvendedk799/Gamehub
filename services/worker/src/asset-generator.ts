@@ -14,76 +14,10 @@
  */
 
 import type { GenerateImageAssetFn, GenerateImageAssetRequest } from '@playforge/agent-core';
-
-// ---------------------------------------------------------------------------
-// SSRF guard
-// ---------------------------------------------------------------------------
-// Infrastructure for any future dynamic fetch (e.g. read_url tool, provider
-// URL from config). The hardcoded https://api.openai.com call below is always
-// safe, but we run it through assertSafeUrl anyway so the guard is exercised
-// on every request and proven live.
-// ---------------------------------------------------------------------------
-
-/**
- * Asserts that `url` is safe to fetch server-side.
- *
- * Rules:
- *  - Protocol must be `https:` (no http, file, ftp, data, …)
- *  - Hostname must not resolve to RFC 1918, loopback, link-local, or
- *    APIPA/metadata addresses (hostname-pattern matching; DNS rebinding is
- *    a separate concern handled at the network layer).
- *
- * Throws `Error('SSRF_BLOCKED: <hostname>')` when a rule is violated.
- */
-export function assertSafeUrl(url: string): void {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new Error(`SSRF_BLOCKED: invalid URL — ${url}`);
-  }
-
-  if (parsed.protocol !== 'https:') {
-    throw new Error(`SSRF_BLOCKED: protocol not allowed — ${parsed.protocol}`);
-  }
-
-  const host = parsed.hostname.toLowerCase();
-
-  // Loopback
-  if (host === 'localhost' || host === '::1' || host === '0.0.0.0') {
-    throw new Error(`SSRF_BLOCKED: ${host}`);
-  }
-
-  // IPv4 pattern checks
-  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (v4 !== null) {
-    const [, a, b, c] = v4;
-    const oa = Number(a);
-    const ob = Number(b);
-    const oc = Number(c);
-
-    // 127.0.0.0/8 — loopback
-    if (oa === 127) throw new Error(`SSRF_BLOCKED: ${host}`);
-
-    // 10.0.0.0/8 — private
-    if (oa === 10) throw new Error(`SSRF_BLOCKED: ${host}`);
-
-    // 172.16.0.0/12 — private (172.16.x.x – 172.31.x.x)
-    if (oa === 172 && ob >= 16 && ob <= 31) throw new Error(`SSRF_BLOCKED: ${host}`);
-
-    // 192.168.0.0/16 — private
-    if (oa === 192 && ob === 168) throw new Error(`SSRF_BLOCKED: ${host}`);
-
-    // 169.254.0.0/16 — link-local / AWS metadata (169.254.169.254)
-    if (oa === 169 && ob === 254) throw new Error(`SSRF_BLOCKED: ${host}`);
-
-    // 0.0.0.0/8
-    if (oa === 0) throw new Error(`SSRF_BLOCKED: ${host}`);
-
-    // Suppress unused-variable lint for `c` — we may extend checks later.
-    void oc;
-  }
-}
+// The ONE canonical SSRF guard. Any server-side fetch of a URL that is
+// attacker/model/config-influenced runs through this (async, DNS-aware) guard.
+// Do not re-fork a local blocklist — see packages/shared/src/ssrf.ts.
+import { assertSafeUrl } from '@playforge/shared';
 
 const ASPECT_TO_SIZE: Record<string, string> = {
   '1:1': '1024x1024',
@@ -113,7 +47,7 @@ export function makeAssetGenerator(opts: {
     const fullPrompt = `${prompt}. Purpose: ${purpose}. Alt text: ${alt ?? purpose}.`;
 
     const imageEndpoint = 'https://api.openai.com/v1/images/generations';
-    assertSafeUrl(imageEndpoint);
+    await assertSafeUrl(imageEndpoint);
     const res = await fetch(imageEndpoint, {
       method: 'POST',
       headers: {

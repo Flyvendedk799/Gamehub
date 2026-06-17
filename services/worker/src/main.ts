@@ -198,6 +198,7 @@ async function main() {
             currentManifestKey: manifestKey,
             updatedAt: new Date(),
             ...(snapshotId !== null ? { currentSnapshotId: snapshotId } : {}),
+            ...(result.engine !== null ? { engine: result.engine } : {}),
           })
           .where(eq(schema.projects.id, projectId)),
         db.insert(schema.chatMessages).values({

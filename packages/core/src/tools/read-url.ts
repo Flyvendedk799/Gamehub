@@ -7,7 +7,7 @@
  */
 
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
-import { CodesignError, ERROR_CODES } from '@playforge/shared';
+import { CodesignError, ERROR_CODES, assertSafeUrl } from '@playforge/shared';
 import { Type } from '@sinclair/typebox';
 
 const ReadUrlParams = Type.Object({
@@ -82,25 +82,54 @@ export function makeReadUrlTool(): AgentTool<typeof ReadUrlParams, ReadUrlDetail
     async execute(_id, params, signal): Promise<AgentToolResult<ReadUrlDetails>> {
       const max = params.maxChars ?? 4000;
       const networkTimeout = AbortSignal.timeout(READ_URL_NETWORK_TIMEOUT_MS);
+
+      // SSRF guard + MANUAL redirect following. The agent (or the user) supplies
+      // this URL, so it is untrusted: it could point at — or redirect to — cloud
+      // metadata (169.254.169.254), an RFC1918 host, or loopback. We validate
+      // every hop (the initial URL AND each `Location`) so an open redirect or a
+      // public host that resolves to a private address cannot steer the fetch.
+      const MAX_REDIRECTS = 5;
+      let currentUrl = params.url;
       let res: Response;
-      try {
-        res = await fetch(params.url, {
-          signal: combineSignals(signal, networkTimeout),
-          headers: {
-            'user-agent': 'open-codesign/0.1 (+https://github.com/hqhq1025/codesign)',
-            accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1',
-          },
-        });
-      } catch (err) {
-        if (isAbortFromTimeout(err, networkTimeout)) {
-          throw new CodesignError(
-            `read_url network timeout after ${READ_URL_NETWORK_TIMEOUT_MS / 1000}s for ${params.url}`,
-            ERROR_CODES.REFERENCE_URL_FETCH_TIMEOUT,
-            { cause: err instanceof Error ? err : new Error(String(err)) },
-          );
+      for (let hop = 0; ; hop++) {
+        try {
+          await assertSafeUrl(currentUrl);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          throw new Error(`read_url refused (SSRF guard): ${msg}`);
         }
-        const msg = err instanceof Error ? err.message : String(err);
-        throw new Error(`Network request failed: ${msg}`);
+        try {
+          res = await fetch(currentUrl, {
+            redirect: 'manual',
+            signal: combineSignals(signal, networkTimeout),
+            headers: {
+              'user-agent': 'Playforge/0.1 (+https://playforge.app)',
+              accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1',
+            },
+          });
+        } catch (err) {
+          if (isAbortFromTimeout(err, networkTimeout)) {
+            throw new CodesignError(
+              `read_url network timeout after ${READ_URL_NETWORK_TIMEOUT_MS / 1000}s for ${params.url}`,
+              ERROR_CODES.REFERENCE_URL_FETCH_TIMEOUT,
+              { cause: err instanceof Error ? err : new Error(String(err)) },
+            );
+          }
+          const msg = err instanceof Error ? err.message : String(err);
+          throw new Error(`Network request failed: ${msg}`);
+        }
+        // undici returns the raw 3xx (not an opaque redirect) under redirect:'manual'.
+        if (res.status >= 300 && res.status < 400) {
+          const location = res.headers.get('location');
+          if (!location) break; // malformed redirect — fall through to the !res.ok check
+          if (hop >= MAX_REDIRECTS) {
+            throw new Error(`read_url refused: too many redirects (>${MAX_REDIRECTS}) for ${params.url}`);
+          }
+          await res.body?.cancel().catch(() => {}); // release the socket before the next hop
+          currentUrl = new URL(location, currentUrl).toString();
+          continue;
+        }
+        break;
       }
       if (!res.ok) {
         throw new Error(`HTTP ${res.status} from ${params.url}`);

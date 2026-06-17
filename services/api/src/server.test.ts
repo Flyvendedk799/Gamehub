@@ -16,6 +16,7 @@ function makeApp(overrides?: {
   store?: SnapshotStore;
   publishRepo?: InMemoryPublishRepo;
   hubRepo?: InMemoryHubRepo;
+  adminToken?: string;
 }) {
   return buildServer({
     repo: overrides?.repo ?? new InMemoryProjectRepo(),
@@ -26,6 +27,7 @@ function makeApp(overrides?: {
     ...(overrides?.store !== undefined ? { store: overrides.store } : {}),
     ...(overrides?.publishRepo !== undefined ? { publishRepo: overrides.publishRepo } : {}),
     ...(overrides?.hubRepo !== undefined ? { hubRepo: overrides.hubRepo } : {}),
+    ...(overrides?.adminToken !== undefined ? { adminToken: overrides.adminToken } : {}),
   });
 }
 
@@ -44,6 +46,42 @@ describe('auth', () => {
   it('rejects unauthenticated project access', async () => {
     const res = await makeApp().inject({ method: 'GET', url: '/v1/projects' });
     expect(res.statusCode).toBe(401);
+  });
+});
+
+describe('admin gate fails closed', () => {
+  it('returns 503 admin_disabled on /v1/admin/metrics when no ADMIN_TOKEN is configured', async () => {
+    const res = await makeApp().inject({ method: 'GET', url: '/v1/admin/metrics' });
+    expect(res.statusCode).toBe(503);
+    expect(res.json()).toMatchObject({ error: 'admin_disabled' });
+  });
+
+  it('returns 503 admin_disabled on moderation when no ADMIN_TOKEN is configured', async () => {
+    const app = makeApp({ publishRepo: new InMemoryPublishRepo() });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/admin/games/some-slug/moderate',
+      payload: { status: 'removed_by_mod' },
+    });
+    expect(res.statusCode).toBe(503);
+    expect(res.json()).toMatchObject({ error: 'admin_disabled' });
+  });
+
+  it('rejects a wrong admin token with 403 and accepts the right one', async () => {
+    const app = makeApp({ adminToken: 'sekret' });
+    const bad = await app.inject({
+      method: 'GET',
+      url: '/v1/admin/metrics',
+      headers: { 'x-admin-token': 'wrong' },
+    });
+    expect(bad.statusCode).toBe(403);
+
+    const ok = await app.inject({
+      method: 'GET',
+      url: '/v1/admin/metrics',
+      headers: { 'x-admin-token': 'sekret' },
+    });
+    expect(ok.statusCode).toBe(200);
   });
 });
 

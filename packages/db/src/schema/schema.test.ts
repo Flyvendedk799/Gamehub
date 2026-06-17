@@ -19,12 +19,14 @@ function columnNames(table: Parameters<typeof getTableConfig>[0]): string[] {
 }
 
 describe('schema', () => {
-  it('users has the auth + profile columns', () => {
+  it('users has the native-auth + profile columns', () => {
     const cfg = getTableConfig(users);
     expect(cfg.name).toBe('users');
     expect(columnNames(users)).toEqual(
-      expect.arrayContaining(['id', 'clerk_user_id', 'handle', 'display_name']),
+      expect.arrayContaining(['id', 'email', 'password_hash', 'handle', 'display_name']),
     );
+    // Clerk's external subject id was dropped when native auth landed.
+    expect(columnNames(users)).not.toContain('clerk_user_id');
   });
 
   it('projects carries engine + game_spec + remix lineage', () => {
