@@ -3,28 +3,28 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { getCreatorProfile } from '@/lib/api';
-import type { CreatorProfile } from '@/lib/api';
+import { GameCard } from '@/components/GameCard';
+import type { GameCardData } from '@/components/GameCard';
+import { getCreatorGames } from '@/lib/api';
+import type { CreatorGame } from '@/lib/api';
 
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  if (months < 12) return `${months}mo ago`;
-  return `${Math.floor(months / 12)}y ago`;
+/** Map a creator's published game onto the shared gallery-card shape (#3.1). */
+function toCardData(game: CreatorGame): GameCardData {
+  return {
+    seedId: game.id,
+    slug: game.publishSlug,
+    title: game.title,
+    thumbnailUrl: game.thumbnailUrl,
+    genre: game.genre,
+    // PublishedGame doesn't carry play count; the card shows "Published".
+  };
 }
 
 export default function CreatorProfilePage() {
   const params = useParams<{ handle: string }>();
   const handle = params?.handle ?? '';
 
-  const [profile, setProfile] = useState<CreatorProfile | null>(null);
+  const [games, setGames] = useState<CreatorGame[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,8 +32,8 @@ export default function CreatorProfilePage() {
     if (!handle) return;
     setLoading(true);
     setError(null);
-    getCreatorProfile(handle)
-      .then(setProfile)
+    getCreatorGames(handle, { limit: 50 })
+      .then(({ games: g }) => setGames(g))
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'Failed to load profile');
       })
@@ -92,9 +92,15 @@ export default function CreatorProfilePage() {
             <div className="h-4 bg-[#111111] rounded w-24 mb-10" />
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="bg-[#111111] border border-[#222222] rounded-xl p-4">
-                  <div className="h-4 bg-[#1a1a1a] rounded w-3/4 mb-3" />
-                  <div className="h-3 bg-[#1a1a1a] rounded w-1/3" />
+                <div
+                  key={i}
+                  className="bg-[#111111] border border-[#222222] rounded-xl overflow-hidden"
+                >
+                  <div className="aspect-video w-full bg-[#1a1a1a]" />
+                  <div className="p-4">
+                    <div className="h-4 bg-[#1a1a1a] rounded w-3/4 mb-3" />
+                    <div className="h-3 bg-[#1a1a1a] rounded w-1/3" />
+                  </div>
                 </div>
               ))}
             </div>
@@ -109,20 +115,18 @@ export default function CreatorProfilePage() {
         )}
 
         {/* Profile loaded */}
-        {!loading && !error && profile && (
+        {!loading && !error && (
           <>
             {/* Hero */}
             <div className="mb-10">
-              <h1 className="text-3xl font-bold text-[#f4f4f5] tracking-tight">
-                @{profile.handle}
-              </h1>
+              <h1 className="text-3xl font-bold text-[#f4f4f5] tracking-tight">@{handle}</h1>
               <p className="text-sm text-[#52525b] mt-1">
-                {profile.projectCount} {profile.projectCount === 1 ? 'game' : 'games'}
+                {games.length} published {games.length === 1 ? 'game' : 'games'}
               </p>
             </div>
 
-            {/* Grid */}
-            {profile.projects.length === 0 ? (
+            {/* Thumbnail gallery (#3.1) */}
+            {games.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-24 border border-dashed border-[#222222] rounded-2xl text-center">
                 <div className="w-12 h-12 rounded-xl bg-[#111111] border border-[#222222] flex items-center justify-center mb-4">
                   <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
@@ -134,8 +138,8 @@ export default function CreatorProfilePage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {profile.projects.map((project) => (
-                  <ProjectCard key={project.id} project={project} />
+                {games.map((game) => (
+                  <GameCard key={game.id} game={toCardData(game)} />
                 ))}
               </div>
             )}
@@ -143,50 +147,5 @@ export default function CreatorProfilePage() {
         )}
       </main>
     </div>
-  );
-}
-
-type ProjectItem = CreatorProfile['projects'][number];
-
-function ProjectCard({ project }: { project: ProjectItem }) {
-  const updated = relativeTime(project.updatedAt);
-  const engineLabel = project.engine ?? 'unknown';
-
-  return (
-    <div className="group bg-[#111111] border border-[#222222] rounded-xl p-4 hover:border-[#333333] transition-colors">
-      {/* Header row */}
-      <div className="flex items-start justify-between gap-2 mb-3">
-        <h2 className="text-sm font-semibold text-[#f4f4f5] truncate group-hover:text-[#6366f1] transition-colors">
-          {project.name}
-        </h2>
-        <EngineBadge engine={engineLabel} />
-      </div>
-
-      {/* Footer */}
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-[#52525b]">Updated {updated}</span>
-        <Link
-          href={`/projects/${project.id}`}
-          className="text-xs px-2.5 py-1 rounded-md bg-[#6366f1]/10 hover:bg-[#6366f1]/20 text-[#6366f1] border border-[#6366f1]/20 transition-colors font-medium"
-        >
-          Builder
-        </Link>
-      </div>
-    </div>
-  );
-}
-
-function EngineBadge({ engine }: { engine: string }) {
-  const isPhaserOrThree = engine === 'phaser' || engine === 'three';
-  return (
-    <span
-      className={`flex-shrink-0 text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded-md border ${
-        isPhaserOrThree
-          ? 'bg-[#6366f1]/10 text-[#6366f1] border-[#6366f1]/20'
-          : 'bg-[#1a1a1a] text-[#52525b] border-[#222222]'
-      }`}
-    >
-      {engine}
-    </span>
   );
 }

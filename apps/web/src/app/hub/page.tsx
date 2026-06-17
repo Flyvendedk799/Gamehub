@@ -1,15 +1,52 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { GameCard } from '@/components/GameCard';
+import type { GameCardData } from '@/components/GameCard';
 import { getHubFeed, searchHub } from '@/lib/api';
-import type { HubGame } from '@/lib/api';
+import type { HubGame, HubSort } from '@/lib/api';
 
-type SortOption = 'recent' | 'popular';
+const SORTS: ReadonlyArray<{ id: HubSort; label: string }> = [
+  { id: 'recent', label: 'Recent' },
+  { id: 'popular', label: 'Popular' },
+  { id: 'trending', label: 'Trending' },
+];
+
+/** Map a HubGame onto the shared gallery-card shape (#3.1). */
+function toCardData(game: HubGame): GameCardData {
+  return {
+    seedId: game.id,
+    slug: game.publishSlug,
+    title: game.title,
+    thumbnailUrl: game.thumbnailUrl,
+    genre: game.genre,
+    playCount: game.playCount,
+    ratingAvg: game.ratingAvg,
+    ratingCount: game.ratingCount,
+    tags: game.tags,
+  };
+}
+
+/**
+ * Genre chips are derived from whatever genres the feed actually surfaces, so
+ * the chip list never drifts from backend data. We track the widest set we've
+ * seen this session so chips don't vanish when a narrower filter is applied.
+ */
+function mergeGenres(prev: string[], games: HubGame[]): string[] {
+  const set = new Set(prev);
+  for (const g of games) {
+    if (g.genre && g.genre.trim().length > 0) set.add(g.genre);
+  }
+  return Array.from(set).sort();
+}
 
 export default function HubPage() {
   const [games, setGames] = useState<HubGame[]>([]);
-  const [sort, setSort] = useState<SortOption>('recent');
+  const [sort, setSort] = useState<HubSort>('recent');
+  const [genre, setGenre] = useState<string>(''); // '' = All
+  const [tag, setTag] = useState<string>(''); // '' = no tag filter
+  const [knownGenres, setKnownGenres] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   // #26 — debounced Hub search. Empty query falls back to the normal feed.
@@ -26,19 +63,39 @@ export default function HubPage() {
     const q = debouncedQuery.trim();
     setLoading(true);
     if (q.length === 0) {
-      void getHubFeed({ sort, limit: 20 })
-        .then(({ games: g }) => setGames(g))
+      // Sort + genre + tag filters compose on the feed (#3.3/#3.4).
+      void getHubFeed({ sort, genre, tag, limit: 24 })
+        .then(({ games: g }) => {
+          setGames(g);
+          setKnownGenres((prev) => mergeGenres(prev, g));
+        })
         .catch(() => setGames([]))
         .finally(() => setLoading(false));
       return;
     }
+    // Search ignores sort/genre/tag (the search endpoint is its own ranking);
+    // the controls are disabled while searching to keep the UX honest.
     let cancelled = false;
-    void searchHub(q, { limit: 20 })
-      .then(({ results }) => { if (!cancelled) setGames(results); })
-      .catch(() => { if (!cancelled) setGames([]); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [sort, debouncedQuery]);
+    void searchHub(q, { limit: 24 })
+      .then(({ results }) => {
+        if (!cancelled) {
+          setGames(results);
+          setKnownGenres((prev) => mergeGenres(prev, results));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setGames([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sort, genre, tag, debouncedQuery]);
+
+  const filtersActive = !isSearching && (genre !== '' || tag !== '');
+  const genreChips = useMemo(() => knownGenres, [knownGenres]);
 
   return (
     <div className="flex flex-col min-h-screen bg-[#0a0a0a]">
@@ -74,41 +131,32 @@ export default function HubPage() {
       {/* Main content */}
       <main className="flex-1 px-4 sm:px-6 lg:px-8 py-8 max-w-7xl mx-auto w-full">
         {/* Page heading + sort controls */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
           <div>
             <h1 className="text-xl font-semibold text-[#f4f4f5]">Community Hub</h1>
             <p className="text-sm text-[#52525b] mt-0.5">Discover games built with Playforge</p>
           </div>
 
+          {/* #3.3 — sort tabs */}
           <div className="flex items-center gap-1 bg-[#111111] border border-[#222222] rounded-lg p-0.5">
             <span className="text-xs text-[#52525b] px-2">Sort:</span>
-            <button
-              onClick={() => setSort('recent')}
-              disabled={isSearching}
-              className={`text-xs px-3 py-1.5 rounded-md transition-colors font-medium disabled:opacity-40 ${
-                sort === 'recent'
-                  ? 'bg-[#6366f1] text-white'
-                  : 'text-[#71717a] hover:text-[#f4f4f5]'
-              }`}
-            >
-              Recent
-            </button>
-            <button
-              onClick={() => setSort('popular')}
-              disabled={isSearching}
-              className={`text-xs px-3 py-1.5 rounded-md transition-colors font-medium disabled:opacity-40 ${
-                sort === 'popular'
-                  ? 'bg-[#6366f1] text-white'
-                  : 'text-[#71717a] hover:text-[#f4f4f5]'
-              }`}
-            >
-              Popular
-            </button>
+            {SORTS.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => setSort(s.id)}
+                disabled={isSearching}
+                className={`text-xs px-3 py-1.5 rounded-md transition-colors font-medium disabled:opacity-40 ${
+                  sort === s.id ? 'bg-[#6366f1] text-white' : 'text-[#71717a] hover:text-[#f4f4f5]'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
           </div>
         </div>
 
         {/* Search box (#26) */}
-        <div className="mb-8 relative">
+        <div className="mb-4 relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#52525b] pointer-events-none">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="11" cy="11" r="7" />
@@ -134,16 +182,60 @@ export default function HubPage() {
           )}
         </div>
 
+        {/* #3.4 — genre filter chips + active tag chip. Hidden while searching
+            (search is its own ranking and ignores these filters). */}
+        {!isSearching && (genreChips.length > 0 || tag !== '') && (
+          <div className="mb-8 flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setGenre('')}
+              className={`text-xs px-3 py-1.5 rounded-full border transition-colors font-medium ${
+                genre === ''
+                  ? 'bg-[#6366f1] text-white border-[#6366f1]'
+                  : 'bg-[#111111] text-[#71717a] border-[#222222] hover:text-[#f4f4f5] hover:border-[#333333]'
+              }`}
+            >
+              All
+            </button>
+            {genreChips.map((g) => (
+              <button
+                key={g}
+                onClick={() => setGenre(genre === g ? '' : g)}
+                className={`text-xs px-3 py-1.5 rounded-full border transition-colors font-medium ${
+                  genre === g
+                    ? 'bg-[#6366f1] text-white border-[#6366f1]'
+                    : 'bg-[#111111] text-[#71717a] border-[#222222] hover:text-[#f4f4f5] hover:border-[#333333]'
+                }`}
+              >
+                {g.replace(/_/g, ' ')}
+              </button>
+            ))}
+
+            {/* Active tag filter (set by clicking a tag on a card) */}
+            {tag !== '' && (
+              <button
+                onClick={() => setTag('')}
+                className="text-xs px-3 py-1.5 rounded-full border bg-[#6366f1]/10 text-[#6366f1] border-[#6366f1]/30 font-medium inline-flex items-center gap-1.5"
+                aria-label={`Remove tag filter ${tag}`}
+              >
+                #{tag} <span className="text-[#6366f1]/70">✕</span>
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Loading skeleton */}
         {loading && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {Array.from({ length: 6 }).map((_, i) => (
               <div
                 key={i}
-                className="bg-[#111111] border border-[#222222] rounded-xl p-4 animate-pulse"
+                className="bg-[#111111] border border-[#222222] rounded-xl overflow-hidden animate-pulse"
               >
-                <div className="h-4 bg-[#1a1a1a] rounded w-3/4 mb-3" />
-                <div className="h-3 bg-[#1a1a1a] rounded w-1/2" />
+                <div className="aspect-video w-full bg-[#1a1a1a]" />
+                <div className="p-4">
+                  <div className="h-4 bg-[#1a1a1a] rounded w-3/4 mb-3" />
+                  <div className="h-3 bg-[#1a1a1a] rounded w-1/2" />
+                </div>
               </div>
             ))}
           </div>
@@ -168,6 +260,20 @@ export default function HubPage() {
                   Clear search
                 </button>
               </>
+            ) : filtersActive ? (
+              <>
+                <p className="text-sm font-medium text-[#71717a]">No games match this filter</p>
+                <p className="text-xs text-[#52525b] mt-1">Try a different genre or clear the filter.</p>
+                <button
+                  onClick={() => {
+                    setGenre('');
+                    setTag('');
+                  }}
+                  className="mt-6 text-xs px-4 py-2 rounded-lg bg-[#1a1a1a] hover:bg-[#222222] text-[#a1a1aa] border border-[#222222] font-medium transition-colors"
+                >
+                  Clear filters
+                </button>
+              </>
             ) : (
               <>
                 <p className="text-sm font-medium text-[#71717a]">No games published yet</p>
@@ -183,53 +289,22 @@ export default function HubPage() {
           </div>
         )}
 
-        {/* Game grid */}
+        {/* Game gallery (#3.1) */}
         {!loading && games.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {games.map((game) => (
-              <GameCard key={game.id} game={game} />
+              <GameCard
+                key={game.id}
+                game={toCardData(game)}
+                onTagClick={(t) => {
+                  setTag(t);
+                  setQuery('');
+                }}
+              />
             ))}
           </div>
         )}
       </main>
     </div>
-  );
-}
-
-function GameCard({ game }: { game: HubGame }) {
-  const rating = game.ratingAvg.toFixed(2);
-  const publishedDate = new Date(game.publishedAt).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
-
-  return (
-    <Link
-      href={`/p/${game.publishSlug}`}
-      className="bg-[#111111] border border-[#222222] rounded-xl p-4 hover:border-[#333333] cursor-pointer transition-colors block"
-    >
-      {/* Title */}
-      <h2 className="text-sm font-semibold text-[#f4f4f5] truncate mb-2">{game.title}</h2>
-
-      {/* Meta row */}
-      <p className="text-xs text-[#52525b]">
-        {game.playCount.toLocaleString()} {game.playCount === 1 ? 'play' : 'plays'}
-        {game.ratingCount > 0 && (
-          <>
-            {' '}
-            &middot; {'★'} {rating} ({game.ratingCount})
-          </>
-        )}
-      </p>
-
-      {/* Footer: published date + Play link */}
-      <div className="flex items-center justify-between mt-4">
-        <span className="text-xs text-[#3f3f46]">{publishedDate}</span>
-        <span className="text-xs px-2.5 py-1 rounded-md bg-[#6366f1]/10 text-[#6366f1] border border-[#6366f1]/20 font-medium">
-          Play
-        </span>
-      </div>
-    </Link>
   );
 }

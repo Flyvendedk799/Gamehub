@@ -7,16 +7,28 @@ const BASE = API_BASE;
 interface GameMeta {
   title: string;
   thumbnailUrl: string | null;
+  /** #3.6 — remix lineage for the play page. */
+  remixCount: number;
+  parentSlug: string | null;
 }
 
 async function fetchGameMeta(slug: string): Promise<GameMeta | null> {
   try {
     const res = await fetch(`${BASE}/v1/hub/games/${slug}`, { next: { revalidate: 60 } });
     if (!res.ok) return null;
-    const json = await res.json() as { game?: { title?: string; thumbnailUrl?: string | null } };
+    const json = (await res.json()) as {
+      game?: {
+        title?: string;
+        thumbnailUrl?: string | null;
+        remixCount?: number;
+        parentSlug?: string | null;
+      };
+    };
     return {
       title: json.game?.title ?? slug,
       thumbnailUrl: json.game?.thumbnailUrl ?? null,
+      remixCount: typeof json.game?.remixCount === 'number' ? json.game.remixCount : 0,
+      parentSlug: json.game?.parentSlug ?? null,
     };
   } catch {
     return null;
@@ -53,5 +65,12 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 export default async function PlayPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const meta = await fetchGameMeta(slug);
-  return <PlayClient slug={slug} initialTitle={meta?.title} />;
+  return (
+    <PlayClient
+      slug={slug}
+      {...(meta?.title !== undefined ? { initialTitle: meta.title } : {})}
+      remixCount={meta?.remixCount ?? 0}
+      parentSlug={meta?.parentSlug ?? null}
+    />
+  );
 }

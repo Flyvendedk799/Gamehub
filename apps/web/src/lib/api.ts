@@ -152,6 +152,11 @@ export interface HubGame {
   projectId: string;
   publishSlug: string;
   title: string;
+  thumbnailUrl: string | null;
+  description: string | null;
+  genre: string | null;
+  tags: string[];
+  remixCount: number;
   status: string;
   playCount: number;
   ratingAvg: number;
@@ -168,16 +173,35 @@ export interface HubComment {
   createdAt: string;
 }
 
-export async function getHubFeed(opts?: {
-  sort?: 'recent' | 'popular';
+export type HubSort = 'recent' | 'popular' | 'trending';
+
+export interface HubFeedOptions {
+  sort?: HubSort;
+  /** Genre slug to filter by; empty/undefined = all genres. */
+  genre?: string;
+  /** Single tag to filter by; empty/undefined = no tag filter. */
+  tag?: string;
   limit?: number;
   offset?: number;
-}): Promise<{ games: HubGame[] }> {
+}
+
+/**
+ * Pure builder for the `/v1/hub` query string (#3.3/#3.4). Extracted so the
+ * sort/genre/tag composition is unit-testable without a live fetch. Empty
+ * strings are treated as "no filter" so the UI can pass `genre: ''` for "All".
+ */
+export function buildHubFeedQuery(opts?: HubFeedOptions): string {
   const params = new URLSearchParams();
   if (opts?.sort) params.set('sort', opts.sort);
+  if (opts?.genre && opts.genre.trim().length > 0) params.set('genre', opts.genre.trim());
+  if (opts?.tag && opts.tag.trim().length > 0) params.set('tag', opts.tag.trim());
   if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
   if (opts?.offset !== undefined) params.set('offset', String(opts.offset));
-  const qs = params.toString();
+  return params.toString();
+}
+
+export async function getHubFeed(opts?: HubFeedOptions): Promise<{ games: HubGame[] }> {
+  const qs = buildHubFeedQuery(opts);
   return apiFetch<{ games: HubGame[] }>(`/v1/hub${qs ? `?${qs}` : ''}`);
 }
 
@@ -206,8 +230,37 @@ export async function addComment(slug: string, body: string): Promise<HubComment
   });
 }
 
-export async function remixGame(slug: string): Promise<{ projectId: string }> {
-  return apiFetch<{ projectId: string }>(`/v1/hub/games/${slug}/remix`, { method: 'POST' });
+export async function remixGame(slug: string): Promise<{ projectId: string; parentSlug: string }> {
+  return apiFetch<{ projectId: string; parentSlug: string }>(`/v1/hub/games/${slug}/remix`, {
+    method: 'POST',
+  });
+}
+
+/**
+ * Detail view for a single published game (#3.6). Carries the hub-only
+ * `remixCount` + `parentSlug` (attribution) on top of the PublishedGame fields,
+ * which now also include description/tags/genre.
+ */
+export interface HubGameDetail {
+  id: string;
+  projectId: string;
+  publishSlug: string;
+  title: string;
+  thumbnailUrl: string | null;
+  description: string | null;
+  genre: string | null;
+  tags: string[];
+  status: string;
+  playCount: number;
+  ratingAvg: number;
+  ratingCount: number;
+  publishedAt: string;
+  remixCount: number;
+  parentSlug: string | null;
+}
+
+export async function getHubGame(slug: string): Promise<{ game: HubGameDetail }> {
+  return apiFetch<{ game: HubGameDetail }>(`/v1/hub/games/${slug}`);
 }
 
 export async function reportGame(slug: string, reason?: string): Promise<void> {
@@ -234,6 +287,37 @@ export interface CreatorProfile {
 
 export async function getCreatorProfile(handle: string): Promise<CreatorProfile> {
   return apiFetch<CreatorProfile>(`/v1/users/${handle}`);
+}
+
+/**
+ * A creator's PUBLISHED games (#3.1) — carries `thumbnailUrl` + `publishSlug`
+ * so the profile renders the same thumbnail gallery as the Hub, with cards that
+ * link to the public play page.
+ */
+export interface CreatorGame {
+  id: string;
+  projectId: string;
+  publishSlug: string;
+  title: string;
+  thumbnailUrl: string | null;
+  description: string | null;
+  genre: string | null;
+  tags: string[];
+  status: string;
+  publishedAt: string;
+}
+
+export async function getCreatorGames(
+  handle: string,
+  opts?: { limit?: number; offset?: number },
+): Promise<{ handle: string; games: CreatorGame[] }> {
+  const params = new URLSearchParams();
+  if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
+  if (opts?.offset !== undefined) params.set('offset', String(opts.offset));
+  const qs = params.toString();
+  return apiFetch<{ handle: string; games: CreatorGame[] }>(
+    `/v1/users/${handle}/games${qs ? `?${qs}` : ''}`,
+  );
 }
 
 // ─── Version timeline ────────────────────────────────────────────────────────

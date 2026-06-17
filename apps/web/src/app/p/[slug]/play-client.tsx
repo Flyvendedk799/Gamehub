@@ -19,9 +19,18 @@ const BASE = API_BASE;
 interface Props {
   slug: string;
   initialTitle?: string;
+  /** #3.6 — how many times this game has been remixed. */
+  remixCount?: number;
+  /** #3.6 — slug this game was remixed FROM, for attribution. Null if original. */
+  parentSlug?: string | null;
 }
 
-export default function PlayClient({ slug, initialTitle }: Props) {
+export default function PlayClient({
+  slug,
+  initialTitle,
+  remixCount = 0,
+  parentSlug = null,
+}: Props) {
   const router = useRouter();
   const gameUrl = `${BASE}/v1/play/${slug}`;
 
@@ -173,6 +182,30 @@ export default function PlayClient({ slug, initialTitle }: Props) {
         />
       </div>
 
+      {/* Remix lineage (#3.6) — remix count + "remixed from" attribution. */}
+      {(remixCount > 0 || parentSlug) && (
+        <div className="border-t border-[#222222] bg-[#0d0d0d] px-4 py-2 flex items-center gap-3 flex-wrap text-xs">
+          {parentSlug && (
+            <span className="text-[#71717a] inline-flex items-center gap-1.5">
+              <ForkIcon />
+              Remixed from{' '}
+              <Link
+                href={`/p/${parentSlug}`}
+                className="text-[#6366f1] hover:text-[#818cf8] font-medium transition-colors"
+              >
+                {parentSlug}
+              </Link>
+            </span>
+          )}
+          {remixCount > 0 && parentSlug && <span className="text-[#2a2a2a]">·</span>}
+          {remixCount > 0 && (
+            <span className="text-[#52525b]">
+              Remixed {remixCount.toLocaleString()} {remixCount === 1 ? 'time' : 'times'}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Action bar */}
       <div className="border-t border-[#222222] bg-[#111111] px-4 py-3 flex items-center gap-4 flex-wrap">
         {/* Like button */}
@@ -307,6 +340,28 @@ function CommentCard({ comment }: { comment: HubComment }) {
       </div>
       <p className="text-sm text-[#a1a1aa] leading-relaxed">{comment.body}</p>
     </div>
+  );
+}
+
+function ForkIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="9" r="3" />
+      <path d="M18 12a6 6 0 0 1-6 6H6" />
+      <path d="M6 9v6" />
+    </svg>
   );
 }
 
