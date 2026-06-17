@@ -212,6 +212,24 @@ describe('generation enqueue', () => {
     expect(res.json()).toMatchObject({ error: 'prompt_required' });
   });
 
+  it('rejects an oversized prompt (#31 ingress cap)', async () => {
+    const app = makeApp();
+    const proj = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: AS_ALICE,
+      payload: { name: 'test' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${proj.json().id}/generate`,
+      headers: AS_ALICE,
+      payload: { prompt: 'x'.repeat(8001) },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'prompt_too_long' });
+  });
+
   it("rejects generate on another user's project", async () => {
     const app = makeApp();
     const proj = await app.inject({

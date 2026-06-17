@@ -52,7 +52,10 @@ export const sessions = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    userIdx: uniqueIndex('sessions_user_idx').on(t.userId, t.createdAt),
+    // NON-unique: two near-simultaneous logins by the same user can land on the
+    // same created_at; a unique index here would 500 the second login. This is
+    // a plain lookup index, not a constraint.
+    userIdx: index('sessions_user_idx').on(t.userId, t.createdAt),
   }),
 );
 

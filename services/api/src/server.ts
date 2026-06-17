@@ -190,7 +190,9 @@ export function decideAffordability(
 }
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
-  const app = Fastify({ logger: false });
+  // bodyLimit caps total request size (#31) — a 1 MiB ceiling is ample for prompts,
+  // chat, and auth payloads while refusing memory-exhaustion bodies (413).
+  const app = Fastify({ logger: false, bodyLimit: 1_048_576 });
   void app.register(websocketPlugin);
 
   // ── Auth rate limiting (in-memory, per-server-instance) ──────────────────
@@ -325,6 +327,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!email || !email.includes('@')) return reply.code(400).send({ error: 'invalid_email' });
     if (!password || password.length < 8) return reply.code(400).send({ error: 'password_too_short', min: 8 });
     if (!handle || handle.length < 2) return reply.code(400).send({ error: 'invalid_handle' });
+    // Ingress length caps (#31) — bound unbounded fields (scrypt input is a CPU/DoS
+    // sink, and oversized rows are pointless). The bodyLimit guards total size; these
+    // guard individual fields.
+    if (email.length > 320) return reply.code(400).send({ error: 'email_too_long', max: 320 });
+    if (password.length > 200) return reply.code(400).send({ error: 'password_too_long', max: 200 });
+    if (handle.length > 32) return reply.code(400).send({ error: 'handle_too_long', max: 32 });
+    if (displayName && displayName.length > 80) return reply.code(400).send({ error: 'display_name_too_long', max: 80 });
 
     // Rate-limit registrations per IP to prevent bulk account creation.
     if (!checkAuthRateLimit(`register:${req.ip ?? 'unknown'}`)) {
@@ -339,18 +348,26 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (existing.length > 0) return reply.code(409).send({ error: 'email_or_handle_taken' });
 
     const passwordHash = await hashPassword(password);
-    const [user] = await deps.authDb.insert(s.users)
-      .values({ email, passwordHash, handle, displayName: displayName ?? handle })
-      .returning({ id: s.users.id, handle: s.users.handle, displayName: s.users.displayName });
-    if (!user) return reply.code(500).send({ error: 'registration_failed' });
-
     const token = generateSessionToken();
-    await deps.authDb.insert(s.sessions).values({ token, userId: user.id, expiresAt: sessionExpiresAt() });
 
-    // Grant free tier credits — non-blocking, don't fail registration on credit error.
-    void deps.authDb.insert(s.creditLedger)
-      .values({ userId: user.id, delta: FREE_TIER_CREDITS, reason: 'welcome_grant' })
-      .catch((err: unknown) => { console.error('[register] credit grant failed:', err); });
+    // ATOMIC registration (#36): user + session + welcome-grant credits all commit
+    // together. The old fire-and-forget grant could fail silently and strand a new
+    // user with 0 credits (unable to generate anything). Now it's all-or-nothing.
+    let user: { id: string; handle: string; displayName: string };
+    try {
+      user = await deps.authDb.transaction(async (tx) => {
+        const [u] = await tx.insert(s.users)
+          .values({ email, passwordHash, handle, displayName: displayName ?? handle })
+          .returning({ id: s.users.id, handle: s.users.handle, displayName: s.users.displayName });
+        if (!u) throw new Error('user insert returned no row');
+        await tx.insert(s.sessions).values({ token, userId: u.id, expiresAt: sessionExpiresAt() });
+        await tx.insert(s.creditLedger).values({ userId: u.id, delta: FREE_TIER_CREDITS, reason: 'welcome_grant' });
+        return u;
+      });
+    } catch (err) {
+      console.error('[register] atomic registration failed:', err);
+      return reply.code(500).send({ error: 'registration_failed' });
+    }
 
     return reply.code(201).send({ token, user: { id: user.id, handle: user.handle, displayName: user.displayName } });
   });
@@ -487,6 +504,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const body = (req.body ?? {}) as { prompt?: unknown };
     if (typeof body.prompt !== 'string' || body.prompt.trim() === '') {
       return reply.code(400).send({ error: 'prompt_required' });
+    }
+    if (body.prompt.length > 8000) {
+      return reply.code(400).send({ error: 'prompt_too_long', max: 8000 });
     }
     // Concurrent run cap — reject if the user already has too many active runs.
     if (deps.maxConcurrentRunsPerUser !== undefined) {
@@ -761,8 +781,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           if (result?.pngBase64 && deps.store) {
             const pngBytes = Buffer.from(result.pngBase64, 'base64');
             const thumbKey = await deps.store.putBlob(pngBytes);
-            await deps.publishRepo?.setThumbnailUrl(publishedGame.id, `/v1/blobs/${thumbKey}`);
-            console.log(`[publish] thumbnail captured for ${publishedGame.publishSlug} → ${thumbKey}`);
+            // putBlob returns a "blobs/<sha256>" key; the /v1/blobs/:key route
+            // takes a single bare-hash segment, so strip the prefix for the URL.
+            const bareThumbKey = thumbKey.replace(/^blobs\//, '');
+            await deps.publishRepo?.setThumbnailUrl(publishedGame.id, `/v1/blobs/${bareThumbKey}`);
+            console.log(`[publish] thumbnail captured for ${publishedGame.publishSlug} → ${bareThumbKey}`);
           }
         } catch (err) {
           console.warn(`[publish] thumbnail failed for ${publishedGame.publishSlug}:`, err);
@@ -898,14 +921,22 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(400).send({ error: 'invalid_key' });
     }
     try {
+      // getBlob canonicalizes a bare <sha256> to the stored "blobs/<sha256>" key (#24).
       const bytes = await deps.store.getBlob(key);
       // Sniff PNG/JPEG/WebP/GIF magic bytes for content-type.
       const buf = Buffer.from(bytes);
-      let ct = 'application/octet-stream';
+      let ct: string | null = null;
       if (buf[0] === 0x89 && buf[1] === 0x50) ct = 'image/png';
       else if (buf[0] === 0xff && buf[1] === 0xd8) ct = 'image/jpeg';
       else if (buf.slice(0, 4).toString() === 'RIFF') ct = 'image/webp';
       else if (buf.slice(0, 6).toString() === 'GIF87a' || buf.slice(0, 6).toString() === 'GIF89a') ct = 'image/gif';
+      // IMAGES ONLY (#35b): this public, unauthenticated route serves thumbnails.
+      // Refuse anything that isn't a recognized image so a removed/unpublished
+      // game's HTML bundle can never be fetched out-of-band here — only the
+      // status-gated /play route serves bundles.
+      if (ct === null) {
+        return reply.code(415).send({ error: 'unsupported_blob_type' });
+      }
       return reply
         .header('Content-Type', ct)
         .header('Cache-Control', 'public, max-age=31536000, immutable')
@@ -1011,9 +1042,25 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   // ── Creator profiles ─────────────────────────────────────────────────────
 
+  // Resolve a public @handle to its owner user id. listByOwner is keyed by user
+  // id, NOT handle — passing the handle straight through always returned empty
+  // (#29). Returns null + the caller 404s when no such handle exists. Falls back
+  // to passthrough when authDb isn't configured (the in-memory test harness).
+  async function resolveHandleToOwnerId(handle: string): Promise<string | null> {
+    if (!deps.authDb) return handle;
+    const { schema: s } = await import('@playforge/db');
+    const [u] = await deps.authDb
+      .select({ id: s.users.id })
+      .from(s.users)
+      .where(drizzleEq(s.users.handle, handle.toLowerCase()));
+    return u?.id ?? null;
+  }
+
   app.get('/v1/users/:handle', async (req, reply) => {
     const { handle } = req.params as { handle: string };
-    const projects = await deps.repo.listByOwner(handle);
+    const ownerId = await resolveHandleToOwnerId(handle);
+    if (ownerId === null) return reply.code(404).send({ error: 'user_not_found' });
+    const projects = await deps.repo.listByOwner(ownerId);
     const publicProjects = projects.filter((p) => p.visibility === 'public');
     return reply.send({
       handle,
@@ -1032,10 +1079,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   app.get('/v1/users/:handle/games', async (req, reply) => {
     if (!deps.publishRepo) return reply.code(503).send({ error: 'publish_unavailable' });
     const { handle } = req.params as { handle: string };
+    const ownerId = await resolveHandleToOwnerId(handle);
+    if (ownerId === null) return reply.code(404).send({ error: 'user_not_found' });
     const q = req.query as Record<string, string | undefined>;
     const limit = Math.min(Number(q['limit'] ?? '20'), 50);
     const offset = Number(q['offset'] ?? '0');
-    const games = await deps.publishRepo.listByOwner(handle, { limit, offset });
+    const games = await deps.publishRepo.listByOwner(ownerId, { limit, offset });
     return reply.send({ handle, games });
   });
 
