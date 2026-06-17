@@ -101,7 +101,49 @@ export interface BrowserJobsPort {
 export interface RuntimeVerifyVerdict {
   hasGameContract: boolean;
   fatalErrors: string[];
+  /**
+   * Phase 5.5 — deterministic juice/density score the browser-worker measured
+   * for the booted artifact (forced-frame canvas pixel-delta + animation
+   * churn). ADDITIVE + OPTIONAL: Phase 1.6's `buildRepairVerdict` only reads
+   * `fatalErrors`, so it is unaffected. `undefined` when the verdict predates
+   * juice measurement (e.g. a queue node that has not yet been updated to
+   * forward it). When present, it is surfaced into the eval observation +
+   * persisted in the per-run quality telemetry row.
+   */
+  juiceScore?: number;
 }
+
+/**
+ * Phase 5.6 — per-run quality telemetry record. Assembled from the data already
+ * in hand after the boot-and-repair loop settles and handed to the injectable
+ * `recordRunQuality` port for a best-effort persist into `run_quality_metrics`.
+ * Mirrors the table columns. `forceAccept` is derived (ship without a passing
+ * deterministic verdict). All fields are deterministic — never an LLM judgement.
+ */
+export interface RunQualityMetrics {
+  genre: string | null;
+  /** True when the run shipped WITHOUT a passing deterministic verdict. */
+  forceAccept: boolean;
+  repairRounds: number;
+  shipReason: ShipReason;
+  /** Genre-playbook predicate pass-count for the shipped attempt. */
+  playbookPass: number;
+  /** Total genre-playbook predicates evaluated for the shipped attempt. */
+  playbookTotal: number;
+  /** Measured juice/density score (5.5), or null when not measured. */
+  juiceScore: number | null;
+  /** Whether window.__game appeared on boot (5.3), or null when not measured. */
+  runtimeBooted: boolean | null;
+}
+
+/**
+ * Best-effort sink for the per-run quality telemetry row (5.6). The worker's
+ * main.ts injects a concrete implementation that writes `run_quality_metrics`
+ * keyed on the runId; offline tests inject a recorder/no-op. The implementation
+ * MUST be non-fatal — a telemetry write failure must never fail a generation —
+ * but runGeneration ALSO wraps the call so a throwing port cannot break a run.
+ */
+export type RecordRunQualityFn = (metrics: RunQualityMetrics) => void | Promise<void>;
 
 /** Playtest verdict the worker consumes — maps onto the agent PlaytesterOutput. */
 export interface PlaytestVerdict {
@@ -138,6 +180,15 @@ export interface GenerationPorts {
    * there is no deterministic verdict to gate on and the run ships as-is.
    */
   maxRepairRounds?: number;
+  /**
+   * #5.6 — best-effort per-run quality telemetry sink. When supplied, ONE
+   * `run_quality_metrics` row is assembled from the data already in hand
+   * (shipReason, repairRounds, playbook pass/total, juiceScore, runtimeBooted,
+   * force_accept) and handed to this sink after the loop settles. The call is
+   * wrapped + logged so a telemetry failure can NEVER fail a generation. Omitted
+   * in offline dev / tests that don't assert telemetry.
+   */
+  recordRunQuality?: RecordRunQualityFn;
 }
 
 export interface GenerationResult {
@@ -276,6 +327,7 @@ export async function runGeneration(
           lastRuntimeVerify = {
             booted: verdict.hasGameContract,
             fatalErrors: [...verdict.fatalErrors],
+            ...(verdict.juiceScore !== undefined ? { juiceScore: verdict.juiceScore } : {}),
           };
           const errors: DoneError[] = verdict.fatalErrors.map((message) => ({
             message,
@@ -391,6 +443,7 @@ export async function runGeneration(
       lastRuntimeVerify = {
         booted: rvVerdict.hasGameContract,
         fatalErrors: [...rvVerdict.fatalErrors],
+        ...(rvVerdict.juiceScore !== undefined ? { juiceScore: rvVerdict.juiceScore } : {}),
       };
     }
     const fatalErrors: string[] = rvVerdict === null ? [] : [...rvVerdict.fatalErrors];
@@ -414,9 +467,14 @@ export async function runGeneration(
   let output: GenerateOutput = await generate(buildInput(nextPrompt, history), deps);
   let repairRounds = 0;
   let shipReason: ShipReason = 'no_verdict';
+  // Phase 5.6 — retain the deterministic verdict for the SHIPPED attempt so the
+  // telemetry write below can read its predicate pass/total. Null when no
+  // deterministic verdict was obtainable (no port / no spec / no predicates).
+  let shippedVerdict: RepairVerdict | null = null;
 
   for (;;) {
     const verdict = await observeVerdict();
+    shippedVerdict = verdict;
     if (verdict === null) {
       // No deterministic verdict (no port / no spec / no predicates / no
       // artifact). Nothing to gate on — ship as-is.
@@ -456,6 +514,33 @@ export async function runGeneration(
     path: f.path,
     bytes: f.bytes instanceof Uint8Array ? f.bytes.length : encoder.encode(f.bytes as string).length,
   }));
+
+  // ── #5.6 — per-run quality telemetry (best-effort, NON-FATAL) ─────────────
+  // Assemble ONE row from the deterministic data already in hand and hand it to
+  // the injectable sink. force_accept = the run shipped WITHOUT a passing
+  // deterministic verdict (a verdict existed but did not pass — repair/budget
+  // exhausted). When no deterministic verdict was ever obtainable
+  // (no_verdict / skipped_non_completable), there was no gate to force past, so
+  // force_accept stays false. The whole write is wrapped: a telemetry failure
+  // must NEVER fail a generation.
+  if (ports.recordRunQuality !== undefined) {
+    const score = shippedVerdict?.score ?? null;
+    const metrics: RunQualityMetrics = {
+      genre: state.spec?.genre ?? null,
+      forceAccept: shippedVerdict !== null && !shippedVerdict.pass,
+      repairRounds,
+      shipReason,
+      playbookPass: score === null ? 0 : score.results.length - score.failures,
+      playbookTotal: score === null ? 0 : score.results.length,
+      juiceScore: lastRuntimeVerify?.juiceScore ?? null,
+      runtimeBooted: lastRuntimeVerify === undefined ? null : lastRuntimeVerify.booted,
+    };
+    try {
+      await ports.recordRunQuality(metrics);
+    } catch (err) {
+      console.error(`[run-generation] quality telemetry write failed (non-fatal): ${String(err)}`);
+    }
+  }
 
   return {
     output,

@@ -238,7 +238,44 @@ async function main() {
           ...(maxTokens !== undefined ? { maxTokens } : {}),
           ...(isRemix === true ? { isRemix } : {}),
         },
-        { bus, store, ...(browserJobs !== undefined ? { browserJobs } : {}) },
+        {
+          bus,
+          store,
+          ...(browserJobs !== undefined ? { browserJobs } : {}),
+          // #5.6 — persist the per-run quality telemetry row. numeric(juice_score)
+          // is string-typed in drizzle, so the measured score is stringified.
+          // onConflictDoUpdate so a resumed run's final ship overwrites the row.
+          recordRunQuality: async (qRunId, m) => {
+            const juiceScore = m.juiceScore === null ? null : String(m.juiceScore);
+            const row = {
+              runId: qRunId,
+              genre: m.genre,
+              forceAccept: m.forceAccept,
+              repairRounds: m.repairRounds,
+              shipReason: m.shipReason,
+              playbookPass: m.playbookPass,
+              playbookTotal: m.playbookTotal,
+              juiceScore,
+              runtimeBooted: m.runtimeBooted,
+            };
+            await db
+              .insert(schema.runQualityMetrics)
+              .values(row)
+              .onConflictDoUpdate({
+                target: schema.runQualityMetrics.runId,
+                set: {
+                  genre: row.genre,
+                  forceAccept: row.forceAccept,
+                  repairRounds: row.repairRounds,
+                  shipReason: row.shipReason,
+                  playbookPass: row.playbookPass,
+                  playbookTotal: row.playbookTotal,
+                  juiceScore: row.juiceScore,
+                  runtimeBooted: row.runtimeBooted,
+                },
+              });
+          },
+        },
       );
 
       const manifestKey = result.snapshot.manifestKey;

@@ -61,6 +61,28 @@ describe('parseEvalRecording', () => {
     expect(() => parseEvalRecording(broken)).toThrow(/set_todos/);
   });
 
+  it('round-trips an optional runtimeVerify.juiceScore (Phase 5.5)', () => {
+    const withJuice = JSON.parse(JSON.stringify(VALID)) as Record<string, unknown>;
+    (withJuice['observation'] as Record<string, unknown>)['runtimeVerify'] = {
+      booted: true,
+      fatalErrors: [],
+      juiceScore: 142,
+    };
+    const parsed = parseEvalRecording(withJuice);
+    expect(parsed.observation.runtimeVerify?.booted).toBe(true);
+    expect(parsed.observation.runtimeVerify?.juiceScore).toBe(142);
+  });
+
+  it('rejects a negative runtimeVerify.juiceScore (Phase 5.5)', () => {
+    const broken = JSON.parse(JSON.stringify(VALID)) as Record<string, unknown>;
+    (broken['observation'] as Record<string, unknown>)['runtimeVerify'] = {
+      booted: true,
+      fatalErrors: [],
+      juiceScore: -5,
+    };
+    expect(() => parseEvalRecording(broken)).toThrow(/juiceScore/);
+  });
+
   it('emptyRecording returns a parser-valid sentinel', () => {
     const seeded = emptyRecording('fps-wave-defense', 'three', 'fps');
     const parsed = parseEvalRecording(JSON.parse(JSON.stringify(seeded)));

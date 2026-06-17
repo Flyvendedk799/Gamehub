@@ -37,6 +37,15 @@ export interface RuntimeVerifyObservation {
   booted: boolean;
   /** Fatal console / load errors captured during boot. Empty = clean. */
   fatalErrors: ReadonlyArray<string>;
+  /**
+   * Phase 5.5 — deterministic JUICE / density score the browser-worker
+   * measured for the booted artifact (forced-frame canvas pixel-delta +
+   * animation-activity churn). Higher = more visible motion. `undefined` when
+   * no juice was measured (legacy recording, never booted, queue down). The
+   * `requireJuice` fixture assertion gates on this; a static no-animation game
+   * scores ~0 and fails the floor.
+   */
+  juiceScore?: number;
 }
 
 export interface RunObservation {
@@ -197,6 +206,30 @@ export function evaluateFixture(
     }
   }
 
+  // Phase 5.5 — JUICE / density floor. Mirrors the boot gate exactly: the
+  // captured runtime-verify verdict must report a `juiceScore` at or above the
+  // fixture's floor. A static no-animation "game" scores ~0 and FAILS; a juicy
+  // one passes. A run with no juice measurement (no verdict, or a verdict that
+  // predates juice capture) also fails when a floor is asserted — you required
+  // the output be juicy but never measured it. `requireJuice = 0` (the default)
+  // is strictly opt-out so existing fixtures are unaffected.
+  const juiceObserved = rv?.juiceScore;
+  if (a.requireJuice > 0) {
+    if (rv === undefined) {
+      failures.push(
+        `juice: requireJuice=${a.requireJuice} but no runtime-verify verdict was recorded`,
+      );
+    } else if (juiceObserved === undefined) {
+      failures.push(
+        `juice: requireJuice=${a.requireJuice} but the verdict carried no juiceScore (not measured)`,
+      );
+    } else if (juiceObserved < a.requireJuice) {
+      failures.push(
+        `juice: juiceScore ${juiceObserved} below floor ${a.requireJuice} — the artifact is too static`,
+      );
+    }
+  }
+
   const cacheHitRate =
     observation.inputTokens > 0 ? observation.cachedInputTokens / observation.inputTokens : 0;
 
@@ -219,6 +252,7 @@ export function evaluateFixture(
       snapshotCount: observation.snapshotCount,
       correctionCount: observation.correctionCount,
       runtimeBoot,
+      juiceScore: juiceObserved ?? null,
     },
   };
 }

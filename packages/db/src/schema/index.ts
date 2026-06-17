@@ -5,3 +5,4 @@ export * from './identity';
 export * from './projects';
 export * from './runs';
 export * from './hub';
+export * from './quality';

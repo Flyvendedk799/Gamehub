@@ -124,7 +124,16 @@ function parseRuntimeVerify(raw: unknown): RuntimeVerifyObservation {
       fatalErrors.push(e);
     }
   }
-  return { booted: raw['booted'], fatalErrors };
+  const out: RuntimeVerifyObservation = { booted: raw['booted'], fatalErrors };
+  // Phase 5.5 — optional juice/density score.
+  if (raw['juiceScore'] !== undefined && raw['juiceScore'] !== null) {
+    const v = raw['juiceScore'];
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) {
+      throw new Error("'observation.runtimeVerify.juiceScore' must be a non-negative number");
+    }
+    out.juiceScore = v;
+  }
+  return out;
 }
 
 export function parseEvalRecording(raw: unknown): EvalRecording {

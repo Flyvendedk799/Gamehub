@@ -152,6 +152,71 @@ describe('runRuntimeVerify (real Chromium)', () => {
     expect(result.fatalErrors.some((m) => m.includes('PLAYFORGE_TEST_THROW'))).toBe(true);
   }, 30_000);
 
+  it('(e) JUICE: an animating canvas scores higher than a static one (Phase 5.5)', async () => {
+    // A juicy game: a RAF loop that repaints a moving rectangle every frame.
+    const juicy = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+      <canvas id="game" width="256" height="256"></canvas>
+      <script>
+        const cvs = document.getElementById('game');
+        const ctx = cvs.getContext('2d');
+        let t = 0;
+        function frame() {
+          t += 4;
+          ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 256, 256);
+          ctx.fillStyle = '#f33';
+          ctx.fillRect((t % 200), 100 + Math.sin(t / 10) * 40, 48, 48);
+          requestAnimationFrame(frame);
+        }
+        requestAnimationFrame(frame);
+        window.__game = { debug: { snapshot() { return { t }; } } };
+      </script>
+    </body></html>`;
+    // A static game: a canvas painted ONCE, no RAF loop, no motion.
+    const stat = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+      <canvas id="game" width="256" height="256"></canvas>
+      <script>
+        const ctx = document.getElementById('game').getContext('2d');
+        ctx.fillStyle = '#234'; ctx.fillRect(0, 0, 256, 256);
+        window.__game = { debug: { snapshot() { return { still: true }; } } };
+      </script>
+    </body></html>`;
+
+    const juicyResult = await runRuntimeVerify(browser, {
+      kind: 'runtime-verify',
+      htmlContent: juicy,
+      bootTimeoutMs: 5_000,
+    });
+    const staticResult = await runRuntimeVerify(browser, {
+      kind: 'runtime-verify',
+      htmlContent: stat,
+      bootTimeoutMs: 5_000,
+    });
+
+    expect(juicyResult.hasGameContract).toBe(true);
+    expect(staticResult.hasGameContract).toBe(true);
+    // Both are bounded, non-negative integers.
+    expect(Number.isInteger(juicyResult.juiceScore)).toBe(true);
+    expect(juicyResult.juiceScore).toBeGreaterThanOrEqual(0);
+    expect(staticResult.juiceScore).toBeGreaterThanOrEqual(0);
+    // The animating canvas must measurably out-score the static one.
+    expect(juicyResult.juiceScore).toBeGreaterThan(staticResult.juiceScore);
+    // And the juicy score clears a meaningful floor (RAF churn alone exceeds this).
+    expect(juicyResult.juiceScore).toBeGreaterThan(10);
+  }, 30_000);
+
+  it('(f) JUICE: a never-booted artifact scores 0 (Phase 5.5)', async () => {
+    const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+      <canvas></canvas><p>no game contract here</p>
+    </body></html>`;
+    const result = await runRuntimeVerify(browser, {
+      kind: 'runtime-verify',
+      htmlContent: html,
+      bootTimeoutMs: 1_500,
+    });
+    expect(result.hasGameContract).toBe(false);
+    expect(result.juiceScore).toBe(0);
+  }, 30_000);
+
   it('(d) EGRESS: blocks an SSRF attempt to the cloud metadata endpoint', async () => {
     // Hostile game code tries to read 169.254.169.254 and report whether the
     // fetch succeeded. The egress lockdown must abort the request, so the fetch

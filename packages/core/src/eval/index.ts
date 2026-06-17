@@ -36,3 +36,11 @@ export type {
   PlaytestTrace,
   PredicateResult,
 } from './playtest-score.js';
+export { PostgresEvalSource, aggregateGenreQuality } from './source-postgres.js';
+export type {
+  EvalSource,
+  GenreQualityAggregate,
+  QualityRowSource,
+  QualityWindow,
+  RunQualityRow,
+} from './source-postgres.js';

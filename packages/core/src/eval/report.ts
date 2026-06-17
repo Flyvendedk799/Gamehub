@@ -27,9 +27,15 @@ function bootBadge(boot: 'boot' | 'fail' | 'n/a'): string {
   return '—';
 }
 
+/** Phase 5.5 — render the measured juice/density score, or '—' when none was
+ *  captured (legacy recording / never booted). */
+function juiceBadge(juice: number | null): string {
+  return juice === null ? '—' : String(juice);
+}
+
 function fixtureRow(r: EvalResult): string {
   const o = r.observed;
-  return `| ${statusBadge(r.pass)} | \`${r.fixture.slug}\` | ${r.fixture.assertions.expectedGenre ?? '—'} | ${o.engine ?? '—'} | ${bootBadge(o.runtimeBoot)} | ${fmtTokens(o.inputTokens)} | ${fmtPct(o.cacheHitRate)} | ${o.setTodosCalls} | ${o.validateGameSceneCalls}/${o.playtestGameCalls} | ${o.renderPreviewCalls} | ${o.strReplaceCalls} | ${o.audioCalls} | ${o.snapshotCount} | ${o.correctionCount} |`;
+  return `| ${statusBadge(r.pass)} | \`${r.fixture.slug}\` | ${r.fixture.assertions.expectedGenre ?? '—'} | ${o.engine ?? '—'} | ${bootBadge(o.runtimeBoot)} | ${juiceBadge(o.juiceScore)} | ${fmtTokens(o.inputTokens)} | ${fmtPct(o.cacheHitRate)} | ${o.setTodosCalls} | ${o.validateGameSceneCalls}/${o.playtestGameCalls} | ${o.renderPreviewCalls} | ${o.strReplaceCalls} | ${o.audioCalls} | ${o.snapshotCount} | ${o.correctionCount} |`;
 }
 
 function failureBlock(r: EvalResult): string {
@@ -58,11 +64,11 @@ export function renderEvalReport(report: EvalReport): string {
   );
   out.push('');
 
-  // Header row. `genre` + `boot` give the per-genre + output-quality view.
+  // Header row. `genre` + `boot` + `juice` give the per-genre + output-quality view.
   out.push(
-    '| status | fixture | genre | engine | boot | input tokens | cache hit | set_todos | validate/playtest | render_preview | str_replace | audio | snapshots | corrections |',
+    '| status | fixture | genre | engine | boot | juice | input tokens | cache hit | set_todos | validate/playtest | render_preview | str_replace | audio | snapshots | corrections |',
   );
-  out.push('|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|');
+  out.push('|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|');
   for (const r of report.results) out.push(fixtureRow(r));
   out.push('');
 
@@ -101,6 +107,9 @@ export function renderEvalReport(report: EvalReport): string {
   out.push('');
   out.push(
     '- The `boot` column is the Phase 5.3 OUTPUT gate: `✓ boot` = the artifact loaded and `window.__game` appeared with no fatal console errors; `✗ boot` = it threw / never booted; `—` = no runtime-verify verdict was captured. Process proxies can all pass while `boot` fails — that is the regression class this column exists to catch.',
+  );
+  out.push(
+    '- The `juice` column is the Phase 5.5 density floor: the deterministic juice score the browser-worker measured for the booted artifact (forced-frame canvas pixel-delta + animation churn). A static no-animation game scores ~0; `—` = no juice was measured. A fixture with `requireJuice > 0` fails when the score is below its floor.',
   );
   out.push(
     '- The `validate/playtest` column shows the count of `validate_game_scene` and `playtest_game` calls. The Phase 9b mandatory pre-done gate requires both to be ≥ 1.',

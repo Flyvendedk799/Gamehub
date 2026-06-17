@@ -29,6 +29,7 @@ import {
   type BrowserJobsPort,
   type GenerateFn,
   type GenerationResult,
+  type RunQualityMetrics,
   type WebEngine,
 } from './run-generation';
 
@@ -66,6 +67,13 @@ export interface QueuePorts {
    * falls back to static-lint-only `done` with no playtest_game.
    */
   browserJobs?: BrowserJobsPort;
+  /**
+   * #5.6 — best-effort per-run quality telemetry sink, keyed by runId. main.ts
+   * injects a concrete `run_quality_metrics` writer; enqueueRun binds it to the
+   * current run's id before handing the runId-free `RecordRunQualityFn` to
+   * runGeneration. Omitted in offline tests / no-DB dev.
+   */
+  recordRunQuality?: (runId: string, metrics: RunQualityMetrics) => void | Promise<void>;
 }
 
 export interface EnqueueResult extends GenerationResult {
@@ -129,6 +137,9 @@ export async function enqueueRun(
         store: ports.store,
         ...(ports.generate !== undefined ? { generate: ports.generate } : {}),
         ...(ports.browserJobs !== undefined ? { browserJobs: ports.browserJobs } : {}),
+        ...(ports.recordRunQuality !== undefined
+          ? { recordRunQuality: (metrics: RunQualityMetrics) => ports.recordRunQuality!(input.runId, metrics) }
+          : {}),
         ...(input.maxTokens !== undefined ? { maxTokens: input.maxTokens } : {}),
         onEvent: (event: AgentEvent) => {
           // Capture the latest set_todos for continuation building.

@@ -435,7 +435,29 @@ export interface RuntimeVerifyResult {
   bootedIn: number;
   /** URLs blocked by the egress lockdown during this job (for audit/telemetry). */
   blockedRequests: string[];
+  /**
+   * Phase 5.5 — deterministic JUICE / density floor. A bounded, non-negative
+   * integer that measures how much VISIBLE MOTION the artifact produces over a
+   * short window of forced frames: the count of changed canvas pixels sampled
+   * between two forced paints plus the animation-activity churn (RAF callbacks
+   * driven + tween/particle/active-emitter hints surfaced by the game). A static
+   * no-animation "game" scores ~0; a juicy one scores high. The eval
+   * `requireJuice` floor gates on this. 0 when no canvas / never booted.
+   */
+  juiceScore: number;
 }
+
+/** Phase 5.5 — hard ceiling on the juice score so a pathological canvas /
+ *  fork-bomb cannot return an unbounded number. Pixel-delta + churn are each
+ *  clamped well under this; the sum is clamped here as a final guard. */
+export const JUICE_SCORE_MAX = 100_000;
+
+/** Phase 5.5 — number of RAF frames we FORCE between the two canvas samples.
+ *  Headless Chromium throttles/﻿skips RAF on a non-painting page, so we drive
+ *  frames explicitly (tickFrames) AND force a paint via a 0-area screenshot so
+ *  the canvas compositor actually advances before we read pixels back. Small
+ *  and bounded — the per-job hard timeout is the backstop. */
+export const JUICE_FRAME_WINDOW = 24;
 
 export interface ThumbnailResult {
   /** Base64-encoded PNG screenshot. */
@@ -491,6 +513,160 @@ export type BrowserJobResult = RuntimeVerifyResult | ThumbnailResult | PlaytestR
  */
 export type ContextSink = (context: BrowserContext) => void;
 
+/**
+ * Phase 5.5 — measure a deterministic JUICE / density score for the booted
+ * artifact. Returns 0 when there is no canvas or sampling fails.
+ *
+ * CRITICAL build note: headless Chromium does NOT paint a normal RAF loop —
+ * `requestAnimationFrame` is throttled/coalesced on a page that is never
+ * composited, so motion is invisible to a naive `toDataURL` diff. We therefore
+ * FORCE rendering explicitly:
+ *   1. tick a bounded window of RAF frames (tickFrames) to advance game state,
+ *   2. force a real paint via a 0-area `page.screenshot()` between the two
+ *      canvas samples so the compositor flushes the canvas backing store,
+ * then diff the two captured canvas data URLs pixel-by-pixel (downsampled) and
+ * add the in-page animation-activity churn (RAF callbacks fired during the
+ * window + tween/particle/active-emitter hints the game surfaces). The whole
+ * thing is bounded by JUICE_SCORE_MAX and runs under the per-job hard timeout.
+ *
+ * The motion delta is computed in-page from two `canvas.toDataURL()` captures
+ * (no pixel bytes cross the CDP boundary — only the final integer does), and a
+ * forced `page.screenshot()` sits between the two captures to guarantee the
+ * canvas actually advanced a frame on a non-painting headless page.
+ */
+async function measureJuice(page: Page): Promise<number> {
+  try {
+    // Snapshot 1: install a RAF counter + capture the first canvas frame.
+    const ok = await page.evaluate(() => {
+      const w = window as Window & {
+        __juice?: { rafCount: number; before?: string };
+        requestAnimationFrame: typeof requestAnimationFrame;
+      };
+      const canvas = document.querySelector('canvas');
+      if (!(canvas instanceof HTMLCanvasElement)) return false;
+      const state: { rafCount: number; before?: string } = { rafCount: 0 };
+      // Wrap RAF so we can count how many callbacks the game schedules during
+      // the forced window — a static page schedules ~0, a juicy one schedules
+      // one per frame (or many, for layered tween/particle systems).
+      const orig = w.requestAnimationFrame.bind(w);
+      w.requestAnimationFrame = (cb: FrameRequestCallback): number => {
+        state.rafCount += 1;
+        return orig(cb);
+      };
+      try {
+        state.before = canvas.toDataURL('image/png');
+      } catch {
+        // Tainted canvas (cross-origin draw) — pixel diff unavailable; churn
+        // alone will carry the score. `state.before` simply stays unset.
+      }
+      w.__juice = state;
+      return true;
+    });
+    if (!ok) return 0;
+
+    // FORCE a paint + advance frames. tickFrames drives RAF; the 0-clip
+    // screenshot flushes the compositor so the canvas backing store actually
+    // updates on a non-painting headless page.
+    await tickFrames(page, JUICE_FRAME_WINDOW);
+    try {
+      await page.screenshot({ clip: { x: 0, y: 0, width: 1, height: 1 }, type: 'png' });
+    } catch {
+      // Screenshot can fail on a detached page — frames were still ticked.
+    }
+    await tickFrames(page, JUICE_FRAME_WINDOW);
+
+    // Snapshot 2: diff the canvas against `before`, restore RAF, and fold in
+    // the animation-activity churn the game exposed.
+    const score = await page.evaluate(
+      ({ max, frameWindow }: { max: number; frameWindow: number }) => {
+        const w = window as Window & {
+          __juice?: { rafCount: number; before?: string };
+          __game?: {
+            debug?: {
+              snapshot?: () => unknown;
+              particleCount?: number;
+              activeTweens?: number;
+            };
+          };
+        };
+        const state = w.__juice;
+        if (state === undefined) return 0;
+
+        // (1) Pixel-delta between the two forced frames. Decode both data URLs
+        // onto a tiny offscreen canvas (downsampled to 64×64) and count cells
+        // whose RGB changed beyond a small threshold — bounded, fast, and
+        // resolution-independent.
+        let pixelDelta = 0;
+        const SAMPLE = 64;
+        const after = (() => {
+          const canvas = document.querySelector('canvas');
+          if (!(canvas instanceof HTMLCanvasElement)) return undefined;
+          try {
+            return canvas.toDataURL('image/png');
+          } catch {
+            return undefined;
+          }
+        })();
+        if (state.before !== undefined && after !== undefined && state.before !== after) {
+          // Cheap structural fast-path: identical data URLs ⇒ no motion. When
+          // they differ, decode both and count changed sample cells.
+          const decode = (dataUrl: string): Uint8ClampedArray | undefined => {
+            const off = document.createElement('canvas');
+            off.width = SAMPLE;
+            off.height = SAMPLE;
+            const ctx = off.getContext('2d');
+            if (ctx === null) return undefined;
+            const img = new Image();
+            // Data URLs decode synchronously enough for drawImage when the
+            // source is a same-origin data: URL already fully in memory; but to
+            // be safe we draw only if complete. Fall back to undefined.
+            img.src = dataUrl;
+            if (!img.complete) return undefined;
+            try {
+              ctx.drawImage(img, 0, 0, SAMPLE, SAMPLE);
+              return ctx.getImageData(0, 0, SAMPLE, SAMPLE).data;
+            } catch {
+              return undefined;
+            }
+          };
+          const a = decode(state.before);
+          const b = decode(after);
+          if (a !== undefined && b !== undefined && a.length === b.length) {
+            for (let i = 0; i < a.length; i += 4) {
+              const dr = Math.abs(a[i]! - b[i]!);
+              const dg = Math.abs(a[i + 1]! - b[i + 1]!);
+              const db = Math.abs(a[i + 2]! - b[i + 2]!);
+              if (dr + dg + db > 24) pixelDelta += 1;
+            }
+          } else if (a === undefined || b === undefined) {
+            // Could not decode (async image) but the data URLs DID differ —
+            // credit a single coarse "something moved" unit so a real animation
+            // is never scored as fully static.
+            pixelDelta += 1;
+          }
+        }
+
+        // (2) Animation-activity churn: RAF callbacks scheduled during the
+        // forced window (one per frame for a live loop) plus any particle /
+        // tween counts the game surfaces on its debug contract.
+        const rafChurn = Math.min(state.rafCount, frameWindow * 4);
+        const dbg = w.__game?.debug;
+        const particles = typeof dbg?.particleCount === 'number' ? dbg.particleCount : 0;
+        const tweens = typeof dbg?.activeTweens === 'number' ? dbg.activeTweens : 0;
+        const churn = rafChurn * 4 + Math.min(particles, 2000) + Math.min(tweens, 500) * 2;
+
+        const raw = pixelDelta + churn;
+        return Math.max(0, Math.min(max, Math.round(raw)));
+      },
+      { max: JUICE_SCORE_MAX, frameWindow: JUICE_FRAME_WINDOW },
+    );
+    return score;
+  } catch {
+    // Any failure during sampling ⇒ no juice evidence (treat as 0, never throw).
+    return 0;
+  }
+}
+
 export async function runRuntimeVerify(
   browser: Browser,
   data: BrowserJobData,
@@ -530,7 +706,17 @@ export async function runRuntimeVerify(
       hasGameContract = false;
     }
     const bootedIn = Date.now() - start;
-    return { hasGameContract, fatalErrors, bootedIn, blockedRequests: [...egress.blocked] };
+    // Phase 5.5 — measure visible motion / density only once the game booted;
+    // a never-booted artifact has no juice to measure (score 0). Best-effort:
+    // measureJuice never throws.
+    const juiceScore = hasGameContract ? await measureJuice(page) : 0;
+    return {
+      hasGameContract,
+      fatalErrors,
+      bootedIn,
+      blockedRequests: [...egress.blocked],
+      juiceScore,
+    };
   } finally {
     await context.close();
   }

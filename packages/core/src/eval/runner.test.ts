@@ -202,6 +202,75 @@ describe('evaluateFixture — Phase 5.3 output-quality (runtime boot) gate', () 
   });
 });
 
+describe('evaluateFixture — Phase 5.5 juice/density floor', () => {
+  const JUICE_FIXTURE: EvalFixture = EvalFixture.parse({
+    name: 'Platformer juice floor',
+    slug: 'platformer-juice',
+    description: 'requires the artifact to actually animate',
+    brief: 'Make a 2D platformer with real motion.',
+    assertions: {
+      requiredAudio: false,
+      minValidateGameSceneCalls: 0,
+      minPlaytestGameCalls: 0,
+      requireJuice: 50,
+    },
+  });
+
+  it('PASSES when the measured juiceScore meets the floor', () => {
+    const r = evaluateFixture(JUICE_FIXTURE, {
+      ...PASSING_OBS,
+      runtimeVerify: { booted: true, fatalErrors: [], juiceScore: 120 },
+    });
+    expect(r.pass).toBe(true);
+    expect(r.observed.juiceScore).toBe(120);
+  });
+
+  it('PASSES exactly at the floor (>= is inclusive)', () => {
+    const r = evaluateFixture(JUICE_FIXTURE, {
+      ...PASSING_OBS,
+      runtimeVerify: { booted: true, fatalErrors: [], juiceScore: 50 },
+    });
+    expect(r.pass).toBe(true);
+  });
+
+  it('FAILS a static no-animation game whose juiceScore is below the floor', () => {
+    const r = evaluateFixture(JUICE_FIXTURE, {
+      ...PASSING_OBS,
+      runtimeVerify: { booted: true, fatalErrors: [], juiceScore: 3 },
+    });
+    expect(r.pass).toBe(false);
+    expect(r.observed.juiceScore).toBe(3);
+    expect(r.failures.join(' ')).toMatch(/too static/i);
+  });
+
+  it('FAILS when requireJuice is set but the verdict carried no juiceScore', () => {
+    const r = evaluateFixture(JUICE_FIXTURE, {
+      ...PASSING_OBS,
+      runtimeVerify: { booted: true, fatalErrors: [] },
+    });
+    expect(r.pass).toBe(false);
+    expect(r.observed.juiceScore).toBeNull();
+    expect(r.failures.join(' ')).toContain('no juiceScore');
+  });
+
+  it('FAILS when requireJuice is set but no runtime-verify verdict was recorded', () => {
+    const r = evaluateFixture(JUICE_FIXTURE, PASSING_OBS);
+    expect(r.pass).toBe(false);
+    expect(r.observed.juiceScore).toBeNull();
+    expect(r.failures.join(' ')).toMatch(/no runtime-verify verdict/);
+  });
+
+  it('does NOT gate on juice when requireJuice is 0 (default) — strictly opt-out', () => {
+    const r = evaluateFixture(FPS_FIXTURE, {
+      ...PASSING_OBS,
+      runtimeVerify: { booted: true, fatalErrors: [], juiceScore: 0 },
+    });
+    expect(r.pass).toBe(true);
+    // The score still surfaces into the report even when no floor is asserted.
+    expect(r.observed.juiceScore).toBe(0);
+  });
+});
+
 describe('evaluateFixture — str_replace failure rate', () => {
   it('FAILS at the FPS 19% miss-rate baseline', () => {
     const r = evaluateFixture(FPS_FIXTURE, {

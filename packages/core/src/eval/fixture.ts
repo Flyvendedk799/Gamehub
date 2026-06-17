@@ -41,6 +41,13 @@ export interface EvalAssertion {
    *  this even if every process proxy looks healthy. A run with no captured
    *  verdict also fails (you asserted the output but never measured it). */
   requireRuntimeBoot: boolean;
+  /** Phase 5.5 — JUICE / density floor. When > 0, the run's captured
+   *  runtime-verify verdict MUST report a `juiceScore` at or above this floor
+   *  (forced-frame canvas pixel-delta + animation churn). A static
+   *  no-animation game scores ~0 and fails; a juicy one passes. A run with no
+   *  juice measurement also fails when a floor is set. 0 (the default) is
+   *  strictly opt-out — existing fixtures without a floor are unaffected. */
+  requireJuice: number;
 }
 
 const ASSERTION_DEFAULTS: EvalAssertion = {
@@ -54,6 +61,7 @@ const ASSERTION_DEFAULTS: EvalAssertion = {
   maxRenderPreviewCalls: 0,
   maxCorrections: 2,
   requireRuntimeBoot: false,
+  requireJuice: 0,
 };
 
 export interface EvalFixture {
@@ -147,6 +155,9 @@ function optionalAssertion(raw: unknown): EvalAssertion {
     }
     out.requireRuntimeBoot = raw['requireRuntimeBoot'];
   }
+  if (raw['requireJuice'] !== undefined) {
+    out.requireJuice = requirePositiveInt(raw, 'requireJuice');
+  }
   return out;
 }
 
@@ -207,6 +218,10 @@ export interface EvalResult {
      *  'boot' = booted clean, 'fail' = boot/error captured, 'n/a' = no
      *  runtime-verify verdict was recorded. */
     runtimeBoot: 'boot' | 'fail' | 'n/a';
+    /** Phase 5.5 — the measured juice/density score for the booted artifact,
+     *  or null when no juice was captured. The `juice` report column renders
+     *  this; the `requireJuice` floor gates on it. */
+    juiceScore: number | null;
   };
 }
 

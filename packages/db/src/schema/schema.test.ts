@@ -12,6 +12,7 @@ import {
   passwordResetTokens,
   projects,
   publishedGames,
+  runQualityMetrics,
   runs,
   snapshots,
   users,
@@ -143,6 +144,31 @@ describe('schema', () => {
       expect.arrayContaining(['id', 'published_game_id', 'user_id', 'score', 'created_at']),
     );
     expect(indexNames(gameScores)).toContain('game_scores_game_score_idx');
+  });
+
+  it('run_quality_metrics holds the per-run quality telemetry + a (genre, created_at) index (Phase 5.6)', () => {
+    const cfg = getTableConfig(runQualityMetrics);
+    expect(cfg.name).toBe('run_quality_metrics');
+    expect(columnNames(runQualityMetrics)).toEqual(
+      expect.arrayContaining([
+        'run_id',
+        'genre',
+        'force_accept',
+        'repair_rounds',
+        'ship_reason',
+        'playbook_pass',
+        'playbook_total',
+        'juice_score',
+        'runtime_booted',
+        'created_at',
+      ]),
+    );
+    // run_id is the PK (one telemetry row per run) and cascade-deletes with the run.
+    // It's a single-column, column-level .primaryKey(), so it surfaces on the
+    // column's `primary` flag — not in the table-level `primaryKeys` config
+    // (which drizzle only populates for composite keys, cf. `follows`).
+    expect(cfg.columns.find((c) => c.name === 'run_id')?.primary).toBe(true);
+    expect(indexNames(runQualityMetrics)).toContain('run_quality_metrics_genre_created_idx');
   });
 
   it('follows is a directed edge with a unique (follower, followee) PK + followee index (Phase 3.9)', () => {

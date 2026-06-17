@@ -114,6 +114,7 @@ function missingRecordingResult(fixture: EvalFixture): EvalResult {
       snapshotCount: 0,
       correctionCount: 0,
       runtimeBoot: 'n/a',
+      juiceScore: null,
     },
   };
 }
