@@ -1,7 +1,7 @@
 /**
  * Backlog-3 §1 — in-iframe HMR runtime.
  *
- * Listens for `{ __codesign_hmr: true, kind: 'css' | 'js', protocolVersion: 1, ... }`
+ * Listens for `{ __playforge_hmr: true, kind: 'css' | 'js', protocolVersion: 1, ... }`
  * postMessage envelopes from the parent window. Applies CSS or single
  * `<script>` patches in place so str_replace edits don't reset canvas
  * rAF loops, video playback, scroll position, or form state.
@@ -12,20 +12,20 @@
  *  - 500ms passes without an ack.
  *
  * Protocol contract (versioned, parent and child must agree):
- *  - parent → iframe: `{ __codesign_hmr: true, protocolVersion: 1, kind, oldStyles?,
+ *  - parent → iframe: `{ __playforge_hmr: true, protocolVersion: 1, kind, oldStyles?,
  *      newStyles?, oldScripts?, newScripts? }`
- *  - iframe → parent: `{ __codesign_hmr_ack: true, ok: boolean, kind, error? }`
+ *  - iframe → parent: `{ __playforge_hmr_ack: true, ok: boolean, kind, error? }`
  *
  * The script is INJECTED via `injectOverlayIntoHtmlDocument` (./index.ts)
- * — see the marker `__CODESIGN_HMR_PATCHER_MARKER` so the injector is
+ * — see the marker `__PLAYFORGE_HMR_PATCHER_MARKER` so the injector is
  * idempotent across re-injections.
  */
 
-export const HMR_PATCHER_MARKER = '__CODESIGN_HMR_PATCHER_MARKER';
+export const HMR_PATCHER_MARKER = '__PLAYFORGE_HMR_PATCHER_MARKER';
 export const HMR_PROTOCOL_VERSION = 1;
 
 export interface HmrCssPatchEnvelope {
-  __codesign_hmr: true;
+  __playforge_hmr: true;
   protocolVersion: 1;
   kind: 'css';
   oldStyles: string[];
@@ -33,7 +33,7 @@ export interface HmrCssPatchEnvelope {
 }
 
 export interface HmrJsPatchEnvelope {
-  __codesign_hmr: true;
+  __playforge_hmr: true;
   protocolVersion: 1;
   kind: 'js';
   oldScripts: string[];
@@ -43,7 +43,7 @@ export interface HmrJsPatchEnvelope {
 export type HmrPatchEnvelope = HmrCssPatchEnvelope | HmrJsPatchEnvelope;
 
 export interface HmrAckEnvelope {
-  __codesign_hmr_ack: true;
+  __playforge_hmr_ack: true;
   protocolVersion: 1;
   ok: boolean;
   kind: 'css' | 'js';
@@ -69,7 +69,7 @@ export function hmrPatcherScript(): string {
   function ack(ok, kind, error) {
     try {
       window.parent.postMessage({
-        __codesign_hmr_ack: true,
+        __playforge_hmr_ack: true,
         protocolVersion: PROTOCOL,
         ok: ok,
         kind: kind,
@@ -104,7 +104,7 @@ export function hmrPatcherScript(): string {
       // Skip our own patcher script and overlay scripts.
       var src = scripts[i].textContent || '';
       if (src.indexOf('${HMR_PATCHER_MARKER}') !== -1) continue;
-      if (scripts[i].dataset && scripts[i].dataset.codesignOverlay === 'true') continue;
+      if (scripts[i].dataset && scripts[i].dataset.playforgeOverlay === 'true') continue;
       jsScripts.push(scripts[i]);
     }
     if (jsScripts.length !== envelope.newScripts.length) {
@@ -135,7 +135,7 @@ export function hmrPatcherScript(): string {
   }
   window.addEventListener('message', function(event) {
     var data = event && event.data;
-    if (!data || data.__codesign_hmr !== true) return;
+    if (!data || data.__playforge_hmr !== true) return;
     if (data.protocolVersion !== PROTOCOL) {
       return ack(false, data.kind || 'unknown', 'protocol version mismatch (' + data.protocolVersion + ' vs ' + PROTOCOL + ')');
     }

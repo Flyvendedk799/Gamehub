@@ -10,7 +10,7 @@
  * layer, so an untrusted agent (or a remixed project) can't write outside the
  * bundle root.
  */
-import { CodesignError, ERROR_CODES } from '@playforge/shared';
+import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
 import {
   type SnapshotInputFile,
   type SnapshotStore,
@@ -69,13 +69,13 @@ export class WorkingTree {
     const content = this.requireFile(path);
     const first = content.indexOf(oldStr);
     if (first === -1) {
-      throw new CodesignError(
+      throw new PlayforgeError(
         `str_replace: no match for the given text in ${path}`,
         ERROR_CODES.IPC_BAD_INPUT,
       );
     }
     if (content.indexOf(oldStr, first + 1) !== -1) {
-      throw new CodesignError(
+      throw new PlayforgeError(
         `str_replace: text is not unique in ${path} (matched more than once)`,
         ERROR_CODES.IPC_BAD_INPUT,
       );
@@ -97,7 +97,7 @@ export class WorkingTree {
     const content = this.requireFile(path);
     const lines = content === '' ? [] : content.split('\n');
     if (line < 0 || line > lines.length) {
-      throw new CodesignError(
+      throw new PlayforgeError(
         `insert: line ${line} out of range (file has ${lines.length} lines)`,
         ERROR_CODES.IPC_BAD_INPUT,
       );
@@ -131,18 +131,18 @@ export class WorkingTree {
       const h = ordered[i];
       if (!h) continue;
       if (h.startLine < 1 || h.endLine > lines.length || h.endLine < h.startLine) {
-        throw new CodesignError(
+        throw new PlayforgeError(
           `patch: hunk [${h.startLine}-${h.endLine}] out of range in ${path}`,
           ERROR_CODES.IPC_BAD_INPUT,
         );
       }
       const prev = ordered[i - 1];
       if (prev && h.endLine >= prev.startLine) {
-        throw new CodesignError(`patch: overlapping hunks in ${path}`, ERROR_CODES.IPC_BAD_INPUT);
+        throw new PlayforgeError(`patch: overlapping hunks in ${path}`, ERROR_CODES.IPC_BAD_INPUT);
       }
       const original = lines.slice(h.startLine - 1, h.endLine).join('\n');
       if (h.expectedOriginal !== undefined && h.expectedOriginal !== original) {
-        throw new CodesignError(
+        throw new PlayforgeError(
           `patch: expectedOriginal mismatch at [${h.startLine}-${h.endLine}] in ${path}`,
           ERROR_CODES.IPC_BAD_INPUT,
         );
@@ -181,7 +181,7 @@ export class WorkingTree {
   private requireFile(path: string): string {
     const content = this.files.get(path);
     if (content === undefined) {
-      throw new CodesignError(`file not found: ${path}`, ERROR_CODES.IPC_NOT_FOUND);
+      throw new PlayforgeError(`file not found: ${path}`, ERROR_CODES.IPC_NOT_FOUND);
     }
     return content;
   }

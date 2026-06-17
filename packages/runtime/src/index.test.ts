@@ -17,14 +17,14 @@ describe('buildSrcdoc', () => {
     const html = '<html><body><p>x</p></body></html>';
     const out = buildSrcdoc(html);
     expect(out).toContain('<p>x</p>');
-    expect(out).toContain('CODESIGN_OVERLAY_SCRIPT');
+    expect(out).toContain('PLAYFORGE_OVERLAY_SCRIPT');
     expect(out).toContain('ELEMENT_SELECTED');
     expect(out).not.toContain('AGENT_BODY_BEGIN');
 
     const doctyped = '<!DOCTYPE html><html><body><p>y</p></body></html>';
     const doctypedOut = buildSrcdoc(doctyped);
     expect(doctypedOut).toContain('<p>y</p>');
-    expect(doctypedOut).toContain('CODESIGN_OVERLAY_SCRIPT');
+    expect(doctypedOut).toContain('PLAYFORGE_OVERLAY_SCRIPT');
     expect(doctypedOut).not.toContain('AGENT_BODY_BEGIN');
   });
 
@@ -104,7 +104,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);`;
     // script were transpiled and run first, the patch wouldn't see the
     // initial render's createElement calls. Order: tagger → babel → agent.
     const out = buildSrcdoc(jsxArtifact);
-    const taggerIdx = out.indexOf('__codesignSrcLineWrapped');
+    const taggerIdx = out.indexOf('__playforgeSrcLineWrapped');
     const agentScriptIdx = out.indexOf('AGENT_BODY_BEGIN');
     expect(taggerIdx).toBeGreaterThan(0);
     expect(agentScriptIdx).toBeGreaterThan(0);
@@ -120,7 +120,7 @@ describe('inlineLocalRefs (multi-file srcdoc fallback)', () => {
     expect(out).toContain('<style');
     expect(out).toContain('body{color:red}');
     expect(out).not.toContain('href="styles.css"');
-    expect(out).toContain('data-codesign-inlined-from="styles.css"');
+    expect(out).toContain('data-playforge-inlined-from="styles.css"');
   });
 
   it('inlines a relative <script src="X.js">', () => {
@@ -129,7 +129,7 @@ describe('inlineLocalRefs (multi-file srcdoc fallback)', () => {
     const out = inlineLocalRefs(html, { 'app.js': 'console.log("ok")' });
     expect(out).toContain('console.log("ok")');
     expect(out).not.toContain('src="app.js"');
-    expect(out).toContain('data-codesign-inlined-from="app.js"');
+    expect(out).toContain('data-playforge-inlined-from="app.js"');
   });
 
   it('preserves CDN <script src="https://...">', () => {
@@ -199,7 +199,7 @@ describe('buildSrcdoc with sidecars option', () => {
     });
     expect(out).toContain('body{color:red}');
     expect(out).toContain('console.log("ok")');
-    expect(out).toContain('CODESIGN_OVERLAY_SCRIPT');
+    expect(out).toContain('PLAYFORGE_OVERLAY_SCRIPT');
   });
 
   it('is a no-op when sidecars is omitted (legacy callers unchanged)', () => {

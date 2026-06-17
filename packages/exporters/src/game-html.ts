@@ -29,7 +29,7 @@
  *     worker / e2e package.
  */
 
-import { CodesignError, ERROR_CODES } from '@playforge/shared';
+import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
 import type { ExportResult } from './index';
 import type { ZipAsset } from './zip';
 
@@ -175,7 +175,7 @@ async function fetchText(url: string, engine: string): Promise<string> {
     }
     return await resp.text();
   } catch (err) {
-    throw new CodesignError(
+    throw new PlayforgeError(
       `Failed to fetch the ${engine} library at export time. game-html needs network access to vendor the engine and its addons. Use game-zip for an export that keeps the CDN reference. (${err instanceof Error ? err.message : String(err)})`,
       ERROR_CODES.EXPORTER_INPUT_INVALID,
     );
@@ -360,14 +360,14 @@ function referenceVariants(path: string): string[] {
 
 export async function buildGameHtml(opts: ExportGameHtmlOptions): Promise<string> {
   if (opts.engine !== 'three' && opts.engine !== 'phaser') {
-    throw new CodesignError(
+    throw new PlayforgeError(
       `game-html exporter only supports browser engines (three / phaser). Got "${opts.engine}".`,
       ERROR_CODES.EXPORTER_FORMAT_REJECTED,
     );
   }
   const indexEntry = opts.files.find((f) => f.path === 'index.html');
   if (indexEntry === undefined) {
-    throw new CodesignError(
+    throw new PlayforgeError(
       'game-html export requires an index.html entry point in the file bundle.',
       ERROR_CODES.EXPORTER_INPUT_INVALID,
     );

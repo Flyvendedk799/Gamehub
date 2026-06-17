@@ -14,7 +14,7 @@
  * by absolutely-positioned overlays, and posts back to the host:
  *
  *     window.parent.postMessage({
- *       __codesign: true,
+ *       __playforge: true,
  *       type: 'overlay_warning',
  *       canvasArea: number,    // px²
  *       occludedArea: number,  // px²
@@ -148,7 +148,7 @@ export function runOverlayCheck(): OverlayCheckResult | null {
     try {
       window.parent.postMessage(
         {
-          __codesign: true,
+          __playforge: true,
           type: 'overlay_warning',
           ...result,
         },

@@ -1,4 +1,4 @@
-import { type ChatMessage, CodesignError, type ModelRef } from '@playforge/shared';
+import { type ChatMessage, PlayforgeError, type ModelRef } from '@playforge/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GenerateOptions, GenerateResult } from './index';
 import {
@@ -84,30 +84,30 @@ describe('classifyError', () => {
     expect(classifyError(new TypeError('fetch failed'))).toMatchObject({ retry: true });
   });
 
-  it('retries CodesignError carrying an Anthropic overloaded_error JSON body', () => {
-    // pi-ai surfaces upstream stream errors as a CodesignError whose message
+  it('retries PlayforgeError carrying an Anthropic overloaded_error JSON body', () => {
+    // pi-ai surfaces upstream stream errors as a PlayforgeError whose message
     // is the raw Anthropic JSON body — no `status` property. The classifier
     // recovers status from `error.type` so 529 retries instead of failing
     // fast on the first attempt.
     const body =
       '{"type":"error","error":{"details":null,"type":"overloaded_error","message":"Overloaded"},"request_id":"req_xyz"}';
-    const err = new CodesignError(body, 'PROVIDER_ERROR');
+    const err = new PlayforgeError(body, 'PROVIDER_ERROR');
     const decision = classifyError(err);
     expect(decision.retry).toBe(true);
     expect(decision.reason).toMatch(/server error \(529\)/);
   });
 
-  it('retries CodesignError carrying an Anthropic rate_limit_error JSON body', () => {
+  it('retries PlayforgeError carrying an Anthropic rate_limit_error JSON body', () => {
     const body = '{"type":"error","error":{"type":"rate_limit_error","message":"slow"}}';
-    const err = new CodesignError(body, 'PROVIDER_ERROR');
+    const err = new PlayforgeError(body, 'PROVIDER_ERROR');
     const decision = classifyError(err);
     expect(decision.retry).toBe(true);
     expect(decision.reason).toMatch(/rate-limited \(429\)/);
   });
 
-  it('does not retry CodesignError carrying an authentication_error JSON body', () => {
+  it('does not retry PlayforgeError carrying an authentication_error JSON body', () => {
     const body = '{"type":"error","error":{"type":"authentication_error","message":"bad key"}}';
-    const err = new CodesignError(body, 'PROVIDER_ERROR');
+    const err = new PlayforgeError(body, 'PROVIDER_ERROR');
     expect(classifyError(err).retry).toBe(false);
   });
 
@@ -181,7 +181,7 @@ describe('completeWithRetry', () => {
     ctrl.abort();
     await expect(
       completeWithRetry(MODEL, MESSAGES, { ...OPTS, signal: ctrl.signal }, {}, impl),
-    ).rejects.toBeInstanceOf(CodesignError);
+    ).rejects.toBeInstanceOf(PlayforgeError);
     expect(impl).not.toHaveBeenCalled();
   });
 
@@ -354,7 +354,7 @@ describe('withBackoff', () => {
     const fn = vi.fn().mockResolvedValue('ok');
     const ctrl = new AbortController();
     ctrl.abort();
-    await expect(withBackoff(fn, { signal: ctrl.signal })).rejects.toBeInstanceOf(CodesignError);
+    await expect(withBackoff(fn, { signal: ctrl.signal })).rejects.toBeInstanceOf(PlayforgeError);
     expect(fn).not.toHaveBeenCalled();
   });
 
@@ -380,18 +380,18 @@ describe('withBackoff', () => {
   });
 });
 
-describe('OPEN_CODESIGN_DEV_FORCE_OVERLOAD_ONCE dev knob', () => {
+describe('PLAYFORGE_DEV_FORCE_OVERLOAD_ONCE dev knob', () => {
   afterEach(() => {
     // The production check uses `process.env['…'] === '1'`, so assigning
     // `undefined` does NOT restore the "not set" state (it leaves the key
     // present with the literal string 'undefined'). Use `delete` here.
     // biome-ignore lint/performance/noDelete: see comment above
-    delete process.env['OPEN_CODESIGN_DEV_FORCE_OVERLOAD_ONCE'];
+    delete process.env['PLAYFORGE_DEV_FORCE_OVERLOAD_ONCE'];
     resetSyntheticOverloadForTests();
   });
 
   it('throws a synthetic overloaded_error on the first attempt and lets the second succeed', async () => {
-    process.env['OPEN_CODESIGN_DEV_FORCE_OVERLOAD_ONCE'] = '1';
+    process.env['PLAYFORGE_DEV_FORCE_OVERLOAD_ONCE'] = '1';
     resetSyntheticOverloadForTests();
 
     const fn = vi.fn().mockResolvedValue('ok');
@@ -414,7 +414,7 @@ describe('OPEN_CODESIGN_DEV_FORCE_OVERLOAD_ONCE dev knob', () => {
   });
 
   it('disarms after firing once: a second withBackoff call runs fn immediately', async () => {
-    process.env['OPEN_CODESIGN_DEV_FORCE_OVERLOAD_ONCE'] = '1';
+    process.env['PLAYFORGE_DEV_FORCE_OVERLOAD_ONCE'] = '1';
     resetSyntheticOverloadForTests();
 
     vi.useFakeTimers();

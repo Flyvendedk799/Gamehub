@@ -17,7 +17,7 @@ let workDir = '';
 beforeEach(() => {
   // macOS /var → /private/var symlink trips zip-lib's extract guard,
   // so resolve to the canonical path up front (matches zip.test.ts).
-  workDir = realpathSync(mkdtempSync(join(tmpdir(), 'open-codesign-game-zip-')));
+  workDir = realpathSync(mkdtempSync(join(tmpdir(), 'playforge-game-zip-')));
 });
 afterEach(() => {
   if (workDir) rmSync(workDir, { recursive: true, force: true });

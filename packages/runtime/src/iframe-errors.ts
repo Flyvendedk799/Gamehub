@@ -11,7 +11,7 @@
  */
 
 export interface IframeErrorMessage {
-  __codesign: true;
+  __playforge: true;
   type: 'IFRAME_ERROR';
   kind: 'error' | 'unhandledrejection';
   message: string;
@@ -26,7 +26,7 @@ export function isIframeErrorMessage(data: unknown): data is IframeErrorMessage 
   return (
     typeof data === 'object' &&
     data !== null &&
-    (data as { __codesign?: boolean }).__codesign === true &&
+    (data as { __playforge?: boolean }).__playforge === true &&
     (data as { type?: string }).type === 'IFRAME_ERROR' &&
     typeof (data as { message?: unknown }).message === 'string'
   );

@@ -19,7 +19,7 @@ const FAKE_ADDON_SOURCE = "/* orbit-controls stub */\nimport * as THREE from 'th
 let workDir = '';
 
 beforeEach(() => {
-  workDir = realpathSync(mkdtempSync(join(tmpdir(), 'open-codesign-game-html-')));
+  workDir = realpathSync(mkdtempSync(join(tmpdir(), 'playforge-game-html-')));
   // Stub fetch so tests don't hit the network.
   vi.stubGlobal(
     'fetch',

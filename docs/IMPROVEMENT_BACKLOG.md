@@ -24,8 +24,8 @@ Unauthenticated WS collab/presence routes; admin routes fail **open** when `ADMI
 ### F. Worker Data Integrity & Run Lifecycle
 Post-agent DB writes are non-transactional with client-side `MAX()+1` seq under `concurrency=2`: colliding seq corrupts the version timeline or strands a completed run as `'failed'` and re-runs it (double LLM cost). No reaper closes orphaned `'running'` runs / SSE streams.
 
-### G. De-Desktop: Remove Non-Web Engines & the `codesign` Protocol
-`pygame`/`godot`/`unity` survived the re-platform across `choose_engine`, the system prompt, engine guides, the runtime adapter registry, shared schemas, exporters, and worker validators — the agent can pick `pygame` for a "retro arcade" prompt and emit `main.py` the browser can't boot. The `codesign:*` wire protocol, `BRAND`, `CodesignError`, and the React/Babel design-canvas runtime also persist (Principle 5).
+### G. De-Desktop: Remove Non-Web Engines & the legacy desktop Protocol
+`pygame`/`godot`/`unity` survived the re-platform across `choose_engine`, the system prompt, engine guides, the runtime adapter registry, shared schemas, exporters, and worker validators — the agent can pick `pygame` for a "retro arcade" prompt and emit `main.py` the browser can't boot. **(Done)** The legacy desktop wire protocol, error class, and brand have been rebranded: the tweaks wire protocol is now `playforge:tweaks:update`, the marker key is `__playforge`, `PlayforgeError`/`PlayforgeErrorCode` replace the old error identifiers, and `BRAND.appName` is `Playforge`. The React/Babel design-canvas runtime still persists (Principle 5).
 
 ### H. Hub Integrity, Moderation & Abuse Controls
 Remix copies the **live mutable HEAD** (leaking unpublished edits); `autoMod` detects but never gates; the report endpoint trusts a client-supplied `userId` and is unthrottled; play-count is trivially gameable; removed bundles stay fetchable via `/v1/blobs`; `/v1/users/:handle` is broken (handle-vs-id).
@@ -88,8 +88,8 @@ The remix safety prefix is a single dilutable English sentence with no structura
 | 35 | Throttle/dedup play-count; stop serving removed bundles via `/v1/blobs` (image-only) | api-hub | correctness | low | M |
 | 36 | Atomic registration grant (one tx, idempotent) + non-unique `sessions_user_idx` | api-credits/db | correctness | medium | S |
 | 37 | Logout-all / revoke-by-user + expired-session sweep; Secure presence-marker cookie | api/frontend | security | medium | M |
-| 38 | Rename `codesign:*` protocol (lockstep) + delete React/Babel tweaks-bridge from game path | runtime/frontend | goal-align | medium | M |
-| 39 | Rewrite `safety.v1.txt` for game-builder scope (keep injection/IP/abuse rules) | core-agent | goal-align | medium | S |
+| 38 | ✅ Rename legacy desktop protocol → `playforge:*` (lockstep) + brand/error-identifier rebrand | runtime/frontend | goal-align | medium | M |
+| 39 | ✅ Rewrite `safety.v1.txt` for game-builder scope (keep injection/IP/abuse rules) | core-agent | goal-align | medium | S |
 | 40 | Fence `read_url` fetched content in `<untrusted_fetched_content>` envelope + rule | core-agent | security | medium | S |
 | 41 | Strictness pass: GameSpec `.strict()`+deletion; validator network-warn; stars/parent checks | shared/runtime/api | correctness | low | S |
 | 42 | Storage integrity: atomic temp+rename, strict readManifest regex, control-char/NFC reject + tests | storage | security | low | S |

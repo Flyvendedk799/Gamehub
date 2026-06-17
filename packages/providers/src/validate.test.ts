@@ -1,4 +1,4 @@
-import { CodesignError } from '@playforge/shared';
+import { PlayforgeError } from '@playforge/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { pingProvider } from './validate';
 
@@ -13,12 +13,12 @@ afterEach(() => {
 });
 
 describe('pingProvider', () => {
-  it('throws CodesignError for unsupported providers', async () => {
-    await expect(pingProvider('google', 'AIza-foo')).rejects.toBeInstanceOf(CodesignError);
+  it('throws PlayforgeError for unsupported providers', async () => {
+    await expect(pingProvider('google', 'AIza-foo')).rejects.toBeInstanceOf(PlayforgeError);
   });
 
   it('throws when key is empty', async () => {
-    await expect(pingProvider('anthropic', '')).rejects.toBeInstanceOf(CodesignError);
+    await expect(pingProvider('anthropic', '')).rejects.toBeInstanceOf(PlayforgeError);
   });
 
   // Keyless builtins (local Ollama) explicitly opt out of API keys via

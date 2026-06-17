@@ -18,7 +18,7 @@ import type {
   StoredDesignSystem,
   WireApi,
 } from '@playforge/shared';
-import { CodesignError, ERROR_CODES } from '@playforge/shared';
+import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
 import { remapProviderError } from './errors.js';
 import { type CoreLogger, NOOP_LOGGER } from './logger.js';
 import { type PromptComposeOptions, composeSystemPrompt } from './prompts/index.js';
@@ -628,7 +628,7 @@ async function runModel(input: ModelRunInput): Promise<GenerateOutput> {
         ms: Date.now() - sendStart,
         errorClass: err instanceof Error ? err.constructor.name : typeof err,
         status: extractStatus(err),
-        code: remapped instanceof CodesignError ? remapped.code : undefined,
+        code: remapped instanceof PlayforgeError ? remapped.code : undefined,
       });
       throw remapped;
     }
@@ -845,7 +845,7 @@ export async function generate(input: GenerateInput): Promise<GenerateOutput> {
   } as const;
 
   if (!input.prompt.trim()) {
-    throw new CodesignError('Prompt cannot be empty', ERROR_CODES.INPUT_EMPTY_PROMPT);
+    throw new PlayforgeError('Prompt cannot be empty', ERROR_CODES.INPUT_EMPTY_PROMPT);
   }
 
   // Narrow guard: only 'create' is wired through buildPrompt. Callers passing
@@ -853,7 +853,7 @@ export async function generate(input: GenerateInput): Promise<GenerateOutput> {
   // When systemPrompt is provided the caller owns the full system message, so
   // mode is irrelevant and we skip the guard (the contract says mode is ignored).
   if (!input.systemPrompt && input.mode && input.mode !== 'create') {
-    throw new CodesignError(
+    throw new PlayforgeError(
       'generate() built-in prompt only supports mode "create". Use applyComment() for revise; tweak is not yet wired.',
       ERROR_CODES.INPUT_UNSUPPORTED_MODE,
     );
@@ -924,10 +924,10 @@ export async function applyComment(input: ApplyCommentInput): Promise<GenerateOu
   } as const;
 
   if (!input.comment.trim()) {
-    throw new CodesignError('Comment cannot be empty', ERROR_CODES.INPUT_EMPTY_COMMENT);
+    throw new PlayforgeError('Comment cannot be empty', ERROR_CODES.INPUT_EMPTY_COMMENT);
   }
   if (!input.html.trim()) {
-    throw new CodesignError('Existing HTML cannot be empty', ERROR_CODES.INPUT_EMPTY_HTML);
+    throw new PlayforgeError('Existing HTML cannot be empty', ERROR_CODES.INPUT_EMPTY_HTML);
   }
 
   log.info('[apply_comment] step=resolve_model', ctx);
@@ -975,7 +975,7 @@ export async function applyComment(input: ApplyCommentInput): Promise<GenerateOu
 // Title generation — small synchronous completion used after the first prompt
 // to replace "Untitled design" with a 2-5 word summary. Uses the same provider
 // the user already configured so no extra key is needed. Failures bubble as
-// CodesignError so the caller can fall back to a simple truncation.
+// PlayforgeError so the caller can fall back to a simple truncation.
 // ---------------------------------------------------------------------------
 
 export interface GenerateTitleInput {
@@ -1006,7 +1006,7 @@ const TITLE_SYSTEM_PROMPT = [
  * `claude-cli` scope the agent already uses.
  *
  * Resolution order:
- *  1. `OPEN_CODESIGN_TITLE_MODEL_ID` env override (advanced users / tests)
+ *  1. `PLAYFORGE_TITLE_MODEL_ID` env override (advanced users / tests)
  *  2. Anthropic family (provider = `anthropic` or `claude-code-imported`)
  *     → `claude-haiku-4-5`
  *  3. Anything else → fall back to the user's active model (we don't know
@@ -1015,7 +1015,7 @@ const TITLE_SYSTEM_PROMPT = [
  * Exported for test coverage.
  */
 export function resolveTitleModel(active: ModelRef): ModelRef {
-  const envOverride = process.env['OPEN_CODESIGN_TITLE_MODEL_ID'];
+  const envOverride = process.env['PLAYFORGE_TITLE_MODEL_ID'];
   if (envOverride && envOverride.trim().length > 0) {
     return { provider: active.provider, modelId: envOverride.trim() };
   }
@@ -1041,7 +1041,7 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string> 
   const log = input.logger ?? NOOP_LOGGER;
   const trimmed = input.prompt.trim();
   if (trimmed.length === 0) {
-    throw new CodesignError(
+    throw new PlayforgeError(
       'generateTitle requires a non-empty prompt',
       ERROR_CODES.INPUT_EMPTY_PROMPT,
     );
@@ -1083,7 +1083,7 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string> 
     log.info('[title] step=send_request.ok', { ms: Date.now() - started });
     const title = sanitizeTitle(result.content);
     if (title.length === 0) {
-      throw new CodesignError('Model returned empty title', ERROR_CODES.PROVIDER_ERROR);
+      throw new PlayforgeError('Model returned empty title', ERROR_CODES.PROVIDER_ERROR);
     }
     return title;
   } catch (err) {

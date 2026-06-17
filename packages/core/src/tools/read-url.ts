@@ -7,7 +7,7 @@
  */
 
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
-import { CodesignError, ERROR_CODES, assertSafeUrl } from '@playforge/shared';
+import { PlayforgeError, ERROR_CODES, assertSafeUrl } from '@playforge/shared';
 import { Type } from '@sinclair/typebox';
 
 const ReadUrlParams = Type.Object({
@@ -136,7 +136,7 @@ export function makeReadUrlTool(): AgentTool<typeof ReadUrlParams, ReadUrlDetail
           });
         } catch (err) {
           if (isAbortFromTimeout(err, networkTimeout)) {
-            throw new CodesignError(
+            throw new PlayforgeError(
               `read_url network timeout after ${READ_URL_NETWORK_TIMEOUT_MS / 1000}s for ${params.url}`,
               ERROR_CODES.REFERENCE_URL_FETCH_TIMEOUT,
               { cause: err instanceof Error ? err : new Error(String(err)) },
@@ -194,7 +194,7 @@ export function makeReadUrlTool(): AgentTool<typeof ReadUrlParams, ReadUrlDetail
         });
       } catch (err) {
         if (isAbortFromTimeout(err, bodyTimeout)) {
-          throw new CodesignError(
+          throw new PlayforgeError(
             `read_url body read timeout after ${READ_URL_BODY_TIMEOUT_MS / 1000}s for ${params.url}`,
             ERROR_CODES.REFERENCE_URL_FETCH_TIMEOUT,
             { cause: err instanceof Error ? err : new Error(String(err)) },

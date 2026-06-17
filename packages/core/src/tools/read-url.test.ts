@@ -4,7 +4,7 @@
  * HTML-stripper edge cases.
  */
 
-import { CodesignError, ERROR_CODES } from '@playforge/shared';
+import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   READ_URL_BODY_TIMEOUT_MS,
@@ -118,7 +118,7 @@ describe('read_url — failure paths', () => {
     expect(text).toMatch(/\[…truncated at 1000 chars\]\n<\/untrusted_fetched_content>$/);
   });
 
-  it('throws CodesignError with REFERENCE_URL_FETCH_TIMEOUT on body-drain timeout', async () => {
+  it('throws PlayforgeError with REFERENCE_URL_FETCH_TIMEOUT on body-drain timeout', async () => {
     // Headers in fast, body never resolves — body timeout fires.
     const slowBody = new ReadableStream<Uint8Array>({
       start() {
@@ -144,7 +144,7 @@ describe('read_url — failure paths', () => {
     });
   }, 10_000);
 
-  it('REFERENCE_URL_FETCH_TIMEOUT errors are CodesignError instances', async () => {
+  it('REFERENCE_URL_FETCH_TIMEOUT errors are PlayforgeError instances', async () => {
     const slowBody = new ReadableStream<Uint8Array>({ start() {} });
     vi.stubGlobal(
       'fetch',
@@ -154,7 +154,7 @@ describe('read_url — failure paths', () => {
       await run('https://example.com');
       throw new Error('should have thrown');
     } catch (err) {
-      expect(err).toBeInstanceOf(CodesignError);
+      expect(err).toBeInstanceOf(PlayforgeError);
     }
   }, 10_000);
 });

@@ -291,7 +291,7 @@ function compactAssistant(
       changed = true;
       // Improver1 §1 — echo-proof placeholder. 2026-04-29 traces
       // (mokhzyr8, mokivxgx) AND today's run-1 (mosuuixq-ybcwn0)
-      // showed Sonnet 4.6 echoing the prior `__codesign_stripped`
+      // showed Sonnet 4.6 echoing the prior `__playforge_stripped`
       // placeholder verbatim as a fresh tool call's `arguments`.
       // pi-ai's `validateToolArguments` runs BEFORE we get a
       // beforeToolCall hook, so we can't intercept pre-validation.

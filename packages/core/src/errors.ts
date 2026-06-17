@@ -17,7 +17,7 @@
 
 import { extractHttpStatus, looksLikeGatewayMissingMessagesApi } from '@playforge/providers';
 import type { ProviderId, WireApi } from '@playforge/shared';
-import { CodesignError, ERROR_CODES } from '@playforge/shared';
+import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
 
 export const PROVIDER_KEY_HELP_URL: Partial<Record<ProviderId, string>> = {
   openai: 'https://platform.openai.com/account/api-keys',
@@ -90,7 +90,7 @@ export function remapProviderError(
   wire?: WireApi | undefined,
 ): unknown {
   if (!(err instanceof Error)) return err;
-  if (err instanceof CodesignError && err.code === ERROR_CODES.PROVIDER_ABORTED) return err;
+  if (err instanceof PlayforgeError && err.code === ERROR_CODES.PROVIDER_ABORTED) return err;
   // Third-party Anthropic relays often reply to POST /v1/messages with 5xx +
   // "not implemented" while their /v1/models endpoint works. Catch that shape
   // before any other classification so the UI can suggest switching wire
@@ -100,10 +100,10 @@ export function remapProviderError(
   // from an OpenAI/Google wire is just a generic upstream error.
   if (
     wire === 'anthropic' &&
-    !(err instanceof CodesignError && err.code === ERROR_CODES.PROVIDER_GATEWAY_INCOMPATIBLE) &&
+    !(err instanceof PlayforgeError && err.code === ERROR_CODES.PROVIDER_GATEWAY_INCOMPATIBLE) &&
     looksLikeGatewayMissingMessagesApi(err)
   ) {
-    return new CodesignError(err.message, ERROR_CODES.PROVIDER_GATEWAY_INCOMPATIBLE, {
+    return new PlayforgeError(err.message, ERROR_CODES.PROVIDER_GATEWAY_INCOMPATIBLE, {
       cause: err,
     });
   }
@@ -111,6 +111,6 @@ export function remapProviderError(
   if (status === undefined || status < 400 || status >= 500) return err;
   const { message, rewritten } = rewriteUpstreamMessage(err.message, provider, status);
   if (!rewritten) return err;
-  const code = err instanceof CodesignError ? err.code : ERROR_CODES.PROVIDER_HTTP_4XX;
-  return new CodesignError(message, code, { cause: err });
+  const code = err instanceof PlayforgeError ? err.code : ERROR_CODES.PROVIDER_HTTP_4XX;
+  return new PlayforgeError(message, code, { cause: err });
 }

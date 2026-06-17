@@ -1,6 +1,6 @@
 import {
   BUILTIN_PROVIDERS,
-  CodesignError,
+  PlayforgeError,
   ERROR_CODES,
   type SupportedOnboardingProvider,
   isSupportedOnboardingProvider,
@@ -96,7 +96,7 @@ export async function pingProvider(
   baseUrl?: string,
 ): Promise<ValidateResult> {
   if (!isSupportedOnboardingProvider(provider)) {
-    throw new CodesignError(
+    throw new PlayforgeError(
       `Provider "${provider}" is not supported in v0.1. Supported: anthropic, openai, openrouter, ollama.`,
       ERROR_CODES.PROVIDER_NOT_SUPPORTED,
     );
@@ -107,7 +107,7 @@ export async function pingProvider(
   // PROVIDER_AUTH_MISSING instead of a confusing 401 from the network.
   const isKeyless = BUILTIN_PROVIDERS[provider].requiresApiKey === false;
   if (!isKeyless && (!apiKey || apiKey.trim().length === 0)) {
-    throw new CodesignError('API key is empty', ERROR_CODES.PROVIDER_AUTH_MISSING);
+    throw new PlayforgeError('API key is empty', ERROR_CODES.PROVIDER_AUTH_MISSING);
   }
 
   const ep = endpoint(provider, baseUrl);

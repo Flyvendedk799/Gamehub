@@ -47,7 +47,7 @@ describe('complete', () => {
       provider: 'openai',
     });
     completeSimpleMock.mockImplementationOnce(async (_model, context) => {
-      expect(context.systemPrompt).toBe('You are open-codesign.');
+      expect(context.systemPrompt).toBe('You are Playforge.');
       expect(context.messages).toEqual([
         {
           role: 'user',
@@ -110,7 +110,7 @@ describe('complete', () => {
     });
 
     const messages: ChatMessage[] = [
-      { role: 'system', content: 'You are open-codesign.' },
+      { role: 'system', content: 'You are Playforge.' },
       { role: 'user', content: '介绍一下你自己' },
       { role: 'assistant', content: '我是一个设计助手。' },
       { role: 'user', content: '你可以干什么' },
@@ -310,7 +310,7 @@ describe('complete', () => {
   it('allows keyless custom gateways by passing a local placeholder key and extra headers', async () => {
     getModelMock.mockReturnValue(undefined);
     completeSimpleMock.mockImplementationOnce(async (_model, _context, opts) => {
-      expect(opts.apiKey).toBe('open-codesign-keyless');
+      expect(opts.apiKey).toBe('playforge-keyless');
       expect(opts.headers).toEqual({ 'x-proxy-auth': 'local' });
       return {
         role: 'assistant',
@@ -684,7 +684,7 @@ describe('complete — openai-responses strict instructions', () => {
     await complete(
       { provider: 'openai', modelId: 'gpt-5.1' },
       [
-        { role: 'system', content: 'You are open-codesign.' },
+        { role: 'system', content: 'You are Playforge.' },
         { role: 'user', content: 'hi' },
       ],
       { apiKey: 'sk-test' },
@@ -704,7 +704,7 @@ describe('complete — openai-responses strict instructions', () => {
       input: Array<{ role: string }>;
     };
 
-    expect(mutated.instructions).toBe('You are open-codesign.');
+    expect(mutated.instructions).toBe('You are Playforge.');
     expect(mutated.input.map((entry) => entry.role)).toEqual(['user']);
   });
 
@@ -772,7 +772,7 @@ describe('complete — openai-responses strict instructions', () => {
     await complete(
       { provider: 'anthropic', modelId: 'claude-4.7-sonnet' },
       [
-        { role: 'system', content: 'You are open-codesign.' },
+        { role: 'system', content: 'You are Playforge.' },
         { role: 'user', content: 'hi' },
       ],
       { apiKey: 'sk-ant-test' },

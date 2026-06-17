@@ -50,7 +50,7 @@ import {
 import {
   type Artifact,
   type ChatMessage,
-  CodesignError,
+  PlayforgeError,
   ERROR_CODES,
   type ModelRef,
   type StoredDesignSystem,
@@ -369,7 +369,7 @@ function buildPiModel(
       ? baseUrl
       : (BUILTIN_PUBLIC_BASE_URLS[model.provider] ?? '');
   if (resolvedBaseUrl.length === 0) {
-    throw new CodesignError(
+    throw new PlayforgeError(
       `Provider "${model.provider}" has no baseUrl configured. Add one in Settings or re-import the config.`,
       ERROR_CODES.PROVIDER_BASE_URL_MISSING,
     );
@@ -1055,10 +1055,10 @@ export async function generateViaAgent(
   } as const;
 
   if (!input.prompt.trim()) {
-    throw new CodesignError('Prompt cannot be empty', ERROR_CODES.INPUT_EMPTY_PROMPT);
+    throw new PlayforgeError('Prompt cannot be empty', ERROR_CODES.INPUT_EMPTY_PROMPT);
   }
   if (!input.systemPrompt && input.mode && input.mode !== 'create') {
-    throw new CodesignError(
+    throw new PlayforgeError(
       'generateViaAgent() built-in prompt only supports mode "create".',
       ERROR_CODES.INPUT_UNSUPPORTED_MODE,
     );
@@ -1449,7 +1449,7 @@ export async function generateViaAgent(
   // types) to the LLM-visible Message subset.
   //
   // `capturedGetApiKeyError` preserves structured errors thrown by the
-  // per-turn async getter (e.g. `CodesignError(PROVIDER_AUTH_MISSING)` when
+  // per-turn async getter (e.g. `PlayforgeError(PROVIDER_AUTH_MISSING)` when
   // the user signs out mid-run). pi-agent-core flattens thrown errors into a
   // plain `errorMessage: string` on the failure AgentMessage, which would
   // otherwise cause us to re-wrap as `PROVIDER_ERROR` below. Stashing the
@@ -1528,7 +1528,7 @@ export async function generateViaAgent(
         ...ctx,
         hint: hintAtStreamFn,
       });
-      throw new CodesignError(
+      throw new PlayforgeError(
         `Paused at safe boundary (${hintAtStreamFn}) before next turn dispatch.`,
         ERROR_CODES.PAUSE_AT_SAFE_BOUNDARY,
       );
@@ -1614,13 +1614,13 @@ export async function generateViaAgent(
       ? async () => {
           try {
             const key = await input.getApiKey?.();
-            return key && key.length > 0 ? key : input.apiKey || 'open-codesign-keyless';
+            return key && key.length > 0 ? key : input.apiKey || 'playforge-keyless';
           } catch (err) {
             capturedGetApiKeyError = err;
             throw err;
           }
         }
-      : () => input.apiKey || 'open-codesign-keyless',
+      : () => input.apiKey || 'playforge-keyless',
   });
 
   if (deps.onEvent) {
@@ -1864,7 +1864,7 @@ export async function generateViaAgent(
                   agent.steer({
                     role: 'user',
                     content:
-                      '[CODESIGN_AUTO_RETRY] You replied with text but did not call any tools. ' +
+                      '[PLAYFORGE_AUTO_RETRY] You replied with text but did not call any tools. ' +
                       'Begin by calling `set_todos` with your plan, then proceed with text_editor edits. ' +
                       'Every turn must include at least one tool call.',
                     timestamp: Date.now(),
@@ -2194,7 +2194,7 @@ export async function generateViaAgent(
             const more =
               result.errors.length > 3 ? `\n• …and ${result.errors.length - 3} more` : '';
             const issueWord = result.errors.length === 1 ? 'issue' : 'issues';
-            const steerContent = `[CODESIGN_AUTO_VERIFY] After ${VERIFY_INTERVAL} edits I ran verify_artifact for you. Findings (${result.errors.length} ${issueWord}):\n${errorList}${more}\n\nIf these are real errors, fix them BEFORE the next edit. If they are false positives, call \`verify_artifact\` yourself for the latest read, then proceed. Do not ignore.`;
+            const steerContent = `[PLAYFORGE_AUTO_VERIFY] After ${VERIFY_INTERVAL} edits I ran verify_artifact for you. Findings (${result.errors.length} ${issueWord}):\n${errorList}${more}\n\nIf these are real errors, fix them BEFORE the next edit. If they are false positives, call \`verify_artifact\` yourself for the latest read, then proceed. Do not ignore.`;
             agent.steer({
               role: 'user',
               content: steerContent,
@@ -2359,7 +2359,7 @@ export async function generateViaAgent(
   // whether the failed attempt produced any such artefact and, if so, mark the
   // error as non-retryable.
   const isFirstTurn = input.history.length === 0;
-  const RETRY_BLOCKED = Symbol.for('open-codesign.retry.blocked');
+  const RETRY_BLOCKED = Symbol.for('playforge.retry.blocked');
   type RetryBlockedError = Error & { [RETRY_BLOCKED]?: true };
   // Snapshot the pre-run message count so usage aggregation below sums only
   // the assistant messages this run added (not historical turns from prior
@@ -2388,7 +2388,7 @@ export async function generateViaAgent(
     // retry would replay tool effects and is RETRY_BLOCKED.
     //
     // Skip when capturedGetApiKeyError is set: the post-withBackoff branch
-    // surfaces that original CodesignError verbatim (preserving its
+    // surfaces that original PlayforgeError verbatim (preserving its
     // structured code, e.g. CODEX_TOKEN_NOT_LOGGED_IN). Re-wrapping it as
     // PROVIDER_ERROR would lose the renderer's auth-recovery routing.
     if (capturedGetApiKeyError !== null) return;
@@ -2401,7 +2401,7 @@ export async function generateViaAgent(
       const userFacing = upstream
         ? `${upstream.providerMessage ?? upstream.type}${upstream.requestId ? ` (request id: ${upstream.requestId})` : ''}`
         : errorMessage;
-      const lifted = new CodesignError(userFacing, code) as Error & { status?: number };
+      const lifted = new PlayforgeError(userFacing, code) as Error & { status?: number };
       if (upstream !== undefined) lifted.status = upstream.status;
       // Drop the error-stopReason message so a retry starts from clean state.
       // pi-agent-core treats agent.state.messages as the live transcript;
@@ -2451,7 +2451,7 @@ export async function generateViaAgent(
     if (budgetReason === 'tool_calls') {
       // tool_calls = runaway loop signal; keep failing loudly.
       clearTimeout(budgetTimer);
-      throw new CodesignError(
+      throw new PlayforgeError(
         `Agent run aborted by safety budget (tool_calls: ${toolCallCount}/${maxToolCalls} calls)`,
         ERROR_CODES.AGENT_BUDGET_EXCEEDED,
       );
@@ -2488,10 +2488,10 @@ export async function generateViaAgent(
 
   const finalAssistant = findFinalAssistantMessage(agent.state.messages);
   if (!finalAssistant) {
-    throw new CodesignError('Agent produced no assistant message', ERROR_CODES.PROVIDER_ERROR);
+    throw new PlayforgeError('Agent produced no assistant message', ERROR_CODES.PROVIDER_ERROR);
   }
   if (budgetReason === 'tool_calls' && finalAssistant.stopReason === 'aborted') {
-    throw new CodesignError(
+    throw new PlayforgeError(
       `Agent run aborted by safety budget (tool_calls: ${toolCallCount}/${maxToolCalls} calls)`,
       ERROR_CODES.AGENT_BUDGET_EXCEEDED,
     );
@@ -2540,7 +2540,7 @@ export async function generateViaAgent(
       stopReason: finalAssistant.stopReason,
     });
     throw remapProviderError(
-      new CodesignError(message, ERROR_CODES.PROVIDER_ERROR),
+      new PlayforgeError(message, ERROR_CODES.PROVIDER_ERROR),
       input.model.provider,
       input.wire,
     );
@@ -2601,7 +2601,7 @@ export async function generateViaAgent(
       finalStopReason: finalAssistant.stopReason,
       reason: 'no_artifacts_no_text',
     });
-    throw new CodesignError(
+    throw new PlayforgeError(
       // The provider-layer error string at packages/providers/src/index.ts
       // talks about reasoning level — match that wording so the renderer's
       // existing i18n + diagnostic-toast surface stays consistent.

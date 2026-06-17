@@ -9,7 +9,7 @@ only**. No GPL/AGPL/SSPL-licensed audio enters the bundle.
 
 The shipped samples are short synthesized tones written by
 `_generate-starter-samples.ts` (committed alongside). They live under
-**CC0** as part of open-codesign itself. They're intentionally simple
+**CC0** as part of Playforge itself. They're intentionally simple
 (sine + envelope) so the tool is functional out of the box without a
 multi-megabyte download.
 

@@ -7,7 +7,7 @@
       "path": "sfx/click.wav",
       "mimeType": "audio/wav",
       "label": "UI click",
-      "license": "open-codesign synthesized starter (CC0)",
+      "license": "Playforge synthesized starter (CC0)",
       "keywords": ["click", "tap", "button", "ui", "press", "select", "menu"]
     },
     {
@@ -16,7 +16,7 @@
       "path": "sfx/jump.wav",
       "mimeType": "audio/wav",
       "label": "Jump / hop",
-      "license": "open-codesign synthesized starter (CC0)",
+      "license": "Playforge synthesized starter (CC0)",
       "keywords": ["jump", "hop", "leap", "boing", "bounce", "spring"]
     },
     {
@@ -25,7 +25,7 @@
       "path": "sfx/coin.wav",
       "mimeType": "audio/wav",
       "label": "Coin pickup",
-      "license": "open-codesign synthesized starter (CC0)",
+      "license": "Playforge synthesized starter (CC0)",
       "keywords": ["coin", "pickup", "collect", "reward", "gem", "powerup", "ding", "score"]
     },
     {
@@ -34,7 +34,7 @@
       "path": "sfx/hit.wav",
       "mimeType": "audio/wav",
       "label": "Hit / impact",
-      "license": "open-codesign synthesized starter (CC0)",
+      "license": "Playforge synthesized starter (CC0)",
       "keywords": ["hit", "impact", "punch", "thud", "damage", "collision", "smash"]
     },
     {
@@ -43,7 +43,7 @@
       "path": "sfx/footstep.wav",
       "mimeType": "audio/wav",
       "label": "Footstep",
-      "license": "open-codesign synthesized starter (CC0)",
+      "license": "Playforge synthesized starter (CC0)",
       "keywords": ["footstep", "footsteps", "step", "walk", "run", "tread"]
     },
     {
@@ -52,7 +52,7 @@
       "path": "sfx/laser.wav",
       "mimeType": "audio/wav",
       "label": "Laser / shoot",
-      "license": "open-codesign synthesized starter (CC0)",
+      "license": "Playforge synthesized starter (CC0)",
       "keywords": ["laser", "shoot", "fire", "blaster", "zap", "pew", "weapon"]
     },
     {
@@ -61,7 +61,7 @@
       "path": "sfx/explosion.wav",
       "mimeType": "audio/wav",
       "label": "Explosion / boom",
-      "license": "open-codesign synthesized starter (CC0)",
+      "license": "Playforge synthesized starter (CC0)",
       "keywords": ["explosion", "boom", "blast", "burst", "bomb", "destroy"]
     },
     {
@@ -70,7 +70,7 @@
       "path": "music/ambient_loop.wav",
       "mimeType": "audio/wav",
       "label": "Ambient loop pad",
-      "license": "open-codesign synthesized starter (CC0)",
+      "license": "Playforge synthesized starter (CC0)",
       "keywords": ["ambient", "loop", "background", "calm", "pad", "atmosphere", "drone"]
     },
     {
@@ -79,7 +79,7 @@
       "path": "music/menu_jingle.wav",
       "mimeType": "audio/wav",
       "label": "Menu jingle",
-      "license": "open-codesign synthesized starter (CC0)",
+      "license": "Playforge synthesized starter (CC0)",
       "keywords": ["jingle", "menu", "title", "intro", "main", "stinger", "fanfare"]
     },
     {
@@ -88,7 +88,7 @@
       "path": "voice/notify_chime.wav",
       "mimeType": "audio/wav",
       "label": "Notification chime (voice placeholder)",
-      "license": "open-codesign synthesized starter (CC0)",
+      "license": "Playforge synthesized starter (CC0)",
       "keywords": ["notify", "notification", "alert", "announce", "voice", "chime", "ping"]
     }
   ]

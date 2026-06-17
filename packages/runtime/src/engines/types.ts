@@ -16,7 +16,7 @@ export type GameEngineId = 'three' | 'phaser';
  * post with an explicit `targetOrigin` (the preview/play API origin), never
  * `'*'`, and the bridge/host must validate `event.origin` on inbound messages.
  */
-export const TWEAKS_UPDATE_MESSAGE_TYPE = 'codesign:tweaks:update' as const;
+export const TWEAKS_UPDATE_MESSAGE_TYPE = 'playforge:tweaks:update' as const;
 export type TweaksUpdateMessageType = typeof TWEAKS_UPDATE_MESSAGE_TYPE;
 
 export interface BootstrapOptions {

@@ -135,7 +135,7 @@ describe('OVERLAY_SCRIPT SET_MODE source validation', () => {
     const forgedSource = {};
     onMessage?.({
       source: forgedSource,
-      data: { __codesign: true, type: 'SET_MODE', mode: 'comment' },
+      data: { __playforge: true, type: 'SET_MODE', mode: 'comment' },
     });
 
     // currentMode is internal to the IIFE, so we observe via the click gate:
@@ -155,7 +155,7 @@ describe('OVERLAY_SCRIPT SET_MODE source validation', () => {
 
     onMessage?.({
       source: h.parent,
-      data: { __codesign: true, type: 'SET_MODE', mode: 'comment' },
+      data: { __playforge: true, type: 'SET_MODE', mode: 'comment' },
     });
 
     // Now in comment mode → click should be intercepted and posted to parent.
@@ -179,7 +179,7 @@ describe('OVERLAY_SCRIPT SET_MODE source validation', () => {
 
     onMessage?.({
       source: null,
-      data: { __codesign: true, type: 'SET_MODE', mode: 'comment' },
+      data: { __playforge: true, type: 'SET_MODE', mode: 'comment' },
     });
 
     onClick?.({
@@ -280,7 +280,7 @@ describe('OVERLAY_SCRIPT rect broadcast', () => {
     const onMessage = h.windowListeners.get('message');
     onMessage?.({
       source: h.parent,
-      data: { __codesign: true, type: 'WATCH_SELECTORS', selectors: ['#a'] },
+      data: { __playforge: true, type: 'WATCH_SELECTORS', selectors: ['#a'] },
     });
     h.runRaf();
 
@@ -303,7 +303,7 @@ describe('OVERLAY_SCRIPT rect broadcast', () => {
 
     h.windowListeners.get('message')?.({
       source: h.parent,
-      data: { __codesign: true, type: 'WATCH_SELECTORS', selectors: ['#a'] },
+      data: { __playforge: true, type: 'WATCH_SELECTORS', selectors: ['#a'] },
     });
     h.runRaf();
     const firstCount = h.postedToParent.filter((m) => m['type'] === 'ELEMENT_RECTS').length;
@@ -327,7 +327,7 @@ describe('OVERLAY_SCRIPT rect broadcast', () => {
     h.registerElement('#a', makeRect(0, 0, 1, 1));
     h.windowListeners.get('message')?.({
       source: h.parent,
-      data: { __codesign: true, type: 'WATCH_SELECTORS', selectors: ['#a'] },
+      data: { __playforge: true, type: 'WATCH_SELECTORS', selectors: ['#a'] },
     });
     h.runRaf(); // initial broadcast from WATCH_SELECTORS
 
@@ -348,7 +348,7 @@ describe('OVERLAY_SCRIPT rect broadcast', () => {
     h.windowListeners.get('message')?.({
       source: h.parent,
       data: {
-        __codesign: true,
+        __playforge: true,
         type: 'WATCH_SELECTORS',
         selectors: ['#live', '#ghost'],
       },
@@ -469,7 +469,7 @@ describe('OVERLAY_SCRIPT HIGHLIGHT_SRC_LINE', () => {
 
     h.windowListeners.get('message')?.({
       source: h.parent,
-      data: { __codesign: true, type: 'HIGHLIGHT_SRC_LINE', startLine: 5, endLine: 10 },
+      data: { __playforge: true, type: 'HIGHLIGHT_SRC_LINE', startLine: 5, endLine: 10 },
     });
     h.runRaf();
 
@@ -491,7 +491,7 @@ describe('OVERLAY_SCRIPT HIGHLIGHT_SRC_LINE', () => {
 
     h.windowListeners.get('message')?.({
       source: h.parent,
-      data: { __codesign: true, type: 'HIGHLIGHT_SRC_LINE', startLine: 5, endLine: 10 },
+      data: { __playforge: true, type: 'HIGHLIGHT_SRC_LINE', startLine: 5, endLine: 10 },
     });
     h.runRaf();
 
@@ -510,7 +510,7 @@ describe('OVERLAY_SCRIPT HIGHLIGHT_SRC_LINE', () => {
     // Forged source — not window.parent.
     h.windowListeners.get('message')?.({
       source: {},
-      data: { __codesign: true, type: 'HIGHLIGHT_SRC_LINE', startLine: 5, endLine: 10 },
+      data: { __playforge: true, type: 'HIGHLIGHT_SRC_LINE', startLine: 5, endLine: 10 },
     });
     h.runRaf();
 
@@ -523,7 +523,7 @@ describe('OVERLAY_SCRIPT HIGHLIGHT_SRC_LINE', () => {
 
     h.windowListeners.get('message')?.({
       source: h.parent,
-      data: { __codesign: true, type: 'HIGHLIGHT_SRC_LINE', startLine: 'oops', endLine: 10 },
+      data: { __playforge: true, type: 'HIGHLIGHT_SRC_LINE', startLine: 'oops', endLine: 10 },
     });
     h.runRaf();
 

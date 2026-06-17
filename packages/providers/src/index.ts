@@ -8,7 +8,7 @@
 
 import {
   type ChatMessage,
-  CodesignError,
+  PlayforgeError,
   ERROR_CODES,
   type ModelRef,
   type WireApi,
@@ -306,9 +306,9 @@ export async function complete(
   opts: GenerateOptions,
 ): Promise<GenerateResult> {
   if (!opts.apiKey && opts.allowKeyless !== true) {
-    throw new CodesignError('Missing API key', ERROR_CODES.PROVIDER_AUTH_MISSING);
+    throw new PlayforgeError('Missing API key', ERROR_CODES.PROVIDER_AUTH_MISSING);
   }
-  const apiKey = opts.apiKey || 'open-codesign-keyless';
+  const apiKey = opts.apiKey || 'playforge-keyless';
 
   // Gemini's OpenAI-compat endpoint rejects the `models/` prefix that its own
   // /models listing returns (issue #175). Normalize on the wire only; Settings
@@ -343,7 +343,7 @@ export async function complete(
     } else if (model.provider === 'openrouter') {
       piModel = synthesizeOpenRouterModel(effectiveModelId);
     } else {
-      throw new CodesignError(
+      throw new PlayforgeError(
         `Unknown model ${model.provider}:${model.modelId}`,
         ERROR_CODES.PROVIDER_MODEL_UNKNOWN,
       );
@@ -404,7 +404,7 @@ export async function complete(
     };
     // Send a placeholder as the primary apiKey so pi-ai's internal
     // x-api-key header doesn't carry the OAuth token (which causes 401).
-    piOpts.apiKey = 'open-codesign-oauth-placeholder';
+    piOpts.apiKey = 'playforge-oauth-placeholder';
   }
 
   // sub2api / claude2api gateways 403 requests without claude-cli identity
@@ -442,12 +442,12 @@ export async function complete(
     // retry classifier loses the status. Recover it from the structured error
     // type so transient classes (overloaded_error → 529, rate_limit_error →
     // 429) actually retry instead of surfacing on the first try. Also map the
-    // provider's `error.type` to a CodesignError code so the renderer's
+    // provider's `error.type` to a PlayforgeError code so the renderer's
     // friendly-copy lookup keys off something more precise than PROVIDER_ERROR.
     const code =
       upstream !== undefined ? errorCodeForUpstreamType(upstream.type) : 'PROVIDER_ERROR';
     const message = formatUpstreamErrorMessage(rawMessage, upstream);
-    const err = new CodesignError(message, code);
+    const err = new PlayforgeError(message, code);
     if (upstream !== undefined) {
       (err as { status?: number }).status = upstream.status;
     }
@@ -465,7 +465,7 @@ export async function complete(
     .join('');
 
   if (text.length === 0) {
-    throw new CodesignError(
+    throw new PlayforgeError(
       'Model returned no text content (likely consumed its budget on reasoning). Use a more directive prompt or lower the reasoning level.',
       ERROR_CODES.MODEL_RETURNED_ONLY_THINKING,
     );
@@ -518,7 +518,7 @@ function validateCodexImageInputs(opts: GenerateOptions): void {
     return sum + Math.floor((len * 3) / 4);
   }, 0);
   if (totalImageBytes > MAX_TOTAL_CODEX_IMAGE_BYTES) {
-    throw new CodesignError(
+    throw new PlayforgeError(
       'Attached images are too large in total for ChatGPT Codex. Reduce image count or image size.',
       ERROR_CODES.ATTACHMENT_TOO_LARGE,
     );

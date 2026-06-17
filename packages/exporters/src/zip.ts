@@ -1,4 +1,4 @@
-import { CodesignError, ERROR_CODES } from '@playforge/shared';
+import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
 import type { ExportResult } from './index';
 
 export interface ZipAsset {
@@ -17,13 +17,13 @@ export interface ExportZipOptions {
 
 const README_TEMPLATE = (title: string, generatedAt: string) => `# ${title}
 
-This bundle was exported from [open-codesign](https://github.com/OpenCoworkAI/open-codesign).
+This bundle was exported from Playforge.
 
 ## Layout
 
 \`\`\`
 .
-├── index.html      The exported design (open in any browser)
+├── index.html      The exported artifact (open in any browser)
 ├── assets/         Linked assets (images, fonts, scripts)
 └── README.md       This file
 \`\`\`
@@ -32,7 +32,7 @@ This bundle was exported from [open-codesign](https://github.com/OpenCoworkAI/op
 
 - Generated: ${generatedAt}
 - The HTML is self-contained; opening \`index.html\` directly works without a server.
-- To re-edit, open the bundle in open-codesign via *File → Import bundle*.
+- To keep editing, re-import this bundle into Playforge.
 `;
 
 /**
@@ -53,13 +53,13 @@ export async function exportZip(
   const os = await import('node:os');
   const { Zip } = await import('zip-lib');
 
-  const stagingDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codesign-zip-'));
+  const stagingDir = await fs.mkdtemp(path.join(os.tmpdir(), 'playforge-zip-'));
   try {
     const indexPath = path.join(stagingDir, 'index.html');
     await fs.writeFile(indexPath, htmlContent, 'utf8');
 
     const readme = README_TEMPLATE(
-      opts.readmeTitle ?? 'open-codesign export',
+      opts.readmeTitle ?? 'Playforge export',
       new Date().toISOString(),
     );
     const readmePath = path.join(stagingDir, 'README.md');
@@ -79,7 +79,7 @@ export async function exportZip(
         const localPath = path.resolve(stagingDir, normalized);
         const rel = path.relative(stagingResolved, localPath);
         if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
-          throw new CodesignError(
+          throw new PlayforgeError(
             `ZIP export rejected unsafe asset path: ${asset.path}`,
             ERROR_CODES.EXPORTER_ZIP_UNSAFE_PATH,
           );
@@ -94,8 +94,8 @@ export async function exportZip(
     const stat = await fs.stat(destinationPath);
     return { bytes: stat.size, path: destinationPath };
   } catch (err) {
-    if (err instanceof CodesignError) throw err;
-    throw new CodesignError(
+    if (err instanceof PlayforgeError) throw err;
+    throw new PlayforgeError(
       `ZIP export failed: ${err instanceof Error ? err.message : String(err)}`,
       ERROR_CODES.EXPORTER_ZIP_FAILED,
       { cause: err },

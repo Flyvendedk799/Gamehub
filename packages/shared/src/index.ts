@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { CodesignErrorCode } from './error-codes';
+import type { PlayforgeErrorCode } from './error-codes';
 
 export const ProviderId = z.enum([
   'anthropic',
@@ -298,7 +298,7 @@ export type CancelGenerationPayloadV1 = z.infer<typeof CancelGenerationPayloadV1
  * the preview throws or rejects unhandled.
  */
 export const IframeErrorEvent = z.object({
-  __codesign: z.literal(true),
+  __playforge: z.literal(true),
   type: z.literal('IFRAME_ERROR'),
   kind: z.enum(['error', 'unhandledrejection']),
   message: z.string(),
@@ -311,7 +311,7 @@ export const IframeErrorEvent = z.object({
 export type IframeErrorEvent = z.infer<typeof IframeErrorEvent>;
 
 export const BRAND = {
-  appName: 'Open CoDesign',
+  appName: 'Playforge',
   backgroundColor: '#faf8f3',
 } as const;
 
@@ -345,15 +345,15 @@ export const ProjectDraft = z.object({
 });
 export type ProjectDraft = z.infer<typeof ProjectDraft>;
 
-export class CodesignError extends Error {
+export class PlayforgeError extends Error {
   constructor(
     message: string,
     // Accept a known registry code (preferred) or a free-form string (backward compat).
-    public readonly code: CodesignErrorCode | string,
+    public readonly code: PlayforgeErrorCode | string,
     options?: { cause?: unknown },
   ) {
     super(message, options);
-    this.name = 'CodesignError';
+    this.name = 'PlayforgeError';
   }
 }
 
@@ -362,7 +362,7 @@ export class CodesignError extends Error {
  *  catch and either skip the row (best-effort, with a log warning) or surface
  *  the failure to the user. Older rows go through `migrateChatMessageRow`
  *  instead and never raise this. */
-export class SchemaMismatchError extends CodesignError {
+export class SchemaMismatchError extends PlayforgeError {
   constructor(
     public readonly table: string,
     public readonly got: number,
@@ -610,7 +610,7 @@ export type {
 } from './diagnostics';
 
 export { ERROR_CODES, ERROR_CODE_DESCRIPTIONS } from './error-codes';
-export type { CodesignErrorCode } from './error-codes';
+export type { PlayforgeErrorCode } from './error-codes';
 // NOTE: fingerprint.ts imports node:crypto and is intentionally NOT re-exported
 // from this barrel — it's main-process only. Import from
 // '@playforge/shared/fingerprint' directly.
@@ -712,7 +712,7 @@ export interface ListEventsResult {
 export interface ReportableError {
   /** Client-side id — stable across the app lifetime, no DB required. */
   localId: string;
-  /** CodesignError code / err.name / 'RENDERER_ERROR' default. */
+  /** PlayforgeError code / err.name / 'RENDERER_ERROR' default. */
   code: string;
   /** 'generate' / 'apply-comment' / 'title' / 'onboarding' / 'settings' / etc. */
   scope: string;

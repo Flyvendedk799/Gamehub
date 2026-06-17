@@ -2,7 +2,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CodesignError } from '@playforge/shared';
+import { PlayforgeError } from '@playforge/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadAllSkills, loadSkillsFromDir } from './loader.js';
 
@@ -167,7 +167,7 @@ Body.
 `;
     await writeSkill(testDir, 'too-long.md', content);
     await expect(loadSkillsFromDir(testDir, 'user')).rejects.toSatisfy(
-      (err: unknown) => err instanceof CodesignError && err.code === 'SKILL_LOAD_FAILED',
+      (err: unknown) => err instanceof PlayforgeError && err.code === 'SKILL_LOAD_FAILED',
     );
   });
 
@@ -181,7 +181,7 @@ Body.
       `---\nschemaVersion: 1\nname: bad\ndescription: ${'z'.repeat(2000)}\n---\nBody.`,
     );
     await expect(loadSkillsFromDir(testDir, 'user')).rejects.toSatisfy(
-      (err: unknown) => err instanceof CodesignError && err.code === 'SKILL_LOAD_FAILED',
+      (err: unknown) => err instanceof PlayforgeError && err.code === 'SKILL_LOAD_FAILED',
     );
   });
 
@@ -324,7 +324,7 @@ Body without description.
     await writeSkill(builtinDir, 'broken-skill.md', brokenSkill);
     await expect(loadAllSkills({ builtinDir })).rejects.toSatisfy(
       (err: unknown) =>
-        err instanceof CodesignError &&
+        err instanceof PlayforgeError &&
         err.code === 'SKILL_LOAD_FAILED' &&
         err.message.includes('broken-skill.md'),
     );

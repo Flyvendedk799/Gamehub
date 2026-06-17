@@ -1,4 +1,4 @@
-import { CodesignError, ERROR_CODES } from '@playforge/shared';
+import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   _resetInFlightForTests,
@@ -48,11 +48,11 @@ describe('parseRefreshResponse', () => {
   });
 
   it('throws CLAUDE_CODE_TOKEN_REFRESH_FAILED on missing access_token', () => {
-    expect(() => parseRefreshResponse({ expires_in: 60 }, 'r')).toThrow(CodesignError);
+    expect(() => parseRefreshResponse({ expires_in: 60 }, 'r')).toThrow(PlayforgeError);
   });
 
   it('throws when the response is not an object', () => {
-    expect(() => parseRefreshResponse('hello', 'r')).toThrow(CodesignError);
+    expect(() => parseRefreshResponse('hello', 'r')).toThrow(PlayforgeError);
   });
 });
 
@@ -100,8 +100,8 @@ describe('refreshClaudeCodeToken', () => {
       clientId: 'c',
       endpoint: ENDPOINT,
     }).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(CodesignError);
-    expect((err as CodesignError).code).toBe(ERROR_CODES.CLAUDE_CODE_REIMPORT_REQUIRED);
+    expect(err).toBeInstanceOf(PlayforgeError);
+    expect((err as PlayforgeError).code).toBe(ERROR_CODES.CLAUDE_CODE_REIMPORT_REQUIRED);
   });
 
   it('throws CLAUDE_CODE_TOKEN_REFRESH_FAILED on 5xx', async () => {
@@ -114,8 +114,8 @@ describe('refreshClaudeCodeToken', () => {
       clientId: 'c',
       endpoint: ENDPOINT,
     }).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(CodesignError);
-    expect((err as CodesignError).code).toBe(ERROR_CODES.CLAUDE_CODE_TOKEN_REFRESH_FAILED);
+    expect(err).toBeInstanceOf(PlayforgeError);
+    expect((err as PlayforgeError).code).toBe(ERROR_CODES.CLAUDE_CODE_TOKEN_REFRESH_FAILED);
   });
 
   it('throws CLAUDE_CODE_TOKEN_REFRESH_FAILED on network error', async () => {
@@ -130,8 +130,8 @@ describe('refreshClaudeCodeToken', () => {
       clientId: 'c',
       endpoint: ENDPOINT,
     }).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(CodesignError);
-    expect((err as CodesignError).code).toBe(ERROR_CODES.CLAUDE_CODE_TOKEN_REFRESH_FAILED);
+    expect(err).toBeInstanceOf(PlayforgeError);
+    expect((err as PlayforgeError).code).toBe(ERROR_CODES.CLAUDE_CODE_TOKEN_REFRESH_FAILED);
   });
 
   it('two parallel callers with the same refresh token share one in-flight HTTP request', async () => {

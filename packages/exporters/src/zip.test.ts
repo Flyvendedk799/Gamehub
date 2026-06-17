@@ -7,7 +7,7 @@ import { exportZip } from './zip';
 let tempDir = '';
 
 beforeAll(() => {
-  tempDir = realpathSync(mkdtempSync(join(tmpdir(), 'codesign-zip-test-')));
+  tempDir = realpathSync(mkdtempSync(join(tmpdir(), 'playforge-zip-test-')));
 });
 
 afterAll(() => {
@@ -41,7 +41,7 @@ describe('exportZip', () => {
     const { readFile } = await import('node:fs/promises');
     const readme = await readFile(join(extractDir, 'README.md'), 'utf8');
     expect(readme).toContain('Test bundle');
-    expect(readme).toContain('open-codesign');
+    expect(readme).toContain('Playforge');
   });
 
   it('produces a valid zip without any extra assets', async () => {

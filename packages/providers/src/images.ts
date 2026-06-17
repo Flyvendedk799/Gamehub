@@ -1,4 +1,4 @@
-import { CodesignError, ERROR_CODES } from '@playforge/shared';
+import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
 
 export type ImageGenerationProvider = 'openai' | 'openrouter';
 export type ImageOutputFormat = 'png' | 'jpeg' | 'webp';
@@ -70,11 +70,11 @@ export function defaultImageBaseUrl(provider: ImageGenerationProvider): string {
 
 export async function generateImage(options: GenerateImageOptions): Promise<GenerateImageResult> {
   if (!options.apiKey.trim()) {
-    throw new CodesignError('Missing image generation API key', ERROR_CODES.PROVIDER_AUTH_MISSING);
+    throw new PlayforgeError('Missing image generation API key', ERROR_CODES.PROVIDER_AUTH_MISSING);
   }
   const prompt = options.prompt.trim();
   if (prompt.length === 0) {
-    throw new CodesignError('Image prompt cannot be empty', ERROR_CODES.INPUT_EMPTY_PROMPT);
+    throw new PlayforgeError('Image prompt cannot be empty', ERROR_CODES.INPUT_EMPTY_PROMPT);
   }
   return options.provider === 'openrouter'
     ? generateOpenRouterImage({ ...options, prompt })
@@ -102,7 +102,7 @@ async function generateOpenAIImage(
   );
   const first = json.data?.[0];
   if (first === undefined) {
-    throw new CodesignError(
+    throw new PlayforgeError(
       'OpenAI image response did not include data',
       ERROR_CODES.PROVIDER_ERROR,
     );
@@ -130,7 +130,7 @@ async function generateOpenAIImage(
       ...(revisedPrompt !== undefined ? { revisedPrompt } : {}),
     };
   }
-  throw new CodesignError(
+  throw new PlayforgeError(
     'OpenAI image response did not include base64 image data',
     ERROR_CODES.PROVIDER_ERROR,
   );
@@ -169,7 +169,7 @@ async function generateOpenRouterImage(
       provider: 'openrouter',
     };
   }
-  throw new CodesignError(
+  throw new PlayforgeError(
     'OpenRouter image response did not include generated image data',
     ERROR_CODES.PROVIDER_ERROR,
   );
@@ -195,7 +195,7 @@ async function postJson<T>(
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    throw new CodesignError(
+    throw new PlayforgeError(
       `Image generation request failed: ${message}`,
       ERROR_CODES.PROVIDER_ERROR,
       {
@@ -205,7 +205,7 @@ async function postJson<T>(
   }
   if (!res.ok) {
     const text = await safeResponseText(res);
-    throw new CodesignError(
+    throw new PlayforgeError(
       `Image generation failed with HTTP ${res.status}${text.length > 0 ? `: ${text}` : ''}`,
       ERROR_CODES.PROVIDER_ERROR,
     );
@@ -232,7 +232,7 @@ function mimeFromFormat(format: ImageOutputFormat): string {
 function parseDataUrl(dataUrl: string): { dataUrl: string; mimeType: string; base64: string } {
   const match = /^data:([^;,]+);base64,(.+)$/i.exec(dataUrl);
   if (!match || match[1] === undefined || match[2] === undefined) {
-    throw new CodesignError('Generated image data URL is malformed', ERROR_CODES.PROVIDER_ERROR);
+    throw new PlayforgeError('Generated image data URL is malformed', ERROR_CODES.PROVIDER_ERROR);
   }
   return { dataUrl, mimeType: match[1], base64: match[2] };
 }

@@ -209,31 +209,31 @@ describe('CodexTokenStore', () => {
     await expect(store.read()).rejects.toThrow(/Invalid Codex token store/);
   });
 
-  it('read() raises CodesignError(CODEX_TOKEN_PARSE_FAILED) on truncated JSON', async () => {
+  it('read() raises PlayforgeError(CODEX_TOKEN_PARSE_FAILED) on truncated JSON', async () => {
     const { store, filePath } = makeStore();
     await mkdir(dirname(filePath), { recursive: true });
     // Simulate a partial/truncated write — valid-looking prefix, cut short.
     await writeFile(filePath, '{"schemaVersion":1,"accessToken":"ac', 'utf8');
     await expect(store.read()).rejects.toMatchObject({
-      name: 'CodesignError',
+      name: 'PlayforgeError',
       code: ERROR_CODES.CODEX_TOKEN_PARSE_FAILED,
     });
   });
 
-  it('read() raises CodesignError(CODEX_TOKEN_PARSE_FAILED) when schema is invalid', async () => {
+  it('read() raises PlayforgeError(CODEX_TOKEN_PARSE_FAILED) when schema is invalid', async () => {
     const { store, filePath } = makeStore();
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, JSON.stringify({ hello: 'world' }), 'utf8');
     await expect(store.read()).rejects.toMatchObject({
-      name: 'CodesignError',
+      name: 'PlayforgeError',
       code: ERROR_CODES.CODEX_TOKEN_PARSE_FAILED,
     });
   });
 
-  it('getValidAccessToken() raises CodesignError(CODEX_TOKEN_NOT_LOGGED_IN) when file missing', async () => {
+  it('getValidAccessToken() raises PlayforgeError(CODEX_TOKEN_NOT_LOGGED_IN) when file missing', async () => {
     const { store } = makeStore();
     await expect(store.getValidAccessToken()).rejects.toMatchObject({
-      name: 'CodesignError',
+      name: 'PlayforgeError',
       code: ERROR_CODES.CODEX_TOKEN_NOT_LOGGED_IN,
     });
   });

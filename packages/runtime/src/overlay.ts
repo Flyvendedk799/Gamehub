@@ -79,7 +79,7 @@ export const OVERLAY_SCRIPT = `(function() {
     if (!entries.length) return;
     try {
       window.parent.postMessage({
-        __codesign: true,
+        __playforge: true,
         type: 'ELEMENT_RECTS',
         entries: entries
       }, '*');
@@ -115,7 +115,7 @@ export const OVERLAY_SCRIPT = `(function() {
 
 
   function getXPath(el) {
-    if (el.dataset && el.dataset.codesignId) return '[data-codesign-id="' + el.dataset.codesignId + '"]';
+    if (el.dataset && el.dataset.playforgeId) return '[data-playforge-id="' + el.dataset.playforgeId + '"]';
     if (el.id) return '#' + el.id;
     var parts = [];
     while (el && el.nodeType === 1 && el !== document.body) {
@@ -168,7 +168,7 @@ export const OVERLAY_SCRIPT = `(function() {
       } catch (_) { /* parent inaccessible — leave blank */ }
       try {
         window.parent.postMessage({
-          __codesign: true,
+          __playforge: true,
           type: 'ELEMENT_SELECTED',
           selector: selector,
           tag: el.tagName.toLowerCase(),
@@ -206,7 +206,7 @@ export const OVERLAY_SCRIPT = `(function() {
     // future control type added to the switch is structurally protected.
     if (!ev || ev.source !== window.parent) return;
     var data = ev.data;
-    if (!data || data.__codesign !== true) return;
+    if (!data || data.__playforge !== true) return;
     if (data.type === 'SET_MODE') {
       var next = data.mode === 'comment' ? 'comment' : 'default';
       if (next === currentMode) return;
@@ -268,7 +268,7 @@ export const OVERLAY_SCRIPT = `(function() {
   function onError(ev) {
     try {
       window.parent.postMessage({
-        __codesign: true,
+        __playforge: true,
         type: 'IFRAME_ERROR',
         kind: 'error',
         message: (ev && ev.message) ? String(ev.message) : 'Unknown iframe error',
@@ -285,7 +285,7 @@ export const OVERLAY_SCRIPT = `(function() {
       var reason = ev && ev.reason;
       var msg = (reason && reason.message) ? String(reason.message) : String(reason);
       window.parent.postMessage({
-        __codesign: true,
+        __playforge: true,
         type: 'IFRAME_ERROR',
         kind: 'unhandledrejection',
         message: msg,
@@ -363,7 +363,7 @@ export const OVERLAY_SCRIPT = `(function() {
 })();`;
 
 export interface OverlayMessage {
-  __codesign: true;
+  __playforge: true;
   type: 'ELEMENT_SELECTED';
   selector: string;
   tag: string;
@@ -378,13 +378,13 @@ export function isOverlayMessage(data: unknown): data is OverlayMessage {
   return (
     typeof data === 'object' &&
     data !== null &&
-    (data as { __codesign?: boolean }).__codesign === true &&
+    (data as { __playforge?: boolean }).__playforge === true &&
     (data as { type?: string }).type === 'ELEMENT_SELECTED'
   );
 }
 
 export interface ElementRectsMessage {
-  __codesign: true;
+  __playforge: true;
   type: 'ELEMENT_RECTS';
   entries: Array<{
     selector: string;
@@ -407,8 +407,8 @@ export const EDIT_CURSOR_KEY = '__edit_cursor__';
 
 export function isElementRectsMessage(data: unknown): data is ElementRectsMessage {
   if (typeof data !== 'object' || data === null) return false;
-  const d = data as { __codesign?: boolean; type?: string; entries?: unknown };
-  if (d.__codesign !== true || d.type !== 'ELEMENT_RECTS') return false;
+  const d = data as { __playforge?: boolean; type?: string; entries?: unknown };
+  if (d.__playforge !== true || d.type !== 'ELEMENT_RECTS') return false;
   if (!Array.isArray(d.entries)) return false;
   if (d.entries.length > MAX_ELEMENT_RECTS_ENTRIES) return false;
   for (const e of d.entries) {

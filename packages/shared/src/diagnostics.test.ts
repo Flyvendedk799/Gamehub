@@ -316,10 +316,10 @@ describe('looksLikeTruncatedStream', () => {
     expect(looksLikeTruncatedStream('Request was aborted.')).toBe(true);
   });
 
-  it('matches the IPC-wrapped variant carrying CodesignError prefix', () => {
+  it('matches the IPC-wrapped variant carrying PlayforgeError prefix', () => {
     expect(
       looksLikeTruncatedStream(
-        "Error invoking remote method 'codesign:v1:generate': CodesignError: Request was aborted.",
+        "Error invoking remote method 'playforge:v1:generate': PlayforgeError: Request was aborted.",
       ),
     ).toBe(true);
   });

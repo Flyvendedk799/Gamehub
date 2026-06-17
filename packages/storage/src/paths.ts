@@ -10,7 +10,7 @@
  *   - Unicode NFC-normalized (reject decomposed/look-alike forms)
  *   - non-empty, normalized segments
  */
-import { CodesignError, ERROR_CODES } from '@playforge/shared';
+import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
 
 // Any C0 control char (0x00-0x1F) or DEL (0x7F). NUL is a subset but it's also
 // checked explicitly below for clarity. Catches CR/LF/TAB/etc. used to smuggle
@@ -42,7 +42,7 @@ export function isSafeBundlePath(path: string): boolean {
 /** Throws a typed error if the path is unsafe; returns it unchanged otherwise. */
 export function assertSafeBundlePath(path: string): string {
   if (!isSafeBundlePath(path)) {
-    throw new CodesignError(
+    throw new PlayforgeError(
       `Unsafe bundle path rejected: ${JSON.stringify(path)}`,
       ERROR_CODES.IPC_BAD_INPUT,
     );

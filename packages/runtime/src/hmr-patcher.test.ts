@@ -19,10 +19,10 @@ afterEach(() => {
 describe('hmr-patcher — Backlog-3 §1', () => {
   it('exports a versioned protocol marker', () => {
     expect(HMR_PROTOCOL_VERSION).toBe(1);
-    expect(HMR_PATCHER_MARKER).toMatch(/^__CODESIGN_/);
+    expect(HMR_PATCHER_MARKER).toMatch(/^__PLAYFORGE_/);
   });
 
-  it('the patcher script is idempotent (window.__codesign marker)', () => {
+  it('the patcher script is idempotent (window.__playforge marker)', () => {
     loadPatcher();
     expect((window as { [HMR_PATCHER_MARKER]?: unknown })[HMR_PATCHER_MARKER]).toBe(true);
     // Re-running should be a no-op (the function bails on the marker).
@@ -39,7 +39,7 @@ describe('hmr-patcher — Backlog-3 §1', () => {
     window.dispatchEvent(
       new MessageEvent('message', {
         data: {
-          __codesign_hmr: true,
+          __playforge_hmr: true,
           protocolVersion: 1,
           kind: 'css',
           oldStyles: ['.a { color: red; }'],
@@ -64,7 +64,7 @@ describe('hmr-patcher — Backlog-3 §1', () => {
     window.dispatchEvent(
       new MessageEvent('message', {
         data: {
-          __codesign_hmr: true,
+          __playforge_hmr: true,
           protocolVersion: 1,
           kind: 'css',
           oldStyles: ['.a {}', '.b {}'],
@@ -90,7 +90,7 @@ describe('hmr-patcher — Backlog-3 §1', () => {
     window.dispatchEvent(
       new MessageEvent('message', {
         data: {
-          __codesign_hmr: true,
+          __playforge_hmr: true,
           protocolVersion: 999,
           kind: 'css',
           oldStyles: [],
@@ -122,7 +122,7 @@ describe('hmr-patcher — Backlog-3 §1', () => {
     window.dispatchEvent(
       new MessageEvent('message', {
         data: {
-          __codesign_hmr: true,
+          __playforge_hmr: true,
           protocolVersion: 1,
           kind: 'js',
           oldScripts: ['window.A = 1;', 'window.B = 2;'],
@@ -149,7 +149,7 @@ describe('hmr-patcher — Backlog-3 §1', () => {
     window.dispatchEvent(
       new MessageEvent('message', {
         data: {
-          __codesign_hmr: true,
+          __playforge_hmr: true,
           protocolVersion: 1,
           kind: 'js',
           oldScripts: ['window.A = 1;', 'window.B = 2;'],

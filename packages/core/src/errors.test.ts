@@ -1,4 +1,4 @@
-import { CodesignError } from '@playforge/shared';
+import { PlayforgeError } from '@playforge/shared';
 import { describe, expect, it } from 'vitest';
 import { remapProviderError, rewriteUpstreamMessage } from './errors';
 
@@ -60,21 +60,21 @@ describe('remapProviderError', () => {
     expect(out).toBe(err);
   });
 
-  it('rewrites anthropic 401 with leaked openai URL into a CodesignError', () => {
+  it('rewrites anthropic 401 with leaked openai URL into a PlayforgeError', () => {
     const err = httpError(401, LEAKED);
     const out = remapProviderError(err, 'anthropic');
-    expect(out).toBeInstanceOf(CodesignError);
-    expect((out as CodesignError).message).toContain('console.anthropic.com/settings/keys');
-    expect((out as CodesignError).message).not.toContain('openai.com');
-    expect((out as CodesignError).code).toBe('PROVIDER_HTTP_4XX');
+    expect(out).toBeInstanceOf(PlayforgeError);
+    expect((out as PlayforgeError).message).toContain('console.anthropic.com/settings/keys');
+    expect((out as PlayforgeError).message).not.toContain('openai.com');
+    expect((out as PlayforgeError).code).toBe('PROVIDER_HTTP_4XX');
   });
 
   it('strips the URL when provider is unknown', () => {
     const err = httpError(401, LEAKED);
     const out = remapProviderError(err, 'mystery-llm');
-    expect(out).toBeInstanceOf(CodesignError);
-    expect((out as CodesignError).message).not.toContain('openai.com');
-    expect((out as CodesignError).message).toContain("Check your provider's API key settings");
+    expect(out).toBeInstanceOf(PlayforgeError);
+    expect((out as PlayforgeError).message).not.toContain('openai.com');
+    expect((out as PlayforgeError).message).toContain("Check your provider's API key settings");
   });
 
   it('passes 5xx errors through unchanged', () => {
@@ -86,15 +86,15 @@ describe('remapProviderError', () => {
   it('tags 5xx "not implemented" bodies as PROVIDER_GATEWAY_INCOMPATIBLE on anthropic wire', () => {
     const err = httpError(500, 'not implemented');
     const out = remapProviderError(err, 'anthropic', 'anthropic');
-    expect(out).toBeInstanceOf(CodesignError);
-    expect((out as CodesignError).code).toBe('PROVIDER_GATEWAY_INCOMPATIBLE');
-    expect((out as CodesignError).message).toContain('not implemented');
+    expect(out).toBeInstanceOf(PlayforgeError);
+    expect((out as PlayforgeError).code).toBe('PROVIDER_GATEWAY_INCOMPATIBLE');
+    expect((out as PlayforgeError).message).toContain('not implemented');
   });
 
   it('tags status-less errors whose message mentions 501 as PROVIDER_GATEWAY_INCOMPATIBLE on anthropic wire', () => {
     const out = remapProviderError(new Error('HTTP 501 from gateway'), 'anthropic', 'anthropic');
-    expect(out).toBeInstanceOf(CodesignError);
-    expect((out as CodesignError).code).toBe('PROVIDER_GATEWAY_INCOMPATIBLE');
+    expect(out).toBeInstanceOf(PlayforgeError);
+    expect((out as PlayforgeError).code).toBe('PROVIDER_GATEWAY_INCOMPATIBLE');
   });
 
   it('does NOT remap 5xx "not implemented" to gateway-incompatible on openai-chat wire', () => {
@@ -116,13 +116,13 @@ describe('remapProviderError', () => {
     expect(out).toBe(err);
   });
 
-  it('extracts status code from CodesignError messages that embed it', () => {
-    const err = new CodesignError(
+  it('extracts status code from PlayforgeError messages that embed it', () => {
+    const err = new PlayforgeError(
       'HTTP 401 — see https://platform.openai.com/account/api-keys',
       'PROVIDER_ERROR',
     );
     const out = remapProviderError(err, 'anthropic');
-    expect(out).toBeInstanceOf(CodesignError);
-    expect((out as CodesignError).message).toContain('console.anthropic.com/settings/keys');
+    expect(out).toBeInstanceOf(PlayforgeError);
+    expect((out as PlayforgeError).message).toContain('console.anthropic.com/settings/keys');
   });
 });

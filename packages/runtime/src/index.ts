@@ -63,7 +63,7 @@ export type {
 
 const JSX_TEMPLATE_BEGIN = '<!-- AGENT_BODY_BEGIN -->';
 const JSX_TEMPLATE_END = '<!-- AGENT_BODY_END -->';
-const OVERLAY_MARKER = '<!-- CODESIGN_OVERLAY_SCRIPT -->';
+const OVERLAY_MARKER = '<!-- PLAYFORGE_OVERLAY_SCRIPT -->';
 
 /**
  * Patches React.createElement so DOM components (string-typed `type`) created
@@ -81,7 +81,7 @@ const OVERLAY_MARKER = '<!-- CODESIGN_OVERLAY_SCRIPT -->';
 const SRC_LINE_TAGGER_SCRIPT = `
 (function(){
   if (!window.React || typeof window.React.createElement !== 'function') return;
-  if (window.React.__codesignSrcLineWrapped) return;
+  if (window.React.__playforgeSrcLineWrapped) return;
   var orig = window.React.createElement;
   window.React.createElement = function(type, props) {
     var args = Array.prototype.slice.call(arguments);
@@ -97,7 +97,7 @@ const SRC_LINE_TAGGER_SCRIPT = `
     }
     return orig.apply(this, args);
   };
-  window.React.__codesignSrcLineWrapped = true;
+  window.React.__playforgeSrcLineWrapped = true;
 })();
 `;
 
@@ -141,7 +141,7 @@ ${JSX_TEMPLATE_BEGIN}
 ${jsx}
 </script>
 ${JSX_TEMPLATE_END}
-<script>if(window.__codesign_tweaks__){window.__codesign_tweaks__.originalScript=${agentScriptLiteral};}</script>
+<script>if(window.__playforge_tweaks__){window.__playforge_tweaks__.originalScript=${agentScriptLiteral};}</script>
 <script>${TWEAKS_BRIDGE_LISTENER}</script>
 <script>${OVERLAY_SCRIPT}</script>
 ${hmrPatcherScriptTag()}
@@ -173,7 +173,7 @@ function injectOverlayIntoHtmlDocument(html: string): string {
       /\b(?:react@\d|react\.(?:production|development|umd))/i.test(upgraded) ||
       /\bReact\.\w+\s*=/.test(upgraded);
     if (!hasBabelLib || !hasReactLib) {
-      const reactRuntime = `<!-- CODESIGN_AUTO_BACKFILL: agent forgot React+Babel for type=text/babel scripts -->
+      const reactRuntime = `<!-- PLAYFORGE_AUTO_BACKFILL: agent forgot React+Babel for type=text/babel scripts -->
 <script>${REACT_UMD}</script>
 <script>${REACT_DOM_UMD}</script>
 <script>${BABEL_STANDALONE}</script>`;
@@ -280,7 +280,7 @@ export function inlineLocalRefs(html: string, sidecars: Record<string, string>):
     if (!isLocalHref(href)) return full;
     const body = sidecars[href];
     if (body === undefined) return full;
-    return `<style data-codesign-inlined-from="${href}">${body}</style>`;
+    return `<style data-playforge-inlined-from="${href}">${body}</style>`;
   });
 
   // <script src="X" ...></script>  →  <script>{contents}</script>
@@ -295,7 +295,7 @@ export function inlineLocalRefs(html: string, sidecars: Record<string, string>):
     if (!isLocalHref(src)) return full;
     const body = sidecars[src];
     if (body === undefined) return full;
-    return `<script data-codesign-inlined-from="${src}">${body}</script>`;
+    return `<script data-playforge-inlined-from="${src}">${body}</script>`;
   });
 
   return out;

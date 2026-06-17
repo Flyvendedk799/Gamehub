@@ -10,7 +10,7 @@
  * === 'claude-code-imported').
  */
 
-import { CodesignError, ERROR_CODES } from '@playforge/shared';
+import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
 
 /** Default Anthropic OAuth token endpoint. Override via env for test
  *  environments or alternative gateways. */
@@ -54,7 +54,7 @@ function fingerprintRefresh(token: string): string {
 
 /**
  * Exchange `refreshToken` for a fresh `{ accessToken, refreshToken,
- * expiresAt }`. Throws `CodesignError` with
+ * expiresAt }`. Throws `PlayforgeError` with
  * `CLAUDE_CODE_TOKEN_REFRESH_FAILED` for transient failures and with
  * `CLAUDE_CODE_REIMPORT_REQUIRED` for unrecoverable ones (revoked /
  * 4xx-class). Concurrent callers with the same refresh token share one
@@ -82,7 +82,7 @@ export async function refreshClaudeCodeToken(
         ...(input.signal !== undefined ? { signal: input.signal } : {}),
       });
     } catch (err) {
-      throw new CodesignError(
+      throw new PlayforgeError(
         `OAuth refresh network failure: ${err instanceof Error ? err.message : String(err)}`,
         ERROR_CODES.CLAUDE_CODE_TOKEN_REFRESH_FAILED,
         { cause: err instanceof Error ? err : new Error(String(err)) },
@@ -92,13 +92,13 @@ export async function refreshClaudeCodeToken(
       // Refresh token revoked, expired, or rejected by the server. Force
       // the user back through onboarding rather than retrying — re-trying
       // a revoked token is just noise.
-      throw new CodesignError(
+      throw new PlayforgeError(
         `Refresh token rejected (HTTP ${res.status}); re-import required`,
         ERROR_CODES.CLAUDE_CODE_REIMPORT_REQUIRED,
       );
     }
     if (!res.ok) {
-      throw new CodesignError(
+      throw new PlayforgeError(
         `OAuth refresh failed with HTTP ${res.status}`,
         ERROR_CODES.CLAUDE_CODE_TOKEN_REFRESH_FAILED,
       );
@@ -107,7 +107,7 @@ export async function refreshClaudeCodeToken(
     try {
       body = await res.json();
     } catch (err) {
-      throw new CodesignError(
+      throw new PlayforgeError(
         `OAuth refresh response was not JSON: ${err instanceof Error ? err.message : String(err)}`,
         ERROR_CODES.CLAUDE_CODE_TOKEN_REFRESH_FAILED,
         { cause: err instanceof Error ? err : new Error(String(err)) },
@@ -133,7 +133,7 @@ export function parseRefreshResponse(
   fallbackRefreshToken: string,
 ): RefreshClaudeCodeTokenResult {
   if (typeof raw !== 'object' || raw === null) {
-    throw new CodesignError(
+    throw new PlayforgeError(
       'OAuth refresh response must be a JSON object',
       ERROR_CODES.CLAUDE_CODE_TOKEN_REFRESH_FAILED,
     );
@@ -141,7 +141,7 @@ export function parseRefreshResponse(
   const r = raw as Record<string, unknown>;
   const accessToken = r['access_token'];
   if (typeof accessToken !== 'string' || accessToken.length === 0) {
-    throw new CodesignError(
+    throw new PlayforgeError(
       'OAuth refresh response missing access_token',
       ERROR_CODES.CLAUDE_CODE_TOKEN_REFRESH_FAILED,
     );

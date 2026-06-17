@@ -1,6 +1,6 @@
 import type { AgentEvent, AgentMessage, AgentOptions } from '@mariozechner/pi-agent-core';
 import type { LoadedSkill, ModelRef } from '@playforge/shared';
-import { CodesignError, ERROR_CODES } from '@playforge/shared';
+import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const loadBuiltinSkillsMock = vi.fn(async (): Promise<LoadedSkill[]> => []);
@@ -295,10 +295,10 @@ afterEach(() => {
 });
 
 describe('generateViaAgent() — Phase 1 pass-through', () => {
-  it('throws CodesignError on empty prompt (matches generate())', async () => {
+  it('throws PlayforgeError on empty prompt (matches generate())', async () => {
     await expect(
       generateViaAgent({ prompt: '  ', history: [], model: MODEL, apiKey: 'sk-test' }),
-    ).rejects.toBeInstanceOf(CodesignError);
+    ).rejects.toBeInstanceOf(PlayforgeError);
     expect(agentCalls).toHaveLength(0);
   });
 
@@ -335,7 +335,7 @@ describe('generateViaAgent() — Phase 1 pass-through', () => {
     if (!call) throw new Error('expected agent call');
     const init = call.options.initialState;
     expect(init?.tools).toEqual([]);
-    expect(init?.systemPrompt).toContain('open-codesign');
+    expect(init?.systemPrompt).toContain('Playforge');
     expect(init?.messages).toHaveLength(1);
     const seed = init?.messages?.[0];
     expect(seed?.role).toBe('user');
@@ -388,12 +388,12 @@ describe('generateViaAgent() — Phase 1 pass-through', () => {
 
   it('rethrows the original input.getApiKey error (preserves structured code)', async () => {
     // Simulates: user signs out of ChatGPT mid-agent-run. Token store throws
-    // CodesignError(PROVIDER_AUTH_MISSING). Without the capture-and-rethrow
+    // PlayforgeError(PROVIDER_AUTH_MISSING). Without the capture-and-rethrow
     // dance, pi-agent-core would flatten the throw into a plain errorMessage
     // string and our post-agent branch would re-wrap as PROVIDER_ERROR —
     // losing the code the renderer needs to show "sign in again".
     scriptedAgent = { assistantText: '', invokeGetApiKey: true };
-    const authErr = new CodesignError('ChatGPT 订阅已失效', ERROR_CODES.PROVIDER_AUTH_MISSING);
+    const authErr = new PlayforgeError('ChatGPT 订阅已失效', ERROR_CODES.PROVIDER_AUTH_MISSING);
     await expect(
       generateViaAgent({
         prompt: 'midrun logout scenario',

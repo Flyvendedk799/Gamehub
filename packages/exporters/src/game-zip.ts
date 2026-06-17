@@ -12,7 +12,7 @@
  * `data:base64,` content before handing to this exporter.
  */
 
-import { CodesignError, ERROR_CODES } from '@playforge/shared';
+import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
 import type { ExportResult } from './index';
 import type { ZipAsset } from './zip';
 
@@ -40,7 +40,7 @@ function readme(opts: ExportGameZipOptions): string {
       : '## How to run\n\nDouble-click `index.html`, or serve with `python3 -m http.server`.';
   return `# ${name}
 
-Exported from [open-codesign](https://github.com/OpenCoworkAI/open-codesign) — game-mode.
+Exported from Playforge — game-mode.
 
 - **Engine**: ${engineLabel}
 - **Generated**: ${new Date().toISOString()}
@@ -63,7 +63,7 @@ export async function exportGameZip(
   opts: ExportGameZipOptions,
 ): Promise<ExportResult> {
   if (opts.files.length === 0) {
-    throw new CodesignError(
+    throw new PlayforgeError(
       'game-zip export called with an empty file list',
       ERROR_CODES.EXPORTER_INPUT_INVALID,
     );
@@ -75,7 +75,7 @@ export async function exportGameZip(
   const os = await import('node:os');
   const { Zip } = await import('zip-lib');
 
-  const stagingDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codesign-game-zip-'));
+  const stagingDir = await fs.mkdtemp(path.join(os.tmpdir(), 'playforge-game-zip-'));
   const stagingResolved = path.resolve(stagingDir);
   try {
     const zip = new Zip();
@@ -87,7 +87,7 @@ export async function exportGameZip(
       const localPath = path.resolve(stagingDir, normalized);
       const rel = path.relative(stagingResolved, localPath);
       if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
-        throw new CodesignError(
+        throw new PlayforgeError(
           `game-zip rejected unsafe path: ${file.path}`,
           ERROR_CODES.EXPORTER_ZIP_UNSAFE_PATH,
         );

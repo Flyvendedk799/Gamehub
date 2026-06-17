@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { CodesignError, ERROR_CODES } from '@playforge/shared';
+import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
 import { type TokenSet, decodeJwtClaims, refreshTokens as defaultRefreshTokens } from './oauth';
 
 export interface StoredCodexAuth {
@@ -74,14 +74,14 @@ export class CodexTokenStore {
     try {
       parsed = JSON.parse(body);
     } catch (cause) {
-      throw new CodesignError(
+      throw new PlayforgeError(
         `Invalid Codex token store at ${this.filePath}`,
         ERROR_CODES.CODEX_TOKEN_PARSE_FAILED,
         { cause },
       );
     }
     if (!isStoredCodexAuth(parsed)) {
-      throw new CodesignError(
+      throw new PlayforgeError(
         `Invalid Codex token store at ${this.filePath}`,
         ERROR_CODES.CODEX_TOKEN_PARSE_FAILED,
       );
@@ -128,7 +128,7 @@ export class CodexTokenStore {
       await this.read();
     }
     if (this.cache === null) {
-      throw new CodesignError(NOT_LOGGED_IN_MSG, ERROR_CODES.CODEX_TOKEN_NOT_LOGGED_IN);
+      throw new PlayforgeError(NOT_LOGGED_IN_MSG, ERROR_CODES.CODEX_TOKEN_NOT_LOGGED_IN);
     }
     if (this.now() >= this.cache.expiresAt - EXPIRY_BUFFER_MS) {
       return this.runRefresh();
@@ -141,7 +141,7 @@ export class CodexTokenStore {
       await this.read();
     }
     if (this.cache === null) {
-      throw new CodesignError(NOT_LOGGED_IN_MSG, ERROR_CODES.CODEX_TOKEN_NOT_LOGGED_IN);
+      throw new PlayforgeError(NOT_LOGGED_IN_MSG, ERROR_CODES.CODEX_TOKEN_NOT_LOGGED_IN);
     }
     return this.runRefresh();
   }
@@ -160,7 +160,7 @@ export class CodexTokenStore {
       await this.read();
     }
     if (this.cache === null) {
-      throw new CodesignError(NOT_LOGGED_IN_MSG, ERROR_CODES.CODEX_TOKEN_NOT_LOGGED_IN);
+      throw new PlayforgeError(NOT_LOGGED_IN_MSG, ERROR_CODES.CODEX_TOKEN_NOT_LOGGED_IN);
     }
     const current = this.cache;
     let next: TokenSet;
@@ -175,7 +175,7 @@ export class CodexTokenStore {
         /\b401\b/.test(msg);
       if (isBadCredential) {
         await this.clear();
-        throw new CodesignError(
+        throw new PlayforgeError(
           'ChatGPT 订阅已失效，请重新登录',
           ERROR_CODES.CODEX_TOKEN_NOT_LOGGED_IN,
           { cause: err },

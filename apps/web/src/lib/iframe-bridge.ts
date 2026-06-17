@@ -15,7 +15,7 @@
 import { API_ORIGIN } from './config';
 
 /** Mirrors runtime `TWEAKS_UPDATE_MESSAGE_TYPE`. */
-export const TWEAKS_UPDATE_MESSAGE_TYPE = 'codesign:tweaks:update' as const;
+export const TWEAKS_UPDATE_MESSAGE_TYPE = 'playforge:tweaks:update' as const;
 
 /**
  * The origin the preview/play iframes are served from. Preview and play are

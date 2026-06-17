@@ -13,7 +13,7 @@
  * only ships Three.js + Phaser web games.
  */
 
-import { CodesignError, ERROR_CODES } from '@playforge/shared';
+import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
 
 export const GAME_EXPORTER_FORMATS = ['game-html', 'game-zip', 'markdown'] as const;
 export type GameExporterFormat = (typeof GAME_EXPORTER_FORMATS)[number];
@@ -58,7 +58,7 @@ export async function exportGameArtifact(
   }
   if (format === 'game-html') {
     if (opts.engine !== 'three' && opts.engine !== 'phaser') {
-      throw new CodesignError(
+      throw new PlayforgeError(
         `game-html is browser-engine-only (Three.js / Phaser). Got "${opts.engine ?? 'undefined'}".`,
         ERROR_CODES.EXPORTER_FORMAT_REJECTED,
       );
@@ -82,7 +82,7 @@ export async function exportGameArtifact(
         : `<html><body><h1>${opts.designName ?? 'Game'}</h1></body></html>`);
     return mod.exportMarkdown(html, destinationPath);
   }
-  throw new CodesignError(
+  throw new PlayforgeError(
     `Unknown game exporter format: ${format as string}`,
     ERROR_CODES.EXPORTER_UNKNOWN,
   );

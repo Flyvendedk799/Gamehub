@@ -1,7 +1,7 @@
 /**
  * may9 Phase 7 — single-source abort classifier.
  *
- * Maps an error message (or a CodesignError's `.message`) to a stable
+ * Maps an error message (or a PlayforgeError's `.message`) to a stable
  * AbortKind enum. Used by:
  *   - apps/desktop/src/main when writing `run_usage.abort_kind` (Phase 0
  *     column added a place to put this; this file decides what to write)
@@ -46,7 +46,7 @@ export type AbortKind =
   /** Anything else. */
   | 'other';
 
-/** Map an error message string (or a partial CodesignError) to a
+/** Map an error message string (or a partial PlayforgeError) to a
  *  stable AbortKind. The function is intentionally string-pattern based
  *  — ergonomic to extend, easy to test, and the canonical strings stay
  *  in one place.

@@ -14,7 +14,7 @@ function evt(origin: string, data: unknown): MessageEvent<unknown> {
 describe('iframe bridge constants', () => {
   it('keeps the tweak protocol literal in lockstep with the runtime bridge', () => {
     // Mirror of runtime TWEAKS_UPDATE_MESSAGE_TYPE / tweaks-bridge.ts listener.
-    expect(TWEAKS_UPDATE_MESSAGE_TYPE).toBe('codesign:tweaks:update');
+    expect(TWEAKS_UPDATE_MESSAGE_TYPE).toBe('playforge:tweaks:update');
   });
 
   it('resolves a concrete preview origin (never "*")', () => {

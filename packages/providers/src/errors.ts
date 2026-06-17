@@ -11,7 +11,7 @@
  * lines is fine", the duplication is intentional.
  */
 
-import { CodesignError } from '@playforge/shared';
+import { PlayforgeError } from '@playforge/shared';
 
 const API_KEY_RE =
   /(sk-[A-Za-z0-9-_]{20,}|AIzaSy[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|[A-Za-z0-9+/]{43}=|[A-Fa-f0-9]{32,}|Bearer\s+[A-Za-z0-9._~+/=-]+)/g;
@@ -162,7 +162,7 @@ export function normalizeProviderError(
   return {
     upstream_provider: provider,
     // Use the public helper so logged `upstream_status` reflects status
-    // recovered from a CodesignError-wrapped Anthropic JSON body too — not
+    // recovered from a PlayforgeError-wrapped Anthropic JSON body too — not
     // just SDK-style numeric properties.
     upstream_status: extractHttpStatus(err),
     upstream_code: extractCode(rec),
@@ -247,7 +247,7 @@ export function parseUpstreamErrorMessage(message: string): ParsedUpstreamError 
  *
  * Lookup order:
  *   1. SDK-style numeric `status` / `statusCode` / `response.status`
- *   2. CodesignError carrying an Anthropic JSON body (overloaded_error → 529)
+ *   2. PlayforgeError carrying an Anthropic JSON body (overloaded_error → 529)
  *   3. Fallback: a 3-digit token in any Error message ("HTTP 503 …")
  */
 export function extractHttpStatus(err: unknown): number | undefined {
@@ -260,7 +260,7 @@ export function extractHttpStatus(err: unknown): number | undefined {
   for (const c of candidates) {
     if (typeof c === 'number' && Number.isFinite(c)) return c;
   }
-  if (err instanceof CodesignError) {
+  if (err instanceof PlayforgeError) {
     const upstream = parseUpstreamErrorMessage(err.message);
     if (upstream !== undefined) return upstream.status;
   }
@@ -275,7 +275,7 @@ export function extractHttpStatus(err: unknown): number | undefined {
 }
 
 /**
- * Map a provider error type to the Codesign error code that best describes
+ * Map a provider error type to the Playforge error code that best describes
  * it for renderer-level routing. Used when re-throwing a stream-level error so
  * the friendly user message ("Anthropic is overloaded — retried automatically")
  * survives the trip across IPC. Unknown types fall back to PROVIDER_ERROR.

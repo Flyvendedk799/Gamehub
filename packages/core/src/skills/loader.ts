@@ -1,7 +1,7 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CodesignError, ERROR_CODES } from '@playforge/shared';
+import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
 import type { LoadedSkillRule } from '@playforge/shared';
 import { type LoadedSkill, SkillFrontmatterV1 } from './types.js';
 
@@ -234,7 +234,7 @@ export async function loadSkillsFromDir(
   }
 
   if (errors.length > 0) {
-    throw new CodesignError(
+    throw new PlayforgeError(
       `Skill loading failed:\n${errors.join('\n')}`,
       ERROR_CODES.SKILL_LOAD_FAILED,
     );
@@ -353,9 +353,9 @@ async function loadRules(skillDir: string): Promise<LoadedSkillRule[]> {
 
 export interface LoadAllSkillsOptions {
   builtinDir: string;
-  /** ~/.config/open-codesign/skills */
+  /** ~/.config/playforge/skills */
   userDir?: string | undefined;
-  /** <project>/.codesign/skills */
+  /** <project>/.playforge/skills */
   projectDir?: string | undefined;
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ERROR_CODES, ERROR_CODE_DESCRIPTIONS } from './error-codes';
-import type { CodesignErrorCode } from './error-codes';
+import type { PlayforgeErrorCode } from './error-codes';
 
 describe('ERROR_CODES', () => {
   it('every value equals its key (identity constant)', () => {
@@ -18,7 +18,7 @@ describe('ERROR_CODES', () => {
 
 describe('ERROR_CODE_DESCRIPTIONS', () => {
   it('has an entry for every ERROR_CODES key', () => {
-    const codes = Object.values(ERROR_CODES) as CodesignErrorCode[];
+    const codes = Object.values(ERROR_CODES) as PlayforgeErrorCode[];
     for (const code of codes) {
       expect(
         ERROR_CODE_DESCRIPTIONS[code],
@@ -58,7 +58,7 @@ describe('ERROR_CODE_DESCRIPTIONS', () => {
     const registeredCodes = new Set(Object.values(ERROR_CODES));
     for (const key of Object.keys(ERROR_CODE_DESCRIPTIONS)) {
       expect(
-        registeredCodes.has(key as CodesignErrorCode),
+        registeredCodes.has(key as PlayforgeErrorCode),
         `ERROR_CODE_DESCRIPTIONS has unexpected key "${key}"`,
       ).toBe(true);
     }

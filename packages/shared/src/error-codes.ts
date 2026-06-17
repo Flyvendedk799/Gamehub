@@ -1,5 +1,5 @@
 /**
- * Central registry of CodesignError codes used throughout the app.
+ * Central registry of PlayforgeError codes used throughout the app.
  *
  * Keeping them in one place lets us:
  *  - get TS auto-complete when throwing (via ErrorCode union)
@@ -113,8 +113,8 @@ export const ERROR_CODES = {
   RENDERER_ERROR: 'RENDERER_ERROR',
 } as const;
 
-/** Literal union of every known CodesignError code. */
-export type CodesignErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
+/** Literal union of every known PlayforgeError code. */
+export type PlayforgeErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
 
 type ErrorCodeDescription = {
   /** @deprecated use userFacingKey + i18n lookup. Kept for backward compatibility. */
@@ -123,7 +123,7 @@ type ErrorCodeDescription = {
   category: 'ipc' | 'provider' | 'generation' | 'snapshot' | 'preferences' | 'connection' | 'other';
 };
 
-export const ERROR_CODE_DESCRIPTIONS: Record<CodesignErrorCode, ErrorCodeDescription> = {
+export const ERROR_CODE_DESCRIPTIONS: Record<PlayforgeErrorCode, ErrorCodeDescription> = {
   // IPC validation
   IPC_BAD_INPUT: {
     userFacing: 'The request contained invalid input. Please try again.',

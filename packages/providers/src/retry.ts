@@ -15,7 +15,7 @@
 
 import {
   type ChatMessage,
-  CodesignError,
+  PlayforgeError,
   ERROR_CODES,
   type ModelRef,
   type WireApi,
@@ -280,7 +280,7 @@ function shouldFireSyntheticOverload(): boolean {
   if (syntheticOverloadArmed === undefined) {
     syntheticOverloadArmed =
       typeof process !== 'undefined' &&
-      process.env?.['OPEN_CODESIGN_DEV_FORCE_OVERLOAD_ONCE'] === '1';
+      process.env?.['PLAYFORGE_DEV_FORCE_OVERLOAD_ONCE'] === '1';
   }
   if (!syntheticOverloadArmed) return false;
   syntheticOverloadArmed = false;
@@ -319,7 +319,7 @@ export async function withBackoff<T>(fn: () => Promise<T>, opts: BackoffOptions 
   const ABSOLUTE_CEILING = unbounded ? 1000 : 10;
   for (let attempt = 1; attempt <= ABSOLUTE_CEILING; attempt++) {
     if (signal?.aborted) {
-      throw new CodesignError('Generation aborted by user', ERROR_CODES.PROVIDER_ABORTED);
+      throw new PlayforgeError('Generation aborted by user', ERROR_CODES.PROVIDER_ABORTED);
     }
     try {
       // Dev-only: force a synthetic overloaded_error on the very first attempt
@@ -329,7 +329,7 @@ export async function withBackoff<T>(fn: () => Promise<T>, opts: BackoffOptions 
       // so the same parseUpstreamErrorMessage → 529 → retry classification
       // chain is exercised.
       if (attempt === 1 && shouldFireSyntheticOverload()) {
-        throw new CodesignError(
+        throw new PlayforgeError(
           '{"type":"error","error":{"type":"overloaded_error","message":"Synthetic overload (dev knob)"},"request_id":"req_synthetic_dev"}',
           ERROR_CODES.PROVIDER_ERROR,
         );
@@ -339,7 +339,7 @@ export async function withBackoff<T>(fn: () => Promise<T>, opts: BackoffOptions 
       lastError = err;
       const decision = classify(err);
       if (decision.reason === 'aborted') {
-        throw new CodesignError('Generation aborted by user', ERROR_CODES.PROVIDER_ABORTED, {
+        throw new PlayforgeError('Generation aborted by user', ERROR_CODES.PROVIDER_ABORTED, {
           cause: err,
         });
       }
@@ -391,7 +391,7 @@ export async function withBackoff<T>(fn: () => Promise<T>, opts: BackoffOptions 
   }
   throw lastError instanceof Error
     ? lastError
-    : new CodesignError('withBackoff exhausted', ERROR_CODES.PROVIDER_RETRY_EXHAUSTED);
+    : new PlayforgeError('withBackoff exhausted', ERROR_CODES.PROVIDER_RETRY_EXHAUSTED);
 }
 
 /** Sniff the Anthropic error-type tag from a JSON-shaped error message
