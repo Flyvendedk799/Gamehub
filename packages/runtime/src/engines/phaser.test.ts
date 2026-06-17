@@ -58,6 +58,29 @@ describe('phaserAdapter.bootstrap (gameplan §3 + §7.3)', () => {
     expect(html).toContain('window.__game.debug');
     expect(html).toContain('snapshot: function () { return null; }');
   });
+
+  it('#47 — neutralises quotes/angle-brackets in gameBaseUrl', () => {
+    const html = phaserAdapter.bootstrap({
+      ...opts,
+      gameBaseUrl: 'https://evil.example.com/"><script>alert(1)</script>',
+    });
+    expect(html).not.toContain('"><script>alert(1)</script>');
+    expect(html).toContain('&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;');
+  });
+
+  it('#47 — rejects javascript:/data: gameBaseUrl bases', () => {
+    expect(() => phaserAdapter.bootstrap({ ...opts, gameBaseUrl: 'javascript:alert(1)' })).toThrow();
+    expect(() =>
+      phaserAdapter.bootstrap({ ...opts, gameBaseUrl: 'data:text/html,<script>1</script>' }),
+    ).toThrow();
+  });
+
+  it('#47 — rejects a non-semver pinnedVersion', () => {
+    expect(() =>
+      phaserAdapter.bootstrap({ ...opts, pinnedVersion: '3.88.0"/></script><script>x</script>' }),
+    ).toThrow();
+    expect(() => phaserAdapter.bootstrap({ ...opts, pinnedVersion: 'latest' })).toThrow();
+  });
 });
 
 describe('phaserAdapter.validate (gameplan §7.6)', () => {
@@ -192,6 +215,23 @@ describe('phaserAdapter.validate (gameplan §7.6)', () => {
         (i) => i.message.includes('"ghost-asset"') && i.message.includes('never loaded'),
       ),
     ).toBe(true);
+  });
+
+  it('#41 — warns (not errors) when scene code references the network', () => {
+    const networky = `${goodMain}
+      const ws = new WebSocket('wss://evil.example.com');
+    `;
+    const result = phaserAdapter.validate([
+      { path: 'index.html', content: goodIndex },
+      { path: 'src/main.js', content: networky },
+    ]);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const warn = result.issues.find((i) => i.message.includes('anti_exfil'));
+    expect(warn?.severity).toBe('warn');
+    expect(
+      result.issues.some((i) => i.severity === 'error' && i.message.includes('anti_exfil')),
+    ).toBe(false);
   });
 
   it('flags eval / new Function as a hard error', () => {

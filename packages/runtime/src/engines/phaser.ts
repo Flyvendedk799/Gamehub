@@ -15,6 +15,13 @@
  */
 
 import {
+  assertSemver,
+  detectNetworkReferences,
+  escapeAttribute,
+  networkReferenceWarning,
+  sanitizeGameBaseUrl,
+} from './bootstrap-safety';
+import {
   type BootstrapOptions,
   type GameEngineAdapter,
   type InputFile,
@@ -36,7 +43,10 @@ function phaserImportMap(version: string): string {
 }
 
 function phaserBootstrap(opts: BootstrapOptions): string {
-  const version = opts.pinnedVersion ?? PHASER_DEFAULT_VERSION;
+  // #47 — strict-semver the version before it reaches the import-map URL;
+  // sanitize + escape the base before it reaches the <base href> attribute.
+  const version = assertSemver(opts.pinnedVersion ?? PHASER_DEFAULT_VERSION);
+  const baseHref = escapeAttribute(sanitizeGameBaseUrl(opts.gameBaseUrl));
   const globalSnippet = gameGlobalSetupSnippet({
     engine: 'phaser',
     initialParams: opts.initialParams ?? {},
@@ -47,7 +57,7 @@ function phaserBootstrap(opts: BootstrapOptions): string {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<base href="${opts.gameBaseUrl}" />
+<base href="${baseHref}" />
 <title>Game</title>
 <style>
   html, body { margin: 0; height: 100%; background: #0b0b0e; color: #e6e6e6;
@@ -178,6 +188,18 @@ function phaserValidate(files: ReadonlyArray<InputFile>): ValidationResult {
         path: jsFiles[0]?.path ?? 'src/',
         message: 'eval / new Function detected. Forbidden — sandbox CSP would reject these anyway.',
         severity: 'error',
+      });
+    }
+
+    // #41 (runtime half) — anti-exfil visibility. WARNING (not a hard
+    // failure) when the scene references the network, so the connect-src
+    // 'self' expectation is visible at validate-time.
+    const networkRefs = detectNetworkReferences(allJs);
+    if (networkRefs.length > 0) {
+      issues.push({
+        path: jsFiles[0]?.path ?? 'src/',
+        message: networkReferenceWarning(networkRefs),
+        severity: 'warn',
       });
     }
   }

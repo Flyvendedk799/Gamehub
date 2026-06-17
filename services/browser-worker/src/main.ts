@@ -40,6 +40,7 @@
  */
 import { chromium, type Browser, type BrowserContext, type Route } from 'playwright';
 import { Worker } from 'bullmq';
+import { execFileSync } from 'node:child_process';
 
 function parseRedisUrl(url: string): { host: string; port: number } {
   try {
@@ -142,17 +143,35 @@ export async function createHardenedContext(
 
 /**
  * Run an async job under a hard wall-clock ceiling. If the job exceeds the
- * timeout, reject so a hostile infinite loop cannot pin the worker slot. The
- * underlying work still has its context torn down by its own finally block.
+ * timeout, reject so a hostile infinite loop cannot pin the worker slot.
+ *
+ * IMPORTANT (kill-switch — backlog #33c): a `Promise.race` against a timeout
+ * only abandons the inner promise — it does NOT cancel the in-flight Playwright
+ * call. If the inner work is hung inside `page.waitForFunction` (which can
+ * outlive its own inline timeout on a non-painting page), that promise NEVER
+ * settles, so its own `finally { context.close() }` never runs and the context
+ * leaks for the worker's lifetime. The optional `onTimeout` hook is therefore
+ * invoked the instant the deadline fires to FORCE the context closed, which in
+ * turn rejects the stuck Playwright call ("Target closed") and lets the inner
+ * finally run. `onTimeout` errors are swallowed — teardown must never mask the
+ * timeout error.
  */
 export async function withHardTimeout<T>(
   fn: () => Promise<T>,
   timeoutMs: number,
   label: string,
+  onTimeout?: () => void | Promise<void>,
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
+      if (onTimeout !== undefined) {
+        try {
+          void Promise.resolve(onTimeout()).catch(() => {});
+        } catch {
+          // never let cleanup mask the timeout
+        }
+      }
       reject(new Error(`[browser-worker] job '${label}' exceeded hard timeout of ${timeoutMs}ms`));
     }, timeoutMs);
   });
@@ -169,6 +188,210 @@ export function assertBrowserAlive(browser: Browser | undefined): asserts browse
     throw new Error(
       '[browser-worker] shared Chromium is not connected (crashed or not launched). Job cannot run.',
     );
+  }
+}
+
+/**
+ * Default number of jobs a single Chromium process may serve before it is
+ * proactively recycled. A long-lived renderer accumulates state, fragmented
+ * heap and potential leaks across tenants; recycling bounds that blast radius.
+ */
+export const DEFAULT_RECYCLE_AFTER_JOBS = 50;
+
+/**
+ * Resident-set ceiling (bytes) above which the browser is recycled even before
+ * the job-count threshold is reached. Defends against a slow leak / memory
+ * pressure pinning the host. Measured against the Chromium process RSS when a
+ * pid is available; skipped otherwise.
+ */
+export const DEFAULT_RECYCLE_RSS_BYTES = 1_500 * 1024 * 1024; // ~1.5 GiB
+
+/**
+ * A freshly launched browser plus, when available, the OS pid of its Chromium
+ * process. The public Playwright `Browser` type does not expose a pid, so the
+ * launcher surfaces it explicitly to enable memory-pressure recycling.
+ */
+export interface LaunchedBrowser {
+  readonly browser: Browser;
+  readonly pid?: number;
+}
+
+/** Signature of a function that launches a fresh Chromium. Injectable for tests. */
+export type BrowserLauncher = () => Promise<LaunchedBrowser>;
+
+/** Read the resident-set size (bytes) of a process by pid, or undefined. */
+export type RssReader = (pid: number) => number | undefined;
+
+/** Default launcher: headless Chromium, surfacing its pid when Playwright exposes one. */
+export async function launchChromium(): Promise<LaunchedBrowser> {
+  const browser = await chromium.launch({ headless: true });
+  // `process()` exists on the Chromium browser at runtime but is absent from the
+  // public `Browser` type; read it through a narrow, typed duck-type guard.
+  const withProcess = browser as Browser & { process?: () => { pid?: number } | undefined };
+  const pid = typeof withProcess.process === 'function' ? withProcess.process()?.pid : undefined;
+  return pid === undefined ? { browser } : { browser, pid };
+}
+
+export interface BrowserPoolOptions {
+  /** How to launch a fresh browser. Defaults to headless Chromium. */
+  readonly launch?: BrowserLauncher;
+  /** Recycle the browser after this many jobs. */
+  readonly recycleAfterJobs?: number;
+  /** Recycle if process RSS exceeds this many bytes. */
+  readonly recycleRssBytes?: number;
+  /** Reads a process RSS; undefined disables memory-pressure recycling. */
+  readonly readRss?: RssReader;
+}
+
+/**
+ * Owns the long-lived shared Chromium and its lifecycle.
+ *
+ * It guarantees a job always runs against a LIVE browser by:
+ *   (a) RECYCLE — relaunching after `recycleAfterJobs` jobs OR when the process
+ *       RSS crosses `recycleRssBytes`, so accumulated state/leaks across tenants
+ *       cannot pile up in one process for the worker's lifetime.
+ *   (b) RELAUNCH-ON-DISCONNECT — a `disconnected` event (crash, OOM-kill, or a
+ *       recycle close) marks the current browser dead; the very next
+ *       `acquire()` transparently relaunches. A single Chromium death therefore
+ *       no longer fails every subsequent job until the worker is restarted.
+ *
+ * Relaunch is serialized through a single in-flight promise so concurrent jobs
+ * don't spawn a thundering herd of browsers.
+ */
+export class BrowserPool {
+  private browser: Browser | undefined;
+  private pid: number | undefined;
+  private jobsServed = 0;
+  private launching: Promise<Browser> | undefined;
+  private closed = false;
+  /** Total relaunches performed (visible for tests/telemetry). */
+  public relaunchCount = 0;
+
+  private readonly launch: BrowserLauncher;
+  private readonly recycleAfterJobs: number;
+  private readonly recycleRssBytes: number;
+  private readonly readRss: RssReader | undefined;
+
+  constructor(opts: BrowserPoolOptions = {}) {
+    this.launch = opts.launch ?? launchChromium;
+    this.recycleAfterJobs = opts.recycleAfterJobs ?? DEFAULT_RECYCLE_AFTER_JOBS;
+    this.recycleRssBytes = opts.recycleRssBytes ?? DEFAULT_RECYCLE_RSS_BYTES;
+    this.readRss = opts.readRss;
+  }
+
+  /** Number of jobs served by the CURRENT browser instance since last relaunch. */
+  public get currentJobCount(): number {
+    return this.jobsServed;
+  }
+
+  /** True if a live, connected browser is currently held. */
+  public get isAlive(): boolean {
+    return this.browser !== undefined && this.browser.isConnected();
+  }
+
+  /** Wire the disconnected handler so a crash marks the browser dead. */
+  private attach(browser: Browser): void {
+    browser.on('disconnected', () => {
+      // Drop our reference so the next acquire() relaunches. Do NOT relaunch
+      // eagerly here — wait until a job actually needs a browser.
+      if (this.browser === browser) {
+        this.browser = undefined;
+        this.pid = undefined;
+        this.jobsServed = 0;
+      }
+    });
+  }
+
+  private async relaunch(): Promise<Browser> {
+    // Serialize: if a relaunch is already in flight, await it.
+    if (this.launching !== undefined) return this.launching;
+    const p = (async () => {
+      const { browser: fresh, pid } = await this.launch();
+      this.attach(fresh);
+      this.browser = fresh;
+      this.pid = pid;
+      this.jobsServed = 0;
+      this.relaunchCount += 1;
+      return fresh;
+    })();
+    this.launching = p;
+    try {
+      return await p;
+    } finally {
+      this.launching = undefined;
+    }
+  }
+
+  /** Decide whether the current browser should be recycled before this job. */
+  private shouldRecycle(): boolean {
+    if (this.jobsServed >= this.recycleAfterJobs) return true;
+    if (this.readRss !== undefined && this.pid !== undefined) {
+      const rss = this.readRss(this.pid);
+      if (rss !== undefined && rss >= this.recycleRssBytes) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Acquire a live browser for one job. Relaunches transparently if the current
+   * browser is dead/absent (disconnect/crash) or due for recycling.
+   */
+  public async acquire(): Promise<Browser> {
+    if (this.closed) {
+      throw new Error('[browser-worker] BrowserPool is closed; cannot acquire a browser.');
+    }
+    // Relaunch if missing or disconnected (crash path).
+    if (this.browser === undefined || !this.browser.isConnected()) {
+      return this.relaunch();
+    }
+    // Proactive recycle (job-count or memory pressure).
+    if (this.shouldRecycle()) {
+      const stale = this.browser;
+      // Detach our reference first so the disconnected handler is a no-op for
+      // the explicit close below, then relaunch.
+      this.browser = undefined;
+      this.pid = undefined;
+      this.jobsServed = 0;
+      try {
+        await stale.close();
+      } catch {
+        // Already gone — fine.
+      }
+      return this.relaunch();
+    }
+    return this.browser;
+  }
+
+  /** Record that a job completed against the current browser (drives recycle). */
+  public noteJobDone(): void {
+    this.jobsServed += 1;
+  }
+
+  /** Tear down the pool for graceful shutdown. */
+  public async close(): Promise<void> {
+    this.closed = true;
+    const b = this.browser;
+    this.browser = undefined;
+    this.pid = undefined;
+    if (b !== undefined && b.isConnected()) {
+      try {
+        await b.close();
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
+/** Read a process RSS (bytes) on Linux/macOS via `ps`. Best-effort; sync. */
+export function readProcessRss(pid: number): number | undefined {
+  try {
+    const out = execFileSync('ps', ['-o', 'rss=', '-p', String(pid)], { encoding: 'utf8' }).trim();
+    const kib = Number(out);
+    if (!Number.isFinite(kib) || kib <= 0) return undefined;
+    return kib * 1024; // ps reports RSS in KiB.
+  } catch {
+    return undefined;
   }
 }
 
@@ -201,15 +424,24 @@ export interface ThumbnailResult {
 
 export type BrowserJobResult = RuntimeVerifyResult | ThumbnailResult;
 
+/**
+ * Optional hook invoked with each per-job context the moment it is created, so
+ * a deadline kill-switch can force-close a hung context even when the inner
+ * Playwright call never settles. See `withHardTimeout` / `runJob`.
+ */
+export type ContextSink = (context: BrowserContext) => void;
+
 export async function runRuntimeVerify(
   browser: Browser,
   data: BrowserJobData,
+  onContext?: ContextSink,
 ): Promise<RuntimeVerifyResult> {
   assertBrowserAlive(browser);
   const { context, egress } = await createHardenedContext(browser, {
     width: 1280,
     height: 720,
   });
+  onContext?.(context);
   const page = await context.newPage();
   const fatalErrors: string[] = [];
   page.on('pageerror', (err) => {
@@ -244,10 +476,15 @@ export async function runRuntimeVerify(
   }
 }
 
-export async function runThumbnail(browser: Browser, data: BrowserJobData): Promise<ThumbnailResult> {
+export async function runThumbnail(
+  browser: Browser,
+  data: BrowserJobData,
+  onContext?: ContextSink,
+): Promise<ThumbnailResult> {
   assertBrowserAlive(browser);
   const vp = data.viewport ?? { width: 640, height: 360 };
   const { context } = await createHardenedContext(browser, vp);
+  onContext?.(context);
   const page = await context.newPage();
   const bootTimeoutMs = data.bootTimeoutMs ?? 8_000;
 
@@ -265,22 +502,45 @@ export async function runThumbnail(browser: Browser, data: BrowserJobData): Prom
 /**
  * Dispatch a single job. Wrapped in the hard wall-clock timeout so no hostile
  * payload can pin a worker slot indefinitely.
+ *
+ * Backlog #33c — kill switch: every per-job context is tracked here. When the
+ * hard deadline fires, `onTimeout` force-closes any still-open context. That
+ * unblocks a hung `waitForFunction`/`waitForTimeout` (the in-flight Playwright
+ * call rejects with "Target closed"), so the job's own finally runs and the
+ * context never leaks even when the inner promise would otherwise never settle.
  */
 export async function runJob(browser: Browser, data: BrowserJobData): Promise<BrowserJobResult> {
+  const liveContexts = new Set<BrowserContext>();
+  const track: ContextSink = (ctx) => {
+    liveContexts.add(ctx);
+    // Self-prune once the context closes normally so the kill switch is a no-op.
+    ctx.on('close', () => liveContexts.delete(ctx));
+  };
+  const killSwitch = async (): Promise<void> => {
+    await Promise.all(
+      [...liveContexts].map((ctx) =>
+        ctx.close().catch(() => {
+          /* already gone */
+        }),
+      ),
+    );
+  };
+
   return withHardTimeout(
     async () => {
       if (data.kind === 'runtime-verify') {
-        return runRuntimeVerify(browser, data);
+        return runRuntimeVerify(browser, data, track);
       }
       if (data.kind === 'thumbnail') {
-        return runThumbnail(browser, data);
+        return runThumbnail(browser, data, track);
       }
       // playtest — simplified: just verify + return debug snapshot placeholder.
-      const verify = await runRuntimeVerify(browser, data);
+      const verify = await runRuntimeVerify(browser, data, track);
       return { ...verify, playtestSteps: [] };
     },
     JOB_HARD_TIMEOUT_MS,
     data.kind,
+    killSwitch,
   );
 }
 
@@ -289,9 +549,11 @@ async function main(): Promise<void> {
   const concurrency = Number(process.env['WORKER_CONCURRENCY'] ?? '2');
   const connection = parseRedisUrl(redisUrl);
 
-  let browser: Browser;
+  const pool = new BrowserPool({ readRss: readProcessRss });
   try {
-    browser = await chromium.launch({ headless: true });
+    // Eagerly warm one browser so the first job doesn't pay the launch cost and
+    // so a launch failure surfaces at boot rather than per-job.
+    await pool.acquire();
   } catch (err) {
     console.error('[browser-worker] FATAL: Chromium failed to launch:', err);
     throw err;
@@ -303,10 +565,16 @@ async function main(): Promise<void> {
     async (job) => {
       const { data } = job;
       console.log(`[browser-worker] job ${job.id} kind=${data.kind}`);
-      // Guard shared-browser death: surface a clear error rather than a cryptic
-      // "Target closed" deep inside Playwright.
-      assertBrowserAlive(browser);
-      return runJob(browser, data);
+      // Acquire a guaranteed-live browser: transparently relaunches after a
+      // crash/disconnect (#33b) and recycles after N jobs / memory pressure
+      // (#33a). A single Chromium death no longer fails every subsequent job.
+      const browser = await pool.acquire();
+      try {
+        return await runJob(browser, data);
+      } finally {
+        // Count the job whether it succeeded or failed; drives the recycle gate.
+        pool.noteJobDone();
+      }
     },
     { connection, concurrency },
   );
@@ -319,7 +587,7 @@ async function main(): Promise<void> {
   for (const sig of ['SIGINT', 'SIGTERM']) {
     process.on(sig, async () => {
       await worker.close();
-      await browser.close();
+      await pool.close();
       process.exit(0);
     });
   }

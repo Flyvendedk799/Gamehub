@@ -6,6 +6,7 @@ export {
   InMemoryBlobStore,
   LocalFsBlobStore,
   blobKey,
+  canonicalBlobKey,
   sha256,
 } from './blob-store';
 export {
@@ -16,4 +17,5 @@ export {
   type WriteResult,
   contentTypeFor,
   manifestKeyFor,
+  parseManifestKey,
 } from './snapshot-store';

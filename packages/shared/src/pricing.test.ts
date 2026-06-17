@@ -70,11 +70,83 @@ describe('computeImpliedCost (Phase 3)', () => {
     expect(cost).toBeLessThan(4.5);
   });
 
-  it('Opus is ~5× Sonnet on equivalent token shapes', () => {
+  it('Opus is ~1.67× Sonnet on equivalent token shapes (Opus 5/25 vs Sonnet 3/15)', () => {
+    // Opus 4.x is now 5/25 and Sonnet 4.6 is 3/15 — the old "~5×" relationship
+    // no longer holds. Every per-rate ratio is 5/3 ≈ 1.667, so the blended cost
+    // ratio on any fixed token shape is exactly 5/3.
     const sonnet = computeImpliedCost(FPS_RUN, 'claude-sonnet-4-6');
-    const opus = computeImpliedCost(FPS_RUN, 'claude-opus-4-7');
-    expect(opus / sonnet).toBeGreaterThan(4);
-    expect(opus / sonnet).toBeLessThan(6);
+    const opus = computeImpliedCost(FPS_RUN, 'claude-opus-4-8');
+    expect(opus / sonnet).toBeCloseTo(5 / 3, 6);
+  });
+
+  it('Fable is ~3.33× Sonnet and 2× Opus on equivalent token shapes', () => {
+    const sonnet = computeImpliedCost(FPS_RUN, 'claude-sonnet-4-6');
+    const opus = computeImpliedCost(FPS_RUN, 'claude-opus-4-8');
+    const fable = computeImpliedCost(FPS_RUN, 'claude-fable-5');
+    expect(fable / sonnet).toBeCloseTo(10 / 3, 6);
+    expect(fable / opus).toBeCloseTo(2, 6);
+  });
+
+  it('pins opus-4-8 to the exact per-rate prices (5 / 0.5 / 6.25 / 25 per 1M)', () => {
+    // 1M fresh input → $5
+    expect(
+      computeImpliedCost(
+        { inputTokens: 1_000_000, cachedInputTokens: 0, cacheCreationInputTokens: 0, outputTokens: 0 },
+        'claude-opus-4-8',
+      ),
+    ).toBeCloseTo(5, 6);
+    // 1M cached input → $0.50
+    expect(
+      computeImpliedCost(
+        { inputTokens: 1_000_000, cachedInputTokens: 1_000_000, cacheCreationInputTokens: 0, outputTokens: 0 },
+        'claude-opus-4-8',
+      ),
+    ).toBeCloseTo(0.5, 6);
+    // 1M cache-creation → $6.25
+    expect(
+      computeImpliedCost(
+        { inputTokens: 1_000_000, cachedInputTokens: 0, cacheCreationInputTokens: 1_000_000, outputTokens: 0 },
+        'claude-opus-4-8',
+      ),
+    ).toBeCloseTo(6.25, 6);
+    // 1M output → $25
+    expect(
+      computeImpliedCost(
+        { inputTokens: 0, cachedInputTokens: 0, cacheCreationInputTokens: 0, outputTokens: 1_000_000 },
+        'claude-opus-4-8',
+      ),
+    ).toBeCloseTo(25, 6);
+  });
+
+  it('pins haiku-4-5 to the exact per-rate prices (1 / 0.1 / 1.25 / 5 per 1M)', () => {
+    // 1M fresh input → $1
+    expect(
+      computeImpliedCost(
+        { inputTokens: 1_000_000, cachedInputTokens: 0, cacheCreationInputTokens: 0, outputTokens: 0 },
+        'claude-haiku-4-5',
+      ),
+    ).toBeCloseTo(1, 6);
+    // 1M cached input → $0.10
+    expect(
+      computeImpliedCost(
+        { inputTokens: 1_000_000, cachedInputTokens: 1_000_000, cacheCreationInputTokens: 0, outputTokens: 0 },
+        'claude-haiku-4-5',
+      ),
+    ).toBeCloseTo(0.1, 6);
+    // 1M cache-creation → $1.25
+    expect(
+      computeImpliedCost(
+        { inputTokens: 1_000_000, cachedInputTokens: 0, cacheCreationInputTokens: 1_000_000, outputTokens: 0 },
+        'claude-haiku-4-5',
+      ),
+    ).toBeCloseTo(1.25, 6);
+    // 1M output → $5
+    expect(
+      computeImpliedCost(
+        { inputTokens: 0, cachedInputTokens: 0, cacheCreationInputTokens: 0, outputTokens: 1_000_000 },
+        'claude-haiku-4-5',
+      ),
+    ).toBeCloseTo(5, 6);
   });
 
   it('unknown model falls back to Sonnet-4-6 pricing (sane ballpark, never $0)', () => {

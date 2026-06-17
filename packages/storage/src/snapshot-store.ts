@@ -72,6 +72,24 @@ export function manifestKeyFor(filesHash: string): string {
   return `snapshots/${filesHash}/manifest.json`;
 }
 
+/**
+ * Strict manifest-key parser. The only well-formed shape is
+ * `snapshots/<64-hex-sha256>/manifest.json`. We validate the WHOLE string with a
+ * single anchored regex rather than `split('/')[1]` so a hostile key can't sneak
+ * traversal, control chars, or extra path segments into the filesHash we then
+ * feed to the blob store. Returns the lowercase hex filesHash.
+ */
+const MANIFEST_KEY_RE = /^snapshots\/([a-f0-9]{64})\/manifest\.json$/;
+
+export function parseManifestKey(manifestKey: string): string {
+  if (typeof manifestKey !== 'string') {
+    throw new Error(`invalid manifestKey: ${JSON.stringify(manifestKey)}`);
+  }
+  const m = MANIFEST_KEY_RE.exec(manifestKey);
+  if (!m?.[1]) throw new Error(`invalid manifestKey: ${JSON.stringify(manifestKey)}`);
+  return m[1];
+}
+
 export interface SnapshotInputFile {
   path: string;
   bytes: Uint8Array;
@@ -102,12 +120,20 @@ export class SnapshotStore {
 
   /** Load a manifest from storage given its key (snapshots/{filesHash}/manifest.json). */
   async readManifest(manifestKey: string): Promise<SnapshotManifest> {
-    // manifestKey = "snapshots/{filesHash}/manifest.json"
-    // The manifest JSON is itself a content-addressed blob stored as "blobs/{filesHash}"
-    const parts = manifestKey.split('/');
-    const filesHash = parts[1];
-    if (!filesHash) throw new Error(`invalid manifestKey: ${manifestKey}`);
+    // manifestKey = "snapshots/{filesHash}/manifest.json"; the manifest JSON is
+    // itself a content-addressed blob stored as "blobs/{filesHash}".
+    const filesHash = parseManifestKey(manifestKey);
     const bytes = await this.blobs.get(blobKey(filesHash));
+    // Content-address integrity check (cheap — we already hold the bytes): the
+    // filesHash IS the sha256 of the canonical manifest JSON, so a mismatch means
+    // a corrupted/torn blob or a key/content mix-up. Fail loud rather than parse
+    // attacker-controllable bytes under a trusted hash.
+    const actual = sha256(bytes);
+    if (actual !== filesHash) {
+      throw new Error(
+        `manifest integrity check failed for ${manifestKey}: expected ${filesHash}, got ${actual}`,
+      );
+    }
     return JSON.parse(Buffer.from(bytes).toString()) as SnapshotManifest;
   }
 

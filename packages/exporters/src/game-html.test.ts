@@ -14,6 +14,7 @@ import { exportGameHtml } from './game-html';
 
 const FAKE_THREE_SOURCE = '/* three.js stub */\nexport const THREE = {};';
 const FAKE_PHASER_SOURCE = '/* phaser stub */\nexport default class Phaser {}';
+const FAKE_ADDON_SOURCE = "/* orbit-controls stub */\nimport * as THREE from 'three';\nexport class OrbitControls {}";
 
 let workDir = '';
 
@@ -24,7 +25,11 @@ beforeEach(() => {
     'fetch',
     vi.fn(async (url: unknown) => {
       const u = String(url);
-      const body = u.includes('three@') ? FAKE_THREE_SOURCE : FAKE_PHASER_SOURCE;
+      const body = u.includes('/examples/jsm/')
+        ? FAKE_ADDON_SOURCE
+        : u.includes('three@')
+          ? FAKE_THREE_SOURCE
+          : FAKE_PHASER_SOURCE;
       return {
         ok: true,
         status: 200,
@@ -208,4 +213,121 @@ describe('exportGameHtml', () => {
       }),
     ).rejects.toThrow(/Failed to fetch the three library/);
   });
+
+  it('rewrites ALL importmap entries — bare engine + addons prefix — to inlined sources (#43a)', async () => {
+    const dest = join(workDir, 'game.html');
+    const indexHtml = `<!doctype html>
+<html><head>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
+</head><body>
+<canvas id="game"></canvas>
+<script type="module" src="src/main.js"></script>
+</body></html>`;
+    await exportGameHtml(dest, {
+      files: [
+        { path: 'index.html', content: indexHtml },
+        {
+          path: 'src/main.js',
+          content:
+            "import * as THREE from 'three';\nimport { OrbitControls } from 'three/addons/controls/OrbitControls.js';\nnew OrbitControls();",
+        },
+      ],
+      engine: 'three',
+    });
+    const written = readFileSync(dest, 'utf8');
+    // No CDN reference remains anywhere — neither the bare engine URL nor the
+    // addons directory prefix URL.
+    expect(written).not.toContain('cdn.jsdelivr.net');
+    // The addons prefix mapping must be expanded to an explicit per-module
+    // data: URL keyed by the specifier the project actually imported.
+    expect(written).toMatch(
+      /"three\/addons\/controls\/OrbitControls\.js"\s*:\s*"data:text\/javascript;base64,/,
+    );
+    // The bare `three` entry is the inlined engine data: URL.
+    expect(written).toMatch(/"three"\s*:\s*"data:text\/javascript;base64,/);
+    // No remaining bare prefix entry (a live CDN dir the CSP would block).
+    expect(written).not.toMatch(/"three\/addons\/"\s*:/);
+    // The inlined addon source was actually fetched + embedded.
+    const addonB64 = Buffer.from(FAKE_ADDON_SOURCE, 'utf8').toString('base64');
+    expect(written).toContain(addonB64);
+  });
+
+  it('inlines a CSS url() asset so no local path survives (#43b)', async () => {
+    const dest = join(workDir, 'game.html');
+    const indexHtml = `<!doctype html><html><head>
+<script type="importmap">{"imports":{"phaser":"https://cdn.jsdelivr.net/npm/phaser@3.88.0/dist/phaser.esm.js"}}</script>
+<link rel="stylesheet" href="styles/game.css" />
+</head><body>
+<div id="bg" style="background: url('assets/tile.png')"></div>
+<canvas id="game"></canvas>
+<script type="module" src="src/main.js"></script>
+</body></html>`;
+    await exportGameHtml(dest, {
+      files: [
+        { path: 'index.html', content: indexHtml },
+        { path: 'src/main.js', content: 'console.log("game");' },
+        {
+          path: 'styles/game.css',
+          content: 'body { background: url(assets/tile.png); }\n#hud { background: url("assets/hud.png"); }',
+        },
+        { path: 'assets/tile.png', content: Buffer.from([0x89, 0x50, 0x4e, 0x47]) },
+        { path: 'assets/hud.png', content: Buffer.from([0x89, 0x50, 0x4e, 0x48]) },
+      ],
+      engine: 'phaser',
+    });
+    const written = readFileSync(dest, 'utf8');
+    // The stylesheet href was inlined to a data:text/css URL.
+    expect(written).toMatch(/href=["']data:text\/css;base64,/);
+    // No remaining un-inlined local asset paths anywhere in the output —
+    // inline-style url(), css url() (bare + quoted), and the css href.
+    assertNoLocalRefs(written, ['assets/tile.png', 'assets/hud.png', 'styles/game.css', 'src/main.js']);
+    // Both pngs were embedded.
+    expect(written).toContain('data:image/png;base64,');
+  });
+
+  it('inlines dynamic import() of a local module (#43c)', async () => {
+    const dest = join(workDir, 'game.html');
+    const indexHtml = `<!doctype html><html><head>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
+</head><body>
+<canvas id="game"></canvas>
+<script type="module" src="src/main.js"></script>
+</body></html>`;
+    await exportGameHtml(dest, {
+      files: [
+        { path: 'index.html', content: indexHtml },
+        {
+          path: 'src/main.js',
+          content:
+            "async function boot() {\n  const level = await import('./levels/level1.js');\n  const boss = await import('src/levels/boss.js');\n  level.start(); boss.start();\n}\nboot();",
+        },
+        { path: 'src/levels/level1.js', content: 'export function start() { return 1; }' },
+        { path: 'src/levels/boss.js', content: 'export function start() { return 2; }' },
+      ],
+      engine: 'three',
+    });
+    const written = readFileSync(dest, 'utf8');
+    // No remaining local module paths — the dynamic import() specifiers were
+    // rewritten to data: URLs inside the inlined entry module.
+    assertNoLocalRefs(written, [
+      'src/levels/level1.js',
+      './levels/level1.js',
+      'src/levels/boss.js',
+      'src/main.js',
+    ]);
+  });
 });
+
+/**
+ * Assert none of the given local bundle paths survive as un-inlined
+ * references in the exported HTML. Checks quoted specifiers, css url(...),
+ * and src=/href= attribute values — the surfaces the inliner must cover.
+ */
+function assertNoLocalRefs(html: string, paths: string[]): void {
+  for (const p of paths) {
+    const esc = p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    expect(html).not.toMatch(new RegExp(`(['"\`])${esc}\\1`));
+    expect(html).not.toMatch(new RegExp(`url\\(\\s*['"\`]?${esc}`));
+    expect(html).not.toMatch(new RegExp(`(?:src|href)\\s*=\\s*['"\`]${esc}`));
+  }
+}

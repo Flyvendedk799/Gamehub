@@ -13,8 +13,10 @@
  * implied (this calculation), each labelled clearly.
  *
  * Prices are USD per million tokens. Source: anthropic.com/pricing as
- * of 2026-05. The default for unrecognised models conservatively maps
+ * of 2026-06. The default for unrecognised models conservatively maps
  * to Sonnet-4-6 (mid-tier). Update the table when new families ship.
+ *
+ * Cached input ≈ 0.1× input; cache-creation ≈ 1.25× input.
  */
 
 export interface ModelPricingEntry {
@@ -41,7 +43,7 @@ function deepFreeze<T extends Record<string, unknown>>(obj: T): Readonly<T> {
  *  this codebase: 'claude-sonnet-4-6', 'claude-opus-4-7', etc.).
  *  Deep-frozen so accidental mutation of nested entries throws. */
 export const ANTHROPIC_PRICING: Readonly<Record<string, ModelPricingEntry>> = deepFreeze({
-  // Sonnet family
+  // Sonnet family — 3 / 15.
   'claude-sonnet-4-6': {
     inputPerMillion: 3.0,
     cachedInputPerMillion: 0.3,
@@ -54,25 +56,38 @@ export const ANTHROPIC_PRICING: Readonly<Record<string, ModelPricingEntry>> = de
     cacheCreationPerMillion: 3.75,
     outputPerMillion: 15.0,
   },
-  // Opus family — top-tier reasoning, ~5× Sonnet pricing.
+  // Opus family — top-tier reasoning, 5 / 25 (≈1.67× Sonnet).
+  'claude-opus-4-8': {
+    inputPerMillion: 5.0,
+    cachedInputPerMillion: 0.5,
+    cacheCreationPerMillion: 6.25,
+    outputPerMillion: 25.0,
+  },
   'claude-opus-4-7': {
-    inputPerMillion: 15.0,
-    cachedInputPerMillion: 1.5,
-    cacheCreationPerMillion: 18.75,
-    outputPerMillion: 75.0,
+    inputPerMillion: 5.0,
+    cachedInputPerMillion: 0.5,
+    cacheCreationPerMillion: 6.25,
+    outputPerMillion: 25.0,
   },
   'claude-opus-4-6': {
-    inputPerMillion: 15.0,
-    cachedInputPerMillion: 1.5,
-    cacheCreationPerMillion: 18.75,
-    outputPerMillion: 75.0,
+    inputPerMillion: 5.0,
+    cachedInputPerMillion: 0.5,
+    cacheCreationPerMillion: 6.25,
+    outputPerMillion: 25.0,
   },
-  // Haiku family — fast & cheap.
+  // Fable family — most capable, above Opus tier: 10 / 50.
+  'claude-fable-5': {
+    inputPerMillion: 10.0,
+    cachedInputPerMillion: 1.0,
+    cacheCreationPerMillion: 12.5,
+    outputPerMillion: 50.0,
+  },
+  // Haiku family — fast & cheap: 1 / 5.
   'claude-haiku-4-5': {
-    inputPerMillion: 0.8,
-    cachedInputPerMillion: 0.08,
-    cacheCreationPerMillion: 1.0,
-    outputPerMillion: 4.0,
+    inputPerMillion: 1.0,
+    cachedInputPerMillion: 0.1,
+    cacheCreationPerMillion: 1.25,
+    outputPerMillion: 5.0,
   },
 });
 
@@ -88,19 +103,27 @@ export interface UsageTokens {
 /** Phase 4 / Integration G — context-window sizes per model id, in
  *  tokens. The continuation threshold check (`shouldPauseForContinuation`'s
  *  `context_threshold` rule) divides estimated cumulative input tokens
- *  by this window to compute `contextUsedPct`. Conservative default
- *  (200k = Sonnet) for unknown models so a missing pricing entry never
- *  silently disables the threshold. */
+ *  by this window to compute `contextUsedPct`. Conservative 200k default
+ *  (the Haiku-tier window; the frontier Opus/Sonnet/Fable models are now 1M)
+ *  for unknown models so a missing pricing entry never silently disables the
+ *  threshold. */
 export const MODEL_CONTEXT_WINDOWS: Readonly<Record<string, number>> = Object.freeze({
-  // Sonnet — 200k standard, 1M with the 1M-context beta
-  'claude-sonnet-4-6': 200_000,
+  // Sonnet 4.6 — 1M context at standard pricing
+  'claude-sonnet-4-6': 1_000_000,
   'claude-sonnet-4-6[1m]': 1_000_000,
+  // Sonnet 4.5 — 200k standard, 1M with the 1M-context beta
   'claude-sonnet-4-5': 200_000,
-  // Opus — 200k standard, 1M with the 1M-context beta
-  'claude-opus-4-7': 200_000,
+  // Opus 4.6 / 4.7 / 4.8 — 1M context at standard pricing
+  'claude-opus-4-8': 1_000_000,
+  'claude-opus-4-8[1m]': 1_000_000,
+  'claude-opus-4-7': 1_000_000,
   'claude-opus-4-7[1m]': 1_000_000,
-  'claude-opus-4-6': 200_000,
-  // Haiku — 200k
+  'claude-opus-4-6': 1_000_000,
+  'claude-opus-4-6[1m]': 1_000_000,
+  // Fable 5 — 1M context (default == max)
+  'claude-fable-5': 1_000_000,
+  'claude-fable-5[1m]': 1_000_000,
+  // Haiku 4.5 — 200k
   'claude-haiku-4-5': 200_000,
 });
 

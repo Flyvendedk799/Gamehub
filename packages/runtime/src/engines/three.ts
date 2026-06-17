@@ -16,6 +16,13 @@
  */
 
 import {
+  assertSemver,
+  detectNetworkReferences,
+  escapeAttribute,
+  networkReferenceWarning,
+  sanitizeGameBaseUrl,
+} from './bootstrap-safety';
+import {
   type BootstrapOptions,
   type GameEngineAdapter,
   type InputFile,
@@ -38,7 +45,12 @@ function threeImportMap(version: string): string {
 }
 
 function threeBootstrap(opts: BootstrapOptions): string {
-  const version = opts.pinnedVersion ?? THREE_DEFAULT_VERSION;
+  // #47 — validate the version against a strict semver before it reaches the
+  // import-map URL; escape the base before it reaches the <base href>
+  // attribute. A non-semver version or a disallowed scheme throws here rather
+  // than emitting an injectable document.
+  const version = assertSemver(opts.pinnedVersion ?? THREE_DEFAULT_VERSION);
+  const baseHref = escapeAttribute(sanitizeGameBaseUrl(opts.gameBaseUrl));
   const globalSnippet = gameGlobalSetupSnippet({
     engine: 'three',
     initialParams: opts.initialParams ?? {},
@@ -49,7 +61,7 @@ function threeBootstrap(opts: BootstrapOptions): string {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<base href="${opts.gameBaseUrl}" />
+<base href="${baseHref}" />
 <title>Game</title>
 <style>
   html, body { margin: 0; height: 100%; background: #0b0b0e; color: #e6e6e6;
@@ -154,6 +166,17 @@ function threeValidate(files: ReadonlyArray<InputFile>): ValidationResult {
         path: jsFiles[0]?.path ?? 'src/',
         message: 'eval / new Function detected. Forbidden — sandbox CSP would reject these anyway.',
         severity: 'error',
+      });
+    }
+    // #41 (runtime half) — anti-exfil visibility. Surface a WARNING (never a
+    // hard failure) when the scene references the network, so the
+    // connect-src 'self' expectation is visible at validate-time.
+    const networkRefs = detectNetworkReferences(allJs);
+    if (networkRefs.length > 0) {
+      issues.push({
+        path: jsFiles[0]?.path ?? 'src/',
+        message: networkReferenceWarning(networkRefs),
+        severity: 'warn',
       });
     }
     // may9 Phase 8 follow-up #27 (Three.js portion) — trigger-zone

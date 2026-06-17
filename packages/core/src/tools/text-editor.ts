@@ -15,6 +15,7 @@ import { Type } from '@sinclair/typebox';
 import { REDACTED_PATH_SENTINEL, REDACTION_POISON_KEY } from '../context-prune.js';
 import type { CameraGuard } from './camera-pin.js';
 import type { EditBudget } from './edit-budget.js';
+import { assertSafeToolPath } from './path-safety.js';
 import { extractJsxSymbol, offsetsToLines, rangeToLineSpan } from './symbol-extractor.js';
 
 /**
@@ -532,6 +533,10 @@ export function makeTextEditorTool(
       toolCallCounter += 1;
       const tick = toolCallCounter;
       const path = params.path;
+      // Tool-layer path-traversal assertion (defense-in-depth). Storage also
+      // confines paths, but this rejects POSIX-absolute / "..", control chars,
+      // etc. BEFORE any fs callback runs, so a storage bug can't become an escape.
+      assertSafeToolPath(path, 'str_replace_based_edit_tool');
       switch (params.command) {
         case 'view': {
           const file = fs.view(path);

@@ -11,10 +11,15 @@ export interface BootstrapOptions {
   /** UUID of the design row this game belongs to. Used to build the
    *  game-files:// base URL the iframe resolves relative imports against. */
   designId: string;
-  /** Fully-qualified base URL — `game-files://designs/{designId}/`. The
-   *  starter template injects this as `<base href>`. */
+  /** Fully-qualified base URL the starter template injects as `<base href>`.
+   *  Re-spec (#47): must be `https://…`, `about:blank`, or the privileged
+   *  `game-files://designs/{designId}/` protocol. `javascript:`/`data:`/
+   *  `file:`/`blob:` bases are rejected by the bootstrap, and the value is
+   *  HTML-attribute-escaped before interpolation. */
   gameBaseUrl: string;
-  /** Optional engine version override. Falls back to `adapter.defaultVersion`. */
+  /** Optional engine version override. Falls back to `adapter.defaultVersion`.
+   *  Must be a strict semver (#47): non-semver values are rejected by the
+   *  bootstrap before they reach the import-map URL. */
   pinnedVersion?: string | undefined;
   /** When true, the bootstrap injects `window.__game.config.startMuted = true`
    *  so engines can avoid the autoplay-policy warning on first preview. */
