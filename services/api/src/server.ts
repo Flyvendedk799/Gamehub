@@ -216,6 +216,19 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     authAttempts.delete(key);
   }
 
+  // Play-count dedup (#35a, in-memory per-instance): a given client (slug+ip)
+  // can only bump a game's play count once per window, so the metric isn't
+  // trivially inflated by reload spam. Multi-instance Redis dedup is a follow-up.
+  const playCountSeen = new Map<string, number>();
+  const PLAY_DEDUP_WINDOW_MS = 60 * 1000;
+  function shouldCountPlay(key: string): boolean {
+    const now = Date.now();
+    const last = playCountSeen.get(key);
+    if (last !== undefined && now - last < PLAY_DEDUP_WINDOW_MS) return false;
+    playCountSeen.set(key, now);
+    return true;
+  }
+
   async function getUserBalance(userId: string): Promise<number> {
     if (!deps.authDb) return Infinity;
     const { schema: s } = await import('@playforge/db');
@@ -380,8 +393,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const password = typeof body.password === 'string' ? body.password : null;
     if (!email || !password) return reply.code(400).send({ error: 'email_and_password_required' });
 
-    // Rate-limit login attempts per email to prevent brute-force.
-    if (!checkAuthRateLimit(`login:${email}`)) {
+    // Rate-limit login attempts keyed on email+IP, NOT email alone (#15). Keying
+    // solely on email let an attacker lock a victim out of their own account by
+    // burning the victim's attempt budget from any IP. email+IP throttles a given
+    // client without affecting the legitimate user on their own IP. (Per-IP
+    // credential-stuffing caps + Redis-backed multi-instance state are follow-ups.)
+    const ip = req.ip ?? 'unknown';
+    if (!checkAuthRateLimit(`login:${email}:${ip}`)) {
       return reply.code(429).send({ error: 'too_many_attempts', retryAfterMs: AUTH_WINDOW_MS });
     }
 
@@ -398,7 +416,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const token = generateSessionToken();
     await deps.authDb.insert(s.sessions).values({ token, userId: user.id, expiresAt: sessionExpiresAt() });
 
-    clearAuthRateLimit(`login:${email}`);
+    clearAuthRateLimit(`login:${email}:${ip}`);
 
     return reply.send({ token, user: { id: user.id, handle: user.handle, displayName: user.displayName } });
   });
@@ -746,6 +764,20 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         targetId: publishedGame.id,
         reason: `auto-mod: ${autoModFlags.join(', ')}`,
       }).catch(() => {});
+
+      // GATE on high-confidence flags (#19): phishing / crypto-mining content must
+      // NOT go live automatically — hold it as 'unpublished' (pending review) and
+      // return 202 instead of a live URL. (The locked CSP on the served bundle is
+      // the real runtime enforcement boundary; this is the pre-publish gate.)
+      const HIGH_CONFIDENCE = new Set(['phishing_language', 'crypto_miner']);
+      if (autoModFlags.some((f) => HIGH_CONFIDENCE.has(f))) {
+        await deps.publishRepo.setStatus(publishedGame.id, 'unpublished');
+        return reply.code(202).send({
+          status: 'pending_review',
+          message: 'Your game was flagged by automated moderation and is pending review before it goes live.',
+          flags: autoModFlags,
+        });
+      }
     }
 
     // Smoke-test gate (blocking): verify the game boots in a headless browser
@@ -881,8 +913,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(404).send({ error: 'not_found' });
     }
 
-    // Fire-and-forget play count increment.
-    void deps.hubRepo?.incrementPlayCount(published.id);
+    // Fire-and-forget play count increment, throttled per client (#35a) so a
+    // reload loop can't inflate the count.
+    if (shouldCountPlay(`${slug}:${req.ip ?? 'anon'}`)) {
+      void deps.hubRepo?.incrementPlayCount(published.id);
+    }
 
     let html: string;
     try {
@@ -1222,15 +1257,20 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!published) {
       return reply.code(404).send({ error: 'not_found' });
     }
-    // Auth is optional for reports — try to get the user but don't block.
-    const qUserId = (req.query as Record<string, string | undefined>)['userId'];
-    const headers = qUserId
-      ? { ...req.headers, 'x-user-id': qUserId }
-      : req.headers;
-    const user = await deps.auth.authenticate(headers);
+    // Auth is optional for reports, but the reporter id must come from the
+    // authenticated session — NEVER from a client-supplied ?userId (#44), which
+    // let anyone attribute a report to any user. Authenticate from headers only.
+    const user = await deps.auth.authenticate(req.headers);
 
     const body = (req.body ?? {}) as { reason?: unknown };
-    const reason = typeof body.reason === 'string' ? body.reason : undefined;
+    // Cap reason length (#44) to bound stored size / abuse.
+    const reason = typeof body.reason === 'string' ? body.reason.slice(0, 500) : undefined;
+
+    // Light per-reporter / per-IP throttle so the report queue can't be flooded.
+    const throttleKey = `report:${user?.userId ?? req.ip ?? 'anon'}`;
+    if (!checkAuthRateLimit(throttleKey)) {
+      return reply.code(429).send({ error: 'too_many_attempts', retryAfterMs: AUTH_WINDOW_MS });
+    }
 
     await deps.hubRepo.addReport({
       targetType: 'published_game',
