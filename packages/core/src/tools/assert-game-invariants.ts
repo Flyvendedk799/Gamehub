@@ -305,6 +305,145 @@ export function assertGameInvariants(
   };
 }
 
+/**
+ * Phase-1.5 — the COMPLETABILITY FLOOR.
+ *
+ * `assertGameInvariants` above is genre-token (`brawler`/`shooter`/…)
+ * aware but warn-only. The `done` gate needs to know, per the declared
+ * GameSpec, which of the four design invariants are *blocking* (a game
+ * that can't be lost or restarted is broken) vs which are *advisory*
+ * (polish — score presence). It also needs to recognise genres that
+ * legitimately have no lose state and downgrade the whole floor to
+ * advisory for them.
+ *
+ * The GameSpec genre vocabulary (`@playforge/shared` — `sandbox`,
+ * `idle`, `fps`, …) is DIFFERENT from this module's `GameGenre`
+ * (`brawler`, `shooter`, … from game-workflow.v1.txt §2). We classify
+ * off the *spec* genre + `winCondition` so the floor reasons about the
+ * artifact the agent actually committed to, not a transcript guess.
+ */
+
+/** The three invariants whose ABSENCE makes a completable game broken:
+ *  no fail state (can't lose), no restart (can't retry after losing),
+ *  no on-hit/on-event feedback (silent-on-hit reads as broken). These
+ *  are FATAL for completable genres. `score-or-state` and the genre-
+ *  specific brawler-* checks stay advisory (polish, not completability). */
+export const FATAL_FLOOR_INVARIANTS: ReadonlySet<GameInvariant> = new Set<GameInvariant>([
+  'fail-state',
+  'restart',
+  'feedback',
+]);
+
+/** GameSpec (`@playforge/shared`) genres that legitimately have no lose
+ *  state — sandbox/creative/idle toys. The floor downgrades to advisory
+ *  for these so a Minecraft-like or an incremental clicker isn't blocked
+ *  for "no fail state". Kept as a string set (not the zod enum) so this
+ *  module has no runtime dependency on @playforge/shared. */
+const NON_COMPLETABLE_SPEC_GENRES: ReadonlySet<string> = new Set<string>([
+  'sandbox',
+  'idle',
+  'tycoon',
+  'visual_novel',
+]);
+
+/** Sentinel the GameSpec schema uses for "endless / no fail state":
+ *  `winCondition: '—'` (em-dash) or `loseCondition: '—'`. An empty or
+ *  whitespace-only condition is treated the same way. */
+function isNoneSentinel(condition: string | undefined | null): boolean {
+  if (condition === undefined || condition === null) return true;
+  const trimmed = condition.trim();
+  return trimmed === '' || trimmed === '—' || trimmed === '-' || trimmed === 'none';
+}
+
+/** Minimal shape of the declared GameSpec the floor reads. Structural
+ *  (not the zod type) so this module stays dependency-free; the host
+ *  passes the real `@playforge/shared` GameSpec, which is a superset. */
+export interface CompletabilitySpec {
+  genre: string;
+  winCondition?: string | undefined;
+  loseCondition?: string | undefined;
+}
+
+/**
+ * Decide whether the completability floor should BLOCK for this spec.
+ *
+ * Escape hatches (→ advisory, never block):
+ *   - genre is a non-completable / creative one (sandbox / idle /
+ *     tycoon / visual_novel), OR
+ *   - the spec declares no fail state (loseCondition '—'/none), OR
+ *   - the spec declares it's endless (winCondition '—'/none) AND no
+ *     explicit lose condition — a pure endless toy with no lose path is
+ *     a legitimate sandbox-class artifact.
+ *
+ * A spec with a real loseCondition is ALWAYS completable (it claims a
+ * fail state), even for an endless win — that's an arcade high-score
+ * game and absolutely must have a working lose + restart path.
+ */
+export function isCompletableSpec(spec: CompletabilitySpec): boolean {
+  if (NON_COMPLETABLE_SPEC_GENRES.has(spec.genre)) return false;
+  // A declared lose condition pins the game as completable regardless of
+  // the win sentinel (endless arcade games still must be losable).
+  if (!isNoneSentinel(spec.loseCondition)) return true;
+  // No declared lose condition: if the win is also endless/none, this is
+  // a creative / endless toy — downgrade. Otherwise (a real win but no
+  // declared lose) we still hold it to the floor: a game you can win but
+  // never lose is the exact "toy not a game" failure the floor targets.
+  if (isNoneSentinel(spec.winCondition)) return false;
+  return true;
+}
+
+export interface CompletabilityFloorResult {
+  /** True when the spec is completable AND a FATAL-floor invariant is
+   *  missing → `done` must block. */
+  blocked: boolean;
+  /** The FATAL-floor invariant issues (fail-state / restart / feedback)
+   *  detected as missing. Empty when the spec is non-completable
+   *  (escape-hatch) or all three are present. */
+  fatal: InvariantIssue[];
+  /** The remaining invariant issues — score-or-state, brawler-*, and
+   *  (when the escape hatch fired) the downgraded floor invariants.
+   *  Always advisory; surfaced but never blocking. */
+  advisory: InvariantIssue[];
+  /** Whether the escape hatch downgraded the floor for this spec. */
+  downgraded: boolean;
+}
+
+/**
+ * Run `assertGameInvariants` and split its issues into the blocking
+ * completability floor vs advisory polish, honouring the spec's escape
+ * hatches. Pure — no I/O beyond the `deps.listFiles` the caller supplies.
+ *
+ * This is the function `done` composes: it re-derives the static design-
+ * completability verdict over the current working tree and decides
+ * whether to refuse acceptance.
+ */
+export function evaluateCompletabilityFloor(
+  deps: AssertGameInvariantsDeps,
+  spec: CompletabilitySpec,
+  opts: { genre?: GameGenre } = {},
+): CompletabilityFloorResult {
+  const result = assertGameInvariants(deps, opts);
+  const completable = isCompletableSpec(spec);
+  const fatal: InvariantIssue[] = [];
+  const advisory: InvariantIssue[] = [];
+  for (const issue of result.issues) {
+    if (completable && FATAL_FLOOR_INVARIANTS.has(issue.invariant)) {
+      // Promote to error severity for the FATAL set so downstream
+      // surfaces (and the `game.invariant.*` done source) read it as a
+      // blocker, not a nudge.
+      fatal.push({ ...issue, severity: 'error' });
+    } else {
+      advisory.push(issue);
+    }
+  }
+  return {
+    blocked: fatal.length > 0,
+    fatal,
+    advisory,
+    downgraded: !completable,
+  };
+}
+
 export function makeAssertGameInvariantsTool(
   deps: AssertGameInvariantsDeps,
   _fs?: TextEditorFsCallbacks,

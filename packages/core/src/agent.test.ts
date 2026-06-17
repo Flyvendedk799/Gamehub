@@ -1612,3 +1612,50 @@ describe('generateViaAgent() — convergence-detector — Improver1 §7', () => 
     expect(convergenceSteers).toHaveLength(1);
   });
 });
+
+describe('Phase-1.7 game-feel library registration', () => {
+  /** Collect the registered tool names from the captured Agent init state. */
+  function registeredToolNames(): Set<string> {
+    const call = agentCalls[0];
+    if (!call) throw new Error('expected agent call');
+    const tools = (call.options.initialState?.tools ?? []) as Array<{ name?: string }>;
+    return new Set(tools.map((t) => t.name).filter((n): n is string => typeof n === 'string'));
+  }
+
+  it('registers list_game_feel + view_game_feel in game mode', async () => {
+    scriptedAgent = { assistantText: RESPONSE_WITH_ARTIFACT };
+    await generateViaAgent(
+      {
+        prompt: 'make a brawler',
+        history: [],
+        model: MODEL,
+        apiKey: 'sk-test',
+      },
+      {
+        gameMode: {
+          setEngine: () => {},
+          getCurrentEngine: () => 'phaser',
+          validate: () => ({ ok: true, engine: 'phaser', issues: [] }),
+        },
+      },
+    );
+    const names = registeredToolNames();
+    expect(names.has('list_game_feel')).toBe(true);
+    expect(names.has('view_game_feel')).toBe(true);
+  });
+
+  it('does NOT register the game-feel tools in design mode (no gameMode dep)', async () => {
+    scriptedAgent = { assistantText: RESPONSE_WITH_ARTIFACT };
+    await generateViaAgent({
+      prompt: 'design a landing page',
+      history: [],
+      model: MODEL,
+      apiKey: 'sk-test',
+    });
+    const names = registeredToolNames();
+    expect(names.has('list_game_feel')).toBe(false);
+    expect(names.has('view_game_feel')).toBe(false);
+    // Sanity: design mode still wires the design-library tools.
+    expect(names.has('list_design_skills')).toBe(true);
+  });
+});

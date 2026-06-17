@@ -29,6 +29,12 @@ import { VerifyResultCache, hashContent } from '../incremental-verify.js';
 import { type CoreLogger, NOOP_LOGGER } from '../logger.js';
 import { planPlaytest } from '../playtest-planner.js';
 import { diffThemeTokens } from '../theme-token-diff.js';
+import {
+  type AssertGameInvariantsDeps,
+  type CompletabilitySpec,
+  type GameGenre as InvariantGameGenre,
+  evaluateCompletabilityFloor,
+} from './assert-game-invariants.js';
 import { HEURISTIC_ADVISORY_SOURCES, runHeuristics } from './done-heuristics.js';
 import type { EditBudget } from './edit-budget.js';
 import type { TextEditorFsCallbacks } from './text-editor.js';
@@ -53,6 +59,26 @@ export type GetParentArtifactBytesFn = () => Promise<number | null> | number | n
  *  Optional — vitest paths and design / motion runs leave undefined.
  */
 export type GetToolCallCountFn = () => number;
+
+/** Phase-1.5 — host-supplied accessor for the declared GameSpec so the
+ *  `done` gate can run the STATIC design-completability floor (a fail
+ *  state, a restart path, and on-hit feedback all exist) over the current
+ *  working tree. The floor is genre/winCondition-aware: it BLOCKS for
+ *  completable genres and downgrades to advisory for sandbox/idle/
+ *  creative specs or specs that declare no fail state (`loseCondition`
+ *  '—'). Only the structural `CompletabilitySpec` slice is read; the
+ *  host passes the full `@playforge/shared` GameSpec (a superset).
+ *
+ *  Optional — when undefined (vitest paths and any host that doesn't wire
+ *  it) the floor is INERT, mirroring the pre-done counter + destructive-
+ *  edit advisory callbacks above. Wiring it in agent.ts (forward the
+ *  game-mode `getSpec` accessor into makeDoneTool) is the activation
+ *  point; until then the floor is reachable via this tool API + tests. */
+export type GetDoneGameSpecFn = () =>
+  | CompletabilitySpec
+  | undefined
+  | null
+  | Promise<CompletabilitySpec | undefined | null>;
 
 const DoneParams = Type.Object({
   summary: Type.Optional(Type.String()),
@@ -261,6 +287,23 @@ const ADVISORY_SOURCES = new Set<string>([
   ...HEURISTIC_ADVISORY_SOURCES,
 ]);
 
+/** Phase-1.5 — is this a completability-floor source, and is it the
+ *  advisory tier? Floor issues are tagged `game.invariant.fatal.<inv>`
+ *  (blocking) or `game.invariant.advisory.<inv>` (non-blocking). The
+ *  fatal tier intentionally falls through to the default fatal path so
+ *  it flips status to has_errors. */
+function isAdvisoryGameInvariantSource(source: string | undefined): boolean {
+  return source !== undefined && source.startsWith(`${GAME_INVARIANT_SOURCE_PREFIX}advisory.`);
+}
+
+/** Predicate covering BOTH the static ADVISORY_SOURCES set and the
+ *  dynamically-named advisory game-invariant sources. Used everywhere the
+ *  fatal/advisory split happens so the floor's advisory rows never trip
+ *  the fix loop. */
+function isAdvisorySource(source: string | undefined): boolean {
+  return ADVISORY_SOURCES.has(source ?? '') || isAdvisoryGameInvariantSource(source);
+}
+
 /** After this many has_errors rounds in a single run, the next done call
  *  force-accepts with a "best-effort" note. Releases the run instead of
  *  burning 30+ minutes on errors the model can't fix; the unresolved
@@ -273,6 +316,25 @@ const MAX_HAS_ERRORS_ROUNDS = 3;
  *  4th call (4 actual checks + 4 throws the model ignored). This ceiling
  *  escalates the throw message so a runaway pattern is unmistakable. */
 const MAX_TOTAL_DONE_CALLS = 6;
+
+/** Phase-1.5 — the completability floor emits its missing-invariant
+ *  issues under `game.invariant.<invariant>` sources. The ADVISORY ones
+ *  (downgraded floor + score-or-state + brawler polish) are registered
+ *  here so the fatal/advisory split below treats them like every other
+ *  non-blocking signal. The FATAL ones (fail-state/restart/feedback on a
+ *  completable game) are deliberately NOT in ADVISORY_SOURCES so they
+ *  flip status to has_errors. */
+const GAME_INVARIANT_SOURCE_PREFIX = 'game.invariant.';
+
+/** Map a `@playforge/shared` GameSpec genre to this module's invariant
+ *  GameGenre token so the genre-specific (brawler) advisory checks still
+ *  fire. Only `fighting` maps to the brawler pass today; every other
+ *  spec genre runs the four base invariants with no genre-specific add-
+ *  ons. Returns undefined when there's no genre-specific mapping. */
+function mapSpecGenreToInvariantGenre(specGenre: string): InvariantGameGenre | undefined {
+  if (specGenre === 'fighting') return 'brawler';
+  return undefined;
+}
 
 /**
  * Run the static + optional runtime checks on a single file and return
@@ -461,7 +523,7 @@ export function makeVerifyArtifactTool(
         ...(artifactType !== undefined ? { artifactType } : {}),
         previousContent,
       });
-      const fatal = result.errors.filter((e) => !ADVISORY_SOURCES.has(e.source ?? ''));
+      const fatal = result.errors.filter((e) => !isAdvisorySource(e.source));
       const status: VerifyDetails['status'] = fatal.length === 0 ? 'ok' : 'has_errors';
       if (status === 'ok' && editBudget !== undefined) editBudget.reset();
       const summary =
@@ -512,6 +574,7 @@ export function makeDoneTool(
   userPrompt?: string,
   getValidateGameSceneCount?: GetToolCallCountFn,
   getPlaytestGameCount?: GetToolCallCountFn,
+  getGameSpec?: GetDoneGameSpecFn,
 ): AgentTool<typeof DoneParams, DoneDetails> {
   // Per-tool-instance state. `makeDoneTool` is called once per `Agent`
   // construction (see generateViaAgent), so these counters are naturally
@@ -685,11 +748,77 @@ export function makeDoneTool(
           });
         }
       }
+      // Phase-1.5 — STATIC design-completability floor. Distinct from
+      // runtimeVerify (the DYNAMIC boot check above): runtimeVerify
+      // catches "the game crashes on load"; the floor catches "the game
+      // loads fine but can never be lost / restarted / gives no on-hit
+      // feedback" — a fail-state-less toy shipping under a green gate.
+      // Only runs in game mode AND only when the host wired getGameSpec;
+      // inert otherwise (mirrors the pre-done counter gate). The floor
+      // re-reads the CURRENT working tree via deps.fs so it reflects the
+      // artifact as it stands at done-time, not a stale snapshot.
+      if (artifactType === 'game' && getGameSpec !== undefined) {
+        try {
+          const spec = await getGameSpec();
+          if (spec !== undefined && spec !== null) {
+            const invariantDeps: AssertGameInvariantsDeps = {
+              listFiles: () => {
+                const out: Array<{ path: string; content: string }> = [];
+                // Walk every staged sibling plus the entry file. Best-
+                // effort: a single-file pattern just yields the one file.
+                const paths = new Set<string>([path]);
+                try {
+                  for (const f of fs.listDir('.')) paths.add(f);
+                } catch {
+                  /* single-file pattern — no siblings to gather. */
+                }
+                for (const p of paths) {
+                  const v = fs.view(p);
+                  if (v !== null) out.push({ path: p, content: v.content });
+                }
+                return out;
+              },
+            };
+            const invariantGenre = mapSpecGenreToInvariantGenre(spec.genre);
+            const floor = evaluateCompletabilityFloor(
+              invariantDeps,
+              spec,
+              invariantGenre !== undefined ? { genre: invariantGenre } : {},
+            );
+            for (const issue of floor.fatal) {
+              errors.push({
+                message: issue.message,
+                source: `${GAME_INVARIANT_SOURCE_PREFIX}fatal.${issue.invariant}`,
+              });
+            }
+            for (const issue of floor.advisory) {
+              errors.push({
+                message: issue.message,
+                source: `${GAME_INVARIANT_SOURCE_PREFIX}advisory.${issue.invariant}`,
+              });
+            }
+            if (floor.blocked) {
+              logger.warn('[done] step=invariant_floor.blocked', {
+                genre: spec.genre,
+                missing: floor.fatal.map((i) => i.invariant),
+              });
+            } else if (floor.downgraded && floor.advisory.length > 0) {
+              logger.info('[done] step=invariant_floor.downgraded', {
+                genre: spec.genre,
+                advisory: floor.advisory.length,
+              });
+            }
+          }
+        } catch {
+          // Best-effort — a thrown getGameSpec or fs walk skips the floor
+          // rather than failing the whole done call.
+        }
+      }
       // Split fatal vs advisory. Only fatal errors flip status to has_errors
       // and drive the fix loop; advisories ride along in the response so the
       // model can address them opportunistically without a forced re-run.
-      const fatal = errors.filter((e) => !ADVISORY_SOURCES.has(e.source ?? ''));
-      const advisory = errors.filter((e) => ADVISORY_SOURCES.has(e.source ?? ''));
+      const fatal = errors.filter((e) => !isAdvisorySource(e.source));
+      const advisory = errors.filter((e) => isAdvisorySource(e.source));
       const naturalStatus: DoneDetails['status'] = fatal.length === 0 ? 'ok' : 'has_errors';
 
       // Force-accept after MAX_HAS_ERRORS_ROUNDS — releases the run instead

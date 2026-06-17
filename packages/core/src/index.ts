@@ -117,7 +117,18 @@ export {
   type DoneError,
   type VerifyDetails,
   type DoneRuntimeVerifier,
+  type GetDoneGameSpecFn,
 } from './tools/done.js';
+export {
+  assertGameInvariants,
+  evaluateCompletabilityFloor,
+  isCompletableSpec,
+  FATAL_FLOOR_INVARIANTS,
+  type CompletabilitySpec,
+  type CompletabilityFloorResult,
+  type GameInvariant,
+  type InvariantIssue,
+} from './tools/assert-game-invariants.js';
 export {
   makeRenderPreviewTool,
   type RenderPreviewer,

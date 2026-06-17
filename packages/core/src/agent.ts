@@ -91,6 +91,10 @@ import {
   makeViewFrameTool,
 } from './tools/design-library.js';
 import {
+  makeListGameFeelTool,
+  makeViewGameFeelTool,
+} from './tools/game-feel-library.js';
+import {
   type DoneRuntimeVerifier,
   makeDoneTool,
   makeVerifyArtifactTool,
@@ -1134,6 +1138,20 @@ export async function generateViaAgent(
   defaultTools.push(
     makeViewDesignSkillTool(deps.userSkills) as unknown as AgentTool<TSchema, unknown>,
   );
+  // Phase-1.7 — game-feel (JUICE) library. The game-mode analogue of the
+  // design library above: surfaces the bundled `game-skills/*` snippets
+  // (previously DEAD) — both the authored feel primitives (screen-shake /
+  // hitstop / particle-burst / squash-&-stretch / score-pop / screen-flash /
+  // camera-kick / knockback, one per engine) and the pre-existing engine
+  // scaffolding. Pure registry lookups, no fs/host deps (same as the design
+  // library), so they sit OUTSIDE the `deps.fs` block and register on every
+  // game-mode run regardless of headless/no-fs paths. The workflow's polish
+  // step (game-workflow.v1.txt §6) directs the agent here so generated games
+  // stop feeling flat. NOT registered in design / motion mode.
+  if (isGameMode) {
+    defaultTools.push(makeListGameFeelTool() as unknown as AgentTool<TSchema, unknown>);
+    defaultTools.push(makeViewGameFeelTool() as unknown as AgentTool<TSchema, unknown>);
+  }
   // gameplan §A5 / motion-graphics-plan §3 — view_frame and
   // read_design_system are design-mode-only. The game- and motion-mode
   // toolsets omit them (their guidance does not apply to canvas/WebGL/
@@ -1279,6 +1297,10 @@ export async function generateViaAgent(
         input.prompt,
         () => validateGameSceneCount,
         () => playtestGameCount,
+        // #1.5 activation — forward the declared game spec so the completability
+        // invariant floor (fail-state / restart / on-hit feedback) actually
+        // BLOCKS `done` for completable genres instead of staying inert.
+        deps.gameMode?.getSpec,
       ) as unknown as AgentTool<TSchema, unknown>,
     );
     // gameplan §A5 — validate_game_scene needs both fs (to read the bundle)
