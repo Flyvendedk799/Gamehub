@@ -163,6 +163,32 @@ const collabRooms = new Map<string, Set<any>>();
 const FREE_TIER_CREDITS = 100;
 const CREDITS_PER_RUN = 10;
 
+/**
+ * Sentinel thrown by the reservation transaction when the user's balance can't
+ * cover one run. The generate route catches it, marks the just-created run
+ * failed, and replies 402. A dedicated class (vs. a plain Error) lets the route
+ * distinguish "insufficient credits" from a genuine DB/transaction failure.
+ */
+export class InsufficientCreditsError extends Error {
+  constructor(readonly balance: number, readonly required: number) {
+    super('insufficient_credits');
+    this.name = 'InsufficientCreditsError';
+  }
+}
+
+/**
+ * Pure affordability decision — extracted so it can be unit-tested without a
+ * live Postgres. Returns whether `balance` covers one run plus the 402 body the
+ * route sends when it doesn't. The reservation transaction and this helper must
+ * agree on the threshold (`balance < required`).
+ */
+export function decideAffordability(
+  balance: number,
+  required: number = CREDITS_PER_RUN,
+): { ok: boolean; balance: number; required: number } {
+  return { ok: balance >= required, balance, required };
+}
+
 export function buildServer(deps: ServerDeps): FastifyInstance {
   const app = Fastify({ logger: false });
   void app.register(websocketPlugin);
@@ -470,15 +496,44 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       }
     }
 
-    // Credit pre-check — reject if balance is too low to cover one run.
+    const run = await deps.runRepo.create({ projectId: project.id, userId: user.userId });
+
+    // Atomic credit RESERVATION (replaces the old non-atomic balance pre-check).
+    // A per-user Postgres advisory lock serializes concurrent generate calls so
+    // two runs can't both read an affordable balance and overspend. We insert a
+    // negative 'reservation' row keyed on run.id (idempotent via the partial
+    // unique 'credit_ledger_reservation_key'), so the cost is committed up front.
+    // On success the worker does NOT debit again; on failure it refunds the row.
     if (deps.authDb) {
-      const balance = await getUserBalance(user.userId);
-      if (balance < CREDITS_PER_RUN) {
-        return reply.code(402).send({ error: 'insufficient_credits', balance, required: CREDITS_PER_RUN });
+      try {
+        const { schema: s } = await import('@playforge/db');
+        await deps.authDb.transaction(async (tx) => {
+          await tx.execute(drizzleSql`SELECT pg_advisory_xact_lock(hashtext(${user.userId}))`);
+          const [row] = await tx
+            .select({ bal: drizzleSql<number>`COALESCE(SUM(${s.creditLedger.delta}), 0)` })
+            .from(s.creditLedger)
+            .where(drizzleEq(s.creditLedger.userId, user.userId));
+          const balance = Number(row?.bal ?? 0);
+          if (!decideAffordability(balance).ok) {
+            throw new InsufficientCreditsError(balance, CREDITS_PER_RUN);
+          }
+          await tx
+            .insert(s.creditLedger)
+            .values({ userId: user.userId, delta: -CREDITS_PER_RUN, reason: 'reservation', runId: run.id })
+            .onConflictDoNothing();
+        });
+      } catch (err) {
+        // Insufficient balance → mark the just-created run failed so it isn't
+        // left dangling as 'queued', and reply 402. Any other error is a real
+        // failure: also fail the run and surface a 500.
+        await deps.runRepo.updateStatus(run.id, 'failed').catch(() => {});
+        if (err instanceof InsufficientCreditsError) {
+          return reply.code(402).send({ error: 'insufficient_credits', balance: err.balance, required: err.required });
+        }
+        console.error(`[generate] credit reservation failed for run ${run.id}:`, err);
+        return reply.code(500).send({ error: 'reservation_failed' });
       }
     }
-
-    const run = await deps.runRepo.create({ projectId: project.id, userId: user.userId });
 
     // Persist the user's prompt to chat history so it survives page reloads.
     if (deps.chatRepo) {

@@ -88,11 +88,18 @@ export async function runGeneration(
   const validateScene = ports.validateScene ?? PASS_VALIDATOR;
   const tree = new WorkingTree(req.initialFiles);
 
-  // Hard run ceiling — abort cleanly when a token budget is set.
-  // We can't observe tokens mid-stream from AgentEvent, so we map maxTokens to
-  // a proportional maxToolCalls cap: at ~3000 tokens/tool-call (typical game run),
-  // 100k tokens ≈ 33 tool calls; 200k ≈ 67. Plus a wall-clock guard of 20 min.
+  // Hard run ceiling (#18) — abort cleanly when a token budget is set.
+  // The agent emits a `turn_end` AgentEvent after each model turn carrying the
+  // assistant message's cumulative `usage` (input/output/totalTokens). We watch
+  // those in wrappedOnEvent below and call tokenAbortController.abort() the first
+  // time (input + output) crosses ports.maxTokens, so the agent stops cleanly via
+  // its abort signal instead of running to the budget's edge unobserved.
+  //
+  // maxToolCalls / maxWallClockMs remain as belt-and-suspenders proxies in case a
+  // provider streams without usage on turn_end: we still derive a tool-call cap
+  // from the token budget and keep a 20-minute wall.
   let tokenAbortController: AbortController | undefined;
+  let aborted = false;
   if (ports.maxTokens !== undefined) {
     tokenAbortController = new AbortController();
   }
@@ -108,7 +115,25 @@ export async function runGeneration(
     spec: null,
   };
 
-  const wrappedOnEvent = ports.onEvent;
+  // Wrap the caller's event sink so we can meter token usage from `turn_end`
+  // events and trip the abort signal once the budget is exceeded. When no token
+  // ceiling is set, this is a transparent pass-through.
+  const wrappedOnEvent: ((event: AgentEvent) => void) | undefined =
+    ports.onEvent === undefined && tokenAbortController === undefined
+      ? undefined
+      : (event: AgentEvent) => {
+          if (tokenAbortController && !aborted && event.type === 'turn_end') {
+            const usage = (event.message as { usage?: { input?: number; output?: number } }).usage;
+            if (usage) {
+              const used = (usage.input ?? 0) + (usage.output ?? 0);
+              if (used > ports.maxTokens!) {
+                aborted = true;
+                tokenAbortController.abort();
+              }
+            }
+          }
+          ports.onEvent?.(event);
+        };
 
   const generateImageAsset = makeAssetGenerator({
     apiKey: req.apiKey,

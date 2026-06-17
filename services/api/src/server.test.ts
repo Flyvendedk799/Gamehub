@@ -6,7 +6,7 @@ import { InMemoryHubRepo } from './hub-repo';
 import { InMemoryPublishRepo } from './publish-repo';
 import { InMemoryProjectRepo } from './repo';
 import { InMemoryRunRepo } from './run-repo';
-import { buildServer, type EnqueueFn } from './server';
+import { buildServer, decideAffordability, type EnqueueFn, type ServerDeps } from './server';
 
 function makeApp(overrides?: {
   bus?: InstanceType<typeof InMemoryEventBus>;
@@ -675,5 +675,130 @@ describe('concurrent run cap', () => {
       payload: { email: 'x@example.com', password: 'pass1234' },
     });
     expect(res.statusCode).toBe(503);
+  });
+});
+
+describe('decideAffordability (pure)', () => {
+  it('is affordable exactly at the run cost', () => {
+    expect(decideAffordability(10, 10)).toEqual({ ok: true, balance: 10, required: 10 });
+  });
+  it('is not affordable just below the run cost', () => {
+    expect(decideAffordability(9, 10)).toEqual({ ok: false, balance: 9, required: 10 });
+  });
+  it('defaults required to CREDITS_PER_RUN (10)', () => {
+    expect(decideAffordability(100)).toMatchObject({ ok: true, required: 10 });
+    expect(decideAffordability(5)).toMatchObject({ ok: false, required: 10 });
+  });
+});
+
+/**
+ * Minimal drizzle-Db stub for the credit-reservation transaction. Records the
+ * rows the route inserts and answers the balance SUM from a seeded starting
+ * balance plus any inserted deltas — enough to drive the 402 path and the
+ * idempotent-reservation no-op without a live Postgres.
+ */
+function makeFakeAuthDb(startingBalance: number): {
+  authDb: ServerDeps['authDb'];
+  inserted: Array<{ reason: string; delta: number; runId?: string }>;
+} {
+  const inserted: Array<{ reason: string; delta: number; runId?: string }> = [];
+  const balance = () => startingBalance + inserted.reduce((n, r) => n + r.delta, 0);
+
+  const tx = {
+    execute: async () => undefined,
+    select: () => ({
+      from: () => ({
+        where: async () => [{ bal: balance() }],
+      }),
+    }),
+    insert: () => ({
+      values: (row: { reason: string; delta: number; runId?: string }) => ({
+        onConflictDoNothing: async () => {
+          // Idempotent on (run_id) where reason='reservation': drop a duplicate.
+          const dup = inserted.some((r) => r.reason === row.reason && r.runId === row.runId);
+          if (!dup) inserted.push(row);
+        },
+      }),
+    }),
+  };
+
+  const authDb = {
+    transaction: async (fn: (t: typeof tx) => Promise<void>) => {
+      await fn(tx);
+    },
+  } as unknown as ServerDeps['authDb'];
+
+  return { authDb, inserted };
+}
+
+describe('credit reservation (#6)', () => {
+  async function makeProjectAndGenerate(authDb: ServerDeps['authDb']) {
+    const repo = new InMemoryProjectRepo();
+    const runRepo = new InMemoryRunRepo();
+    const project = await repo.create({ ownerId: 'alice', name: 'Credit Test', engine: 'phaser' });
+    const enqueued: string[] = [];
+    const app = buildServer({
+      repo,
+      auth: new HeaderAuthenticator(),
+      bus: new InMemoryEventBus(),
+      runRepo,
+      enqueue: async (input) => { enqueued.push(input.runId); },
+      ...(authDb !== undefined ? { authDb } : {}),
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${project.id}/generate`,
+      headers: AS_ALICE,
+      payload: { prompt: 'make a game' },
+    });
+    return { res, runRepo, enqueued };
+  }
+
+  it('reserves the run cost and enqueues when the balance is sufficient', async () => {
+    const { authDb, inserted } = makeFakeAuthDb(100);
+    const { res, enqueued } = await makeProjectAndGenerate(authDb);
+    expect(res.statusCode).toBe(202);
+    expect(enqueued).toHaveLength(1);
+    // Exactly one negative reservation row was written for this run.
+    const reservations = inserted.filter((r) => r.reason === 'reservation');
+    expect(reservations).toHaveLength(1);
+    expect(reservations[0]).toMatchObject({ delta: -10, runId: enqueued[0] });
+  });
+
+  it('returns 402 + marks the run failed when the balance is too low', async () => {
+    const { authDb } = makeFakeAuthDb(5);
+    const { res, runRepo, enqueued } = await makeProjectAndGenerate(authDb);
+    expect(res.statusCode).toBe(402);
+    expect(res.json()).toMatchObject({ error: 'insufficient_credits', balance: 5, required: 10 });
+    // No enqueue on the insufficient path.
+    expect(enqueued).toHaveLength(0);
+    // The just-created run was marked failed (not left dangling as 'queued').
+    const stats = await runRepo.getStats();
+    expect(stats.failed).toBe(1);
+    expect(stats.active).toBe(0);
+  });
+
+  it('reservation insert is idempotent — a duplicate runId is a no-op', async () => {
+    const { authDb, inserted } = makeFakeAuthDb(100);
+    // First reservation.
+    await makeProjectAndGenerate(authDb);
+    const firstRunId = inserted.find((r) => r.reason === 'reservation')?.runId;
+    expect(firstRunId).toBeDefined();
+    // Re-running onConflictDoNothing with the same runId must not add a second row.
+    await authDb!.transaction(async (tx) => {
+      await (tx as unknown as {
+        insert: () => { values: (r: unknown) => { onConflictDoNothing: () => Promise<void> } };
+      })
+        .insert()
+        .values({ reason: 'reservation', delta: -10, runId: firstRunId })
+        .onConflictDoNothing();
+    });
+    expect(inserted.filter((r) => r.reason === 'reservation')).toHaveLength(1);
+  });
+
+  it('skips reservation entirely when authDb is undefined (tests/dev)', async () => {
+    const { res, enqueued } = await makeProjectAndGenerate(undefined);
+    expect(res.statusCode).toBe(202);
+    expect(enqueued).toHaveLength(1);
   });
 });

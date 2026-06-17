@@ -18,6 +18,12 @@ function columnNames(table: Parameters<typeof getTableConfig>[0]): string[] {
   return getTableConfig(table).columns.map((c) => c.name);
 }
 
+function indexNames(table: Parameters<typeof getTableConfig>[0]): string[] {
+  return getTableConfig(table)
+    .indexes.map((i) => i.config.name)
+    .filter((n): n is string => n !== undefined);
+}
+
 describe('schema', () => {
   it('users has the native-auth + profile columns', () => {
     const cfg = getTableConfig(users);
@@ -79,6 +85,26 @@ describe('schema', () => {
     expect(columnNames(creditLedger)).toEqual(
       expect.arrayContaining(['user_id', 'delta', 'reason']),
     );
+  });
+
+  it('credit_ledger carries the reservation/refund idempotency + balance indexes', () => {
+    expect(indexNames(creditLedger)).toEqual(
+      expect.arrayContaining([
+        'credit_ledger_user_event_key',
+        'credit_ledger_reservation_key',
+        'credit_ledger_refund_key',
+        'credit_ledger_user_idx',
+      ]),
+    );
+  });
+
+  it('snapshots enforce a unique (project_id, seq) sequence', () => {
+    const cfg = getTableConfig(snapshots);
+    const seqKey = cfg.indexes.find((i) => i.config.name === 'snapshots_project_seq_key');
+    expect(seqKey).toBeDefined();
+    expect(seqKey?.config.unique).toBe(true);
+    // The redundant non-unique index was dropped in favour of the unique one.
+    expect(indexNames(snapshots)).not.toContain('snapshots_project_seq_idx');
   });
 
   it('engine enum is web-only (three + phaser)', () => {

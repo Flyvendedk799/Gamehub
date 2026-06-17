@@ -96,3 +96,57 @@ describe('runGeneration (offline E2E)', () => {
     expect(new TextDecoder().decode(bytes)).toBe('scene()');
   });
 });
+
+describe('runGeneration token ceiling (#18)', () => {
+  /** Builds a turn_end AgentEvent carrying a usage block (the real assistant
+   *  message shape the agent emits after each model turn). */
+  function turnEnd(input: number, output: number): AgentEvent {
+    return {
+      type: 'turn_end',
+      message: { usage: { input, output, cacheRead: 0, cacheWrite: 0, totalTokens: input + output } },
+      toolResults: [],
+    } as unknown as AgentEvent;
+  }
+
+  it('aborts the run signal once turn_end usage exceeds maxTokens', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+
+    // Agent emits two turns: the first under budget, the second over. After the
+    // second turn_end the signal should already be aborted.
+    let signalAbortedAtSecondTurn = false;
+    const meteredAgent: GenerateFn = async (input, deps) => {
+      deps.onEvent?.(turnEnd(40_000, 5_000)); // 45k — under 100k budget
+      expect(input.signal?.aborted ?? false).toBe(false);
+      deps.onEvent?.(turnEnd(90_000, 20_000)); // 110k cumulative — over budget
+      signalAbortedAtSecondTurn = input.signal?.aborted ?? false;
+      await deps.fs?.create('index.html', RED_SQUARE);
+      return emptyOutput('hit ceiling');
+    };
+
+    await runGeneration(
+      { prompt: 'big game', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      { store, generate: meteredAgent, maxTokens: 100_000 },
+    );
+
+    expect(signalAbortedAtSecondTurn).toBe(true);
+  });
+
+  it('does not abort when usage stays under maxTokens', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    let abortedSeen = false;
+    const underBudgetAgent: GenerateFn = async (input, deps) => {
+      deps.onEvent?.(turnEnd(10_000, 2_000));
+      deps.onEvent?.(turnEnd(20_000, 3_000));
+      abortedSeen = input.signal?.aborted ?? false;
+      await deps.fs?.create('index.html', RED_SQUARE);
+      return emptyOutput('ok');
+    };
+
+    await runGeneration(
+      { prompt: 'small game', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      { store, generate: underBudgetAgent, maxTokens: 100_000 },
+    );
+
+    expect(abortedSeen).toBe(false);
+  });
+});

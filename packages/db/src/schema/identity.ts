@@ -9,6 +9,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigserial,
+  index,
   integer,
   pgEnum,
   pgTable,
@@ -87,6 +88,18 @@ export const creditLedger = pgTable(
     userCreatedIdx: uniqueIndex('credit_ledger_user_event_key')
       .on(t.userId, t.stripeEventId)
       .where(sql`${t.stripeEventId} is not null`),
+    // One reservation row per run — makes the enqueue-time RESERVE insert
+    // idempotent under concurrent/retried generate calls.
+    reservationKey: uniqueIndex('credit_ledger_reservation_key')
+      .on(t.runId)
+      .where(sql`${t.reason} = 'reservation'`),
+    // One refund row per run — a failed run refunds exactly once even if the
+    // worker 'failed' handler and the in-process .catch both fire.
+    refundKey: uniqueIndex('credit_ledger_refund_key')
+      .on(t.runId)
+      .where(sql`${t.reason} = 'refund'`),
+    // Covering index for the per-user balance SUM(delta).
+    userIdx: index('credit_ledger_user_idx').on(t.userId),
   }),
 );
 

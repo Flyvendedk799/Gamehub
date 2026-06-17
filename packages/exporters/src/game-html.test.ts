@@ -128,6 +128,66 @@ describe('exportGameHtml', () => {
     );
   });
 
+  it('injects the hardened anti-exfil CSP meta (#13) and denies network egress', async () => {
+    const dest = join(workDir, 'game.html');
+    const indexHtml = `<!doctype html><html><head>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
+</head><body><canvas id="game"></canvas>
+<script type="module" src="src/main.js"></script>
+</body></html>`;
+    await exportGameHtml(dest, {
+      files: [
+        { path: 'index.html', content: indexHtml },
+        { path: 'src/main.js', content: "import * as THREE from 'three';" },
+      ],
+      engine: 'three',
+    });
+    const written = readFileSync(dest, 'utf8');
+    // CSP meta present.
+    expect(written).toMatch(
+      /<meta\s+http-equiv="Content-Security-Policy"\s+content="[^"]*"\s*>/i,
+    );
+    // No network egress allowed.
+    expect(written).toContain("connect-src 'none'");
+    // default-src locked down.
+    expect(written).toContain("default-src 'none'");
+    // img-src must NOT contain a wildcard.
+    const cspMatch = written.match(
+      /<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"/i,
+    );
+    expect(cspMatch).not.toBeNull();
+    const policy = cspMatch?.[1] ?? '';
+    const imgDirective = policy.split(';').find((d) => d.trim().startsWith('img-src')) ?? '';
+    expect(imgDirective).not.toContain('*');
+    expect(imgDirective).toContain("'self'");
+    // The engine is inlined (no live CDN), so script-src must NOT pin a CDN host.
+    const scriptDirective =
+      policy.split(';').find((d) => d.trim().startsWith('script-src')) ?? '';
+    expect(scriptDirective).not.toContain('cdn.jsdelivr.net');
+    expect(scriptDirective).toContain("'unsafe-inline'");
+  });
+
+  it('strips an author-supplied CSP meta and overrides it with the hardened policy', async () => {
+    const dest = join(workDir, 'game.html');
+    const indexHtml = `<!doctype html><html><head>
+<meta http-equiv="Content-Security-Policy" content="default-src *; connect-src https://evil.example img-src *">
+<script type="importmap">{"imports":{"phaser":"https://cdn.jsdelivr.net/npm/phaser@3.88.0/dist/phaser.esm.js"}}</script>
+</head><body><canvas id="game"></canvas></body></html>`;
+    await exportGameHtml(dest, {
+      files: [{ path: 'index.html', content: indexHtml }],
+      engine: 'phaser',
+    });
+    const written = readFileSync(dest, 'utf8');
+    // The weak author policy must be gone.
+    expect(written).not.toContain('default-src *');
+    expect(written).not.toContain('https://evil.example');
+    // Exactly one CSP meta remains — ours.
+    const cspMetas = written.match(/http-equiv="Content-Security-Policy"/gi) ?? [];
+    expect(cspMetas).toHaveLength(1);
+    expect(written).toContain("connect-src 'none'");
+    expect(written).toContain("default-src 'none'");
+  });
+
   it('surfaces a clear error when the engine fetch fails (network down)', async () => {
     vi.unstubAllGlobals();
     vi.stubGlobal(

@@ -71,6 +71,56 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * Hardened CSP for the exported single-file game (#13). Mirrors the
+ * anti-exfil boundary the served routes enforce so an offline export can
+ * never become a softer attack surface than the hosted play URL.
+ *
+ * The engine library is fetched at export time and inlined as a `data:`
+ * URL (see `engineDataUrl` below) — the export keeps NO live CDN
+ * reference — so `script-src` deliberately omits any CDN host. Inline
+ * scripts plus `data:`/`blob:` cover the inlined modules; everything else
+ * (network egress in particular) is denied: `connect-src 'none'`.
+ */
+const EXPORT_CSP = [
+  "default-src 'none'",
+  "script-src 'unsafe-inline' data: blob:",
+  "style-src 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "media-src 'self' data: blob:",
+  'font-src data:',
+  "connect-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+].join('; ');
+
+const CSP_META_TAG = `<meta http-equiv="Content-Security-Policy" content="${EXPORT_CSP}">`;
+
+/**
+ * Remove every author/generated CSP `<meta http-equiv>` (case-insensitive,
+ * attribute order independent) so generated game code can't weaken the
+ * policy, then inject our hardened tag at the very start of `<head>`. If no
+ * `<head>` exists, fall back to inserting right after `<html ...>` (or at
+ * the top of the document).
+ */
+function applyExportCsp(html: string): string {
+  // Strip any existing CSP meta — match a <meta ...> whose http-equiv is
+  // Content-Security-Policy, regardless of attribute ordering.
+  const cspMetaRegex =
+    /<meta\b[^>]*\bhttp-equiv\s*=\s*["']\s*content-security-policy\s*["'][^>]*>\s*/gi;
+  let out = html.replace(cspMetaRegex, '');
+
+  const headOpen = /<head\b[^>]*>/i;
+  if (headOpen.test(out)) {
+    return out.replace(headOpen, (match) => `${match}\n${CSP_META_TAG}`);
+  }
+  const htmlOpen = /<html\b[^>]*>/i;
+  if (htmlOpen.test(out)) {
+    return out.replace(htmlOpen, (match) => `${match}\n${CSP_META_TAG}`);
+  }
+  return `${CSP_META_TAG}\n${out}`;
+}
+
 export async function buildGameHtml(opts: ExportGameHtmlOptions): Promise<string> {
   if (opts.engine !== 'three' && opts.engine !== 'phaser') {
     throw new CodesignError(
@@ -182,6 +232,11 @@ export async function buildGameHtml(opts: ExportGameHtmlOptions): Promise<string
   // applies once everything is inlined — strip it so the file: URL
   // doesn't try to resolve relatives against the protocol.
   html = html.replace(/<base\s+href=["'][^"']*["']\s*\/?\s*>\s*/i, '');
+
+  // 4. Enforce the anti-exfil CSP boundary (#13): strip any author/generated
+  //    CSP meta so the game can't weaken the policy, then inject our locked
+  //    one. Done last so it survives all prior rewrites.
+  html = applyExportCsp(html);
 
   return html;
 }

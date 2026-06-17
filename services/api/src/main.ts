@@ -19,7 +19,7 @@
  *   BLOB_DIR            local blob-store root (default: .playforge-blobs)
  */
 import { Queue } from 'bullmq';
-import { createDb } from '@playforge/db';
+import { createDb, schema } from '@playforge/db';
 import { InMemoryEventBus, RedisEventBus, type EventBus } from '@playforge/bus';
 import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
 import { enqueueRun } from '../../worker/src/queue';
@@ -29,6 +29,9 @@ import { DrizzleChatRepo, DrizzleProjectRepo, DrizzleRunRepo, DrizzleSnapshotRep
 import { DrizzleHubRepo } from './hub-repo';
 import { DrizzlePublishRepo } from './publish-repo';
 import { buildServer, type EnqueueFn } from './server';
+
+/** Run cost in credits — must match server.ts and worker/main.ts. */
+const CREDITS_PER_RUN = 10;
 
 function requireEnv(name: string): string {
   const val = process.env[name];
@@ -127,6 +130,16 @@ async function main() {
     }).catch(async (err: unknown) => {
       console.error(`[run:${runId}] generation failed:`, err);
       await runRepo.updateStatus(runId, 'failed').catch(() => {});
+      // Refund the enqueue-time reservation so a failed run costs nothing. This
+      // mirrors the worker.on('failed') refund for the no-Redis in-process path.
+      // Idempotent via the partial unique 'credit_ledger_refund_key'.
+      await db
+        .insert(schema.creditLedger)
+        .values({ userId, delta: CREDITS_PER_RUN, reason: 'refund', runId })
+        .onConflictDoNothing()
+        .catch((refundErr: unknown) => {
+          console.error(`[run:${runId}] credit refund failed:`, refundErr);
+        });
     });
   };
 

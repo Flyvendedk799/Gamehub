@@ -116,14 +116,14 @@ async function main() {
 
       const manifestKey = result.snapshot.manifestKey;
 
-      // Compute next chat seq atomically enough for single-worker concurrency.
-      const [seqRow] = await db
-        .select({ val: sql<number>`COALESCE(MAX(${schema.chatMessages.seq}), -1)` })
-        .from(schema.chatMessages)
-        .where(eq(schema.chatMessages.projectId, projectId));
-      const nextSeq = (seqRow?.val ?? -1) + 1;
-
       if (result.pausedContinuation) {
+        // Compute next chat seq atomically enough for single-worker concurrency.
+        const [seqRow] = await db
+          .select({ val: sql<number>`COALESCE(MAX(${schema.chatMessages.seq}), -1)` })
+          .from(schema.chatMessages)
+          .where(eq(schema.chatMessages.projectId, projectId));
+        const nextSeq = (seqRow?.val ?? -1) + 1;
+
         // Agent paused at a safe boundary. Persist continuation state + chat row.
         await Promise.all([
           db
@@ -146,44 +146,98 @@ async function main() {
             payload: { runId, manifestKey },
           }),
         ]);
+
+        // A paused run is non-terminal: it is superseded by a fresh resume run
+        // (new runId) that reserves its own cost at enqueue. Refund THIS run's
+        // enqueue-time reservation so a pause→resume cycle costs CREDITS_PER_RUN
+        // exactly once (restoring the pre-reservation "paused runs cost 0"
+        // semantics), not twice. Idempotent via the 'credit_ledger_refund_key'
+        // partial unique, exactly like the worker.on('failed') refund.
+        const pausedUserId = job.data.userId;
+        if (pausedUserId) {
+          await db
+            .insert(schema.creditLedger)
+            .values({ userId: pausedUserId, delta: CREDITS_PER_RUN, reason: 'refund', runId })
+            .onConflictDoNothing()
+            .catch((refundErr: unknown) => {
+              console.error(`[worker] paused-run refund failed for run ${runId}:`, refundErr);
+            });
+        }
+
         console.log(`[worker] paused job ${job.id} run=${runId} manifest=${manifestKey}`);
         return { manifestKey, paused: true };
       }
 
-      // Compute next snapshot seq for this project.
-      const [snapSeqRow] = await db
-        .select({ val: sql<number>`COALESCE(MAX(${schema.snapshots.seq}), -1)` })
-        .from(schema.snapshots)
-        .where(eq(schema.snapshots.projectId, projectId));
-      const nextSnapSeq = (snapSeqRow?.val ?? -1) + 1;
+      // ── Transactional completion write (#9) ────────────────────────────────
+      // All post-agent state lands in ONE transaction so a partial failure can't
+      // strand a finished run: either the snapshot row, run→completed, project
+      // HEAD advance, and chat row all commit, or none do (and the run stays
+      // non-terminal for the worker.on('failed') refund/retry path to handle).
+      //
+      // Idempotency: a BullMQ retry of an ALREADY-completed run must not insert a
+      // duplicate snapshot. We SELECT … FOR UPDATE the run row first; if it is
+      // already 'completed', we short-circuit. Snapshot-seq is allocated under a
+      // FOR UPDATE lock on the project row, and we retry once on the off chance a
+      // concurrent writer wins the (project_id, seq) UNIQUE race.
+      const completedManifestKey = await db.transaction(async (tx) => {
+        // Lock the run row; short-circuit a retry of an already-completed run.
+        const [runRow] = await tx
+          .select({ status: schema.runs.status, existingManifest: schema.runs.snapshotManifestKey })
+          .from(schema.runs)
+          .where(eq(schema.runs.id, runId))
+          .for('update');
+        if (runRow?.status === 'completed') {
+          console.log(`[worker] run=${runId} already completed — skipping duplicate write`);
+          return runRow.existingManifest ?? manifestKey;
+        }
 
-      // Fetch parent snapshot id (for the DAG chain).
-      const [projectRow] = await db
-        .select({ currentSnapshotId: schema.projects.currentSnapshotId })
-        .from(schema.projects)
-        .where(eq(schema.projects.id, projectId));
-      const parentSnapshotId = projectRow?.currentSnapshotId ?? null;
+        // Lock the project row so snapshot-seq allocation + HEAD advance are
+        // serialized against any concurrent run on the same project.
+        const [projectRow] = await tx
+          .select({ currentSnapshotId: schema.projects.currentSnapshotId })
+          .from(schema.projects)
+          .where(eq(schema.projects.id, projectId))
+          .for('update');
+        const parentSnapshotId = projectRow?.currentSnapshotId ?? null;
 
-      // Insert immutable snapshot row.
-      const [snapshotRow] = await db
-        .insert(schema.snapshots)
-        .values({
-          projectId,
-          ...(parentSnapshotId !== null ? { parentId: parentSnapshotId } : {}),
-          seq: nextSnapSeq,
-          type: nextSnapSeq === 0 ? 'initial' : 'edit',
-          prompt,
-          ...(result.spec !== null ? { gameSpec: result.spec } : {}),
-          ...(result.engine !== null ? { engine: result.engine } : {}),
-          filesManifestKey: manifestKey,
-          filesHash: result.snapshot.filesHash,
-        })
-        .returning({ id: schema.snapshots.id });
+        // Allocate the next snapshot seq under the project-row lock; the UNIQUE
+        // (project_id, seq) is the real guard. Retry once on a unique violation.
+        let snapshotId: string | null = null;
+        for (let attempt = 0; attempt < 2 && snapshotId === null; attempt++) {
+          const [snapSeqRow] = await tx
+            .select({ val: sql<number>`COALESCE(MAX(${schema.snapshots.seq}), -1)` })
+            .from(schema.snapshots)
+            .where(eq(schema.snapshots.projectId, projectId));
+          const nextSnapSeq = (snapSeqRow?.val ?? -1) + 1 + attempt;
+          try {
+            const [snapshotRow] = await tx
+              .insert(schema.snapshots)
+              .values({
+                projectId,
+                ...(parentSnapshotId !== null ? { parentId: parentSnapshotId } : {}),
+                seq: nextSnapSeq,
+                type: nextSnapSeq === 0 ? 'initial' : 'edit',
+                prompt,
+                ...(result.spec !== null ? { gameSpec: result.spec } : {}),
+                ...(result.engine !== null ? { engine: result.engine } : {}),
+                filesManifestKey: manifestKey,
+                filesHash: result.snapshot.filesHash,
+              })
+              .returning({ id: schema.snapshots.id });
+            snapshotId = snapshotRow?.id ?? null;
+          } catch (insErr) {
+            if (attempt === 1) throw insErr; // give up after one retry
+          }
+        }
 
-      const snapshotId = snapshotRow?.id ?? null;
+        // Next chat seq, allocated inside the txn for consistency with the writes.
+        const [chatSeqRow] = await tx
+          .select({ val: sql<number>`COALESCE(MAX(${schema.chatMessages.seq}), -1)` })
+          .from(schema.chatMessages)
+          .where(eq(schema.chatMessages.projectId, projectId));
+        const nextChatSeq = (chatSeqRow?.val ?? -1) + 1;
 
-      await Promise.all([
-        db
+        await tx
           .update(schema.runs)
           .set({
             snapshotManifestKey: manifestKey,
@@ -191,8 +245,8 @@ async function main() {
             updatedAt: new Date(),
             finishedAt: new Date(),
           })
-          .where(eq(schema.runs.id, runId)),
-        db
+          .where(eq(schema.runs.id, runId));
+        await tx
           .update(schema.projects)
           .set({
             currentManifestKey: manifestKey,
@@ -200,10 +254,10 @@ async function main() {
             ...(snapshotId !== null ? { currentSnapshotId: snapshotId } : {}),
             ...(result.engine !== null ? { engine: result.engine } : {}),
           })
-          .where(eq(schema.projects.id, projectId)),
-        db.insert(schema.chatMessages).values({
+          .where(eq(schema.projects.id, projectId));
+        await tx.insert(schema.chatMessages).values({
           projectId,
-          seq: nextSeq,
+          seq: nextChatSeq,
           kind: 'artifact_delivered',
           payload: {
             runId,
@@ -211,27 +265,26 @@ async function main() {
             engine: result.engine,
             snapshotId,
           },
-        }),
-      ]);
+        });
 
-      // Deduct generation credits from the user's ledger.
-      await db.insert(schema.creditLedger).values({
-        userId: job.data.userId,
-        delta: -CREDITS_PER_RUN,
-        reason: 'generation',
-        runId,
-      }).catch((err: unknown) => {
-        console.error(`[worker] credit deduction failed for run ${runId}:`, err);
+        return manifestKey;
       });
 
-      console.log(`[worker] completed job ${job.id} run=${runId} manifest=${manifestKey}`);
-      return { manifestKey };
+      // NOTE: No credit debit here. The run cost was already RESERVED at enqueue
+      // (negative 'reservation' ledger row, keyed on runId by the API). A
+      // successful run keeps that reservation — net cost -CREDITS_PER_RUN — so
+      // debiting again would double-charge. The 'failed' handler below refunds
+      // the reservation when a run does not complete.
+
+      console.log(`[worker] completed job ${job.id} run=${runId} manifest=${completedManifestKey}`);
+      return { manifestKey: completedManifestKey };
     },
     { connection, concurrency },
   );
 
   worker.on('failed', async (job, err) => {
     const runId = job?.data.runId;
+    const userId = job?.data.userId;
     const abortKind = classifyAbortKind(err instanceof Error ? err.message : String(err));
     console.error(`[worker] job ${job?.id ?? '?'} run=${runId ?? '?'} failed (${abortKind}):`, err);
     if (runId) {
@@ -240,6 +293,20 @@ async function main() {
         .set({ status: 'failed', abortKind, updatedAt: new Date() })
         .where(eq(schema.runs.id, runId))
         .catch(() => {});
+
+      // Refund the enqueue-time reservation so a failed run costs nothing. The
+      // partial unique 'credit_ledger_refund_key' (run_id WHERE reason='refund')
+      // makes this idempotent: a BullMQ retry that ultimately fails, or both this
+      // handler and the in-process .catch firing, refunds exactly once.
+      if (userId) {
+        await db
+          .insert(schema.creditLedger)
+          .values({ userId, delta: CREDITS_PER_RUN, reason: 'refund', runId })
+          .onConflictDoNothing()
+          .catch((refundErr: unknown) => {
+            console.error(`[worker] credit refund failed for run ${runId}:`, refundErr);
+          });
+      }
     }
   });
 

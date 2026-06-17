@@ -16,6 +16,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 import { users } from './identity';
@@ -81,6 +82,11 @@ export const snapshots = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    projectSeqIdx: index('snapshots_project_seq_idx').on(t.projectId, t.seq),
+    // UNIQUE on (project_id, seq): guarantees a snapshot sequence is dense and
+    // collision-free per project. A unique btree on these leading columns also
+    // serves the same (project_id) / (project_id, seq) lookups the old
+    // non-unique snapshots_project_seq_idx did, so that one is redundant and
+    // dropped (see migration 0005) rather than kept alongside.
+    projectSeqKey: uniqueIndex('snapshots_project_seq_key').on(t.projectId, t.seq),
   }),
 );
