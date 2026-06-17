@@ -148,6 +148,12 @@ export interface ServerDeps {
   snapshotRepo?: SnapshotRepo;
   /** Optional: enables /v1/auth/* routes (register, login, logout, me). */
   authDb?: import('@playforge/db').Db;
+  /**
+   * Optional: public app base URL (e.g. "https://playforge.app") used to build
+   * the exported game's "Made with Playforge — Remix this" CTA deep link (#3.2).
+   * Configurable, never hardcoded. When unset, no CTA is injected into bundles.
+   */
+  appBaseUrl?: string;
 }
 
 const ENGINES: Engine[] = ['three', 'phaser'];
@@ -850,9 +856,27 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       }),
     );
 
-    const html = await buildGameHtml({ files, engine });
+    // Inject the configurable "Made with Playforge — Remix this" CTA (#3.2)
+    // into the bundle so a shared/embedded game funnels players back to remix.
+    // The slug is the play deep-link target; appBaseUrl is configurable.
+    const html = await buildGameHtml({
+      files,
+      engine,
+      ...(deps.appBaseUrl !== undefined ? { appBaseUrl: deps.appBaseUrl, publishSlug: project.slug } : {}),
+    });
     const htmlBytes = Buffer.from(html, 'utf8');
     const bundleKey = await deps.store.putBlob(htmlBytes);
+
+    // Persist description + tags + genre on publish (#3.4). The declared GameSpec
+    // lives on the published snapshot; lift its genre (for `?genre=` filtering),
+    // a one-line description (win condition), and the genre as a discovery tag.
+    let gameSpec: import('@playforge/shared').GameSpec | undefined;
+    if (project.currentSnapshotId !== null && deps.snapshotRepo) {
+      const snap = await deps.snapshotRepo.getById(project.currentSnapshotId);
+      gameSpec = snap?.gameSpec ?? undefined;
+    }
+    const description = gameSpec ? gameSpec.winCondition : undefined;
+    const tags = gameSpec ? [gameSpec.genre] : undefined;
 
     const publishedGame = await deps.publishRepo.upsert({
       projectId: project.id,
@@ -862,6 +886,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       // Pin the published snapshot so remix forks this immutable version, not the
       // project's live HEAD (#14). currentSnapshotId is the HEAD at publish time.
       ...(project.currentSnapshotId !== null ? { snapshotId: project.currentSnapshotId } : {}),
+      ...(gameSpec !== undefined ? { gameSpec } : {}),
+      ...(description !== undefined ? { description } : {}),
+      ...(tags !== undefined ? { tags } : {}),
     });
 
     // Auto-moderation: scan title + bundle for flagged patterns.
@@ -1023,9 +1050,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
 
     // Fire-and-forget play count increment, throttled per client (#35a) so a
-    // reload loop can't inflate the count.
-    if (shouldCountPlay(`${slug}:${req.ip ?? 'anon'}`)) {
+    // reload loop can't inflate the count. The throttle key doubles as a
+    // salted-IP session hash for the trending play_events row (#3.3).
+    const sessionHash = `${slug}:${req.ip ?? 'anon'}`;
+    if (shouldCountPlay(sessionHash)) {
       void deps.hubRepo?.incrementPlayCount(published.id);
+      // Record a play event so `?sort=trending` can compute play velocity.
+      void deps.hubRepo?.recordPlayEvent({ publishedGameId: published.id, sessionHash });
     }
 
     let html: string;
@@ -1237,12 +1268,37 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   app.get('/v1/hub', async (req, reply) => {
     if (!deps.hubRepo) return reply.code(503).send({ error: 'hub_unavailable' });
     const q = req.query as Record<string, string | undefined>;
-    const sort = q['sort'] === 'popular' ? 'popular' : 'recent';
+    const sort =
+      q['sort'] === 'popular' ? 'popular' : q['sort'] === 'trending' ? 'trending' : 'recent';
     const limit = Math.min(Math.max(Number(q['limit'] ?? '20'), 1), 100);
     const offset = Math.max(Number(q['offset'] ?? '0'), 0);
-    const games = await deps.hubRepo.feed({ limit, offset, sort });
+    // Discovery filters (#3.4): ?genre= matches the published GameSpec genre,
+    // ?tag= matches a persisted discovery tag.
+    const genre = typeof q['genre'] === 'string' && q['genre'].trim() !== '' ? q['genre'].trim() : undefined;
+    const tag = typeof q['tag'] === 'string' && q['tag'].trim() !== '' ? q['tag'].trim() : undefined;
+    const games = await deps.hubRepo.feed({
+      limit,
+      offset,
+      sort,
+      ...(genre !== undefined ? { genre } : {}),
+      ...(tag !== undefined ? { tag } : {}),
+    });
     return reply.send({ games });
   });
+
+  /**
+   * Resolve the published slug of a project's remix parent for attribution
+   * (#3.6). Walks: project.remixOfProjectId → that project's published game's
+   * slug. Returns null when the project is not a remix or the parent isn't
+   * (or no longer) published.
+   */
+  async function parentSlugFor(projectId: string): Promise<string | null> {
+    if (!deps.publishRepo) return null;
+    const project = await deps.repo.get(projectId);
+    if (!project || project.remixOfProjectId === null) return null;
+    const parentPublished = await deps.publishRepo.getByProject(project.remixOfProjectId);
+    return parentPublished?.publishSlug ?? null;
+  }
 
   app.get('/v1/hub/games/:slug', async (req, reply) => {
     if (!deps.publishRepo) {
@@ -1253,7 +1309,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!published || published.status !== 'live') {
       return reply.code(404).send({ error: 'not_found' });
     }
-    return reply.send({ game: published });
+    // Remix lineage (#3.6): how many times this game has been remixed, and the
+    // parent slug it was remixed FROM (for "Remix of …" attribution).
+    const [remixCount, parentSlug] = await Promise.all([
+      deps.hubRepo ? deps.hubRepo.remixCount(published.projectId) : Promise.resolve(0),
+      parentSlugFor(published.projectId),
+    ]);
+    return reply.send({ game: { ...published, remixCount, parentSlug } });
   });
 
   app.post('/v1/hub/games/:slug/like', async (req, reply) => {
@@ -1369,7 +1431,19 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (remixManifestKey !== null) {
       await deps.repo.setCurrentManifestKey(newProject.id, remixManifestKey);
     }
-    return reply.code(201).send({ projectId: newProject.id });
+
+    // Record remix lineage (#3.6): a depth-1 edge source→fork plus the source's
+    // ancestor edges at depth+1, so the source's remixCount increments and the
+    // full tree stays queryable. Best-effort — never block the fork response.
+    await deps.hubRepo
+      .addRemixEdge({ ancestorProjectId: published.projectId, descendantProjectId: newProject.id })
+      .catch(() => {});
+
+    return reply.code(201).send({
+      projectId: newProject.id,
+      // Attribution (#3.6): the slug this project was remixed FROM.
+      parentSlug: published.publishSlug,
+    });
   });
 
   app.post('/v1/hub/games/:slug/report', async (req, reply) => {

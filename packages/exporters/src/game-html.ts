@@ -39,6 +39,17 @@ export interface ExportGameHtmlOptions {
   engine: 'three' | 'phaser';
   /** Pinned engine version. Defaults: three@0.170.0, phaser@3.88.0. */
   engineVersion?: string;
+  /**
+   * Virality CTA (#3.2): when set, a small "Made with Playforge — Remix this"
+   * anchor is injected, linking to `<appBaseUrl>/p/<publishSlug>?ref=embed`.
+   * CONFIGURABLE — never a hardcoded host; server.ts passes the configured base
+   * URL. The anchor uses target=_blank rel=noopener so it survives the hardened
+   * meta-CSP (no script, no network egress) and is closeable by the player. When
+   * `appBaseUrl` is omitted no CTA is injected (e.g. plain offline ZIP exports).
+   */
+  appBaseUrl?: string;
+  /** The published slug the CTA deep-links to. Required for the CTA to render. */
+  publishSlug?: string;
 }
 
 const DEFAULT_VERSIONS = { three: '0.170.0', phaser: '3.88.0' } as const;
@@ -160,6 +171,57 @@ function applyExportCsp(html: string): string {
     return out.replace(htmlOpen, (match) => `${match}\n${CSP_META_TAG}`);
   }
   return `${CSP_META_TAG}\n${out}`;
+}
+
+function escapeHtmlAttr(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+/**
+ * Build the "Made with Playforge — Remix this" virality CTA (#3.2).
+ *
+ * It is a pure HTML/CSS badge — NO script — so it survives the hardened
+ * meta-CSP (`script-src` allows inline but we don't rely on it; `connect-src
+ * 'none'` is untouched because the link only opens on user click in a NEW tab
+ * with rel=noopener). A CSS-only checkbox toggle makes it closeable without JS:
+ * the same bytes serve /v1/play/:slug, where a player can dismiss the badge.
+ *
+ * The deep link is `<appBaseUrl>/p/<slug>?ref=embed`; appBaseUrl is configurable
+ * (never a hardcoded host).
+ */
+function buildRemixCta(appBaseUrl: string, publishSlug: string): string {
+  const base = appBaseUrl.replace(/\/+$/, '');
+  const href = `${base}/p/${encodeURIComponent(publishSlug)}?ref=embed`;
+  const hrefAttr = escapeHtmlAttr(href);
+  // A unique-ish id keeps the toggle from colliding with author markup.
+  const id = 'pf-remix-cta';
+  return `<style>
+#${id}{position:fixed;right:12px;bottom:12px;z-index:2147483647;font:600 13px/1.4 system-ui,sans-serif}
+#${id} .pf-cta-card{display:flex;align-items:center;gap:8px;background:#111;color:#fff;padding:8px 12px;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.35)}
+#${id} a.pf-cta-link{color:#fff;text-decoration:none}
+#${id} a.pf-cta-link b{color:#a78bfa}
+#${id} .pf-cta-close{cursor:pointer;color:#999;padding:0 2px;font-weight:700;text-decoration:none}
+#${id}-dismiss{position:absolute;opacity:0;pointer-events:none}
+#${id}-dismiss:checked ~ .pf-cta-card{display:none}
+</style>
+<div id="${id}"><input type="checkbox" id="${id}-dismiss"><div class="pf-cta-card"><a class="pf-cta-link" href="${hrefAttr}" target="_blank" rel="noopener noreferrer">Made with <b>Playforge</b> — Remix this</a><label class="pf-cta-close" for="${id}-dismiss" title="Dismiss" aria-label="Dismiss">×</label></div></div>`;
+}
+
+/**
+ * Inject the remix CTA just before `</body>` (or at the end of the document if
+ * there is no body close tag). Done before applyExportCsp so the CSP still wins.
+ */
+function injectRemixCta(html: string, appBaseUrl: string, publishSlug: string): string {
+  const cta = buildRemixCta(appBaseUrl, publishSlug);
+  const bodyClose = /<\/body\s*>/i;
+  if (bodyClose.test(html)) {
+    return html.replace(bodyClose, (m) => `${cta}\n${m}`);
+  }
+  return `${html}\n${cta}`;
 }
 
 /**
@@ -459,7 +521,15 @@ export async function buildGameHtml(opts: ExportGameHtmlOptions): Promise<string
   // doesn't try to resolve relatives against the protocol.
   html = html.replace(/<base\s+href=["'][^"']*["']\s*\/?\s*>\s*/i, '');
 
-  // 6. Enforce the anti-exfil CSP boundary (#13): strip any author/generated
+  // 6. Virality CTA (#3.2): inject the configurable "Made with Playforge —
+  //    Remix this" badge BEFORE the CSP so it's part of the bytes the CSP
+  //    governs. Pure HTML/CSS (no script, no network) — survives connect-src
+  //    'none'; the anchor only opens on click in a new tab.
+  if (opts.appBaseUrl !== undefined && opts.publishSlug !== undefined) {
+    html = injectRemixCta(html, opts.appBaseUrl, opts.publishSlug);
+  }
+
+  // 7. Enforce the anti-exfil CSP boundary (#13): strip any author/generated
   //    CSP meta so the game can't weaken the policy, then inject our locked
   //    one. Done last so it survives all prior rewrites.
   html = applyExportCsp(html);

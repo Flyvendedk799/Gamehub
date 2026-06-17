@@ -462,6 +462,137 @@ describe('hub routes', () => {
   });
 });
 
+describe('hub discovery + virality (Phase 3)', () => {
+  // Seed a HubGame on the InMemoryHubRepo with sensible field overrides.
+  function seed(
+    hubRepo: InMemoryHubRepo,
+    over: Partial<Parameters<InMemoryHubRepo['seedGame']>[0]> &
+      Pick<Parameters<InMemoryHubRepo['seedGame']>[0], 'id' | 'publishSlug'>,
+  ): void {
+    hubRepo.seedGame({
+      projectId: `proj-${over.id}`,
+      title: over.publishSlug,
+      status: 'live',
+      publishedAt: '2026-01-01T00:00:00.000Z',
+      ...over,
+    });
+  }
+
+  it('feed surfaces thumbnailUrl, genre, tags, and remixCount (#3.1/#3.4/#3.6)', async () => {
+    const hubRepo = new InMemoryHubRepo();
+    seed(hubRepo, {
+      id: 'g1',
+      publishSlug: 'pixel-jumper',
+      thumbnailUrl: '/v1/blobs/abc123',
+      genre: 'platformer',
+      tags: ['platformer', 'showcase'],
+    });
+    const app = makeApp({ hubRepo });
+    const res = await app.inject({ method: 'GET', url: '/v1/hub' });
+    expect(res.statusCode).toBe(200);
+    const game = (res.json() as { games: Array<Record<string, unknown>> }).games[0];
+    expect(game).toMatchObject({
+      publishSlug: 'pixel-jumper',
+      thumbnailUrl: '/v1/blobs/abc123',
+      genre: 'platformer',
+      tags: ['platformer', 'showcase'],
+      remixCount: 0,
+    });
+  });
+
+  it('?sort=trending orders by recent play velocity (#3.3)', async () => {
+    // Controllable clock so play-event timestamps are deterministic.
+    let clock = 0;
+    const hubRepo = new InMemoryHubRepo(() => clock);
+    seed(hubRepo, { id: 'fresh', publishSlug: 'fresh', playCount: 1 });
+    seed(hubRepo, { id: 'stale', publishSlug: 'stale', playCount: 100 });
+
+    const NOW = 1_000_000_000_000;
+    const WEEK_AGO = NOW - 7 * 24 * 60 * 60 * 1000;
+
+    // 'stale' got 50 plays a week ago — heavily decayed under the 24h half-life.
+    clock = WEEK_AGO;
+    for (let i = 0; i < 50; i++) {
+      await hubRepo.recordPlayEvent({ publishedGameId: 'stale', sessionHash: `old-${i}` });
+    }
+    // 'fresh' got 3 plays just now — undecayed.
+    clock = NOW;
+    for (let i = 0; i < 3; i++) {
+      await hubRepo.recordPlayEvent({ publishedGameId: 'fresh', sessionHash: `new-${i}` });
+    }
+
+    const app = makeApp({ hubRepo });
+    const res = await app.inject({ method: 'GET', url: '/v1/hub?sort=trending' });
+    expect(res.statusCode).toBe(200);
+    const games = (res.json() as { games: Array<{ publishSlug: string }> }).games;
+    // Recent plays beat week-old plays under the 24h half-life decay.
+    expect(games[0]?.publishSlug).toBe('fresh');
+
+    // Sanity: ?sort=popular still ranks by raw playCount (stale wins there).
+    const popular = await app.inject({ method: 'GET', url: '/v1/hub?sort=popular' });
+    expect((popular.json() as { games: Array<{ publishSlug: string }> }).games[0]?.publishSlug).toBe('stale');
+  });
+
+  it('?genre= and ?tag= filter the feed (#3.4)', async () => {
+    const hubRepo = new InMemoryHubRepo();
+    seed(hubRepo, { id: 'p', publishSlug: 'plat', genre: 'platformer', tags: ['platformer', 'retro'] });
+    seed(hubRepo, { id: 'f', publishSlug: 'fps', genre: 'fps', tags: ['fps', 'showcase'] });
+    const app = makeApp({ hubRepo });
+
+    const byGenre = await app.inject({ method: 'GET', url: '/v1/hub?genre=fps' });
+    const g = (byGenre.json() as { games: Array<{ publishSlug: string }> }).games;
+    expect(g).toHaveLength(1);
+    expect(g[0]?.publishSlug).toBe('fps');
+
+    const byTag = await app.inject({ method: 'GET', url: '/v1/hub?tag=retro' });
+    const t = (byTag.json() as { games: Array<{ publishSlug: string }> }).games;
+    expect(t).toHaveLength(1);
+    expect(t[0]?.publishSlug).toBe('plat');
+  });
+
+  it('remix writes a lineage edge, increments remixCount, and returns parentSlug (#3.6)', async () => {
+    const repo = new InMemoryProjectRepo();
+    const hubRepo = new InMemoryHubRepo();
+    const publishRepo = new InMemoryPublishRepo();
+
+    // Source project + published game.
+    const source = await repo.create({ ownerId: 'alice', name: 'Original', engine: 'phaser' });
+    await repo.setCurrentManifestKey(source.id, 'manifest-key-1');
+    await publishRepo.upsert({
+      projectId: source.id,
+      publishSlug: 'original',
+      title: 'Original',
+      bundleKey: 'bundle-1',
+    });
+
+    const app = makeApp({ repo, hubRepo, publishRepo });
+
+    // Before remix: remixCount is 0.
+    const before = await app.inject({ method: 'GET', url: '/v1/hub/games/original' });
+    expect((before.json() as { game: { remixCount: number; parentSlug: string | null } }).game.remixCount).toBe(0);
+
+    // Remix it.
+    const remix = await app.inject({
+      method: 'POST',
+      url: '/v1/hub/games/original/remix',
+      headers: AS_BOB,
+    });
+    expect(remix.statusCode).toBe(201);
+    const body = remix.json() as { projectId: string; parentSlug: string };
+    expect(body.parentSlug).toBe('original');
+
+    // Edge recorded → remixCount increments to 1.
+    expect(await hubRepo.remixCount(source.id)).toBe(1);
+    const after = await app.inject({ method: 'GET', url: '/v1/hub/games/original' });
+    expect((after.json() as { game: { remixCount: number } }).game.remixCount).toBe(1);
+
+    // The new project is a remix of the source (parentSlug attribution surfaces
+    // on the child's published page once it publishes — lineage edge confirms it).
+    const child = await repo.get(body.projectId);
+    expect(child?.remixOfProjectId).toBe(source.id);
+  });
+});
+
 describe('preview route', () => {
   it('serves index.html from a run snapshot', async () => {
     const blobStore = new InMemoryBlobStore();

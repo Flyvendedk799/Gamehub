@@ -316,6 +316,49 @@ describe('exportGameHtml', () => {
       'src/main.js',
     ]);
   });
+
+  it('injects the configurable "Remix this" CTA and still locks connect-src to none (#3.2)', async () => {
+    const dest = join(workDir, 'game.html');
+    const indexHtml = `<!doctype html><html><head>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
+</head><body><canvas id="game"></canvas>
+<script type="module" src="src/main.js"></script>
+</body></html>`;
+    await exportGameHtml(dest, {
+      files: [
+        { path: 'index.html', content: indexHtml },
+        { path: 'src/main.js', content: "import * as THREE from 'three';" },
+      ],
+      engine: 'three',
+      appBaseUrl: 'https://play.example.app',
+      publishSlug: 'cool-game',
+    });
+    const written = readFileSync(dest, 'utf8');
+    // CTA anchor present, with the configurable deep link + ref=embed, opening
+    // in a new tab so it survives the hardened CSP.
+    expect(written).toContain('Made with');
+    expect(written).toContain('https://play.example.app/p/cool-game?ref=embed');
+    expect(written).toMatch(/target="_blank"[^>]*rel="noopener/);
+    // The anti-exfil boundary is untouched — no network egress, default-src none.
+    expect(written).toContain("connect-src 'none'");
+    expect(written).toContain("default-src 'none'");
+    // No hardcoded host: the only base URL present is the one we configured.
+    expect(written).not.toContain('playforge.app/p/');
+  });
+
+  it('omits the CTA when appBaseUrl is not configured', async () => {
+    const dest = join(workDir, 'game.html');
+    const indexHtml = `<!doctype html><html><head>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
+</head><body><canvas id="game"></canvas></body></html>`;
+    await exportGameHtml(dest, {
+      files: [{ path: 'index.html', content: indexHtml }],
+      engine: 'three',
+    });
+    const written = readFileSync(dest, 'utf8');
+    expect(written).not.toContain('pf-remix-cta');
+    expect(written).not.toContain('?ref=embed');
+  });
 });
 
 /**

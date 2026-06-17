@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq } from 'drizzle-orm';
+import type { GameSpec } from '@playforge/shared';
 import { type Db, schema } from '@playforge/db';
 
 export interface PublishedGame {
@@ -11,6 +12,12 @@ export interface PublishedGame {
   snapshotId: string | null;
   publishSlug: string;
   title: string;
+  /** Short description copied from the project's GameSpec at publish (#3.4). */
+  description: string | null;
+  /** Discovery tags persisted at publish (#3.4). */
+  tags: string[];
+  /** Genre lifted from the published GameSpec (#3.4). */
+  genre: string | null;
   bundleKey: string;
   thumbnailUrl: string | null;
   status: 'live' | 'unpublished' | 'removed_by_mod';
@@ -18,14 +25,21 @@ export interface PublishedGame {
   updatedAt: string;
 }
 
+/** Fields a publish carries about the source content (#3.4). */
+export interface PublishUpsertInput {
+  projectId: string;
+  publishSlug: string;
+  title: string;
+  bundleKey: string;
+  snapshotId?: string;
+  description?: string;
+  tags?: string[];
+  /** The declared GameSpec — genre is persisted for `?genre=` filtering. */
+  gameSpec?: GameSpec;
+}
+
 export interface PublishRepo {
-  upsert(input: {
-    projectId: string;
-    publishSlug: string;
-    title: string;
-    bundleKey: string;
-    snapshotId?: string;
-  }): Promise<PublishedGame>;
+  upsert(input: PublishUpsertInput): Promise<PublishedGame>;
   getBySlug(slug: string): Promise<PublishedGame | null>;
   getByProject(projectId: string): Promise<PublishedGame | null>;
   setStatus(id: string, status: PublishedGame['status']): Promise<void>;
@@ -35,12 +49,16 @@ export interface PublishRepo {
 }
 
 function rowToPublishedGame(row: typeof schema.publishedGames.$inferSelect): PublishedGame {
+  const spec = row.gameSpec as { genre?: unknown } | null;
   return {
     id: row.id,
     projectId: row.projectId,
     snapshotId: row.snapshotId ?? null,
     publishSlug: row.publishSlug,
     title: row.title,
+    description: row.description ?? null,
+    tags: row.tags ?? [],
+    genre: typeof spec?.genre === 'string' ? spec.genre : null,
     bundleKey: row.bundleKey,
     thumbnailUrl: row.thumbnailUrl ?? null,
     status: row.status,
@@ -49,22 +67,44 @@ function rowToPublishedGame(row: typeof schema.publishedGames.$inferSelect): Pub
   };
 }
 
+/** Genre out of a (possibly undefined) GameSpec, or null. */
+function genreOf(spec: GameSpec | undefined): string | null {
+  return typeof spec?.genre === 'string' ? spec.genre : null;
+}
+
 export class InMemoryPublishRepo implements PublishRepo {
   private readonly byId = new Map<string, PublishedGame>();
 
-  async upsert(input: { projectId: string; publishSlug: string; title: string; bundleKey: string; snapshotId?: string }): Promise<PublishedGame> {
+  async upsert(input: PublishUpsertInput): Promise<PublishedGame> {
     const existing = [...this.byId.values()].find((g) => g.projectId === input.projectId);
     const now = new Date().toISOString();
     const snapshotId = input.snapshotId ?? null;
+    // Re-publish keeps prior metadata unless the new publish supplies it.
     if (existing) {
-      const updated: PublishedGame = { ...existing, ...input, snapshotId, updatedAt: now };
+      const updated: PublishedGame = {
+        ...existing,
+        publishSlug: input.publishSlug,
+        title: input.title,
+        bundleKey: input.bundleKey,
+        snapshotId,
+        ...(input.description !== undefined ? { description: input.description } : {}),
+        ...(input.tags !== undefined ? { tags: input.tags } : {}),
+        ...(input.gameSpec !== undefined ? { genre: genreOf(input.gameSpec) } : {}),
+        updatedAt: now,
+      };
       this.byId.set(existing.id, updated);
       return updated;
     }
     const game: PublishedGame = {
       id: randomUUID(),
-      ...input,
+      projectId: input.projectId,
+      publishSlug: input.publishSlug,
+      title: input.title,
+      bundleKey: input.bundleKey,
       snapshotId,
+      description: input.description ?? null,
+      tags: input.tags ?? [],
+      genre: genreOf(input.gameSpec),
       thumbnailUrl: null,
       status: 'live',
       publishedAt: now,
@@ -102,7 +142,7 @@ export class InMemoryPublishRepo implements PublishRepo {
 export class DrizzlePublishRepo implements PublishRepo {
   constructor(private readonly db: Db) {}
 
-  async upsert(input: { projectId: string; publishSlug: string; title: string; bundleKey: string; snapshotId?: string }): Promise<PublishedGame> {
+  async upsert(input: PublishUpsertInput): Promise<PublishedGame> {
     const existing = await this.db.query.publishedGames.findFirst({
       where: eq(schema.publishedGames.projectId, input.projectId),
     });
@@ -114,6 +154,9 @@ export class DrizzlePublishRepo implements PublishRepo {
           title: input.title,
           updatedAt: new Date(),
           ...(input.snapshotId !== undefined ? { snapshotId: input.snapshotId } : {}),
+          ...(input.description !== undefined ? { description: input.description } : {}),
+          ...(input.tags !== undefined ? { tags: input.tags } : {}),
+          ...(input.gameSpec !== undefined ? { gameSpec: input.gameSpec } : {}),
         })
         .where(eq(schema.publishedGames.id, existing.id))
         .returning();
@@ -130,6 +173,9 @@ export class DrizzlePublishRepo implements PublishRepo {
         title: input.title,
         bundleKey: input.bundleKey,
         ...(input.snapshotId !== undefined ? { snapshotId: input.snapshotId } : {}),
+        ...(input.description !== undefined ? { description: input.description } : {}),
+        ...(input.tags !== undefined ? { tags: input.tags } : {}),
+        ...(input.gameSpec !== undefined ? { gameSpec: input.gameSpec } : {}),
       })
       .returning();
     if (!row) throw new Error('publish insert returned no row');

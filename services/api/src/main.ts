@@ -59,6 +59,8 @@ async function main() {
   const adminToken = process.env['ADMIN_TOKEN'];
   const maxConcurrentRunsPerUser = Number(process.env['MAX_CONCURRENT_RUNS'] ?? '1');
   const maxRunTokens = process.env['MAX_RUN_TOKENS'] ? Number(process.env['MAX_RUN_TOKENS']) : undefined;
+  // Public app base URL for the exported game's "Remix this" CTA (#3.2). Configurable.
+  const appBaseUrl = process.env['APP_BASE_URL'];
 
   const db = createDb(databaseUrl);
 
@@ -176,6 +178,7 @@ async function main() {
     ...(browserQueue !== undefined ? { browserQueue } : {}),
     ...(maxRunTokens !== undefined ? { maxRunTokens } : {}),
     ...(queue !== undefined ? { generateQueue: queue } : {}),
+    ...(appBaseUrl !== undefined ? { appBaseUrl } : {}),
   });
 
   try {
