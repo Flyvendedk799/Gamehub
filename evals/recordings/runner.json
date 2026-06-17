@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "fixtureSlug": "runner",
+  "capturedAt": "2026-06-17T10:20:00.000Z",
+  "notes": "Golden endless-runner run. Auto-advance + jump-y-only verified; booted clean.",
+  "observation": {
+    "engine": "phaser",
+    "genre": "runner",
+    "inputTokens": 500000,
+    "outputTokens": 35000,
+    "cachedInputTokens": 380000,
+    "toolCounts": {
+      "str_replace_based_edit_tool": 29,
+      "set_todos": 3,
+      "validate_game_scene": 1,
+      "playtest_game": 1
+    },
+    "strReplaceFailures": 0,
+    "filePaths": ["index.html"],
+    "snapshotCount": 1,
+    "correctionCount": 0,
+    "runtimeVerify": {
+      "booted": true,
+      "fatalErrors": []
+    }
+  }
+}

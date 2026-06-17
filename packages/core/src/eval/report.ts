@@ -21,9 +21,15 @@ function statusBadge(pass: boolean): string {
   return pass ? '✓ pass' : '✗ FAIL';
 }
 
+function bootBadge(boot: 'boot' | 'fail' | 'n/a'): string {
+  if (boot === 'boot') return '✓ boot';
+  if (boot === 'fail') return '✗ boot';
+  return '—';
+}
+
 function fixtureRow(r: EvalResult): string {
   const o = r.observed;
-  return `| ${statusBadge(r.pass)} | \`${r.fixture.slug}\` | ${o.engine ?? '—'} | ${fmtTokens(o.inputTokens)} | ${fmtPct(o.cacheHitRate)} | ${o.setTodosCalls} | ${o.validateGameSceneCalls}/${o.playtestGameCalls} | ${o.renderPreviewCalls} | ${o.strReplaceCalls} | ${o.audioCalls} | ${o.snapshotCount} | ${o.correctionCount} |`;
+  return `| ${statusBadge(r.pass)} | \`${r.fixture.slug}\` | ${r.fixture.assertions.expectedGenre ?? '—'} | ${o.engine ?? '—'} | ${bootBadge(o.runtimeBoot)} | ${fmtTokens(o.inputTokens)} | ${fmtPct(o.cacheHitRate)} | ${o.setTodosCalls} | ${o.validateGameSceneCalls}/${o.playtestGameCalls} | ${o.renderPreviewCalls} | ${o.strReplaceCalls} | ${o.audioCalls} | ${o.snapshotCount} | ${o.correctionCount} |`;
 }
 
 function failureBlock(r: EvalResult): string {
@@ -52,11 +58,11 @@ export function renderEvalReport(report: EvalReport): string {
   );
   out.push('');
 
-  // Header row.
+  // Header row. `genre` + `boot` give the per-genre + output-quality view.
   out.push(
-    '| status | fixture | engine | input tokens | cache hit | set_todos | validate/playtest | render_preview | str_replace | audio | snapshots | corrections |',
+    '| status | fixture | genre | engine | boot | input tokens | cache hit | set_todos | validate/playtest | render_preview | str_replace | audio | snapshots | corrections |',
   );
-  out.push('|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|');
+  out.push('|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|');
   for (const r of report.results) out.push(fixtureRow(r));
   out.push('');
 
@@ -73,8 +79,29 @@ export function renderEvalReport(report: EvalReport): string {
     out.push('');
   }
 
+  // Per-genre roll-up (Phase 5.2): one line per genre with pass/total.
+  const byGenre = new Map<string, { passed: number; total: number }>();
+  for (const r of report.results) {
+    const g = r.fixture.assertions.expectedGenre ?? r.fixture.slug;
+    const cell = byGenre.get(g) ?? { passed: 0, total: 0 };
+    cell.total += 1;
+    if (r.pass) cell.passed += 1;
+    byGenre.set(g, cell);
+  }
+  out.push('## Per-genre');
+  out.push('');
+  out.push('| genre | passed | total |');
+  out.push('|---|---:|---:|');
+  for (const [genre, cell] of [...byGenre.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    out.push(`| \`${genre}\` | ${cell.passed} | ${cell.total} |`);
+  }
+  out.push('');
+
   out.push('## How to read this report');
   out.push('');
+  out.push(
+    '- The `boot` column is the Phase 5.3 OUTPUT gate: `✓ boot` = the artifact loaded and `window.__game` appeared with no fatal console errors; `✗ boot` = it threw / never booted; `—` = no runtime-verify verdict was captured. Process proxies can all pass while `boot` fails — that is the regression class this column exists to catch.',
+  );
   out.push(
     '- The `validate/playtest` column shows the count of `validate_game_scene` and `playtest_game` calls. The Phase 9b mandatory pre-done gate requires both to be ≥ 1.',
   );

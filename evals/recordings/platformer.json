@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "fixtureSlug": "platformer",
+  "capturedAt": "2026-06-17T10:00:00.000Z",
+  "notes": "Golden platformer run. Booted clean (window.__game present), jump arc verified by playtest. Process proxies all within Phase 9b caps.",
+  "observation": {
+    "engine": "phaser",
+    "genre": "platformer",
+    "inputTokens": 620000,
+    "outputTokens": 41000,
+    "cachedInputTokens": 470000,
+    "toolCounts": {
+      "str_replace_based_edit_tool": 34,
+      "set_todos": 3,
+      "validate_game_scene": 2,
+      "playtest_game": 1
+    },
+    "strReplaceFailures": 1,
+    "filePaths": ["index.html"],
+    "snapshotCount": 1,
+    "correctionCount": 0,
+    "runtimeVerify": {
+      "booted": true,
+      "fatalErrors": []
+    }
+  }
+}

@@ -35,6 +35,12 @@ export interface EvalAssertion {
   minPlaytestGameCalls: number;
   maxRenderPreviewCalls: number;
   maxCorrections: number;
+  /** Phase 5.3 — OUTPUT-quality gate. When true, the run's captured
+   *  runtime-verify verdict MUST show the artifact booted (window.__game
+   *  present) with zero fatal boot errors. A throw-on-boot recording fails
+   *  this even if every process proxy looks healthy. A run with no captured
+   *  verdict also fails (you asserted the output but never measured it). */
+  requireRuntimeBoot: boolean;
 }
 
 const ASSERTION_DEFAULTS: EvalAssertion = {
@@ -47,6 +53,7 @@ const ASSERTION_DEFAULTS: EvalAssertion = {
   minPlaytestGameCalls: 1,
   maxRenderPreviewCalls: 0,
   maxCorrections: 2,
+  requireRuntimeBoot: false,
 };
 
 export interface EvalFixture {
@@ -134,6 +141,12 @@ function optionalAssertion(raw: unknown): EvalAssertion {
   if (raw['maxCorrections'] !== undefined) {
     out.maxCorrections = requirePositiveInt(raw, 'maxCorrections');
   }
+  if (raw['requireRuntimeBoot'] !== undefined) {
+    if (typeof raw['requireRuntimeBoot'] !== 'boolean') {
+      throw new Error("'requireRuntimeBoot' must be a boolean");
+    }
+    out.requireRuntimeBoot = raw['requireRuntimeBoot'];
+  }
   return out;
 }
 
@@ -190,6 +203,10 @@ export interface EvalResult {
     audioCalls: number;
     snapshotCount: number;
     correctionCount: number;
+    /** Phase 5.3 — output-quality verdict surfaced into the report.
+     *  'boot' = booted clean, 'fail' = boot/error captured, 'n/a' = no
+     *  runtime-verify verdict was recorded. */
+    runtimeBoot: 'boot' | 'fail' | 'n/a';
   };
 }
 

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "fixtureSlug": "fighting",
+  "capturedAt": "2026-06-17T10:25:00.000Z",
+  "notes": "Golden brawler run — the c44763af regression class, now passing. D moves +x, attack lowers opponent HP, booted clean. This is the recording Phase 5.2 inverts to drop the pass count.",
+  "observation": {
+    "engine": "phaser",
+    "genre": "fighting",
+    "inputTokens": 700000,
+    "outputTokens": 49000,
+    "cachedInputTokens": 520000,
+    "toolCounts": {
+      "str_replace_based_edit_tool": 52,
+      "set_todos": 5,
+      "validate_game_scene": 2,
+      "playtest_game": 1
+    },
+    "strReplaceFailures": 2,
+    "filePaths": ["index.html"],
+    "snapshotCount": 2,
+    "correctionCount": 1,
+    "runtimeVerify": {
+      "booted": true,
+      "fatalErrors": []
+    }
+  }
+}

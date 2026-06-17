@@ -15,6 +15,30 @@
  */
 import type { EvalFixture, EvalResult } from './fixture.js';
 
+/**
+ * Phase 5.3 — output-quality verdict.
+ *
+ * The tool-call counts above are PROCESS proxies (did the agent call
+ * validate/playtest, how many tokens). They say nothing about whether the
+ * artifact the agent shipped actually BOOTS and is playable. This verdict
+ * carries the post-generation runtime check the browser-worker produces
+ * (`RuntimeVerifyVerdict` in services/worker): does `window.__game` appear,
+ * and were there fatal console errors on boot?
+ *
+ * Production hook: the worker already round-trips
+ * `browserJobs.runtimeVerify(htmlContent)` at `done` time (see
+ * run-generation.ts → `RuntimeVerifyVerdict`). Surfacing that verdict into a
+ * captured recording closes the loop so the eval scores the OUTPUT, not just
+ * the process. When the worker captures a recording it should populate this
+ * field from that same verdict; offline recordings supply it by hand.
+ */
+export interface RuntimeVerifyObservation {
+  /** Did the artifact boot to the point window.__game was assigned? */
+  booted: boolean;
+  /** Fatal console / load errors captured during boot. Empty = clean. */
+  fatalErrors: ReadonlyArray<string>;
+}
+
 export interface RunObservation {
   /** The agent's chosen engine for this run, or null if no choose_engine
    *  call was recorded. */
@@ -42,6 +66,10 @@ export interface RunObservation {
   /** Number of distinct user prompts beyond the initial — i.e. the
    *  user's correction count. */
   correctionCount: number;
+  /** Phase 5.3 — post-generation runtime-verify verdict. `undefined` when
+   *  no runtime check was captured (legacy recordings, queue down). When
+   *  present it is scored as an OUTPUT assertion, not a process proxy. */
+  runtimeVerify?: RuntimeVerifyObservation;
 }
 
 const DEFAULT_OBSERVATION: RunObservation = {
@@ -144,6 +172,31 @@ export function evaluateFixture(
     failures.push(`corrections: ${observation.correctionCount} exceeds max ${a.maxCorrections}`);
   }
 
+  // Phase 5.3 — OUTPUT-quality gate. Score the captured runtime-verify
+  // verdict, not just the process proxies above.
+  const rv = observation.runtimeVerify;
+  let runtimeBoot: 'boot' | 'fail' | 'n/a';
+  if (rv === undefined) {
+    runtimeBoot = 'n/a';
+  } else if (rv.booted && rv.fatalErrors.length === 0) {
+    runtimeBoot = 'boot';
+  } else {
+    runtimeBoot = 'fail';
+  }
+  if (a.requireRuntimeBoot) {
+    if (rv === undefined) {
+      failures.push(
+        'runtimeBoot: requireRuntimeBoot=true but no runtime-verify verdict was recorded',
+      );
+    } else if (!rv.booted) {
+      failures.push('runtimeBoot: window.__game never appeared — the artifact did not boot');
+    } else if (rv.fatalErrors.length > 0) {
+      failures.push(
+        `runtimeBoot: ${rv.fatalErrors.length} fatal boot error(s): ${rv.fatalErrors.join(' | ')}`,
+      );
+    }
+  }
+
   const cacheHitRate =
     observation.inputTokens > 0 ? observation.cachedInputTokens / observation.inputTokens : 0;
 
@@ -165,6 +218,7 @@ export function evaluateFixture(
       audioCalls,
       snapshotCount: observation.snapshotCount,
       correctionCount: observation.correctionCount,
+      runtimeBoot,
     },
   };
 }

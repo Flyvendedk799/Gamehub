@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "name": "Top-down arcade — cardinal shooter",
+  "slug": "topdown-arcade",
+  "description": "Top-down arcade shooter in Phaser: WASD cardinal movement in screen-relative axes, shoot enemies, survive.",
+  "brief": "Build a top-down arcade shooter. The player moves in four cardinal directions with WASD (W is up the screen, S is down, A is left, D is right), aims and fires at enemies that spawn around the arena, and tries to survive as long as possible. Touching an enemy loses a life; losing all lives ends the game.",
+  "playtestPlaybook": "topdown_arcade",
+  "assertions": {
+    "expectedEngine": "phaser",
+    "expectedGenre": "topdown_arcade",
+    "requiredFiles": ["index.html"],
+    "requiredAudio": false,
+    "maxInputTokens": 1400000,
+    "maxStrReplaceFailureRate": 0.05,
+    "maxSetTodosCalls": 8,
+    "minValidateGameSceneCalls": 1,
+    "minPlaytestGameCalls": 1,
+    "maxRenderPreviewCalls": 0,
+    "maxCorrections": 2,
+    "requireRuntimeBoot": true
+  }
+}

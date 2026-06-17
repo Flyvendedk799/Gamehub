@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "fixtureSlug": "puzzle",
+  "capturedAt": "2026-06-17T10:10:00.000Z",
+  "notes": "Golden match-3 run. Swap + clear + score verified; booted clean.",
+  "observation": {
+    "engine": "phaser",
+    "genre": "puzzle",
+    "inputTokens": 540000,
+    "outputTokens": 38000,
+    "cachedInputTokens": 410000,
+    "toolCounts": {
+      "str_replace_based_edit_tool": 41,
+      "set_todos": 4,
+      "validate_game_scene": 1,
+      "playtest_game": 1
+    },
+    "strReplaceFailures": 1,
+    "filePaths": ["index.html"],
+    "snapshotCount": 1,
+    "correctionCount": 0,
+    "runtimeVerify": {
+      "booted": true,
+      "fatalErrors": []
+    }
+  }
+}

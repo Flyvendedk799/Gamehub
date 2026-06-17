@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "name": "Fighting — lateral brawler",
+  "slug": "fighting",
+  "description": "Side-view fighter (the c44763af sign-error class): D moves +x, A moves -x, attack lowers opponent HP.",
+  "brief": "Build a 2D one-on-one fighting game viewed from the side. Pressing D moves the player to the right (increasing x), A moves left (decreasing x), and the attack key (J) throws a punch that lowers the opponent's health when in range. Reducing the opponent's health to zero wins the round; losing all your own health loses it.",
+  "playtestPlaybook": "fighting",
+  "assertions": {
+    "expectedEngine": "phaser",
+    "expectedGenre": "fighting",
+    "requiredFiles": ["index.html"],
+    "requiredAudio": false,
+    "maxInputTokens": 1400000,
+    "maxStrReplaceFailureRate": 0.05,
+    "maxSetTodosCalls": 8,
+    "minValidateGameSceneCalls": 1,
+    "minPlaytestGameCalls": 1,
+    "maxRenderPreviewCalls": 0,
+    "maxCorrections": 2,
+    "requireRuntimeBoot": true
+  }
+}

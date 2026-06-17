@@ -23,6 +23,7 @@
  * `window.__game.debug.snapshot()` between them.
  */
 import type { GameGenre } from '@playforge/shared';
+import type { PlaytestPredicate } from './eval/playtest-score.js';
 
 /** A single recommended playtest step in the same shape as the
  *  `playtest_game` tool's `Step` discriminated union. We re-encode here
@@ -45,6 +46,15 @@ export interface PlaybookStep {
    *  snapshot returned by playtest_game AFTER this step. Free-form so
    *  per-engine state shapes don't constrain the playbook. */
   assert?: string;
+  /** Phase 5.4 — MACHINE-CHECKABLE predicates that promote the free-form
+   *  `assert` above into something a pure evaluator (`scorePlaytest`) can
+   *  check DETERMINISTICALLY, no LLM. These reference snapshot fields by
+   *  dotted path and a frame index into the trace; the agent maps its
+   *  own debug-snapshot shape onto the named fields. The deferred
+   *  boot-and-repair loop (#1.6) gates on these. Frames here are relative
+   *  to the playbook's own step ordering (the harness wires the absolute
+   *  trace indices). When omitted, only the English `assert` applies. */
+  predicates?: ReadonlyArray<PlaytestPredicate>;
 }
 
 export interface PlaytestPlaybook {
@@ -65,12 +75,26 @@ const PLATFORMER: PlaytestPlaybook = {
     'Jump arc: pressing the jump key raises the player y, then gravity returns y to a ground-stable value.',
   steps: [
     { kind: 'wait', durationFrames: 30, assert: 'Player is on ground; y is stable.' },
-    { kind: 'key', code: 'Space', frames: 5, assert: 'Player y is RISING (jump initiated).' },
+    {
+      kind: 'key',
+      code: 'Space',
+      frames: 5,
+      assert: 'Player y is RISING (jump initiated).',
+      // World-up varies by engine: many 2D engines treat y-up as a
+      // DECREASE in screen-space. The playbook asserts the y CHANGED on
+      // jump; the agent picks increased/decreased for its coordinate
+      // system. `changed` is the engine-agnostic floor that still catches
+      // a no-op jump (y never moves).
+      predicates: [{ field: 'playerPos.y', op: 'changed', frame: { step: 1 }, against: { step: 0 } }],
+    },
     { kind: 'wait', durationFrames: 30, assert: 'Player y peaks then descends.' },
     {
       kind: 'wait',
       durationFrames: 60,
       assert: 'Player is back on ground; y matches the pre-jump value within ±1.',
+      predicates: [
+        { field: 'playerPos.y', op: 'unchanged', frame: { step: 3 }, against: { step: 0 }, epsilon: 1 },
+      ],
     },
   ],
   watchFor: [
@@ -86,8 +110,24 @@ const FIGHTING: PlaytestPlaybook = {
   intent:
     'Lateral movement + attack: pressing right increases x, pressing the attack key reduces opponent HP.',
   steps: [
-    { kind: 'key', code: 'KeyD', frames: 30, assert: 'Player x is INCREASING (rightward).' },
-    { kind: 'key', code: 'KeyA', frames: 30, assert: 'Player x is DECREASING (leftward).' },
+    {
+      kind: 'key',
+      code: 'KeyD',
+      frames: 30,
+      assert: 'Player x is INCREASING (rightward).',
+      predicates: [
+        { field: 'playerPos.x', op: 'increased', frame: { step: 0 }, against: 'baseline' },
+      ],
+    },
+    {
+      kind: 'key',
+      code: 'KeyA',
+      frames: 30,
+      assert: 'Player x is DECREASING (leftward).',
+      predicates: [
+        { field: 'playerPos.x', op: 'decreased', frame: { step: 1 }, against: { step: 0 } },
+      ],
+    },
     {
       kind: 'wait',
       durationFrames: 10,
@@ -98,6 +138,9 @@ const FIGHTING: PlaytestPlaybook = {
       code: 'KeyJ',
       frames: 5,
       assert: 'Attack animation triggered; opponent HP DECREASED by > 0 within 30 frames.',
+      predicates: [
+        { field: 'opponentHp', op: 'decreased', frame: { step: 3 }, against: { step: 2 } },
+      ],
     },
   ],
   watchFor: [
@@ -184,15 +227,37 @@ const TOPDOWN: PlaytestPlaybook = {
       code: 'KeyW',
       frames: 20,
       assert: 'Player y DECREASED (north / up the screen).',
+      predicates: [
+        { field: 'playerPos.y', op: 'decreased', frame: { step: 0 }, against: 'baseline' },
+      ],
     },
     {
       kind: 'key',
       code: 'KeyS',
       frames: 20,
       assert: 'Player y INCREASED (south / down the screen).',
+      predicates: [
+        { field: 'playerPos.y', op: 'increased', frame: { step: 1 }, against: { step: 0 } },
+      ],
     },
-    { kind: 'key', code: 'KeyA', frames: 20, assert: 'Player x DECREASED (west / left).' },
-    { kind: 'key', code: 'KeyD', frames: 20, assert: 'Player x INCREASED (east / right).' },
+    {
+      kind: 'key',
+      code: 'KeyA',
+      frames: 20,
+      assert: 'Player x DECREASED (west / left).',
+      predicates: [
+        { field: 'playerPos.x', op: 'decreased', frame: { step: 2 }, against: { step: 1 } },
+      ],
+    },
+    {
+      kind: 'key',
+      code: 'KeyD',
+      frames: 20,
+      assert: 'Player x INCREASED (east / right).',
+      predicates: [
+        { field: 'playerPos.x', op: 'increased', frame: { step: 3 }, against: { step: 2 } },
+      ],
+    },
   ],
   watchFor: [
     'World y-axis flipped (W moves player down because the engine uses screen-coord y).',

@@ -22,6 +22,7 @@ import {
   type PlaytesterInput,
   type PlaytesterOutput,
   type PlaytestStep,
+  type RuntimeVerifyObservation as EvalRuntimeVerify,
   generateViaAgent,
 } from '@playforge/agent-core';
 // Import from the engines subpath, NOT the package root — the root re-exports the
@@ -128,6 +129,13 @@ export interface GenerationResult {
   fileCount: number;
   /** File listing at run end — used to build continuation fsState. */
   fsState: Array<{ path: string; bytes: number }>;
+  /** Phase 5.3 — last runtime-verify verdict (window.__game present +
+   *  fatal boot errors), when a browser-jobs port produced one. The eval
+   *  capture pipeline writes this into an `evals/recordings/<slug>.json`
+   *  `observation.runtimeVerify` so the eval scores the OUTPUT, not just
+   *  the process. `undefined` when no verdict was obtained (no port /
+   *  queue down). */
+  runtimeVerify?: EvalRuntimeVerify;
 }
 
 /**
@@ -223,12 +231,23 @@ export async function runGeneration(
   // any fatal console errors so `done` reports status='has_errors' (instead of
   // force-accepting on static lint alone). A `null` verdict (queue down) yields
   // no errors so the run is not blocked by missing verification infra.
+  //
+  // Phase 5.3 — eval output-quality hook: we ALSO retain the last verdict so
+  // the run can surface it as an eval `RuntimeVerifyObservation` (booted +
+  // fatalErrors). This is the production source for a recording's
+  // `observation.runtimeVerify` field; a capture pipeline reads
+  // `GenerationResult.runtimeVerify` and writes it into evals/recordings.
+  let lastRuntimeVerify: EvalRuntimeVerify | undefined;
   const runtimeVerify: GenerateViaAgentDeps['runtimeVerify'] | undefined =
     browserJobs === undefined
       ? undefined
       : async (artifactSource: string): Promise<DoneError[]> => {
           const verdict = await browserJobs.runtimeVerify(artifactSource);
           if (verdict === null) return [];
+          lastRuntimeVerify = {
+            booted: verdict.hasGameContract,
+            fatalErrors: [...verdict.fatalErrors],
+          };
           const errors: DoneError[] = verdict.fatalErrors.map((message) => ({
             message,
             source: 'runtime',
@@ -315,5 +334,13 @@ export async function runGeneration(
     bytes: f.bytes instanceof Uint8Array ? f.bytes.length : encoder.encode(f.bytes as string).length,
   }));
 
-  return { output, engine: state.engine, spec: state.spec, snapshot, fileCount: tree.size, fsState };
+  return {
+    output,
+    engine: state.engine,
+    spec: state.spec,
+    snapshot,
+    fileCount: tree.size,
+    fsState,
+    ...(lastRuntimeVerify !== undefined ? { runtimeVerify: lastRuntimeVerify } : {}),
+  };
 }

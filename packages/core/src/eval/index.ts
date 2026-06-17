@@ -16,7 +16,23 @@ export {
 } from './fixture.js';
 export type { EvalReport, EvalResult } from './fixture.js';
 export { evaluateFixture } from './runner.js';
-export type { RunObservation } from './runner.js';
+export type { RunObservation, RuntimeVerifyObservation } from './runner.js';
 export { renderEvalReport } from './report.js';
 export { RECORDING_SCHEMA_VERSION, emptyRecording, parseEvalRecording } from './recording.js';
 export type { EvalRecording } from './recording.js';
+export {
+  PLAYTEST_PREDICATE_OPS,
+  evaluatePredicate,
+  parsePlaytestPredicate,
+  resolvePath,
+  scorePlaytest,
+} from './playtest-score.js';
+export type {
+  FrameRef,
+  PlaytestFrame,
+  PlaytestPredicate,
+  PlaytestPredicateOp,
+  PlaytestScore,
+  PlaytestTrace,
+  PredicateResult,
+} from './playtest-score.js';

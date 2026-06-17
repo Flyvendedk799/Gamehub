@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "name": "Platformer — jump & flag",
+  "slug": "platformer",
+  "description": "Side-scrolling 2D platformer: run, jump over gaps, reach a flag to win. The canonical phaser baseline.",
+  "brief": "Make a 2D side-scrolling platformer. The player runs and jumps with arrow keys and space, crosses a few platforms with gaps, and wins by touching a flag at the end of the level. Falling off the bottom loses.",
+  "playtestPlaybook": "platformer",
+  "assertions": {
+    "expectedEngine": "phaser",
+    "expectedGenre": "platformer",
+    "requiredFiles": ["index.html"],
+    "requiredAudio": false,
+    "maxInputTokens": 1400000,
+    "maxStrReplaceFailureRate": 0.05,
+    "maxSetTodosCalls": 8,
+    "minValidateGameSceneCalls": 1,
+    "minPlaytestGameCalls": 1,
+    "maxRenderPreviewCalls": 0,
+    "maxCorrections": 2,
+    "requireRuntimeBoot": true
+  }
+}

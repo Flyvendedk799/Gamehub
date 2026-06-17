@@ -31,7 +31,7 @@
  * The CLI loads recordings via `--recording <path>` and skips the
  * SQLite lookup entirely.
  */
-import type { RunObservation } from './runner.js';
+import type { RunObservation, RuntimeVerifyObservation } from './runner.js';
 
 export const RECORDING_SCHEMA_VERSION = 1 as const;
 
@@ -88,7 +88,7 @@ function parseObservation(raw: unknown): RunObservation {
       filePaths.push(f);
     }
   }
-  return {
+  const base: RunObservation = {
     engine: typeof raw['engine'] === 'string' ? raw['engine'] : null,
     genre: typeof raw['genre'] === 'string' ? raw['genre'] : null,
     inputTokens: requireNumber(raw, 'inputTokens'),
@@ -100,6 +100,31 @@ function parseObservation(raw: unknown): RunObservation {
     snapshotCount: requireNumber(raw, 'snapshotCount'),
     correctionCount: requireNumber(raw, 'correctionCount'),
   };
+  // Phase 5.3 — optional output-quality verdict.
+  if (raw['runtimeVerify'] !== undefined && raw['runtimeVerify'] !== null) {
+    base.runtimeVerify = parseRuntimeVerify(raw['runtimeVerify']);
+  }
+  return base;
+}
+
+function parseRuntimeVerify(raw: unknown): RuntimeVerifyObservation {
+  if (!isObject(raw)) throw new Error("'observation.runtimeVerify' must be an object");
+  if (typeof raw['booted'] !== 'boolean') {
+    throw new Error("'observation.runtimeVerify.booted' must be a boolean");
+  }
+  const fatalErrors: string[] = [];
+  if (raw['fatalErrors'] !== undefined) {
+    if (!Array.isArray(raw['fatalErrors'])) {
+      throw new Error("'observation.runtimeVerify.fatalErrors' must be an array");
+    }
+    for (const e of raw['fatalErrors']) {
+      if (typeof e !== 'string') {
+        throw new Error("'observation.runtimeVerify.fatalErrors[*]' must be strings");
+      }
+      fatalErrors.push(e);
+    }
+  }
+  return { booted: raw['booted'], fatalErrors };
 }
 
 export function parseEvalRecording(raw: unknown): EvalRecording {

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "name": "Runner — endless auto-run & jump",
+  "slug": "runner",
+  "description": "Endless runner in Phaser: player auto-advances along the run axis, jump avoids obstacles, distance is the score.",
+  "brief": "Make an endless runner. The player character runs forward automatically and the only control is jump (space) to clear obstacles and gaps. The run never stops while airborne. Hitting an obstacle ends the run; the score is the distance travelled.",
+  "playtestPlaybook": "runner",
+  "assertions": {
+    "expectedEngine": "phaser",
+    "expectedGenre": "runner",
+    "requiredFiles": ["index.html"],
+    "requiredAudio": false,
+    "maxInputTokens": 1400000,
+    "maxStrReplaceFailureRate": 0.05,
+    "maxSetTodosCalls": 8,
+    "minValidateGameSceneCalls": 1,
+    "minPlaytestGameCalls": 1,
+    "maxRenderPreviewCalls": 0,
+    "maxCorrections": 2,
+    "requireRuntimeBoot": true
+  }
+}

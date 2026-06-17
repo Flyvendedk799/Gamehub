@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "name": "Puzzle — match-3 swap",
+  "slug": "puzzle",
+  "description": "Grid match-3 in Phaser: click two adjacent tiles to swap, matches of 3+ clear and score, board refills.",
+  "brief": "Make a match-3 puzzle game on a grid of colored tiles. Click one tile then an adjacent tile to swap them. Any line of three or more same-colored tiles clears, the score increases, and tiles above fall to fill the gaps. There is no fail state; the player aims for a high score.",
+  "playtestPlaybook": "puzzle",
+  "assertions": {
+    "expectedEngine": "phaser",
+    "expectedGenre": "puzzle",
+    "requiredFiles": ["index.html"],
+    "requiredAudio": false,
+    "maxInputTokens": 1400000,
+    "maxStrReplaceFailureRate": 0.05,
+    "maxSetTodosCalls": 8,
+    "minValidateGameSceneCalls": 1,
+    "minPlaytestGameCalls": 1,
+    "maxRenderPreviewCalls": 0,
+    "maxCorrections": 2,
+    "requireRuntimeBoot": true
+  }
+}

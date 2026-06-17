@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "fixtureSlug": "topdown-arcade",
+  "capturedAt": "2026-06-17T10:15:00.000Z",
+  "notes": "Golden top-down arcade run. Cardinal WASD deltas verified in screen-relative axes; booted clean.",
+  "observation": {
+    "engine": "phaser",
+    "genre": "topdown_arcade",
+    "inputTokens": 580000,
+    "outputTokens": 40000,
+    "cachedInputTokens": 430000,
+    "toolCounts": {
+      "str_replace_based_edit_tool": 38,
+      "set_todos": 4,
+      "validate_game_scene": 1,
+      "playtest_game": 1
+    },
+    "strReplaceFailures": 1,
+    "filePaths": ["index.html"],
+    "snapshotCount": 1,
+    "correctionCount": 0,
+    "runtimeVerify": {
+      "booted": true,
+      "fatalErrors": []
+    }
+  }
+}

@@ -142,6 +142,66 @@ describe('evaluateFixture — token + count caps', () => {
   });
 });
 
+describe('evaluateFixture — Phase 5.3 output-quality (runtime boot) gate', () => {
+  const BOOT_FIXTURE: EvalFixture = EvalFixture.parse({
+    name: 'Platformer boot gate',
+    slug: 'platformer-boot',
+    description: 'requires the artifact to actually boot',
+    brief: 'Make a 2D platformer that boots.',
+    assertions: {
+      requiredAudio: false,
+      minValidateGameSceneCalls: 0,
+      minPlaytestGameCalls: 0,
+      requireRuntimeBoot: true,
+    },
+  });
+
+  // A process-healthy observation with NO runtime verdict; the boot gate
+  // is what the cases below toggle.
+  const HEALTHY_OBS: RunObservation = PASSING_OBS;
+
+  it('PASSES when the artifact booted clean (window.__game present, no errors)', () => {
+    const r = evaluateFixture(BOOT_FIXTURE, {
+      ...HEALTHY_OBS,
+      runtimeVerify: { booted: true, fatalErrors: [] },
+    });
+    expect(r.pass).toBe(true);
+    expect(r.observed.runtimeBoot).toBe('boot');
+  });
+
+  it('FAILS a throw-on-boot artifact even when every process proxy looks healthy', () => {
+    const r = evaluateFixture(BOOT_FIXTURE, {
+      ...HEALTHY_OBS,
+      runtimeVerify: { booted: false, fatalErrors: ['TypeError: cannot read x of undefined'] },
+    });
+    expect(r.pass).toBe(false);
+    expect(r.observed.runtimeBoot).toBe('fail');
+    expect(r.failures.join(' ')).toMatch(/did not boot/i);
+  });
+
+  it('FAILS when window.__game appeared but fatal boot errors were captured', () => {
+    const r = evaluateFixture(BOOT_FIXTURE, {
+      ...HEALTHY_OBS,
+      runtimeVerify: { booted: true, fatalErrors: ['Uncaught RangeError'] },
+    });
+    expect(r.pass).toBe(false);
+    expect(r.failures.join(' ')).toContain('fatal boot error');
+  });
+
+  it('FAILS when requireRuntimeBoot=true but no verdict was recorded', () => {
+    const r = evaluateFixture(BOOT_FIXTURE, HEALTHY_OBS);
+    expect(r.pass).toBe(false);
+    expect(r.observed.runtimeBoot).toBe('n/a');
+    expect(r.failures.join(' ')).toContain('no runtime-verify verdict');
+  });
+
+  it('does NOT gate on boot when requireRuntimeBoot is false (default)', () => {
+    const r = evaluateFixture(FPS_FIXTURE, PASSING_OBS);
+    expect(r.pass).toBe(true);
+    expect(r.observed.runtimeBoot).toBe('n/a');
+  });
+});
+
 describe('evaluateFixture — str_replace failure rate', () => {
   it('FAILS at the FPS 19% miss-rate baseline', () => {
     const r = evaluateFixture(FPS_FIXTURE, {

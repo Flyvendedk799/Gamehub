@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "name": "FPS — wave defense",
+  "slug": "fps",
+  "description": "First-person shooter in Three.js: pointer-lock look, WASD camera-relative movement, fight waves of enemies.",
+  "brief": "Create a simple 3D first-person shooter. Click to lock the pointer, look with the mouse, move with WASD relative to where the camera faces, and shoot waves of enemies that approach. The player wins by surviving all waves and loses if their health reaches zero.",
+  "playtestPlaybook": "fps",
+  "assertions": {
+    "expectedEngine": "three",
+    "expectedGenre": "fps",
+    "requiredFiles": ["index.html"],
+    "requiredAudio": false,
+    "maxInputTokens": 1400000,
+    "maxStrReplaceFailureRate": 0.05,
+    "maxSetTodosCalls": 8,
+    "minValidateGameSceneCalls": 1,
+    "minPlaytestGameCalls": 1,
+    "maxRenderPreviewCalls": 0,
+    "maxCorrections": 2,
+    "requireRuntimeBoot": true
+  }
+}

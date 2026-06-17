@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "fixtureSlug": "fps",
+  "capturedAt": "2026-06-17T10:05:00.000Z",
+  "notes": "Golden FPS run on three. Pointer-lock + yaw verified; booted clean.",
+  "observation": {
+    "engine": "three",
+    "genre": "fps",
+    "inputTokens": 1120000,
+    "outputTokens": 73000,
+    "cachedInputTokens": 880000,
+    "toolCounts": {
+      "str_replace_based_edit_tool": 96,
+      "set_todos": 5,
+      "validate_game_scene": 2,
+      "playtest_game": 1
+    },
+    "strReplaceFailures": 4,
+    "filePaths": ["index.html"],
+    "snapshotCount": 2,
+    "correctionCount": 1,
+    "runtimeVerify": {
+      "booted": true,
+      "fatalErrors": []
+    }
+  }
+}
