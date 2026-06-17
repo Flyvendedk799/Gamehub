@@ -33,6 +33,20 @@ export function chatMessageToEvents(msg: ChatHistoryMessage): SseEvent[] {
       },
     ];
   }
+  // Phase 2.5 — a `continuation_pending` row means a long run paused at a safe
+  // boundary. Hydrating it as a `run_paused` event makes the Resume button
+  // reappear after a reload; resuming re-fires generateGame (the server
+  // auto-applies the stored continuation).
+  if (msg.kind === 'continuation_pending') {
+    const p = msg.payload as { runId?: string } | null;
+    return [
+      {
+        type: 'run_paused',
+        runId: p?.runId ?? '',
+        timestamp: msg.createdAt,
+      },
+    ];
+  }
   return [];
 }
 

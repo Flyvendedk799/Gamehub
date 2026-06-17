@@ -3,6 +3,7 @@ import {
   SSE_NAMED_TYPES,
   isTerminalSseEvent,
   parseSseFrame,
+  parseSseFrames,
   reconnectDelay,
 } from '../api';
 import type { SseEvent } from '../types';
@@ -52,8 +53,56 @@ describe('parseSseFrame', () => {
   });
 });
 
+describe('parseSseFrames — raw agent frame integration (2.1)', () => {
+  it('normalizes a raw tool_execution_start frame instead of dropping it', () => {
+    const frame = JSON.stringify({
+      type: 'tool_execution_start',
+      toolName: 'str_replace_based_edit_tool',
+      args: { command: 'create', path: 'index.html' },
+      toolCallId: 'c1',
+    });
+    const out = parseSseFrames(frame, 'run-1');
+    expect(out).toHaveLength(1);
+    expect(out[0]?.type).toBe('tool_use');
+    if (out[0]?.type === 'tool_use') {
+      expect(out[0].runId).toBe('run-1');
+      expect(out[0].label).toBe('writing index.html');
+    }
+  });
+
+  it('fans out a declare_game_spec frame into tool_use + game_spec', () => {
+    const frame = JSON.stringify({
+      type: 'tool_execution_start',
+      toolName: 'declare_game_spec',
+      args: { genre: 'shooter', winCondition: 'clear waves' },
+    });
+    const out = parseSseFrames(frame, 'run-1');
+    expect(out.map((e) => e.type)).toEqual(['tool_use', 'game_spec']);
+  });
+
+  it('passes an already-normalized frame through as a single event', () => {
+    const frame = JSON.stringify({ type: 'run_complete', runId: 'r', previewUrl: '/p' });
+    const out = parseSseFrames(frame, 'r');
+    expect(out).toHaveLength(1);
+    expect(out[0]?.type).toBe('run_complete');
+  });
+
+  it('returns [] for malformed / unknown frames (no silent vanish path)', () => {
+    expect(parseSseFrames('{bad', 'r')).toEqual([]);
+    expect(parseSseFrames(JSON.stringify({ type: 'bogus' }), 'r')).toEqual([]);
+    expect(parseSseFrames('', 'r')).toEqual([]);
+  });
+
+  it('normalizes a bare run_paused frame (2.5)', () => {
+    const out = parseSseFrames(JSON.stringify({ type: 'run_paused' }), 'run-1');
+    expect(out).toHaveLength(1);
+    expect(out[0]?.type).toBe('run_paused');
+    if (out[0]?.type === 'run_paused') expect(out[0].runId).toBe('run-1');
+  });
+});
+
 describe('isTerminalSseEvent', () => {
-  it('is true for run_complete and run_error only', () => {
+  it('is true for run_complete, run_error, and run_paused', () => {
     const complete: SseEvent = {
       type: 'run_complete',
       runId: 'r',
@@ -62,9 +111,12 @@ describe('isTerminalSseEvent', () => {
       timestamp: 't',
     };
     const error: SseEvent = { type: 'run_error', runId: 'r', error: 'x', timestamp: 't' };
+    const paused: SseEvent = { type: 'run_paused', runId: 'r', timestamp: 't' };
     const agentEnd: SseEvent = { type: 'agent_end', runId: 'r', timestamp: 't' };
     expect(isTerminalSseEvent(complete)).toBe(true);
     expect(isTerminalSseEvent(error)).toBe(true);
+    // 2.5: run_paused stops the stream — the server closes it after pausing.
+    expect(isTerminalSseEvent(paused)).toBe(true);
     // #34: agent_end is NOT terminal.
     expect(isTerminalSseEvent(agentEnd)).toBe(false);
   });

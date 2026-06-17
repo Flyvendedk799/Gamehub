@@ -1,16 +1,27 @@
 'use client';
 
+import { ChatPanel } from '@/components/ChatPanel';
+import { PreviewPane, type TweakSchema } from '@/components/PreviewPane';
+import {
+  type SnapshotEntry,
+  describeApiError,
+  generateGame,
+  getChatHistory,
+  getProject,
+  getSnapshots,
+  publishProject,
+  revertToSnapshot,
+  streamRun,
+} from '@/lib/api';
+import { chatMessageToEvents, lastPreviewUrlFromHistory } from '@/lib/chat-hydration';
+import { API_BASE } from '@/lib/config';
+import { TRANSPORT_LOST_MESSAGE } from '@/lib/event-normalize';
+import type { Project, RunCompleteEvent, RunErrorEvent, SseEvent } from '@/lib/types';
+import { useCollab } from '@/lib/use-collab';
+import { usePresence } from '@/lib/use-presence';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChatPanel } from '@/components/ChatPanel';
-import { PreviewPane, type TweakSchema } from '@/components/PreviewPane';
-import { describeApiError, generateGame, getChatHistory, getProject, getSnapshots, publishProject, revertToSnapshot, streamRun, type SnapshotEntry } from '@/lib/api';
-import { chatMessageToEvents, lastPreviewUrlFromHistory } from '@/lib/chat-hydration';
-import { API_BASE } from '@/lib/config';
-import { useCollab } from '@/lib/use-collab';
-import { usePresence } from '@/lib/use-presence';
-import type { Project, RunCompleteEvent, RunErrorEvent, SseEvent } from '@/lib/types';
 
 const BASE = API_BASE;
 
@@ -95,65 +106,80 @@ export default function BuilderPage() {
         }
       })
       .catch((err) => setLoadError(describeApiError(err)));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, refreshSnapshots]);
 
   // ─── Start streaming when runId changes ───────────────────────────────────
-  const startStream = useCallback((runId: string) => {
-    // Close any existing stream
-    streamCtrlRef.current?.close();
-    setIsStreaming(true);
-    setReconnecting(false);
-    setHasError(false);
-    setErrorMessage(undefined);
+  const startStream = useCallback(
+    (runId: string) => {
+      // Close any existing stream
+      streamCtrlRef.current?.close();
+      setIsStreaming(true);
+      setReconnecting(false);
+      setHasError(false);
+      setErrorMessage(undefined);
 
-    const ctrl = streamRun(
-      runId,
-      (event) => {
-        // A frame arrived → the connection is healthy again.
-        setReconnecting(false);
-        setEvents((prev) => [...prev, event]);
-
-        if (event.type === 'run_complete') {
-          const completeEvent = event as RunCompleteEvent;
-          // Build full preview URL from the path returned by the server
-          const url = completeEvent.previewUrl.startsWith('http')
-            ? completeEvent.previewUrl
-            : `${BASE}${completeEvent.previewUrl}`;
-          setPreviewUrl(url);
-          setIsStreaming(false);
-          streamCtrlRef.current?.close();
-          refreshSnapshots();
-        }
-
-        if (event.type === 'run_error') {
-          const errEvent = event as RunErrorEvent;
-          setHasError(true);
-          setErrorMessage(errEvent.error);
-          setIsStreaming(false);
-          streamCtrlRef.current?.close();
-        }
-
-        // NOTE (#34): do NOT end the streaming UI on `agent_end`. Only the
-        // terminal `run_complete` / `run_error` events stop streaming — the
-        // artifact may still be packaging after the agent finishes its turns.
-      },
-      undefined,
-      {
-        // #10: surface transient disconnects as a "reconnecting" state; the
-        // server bus replays history on reconnect so resume is clean.
-        onReconnecting: () => setReconnecting(true),
-        onGiveUp: () => {
+      const ctrl = streamRun(
+        runId,
+        (event) => {
+          // A frame arrived → the connection is healthy again.
           setReconnecting(false);
-          setIsStreaming(false);
-          setHasError(true);
-          setErrorMessage('Lost connection to the build stream. Reload to resume.');
-        },
-      },
-    );
+          setEvents((prev) => [...prev, event]);
 
-    streamCtrlRef.current = ctrl;
-  }, [refreshSnapshots]);
+          if (event.type === 'run_complete') {
+            const completeEvent = event as RunCompleteEvent;
+            // Build full preview URL from the path returned by the server
+            const url = completeEvent.previewUrl.startsWith('http')
+              ? completeEvent.previewUrl
+              : `${BASE}${completeEvent.previewUrl}`;
+            setPreviewUrl(url);
+            setIsStreaming(false);
+            streamCtrlRef.current?.close();
+            refreshSnapshots();
+          }
+
+          if (event.type === 'run_error') {
+            const errEvent = event as RunErrorEvent;
+            setHasError(true);
+            setErrorMessage(errEvent.error);
+            setIsStreaming(false);
+            streamCtrlRef.current?.close();
+          }
+
+          // Phase 2.5 — the backend pauses long runs at a safe boundary, emits a
+          // single `run_paused` frame, then closes the stream. Stop streaming so
+          // the ChatPanel's Resume button (re-fires generateGame; the server
+          // auto-applies the stored continuation) takes over. Not an error.
+          if (event.type === 'run_paused') {
+            setIsStreaming(false);
+            streamCtrlRef.current?.close();
+          }
+
+          // NOTE (#34): do NOT end the streaming UI on `agent_end`. Only the
+          // terminal `run_complete` / `run_error` / `run_paused` events stop
+          // streaming — the artifact may still be packaging after the agent
+          // finishes its turns.
+        },
+        undefined,
+        {
+          // #10: surface transient disconnects as a "reconnecting" state; the
+          // server bus replays history on reconnect so resume is clean.
+          onReconnecting: () => setReconnecting(true),
+          onGiveUp: () => {
+            setReconnecting(false);
+            setIsStreaming(false);
+            setHasError(true);
+            // 2.3: the transport-lost message must match TRANSPORT_LOST_MESSAGE so
+            // shouldOfferFix() never shows a Fix button for a dropped socket.
+            setErrorMessage(TRANSPORT_LOST_MESSAGE);
+          },
+        },
+      );
+
+      streamCtrlRef.current = ctrl;
+    },
+    [refreshSnapshots],
+  );
 
   useEffect(() => {
     if (initialRunId) {
@@ -179,6 +205,12 @@ export default function BuilderPage() {
     };
     setEvents((prev) => [...prev, userEvent]);
 
+    await fireRun(prompt);
+  }
+
+  /** Start a generate run and stream it; surfaces failures as a run_error row. */
+  async function fireRun(prompt: string) {
+    if (!projectId) return;
     try {
       const { runId } = await generateGame(projectId, prompt);
       setCurrentRunId(runId);
@@ -194,6 +226,33 @@ export default function BuilderPage() {
       };
       setEvents((prev) => [...prev, errEvent]);
     }
+  }
+
+  // ─── Phase 2.3 — one-click "Fix this error" ───────────────────────────────
+  // Starts a fresh run whose prompt embeds the prior error so the agent has the
+  // failure in context. Only wired for genuine `run_error` rows — the transport
+  // "Lost connection to the build stream" case never becomes a run_error event
+  // (it sets the error banner via onGiveUp), so it never shows a Fix button.
+  async function handleFixError(error: string) {
+    if (!projectId || isStreaming) return;
+    const fixPrompt = `The previous build failed with this error:\n\n${error}\n\nPlease diagnose and fix it, then continue building the game.`;
+    const userEvent: SseEvent = {
+      type: 'user_message',
+      runId: currentRunId ?? '',
+      content: 'Fix the build error',
+      timestamp: new Date().toISOString(),
+    };
+    setEvents((prev) => [...prev, userEvent]);
+    await fireRun(fixPrompt);
+  }
+
+  // ─── Phase 2.5 — Resume a paused long-run ─────────────────────────────────
+  // Re-fires generateGame; the server's /generate route calls
+  // getPausedContinuation(projectId) and auto-applies the stored continuation,
+  // so any continue-style prompt resumes from the safe boundary.
+  async function handleResume() {
+    if (!projectId || isStreaming) return;
+    await fireRun('Continue building from where you paused.');
   }
 
   async function handlePublish() {
@@ -254,12 +313,18 @@ export default function BuilderPage() {
 
         <div className="flex items-center gap-2 md:gap-3 flex-shrink-0">
           {reconnecting ? (
-            <span className="flex items-center gap-1.5 text-xs text-[#f59e0b] font-mono" role="status">
+            <span
+              className="flex items-center gap-1.5 text-xs text-[#f59e0b] font-mono"
+              role="status"
+            >
               <PulseRing color="#f59e0b" />
               <span className="hidden sm:inline">reconnecting</span>
             </span>
           ) : isBuilding ? (
-            <span className="flex items-center gap-1.5 text-xs text-[#6366f1] font-mono" role="status">
+            <span
+              className="flex items-center gap-1.5 text-xs text-[#6366f1] font-mono"
+              role="status"
+            >
               <PulseRing />
               <span className="hidden sm:inline">building</span>
             </span>
@@ -311,7 +376,9 @@ export default function BuilderPage() {
                 </a>
               ) : (
                 <button
-                  onClick={() => { void handlePublish(); }}
+                  onClick={() => {
+                    void handlePublish();
+                  }}
                   disabled={isPublishing || isStreaming}
                   className="
                     text-xs px-3 py-1.5 rounded-lg
@@ -333,18 +400,25 @@ export default function BuilderPage() {
               className={`
                 hidden md:inline-flex
                 text-xs px-3 py-1.5 rounded-lg border transition-colors font-medium
-                ${showTimeline
-                  ? 'bg-[#6366f1]/20 text-[#6366f1] border-[#6366f1]/40'
-                  : 'bg-[#1a1a1a] hover:bg-[#222222] text-[#a1a1aa] border-[#222222]'}
+                ${
+                  showTimeline
+                    ? 'bg-[#6366f1]/20 text-[#6366f1] border-[#6366f1]/40'
+                    : 'bg-[#1a1a1a] hover:bg-[#222222] text-[#a1a1aa] border-[#222222]'
+                }
               `}
             >
               History ({snapshots.length})
             </button>
           )}
           {(viewerCount > 1 || (collabConnected && peerCount > 0)) && (
-            <span className="flex items-center gap-1 text-xs text-emerald-400 font-medium" title="Live collaborators">
+            <span
+              className="flex items-center gap-1 text-xs text-emerald-400 font-medium"
+              title="Live collaborators"
+            >
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="hidden sm:inline">{Math.max(viewerCount - 1, peerCount)} with you</span>
+              <span className="hidden sm:inline">
+                {Math.max(viewerCount - 1, peerCount)} with you
+              </span>
             </span>
           )}
           {/* All projects link — hidden on small screens */}
@@ -374,9 +448,17 @@ export default function BuilderPage() {
         <div className="h-[50vh] md:h-auto w-full md:w-[35%] md:min-w-[280px] md:max-w-[480px] md:flex-shrink-0 overflow-hidden">
           <ChatPanel
             events={events}
-            onSend={(prompt) => { void handleSend(prompt); }}
+            onSend={(prompt) => {
+              void handleSend(prompt);
+            }}
             isStreaming={isStreaming}
             reconnecting={reconnecting}
+            onFixError={(error) => {
+              void handleFixError(error);
+            }}
+            onResume={() => {
+              void handleResume();
+            }}
           />
         </div>
 
@@ -412,14 +494,18 @@ export default function BuilderPage() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 mb-1">
-                        <span className={`
+                        <span
+                          className={`
                           text-[10px] px-1.5 py-0.5 rounded font-mono font-medium
                           ${snap.type === 'initial' ? 'bg-[#6366f1]/20 text-[#6366f1]' : 'bg-[#1a1a1a] text-[#52525b]'}
-                        `}>
+                        `}
+                        >
                           v{snap.seq + 1}
                         </span>
                         {snap.engine && (
-                          <span className="text-[10px] text-[#52525b] font-mono">{snap.engine}</span>
+                          <span className="text-[10px] text-[#52525b] font-mono">
+                            {snap.engine}
+                          </span>
                         )}
                       </div>
                       {snap.prompt && (
@@ -427,13 +513,17 @@ export default function BuilderPage() {
                       )}
                       <p className="text-[10px] text-[#3f3f46] mt-1">
                         {new Date(snap.createdAt).toLocaleString(undefined, {
-                          month: 'short', day: 'numeric',
-                          hour: '2-digit', minute: '2-digit',
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
                         })}
                       </p>
                     </div>
                     <button
-                      onClick={() => { void handleRevert(snap.id); }}
+                      onClick={() => {
+                        void handleRevert(snap.id);
+                      }}
                       disabled={isReverting !== null || isStreaming}
                       className="
                         text-[10px] px-2 py-1 rounded

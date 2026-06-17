@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildRenderItems } from '@/lib/chat-render';
+import { shouldOfferFix, writtenPaths } from '@/lib/event-normalize';
 import type { SseEvent } from '@/lib/types';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 interface ChatPanelProps {
   events: SseEvent[];
@@ -10,9 +11,27 @@ interface ChatPanelProps {
   isStreaming: boolean;
   /** When set, a transient SSE disconnect is being retried (#10). */
   reconnecting?: boolean;
+  /**
+   * Phase 2.3 — one-click "Fix this error". Called with the prior error string
+   * so the builder can start a new run whose prompt includes it. Only wired for
+   * genuine `run_error` events, never the transport "Lost connection" case.
+   */
+  onFixError?: (error: string) => void;
+  /**
+   * Phase 2.5 — "Resume" a paused long-run. Re-fires generateGame; the server
+   * auto-applies the stored continuation.
+   */
+  onResume?: () => void;
 }
 
-export function ChatPanel({ events, onSend, isStreaming, reconnecting = false }: ChatPanelProps) {
+export function ChatPanel({
+  events,
+  onSend,
+  isStreaming,
+  reconnecting = false,
+  onFixError,
+  onResume,
+}: ChatPanelProps) {
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -38,6 +57,11 @@ export function ChatPanel({ events, onSend, isStreaming, reconnecting = false }:
   }
 
   const renderItems = useMemo(() => buildRenderItems(events), [events]);
+
+  // Phase 2.6 — "Changed N files" per iteration. Map each terminal event's
+  // render key to the file paths written since the previous terminal event, so
+  // the completion row can list exactly that iteration's changes.
+  const filesByTerminal = useMemo(() => computeFilesByTerminal(events), [events]);
 
   return (
     <div className="flex flex-col h-full bg-[#111111] border-r border-[#222222]">
@@ -69,7 +93,7 @@ export function ChatPanel({ events, onSend, isStreaming, reconnecting = false }:
             Waiting for your first build…
           </div>
         )}
-        {renderItems.map((item) =>
+        {renderItems.map((item, idx) =>
           item.kind === 'text' ? (
             <div
               key={item.key}
@@ -78,7 +102,17 @@ export function ChatPanel({ events, onSend, isStreaming, reconnecting = false }:
               {item.text}
             </div>
           ) : (
-            <EventRow key={item.key} event={item.event} />
+            <EventRow
+              key={item.key}
+              event={item.event}
+              changedFiles={filesByTerminal.get(item.key)}
+              {...(shouldOfferFix(item.event) && onFixError
+                ? { onFixError, isLatest: idx === renderItems.length - 1 }
+                : {})}
+              {...(item.event.type === 'run_paused' && onResume
+                ? { onResume, isLatest: idx === renderItems.length - 1 }
+                : {})}
+            />
           ),
         )}
       </div>
@@ -121,38 +155,110 @@ export function ChatPanel({ events, onSend, isStreaming, reconnecting = false }:
   );
 }
 
+// ─── Per-iteration "Changed N files" mapping (Phase 2.6) ──────────────────────
+//
+// Keyed by the render key `buildRenderItems` assigns to each event (`ev-${i}`),
+// so the completion row can look up exactly the files written in its iteration.
+
+const TERMINAL_TYPES = new Set(['run_complete', 'run_error', 'run_paused']);
+
+function computeFilesByTerminal(events: SseEvent[]): Map<string, string[]> {
+  const result = new Map<string, string[]>();
+  let segmentStart = 0;
+  events.forEach((event, i) => {
+    if (TERMINAL_TYPES.has(event.type)) {
+      const segment = events.slice(segmentStart, i + 1);
+      const paths = writtenPaths(segment);
+      if (paths.length > 0) result.set(`ev-${i}`, paths);
+      segmentStart = i + 1;
+    }
+  });
+  return result;
+}
+
 // ─── Individual event row ─────────────────────────────────────────────────────
 
-function EventRow({ event }: { event: SseEvent }) {
+function EventRow({
+  event,
+  changedFiles,
+  onFixError,
+  onResume,
+  isLatest = false,
+}: {
+  event: SseEvent;
+  changedFiles?: string[];
+  onFixError?: (error: string) => void;
+  onResume?: () => void;
+  isLatest?: boolean;
+}) {
   switch (event.type) {
     case 'agent_start':
       return <StatusChip label="Agent started" color="indigo" />;
 
     case 'turn_start':
-      return (
-        <StatusChip label={`Turn ${event.turnIndex + 1} started`} color="indigo" dim />
-      );
+      return <StatusChip label={`Turn ${event.turnIndex + 1} started`} color="indigo" dim />;
 
     case 'turn_end':
-      return (
-        <StatusChip label={`Turn ${event.turnIndex + 1} complete`} color="indigo" dim />
-      );
+      return <StatusChip label={`Turn ${event.turnIndex + 1} complete`} color="indigo" dim />;
 
     case 'agent_end':
       return <StatusChip label="Agent finished" color="green" />;
 
     case 'run_complete':
       return (
-        <StatusChip label="Build complete — game ready" color="green" />
+        <div className="space-y-1.5">
+          <StatusChip label="Build complete — game ready" color="green" />
+          {changedFiles && changedFiles.length > 0 && <ChangedFilesSummary paths={changedFiles} />}
+        </div>
       );
 
     case 'run_error':
       return (
-        <div className="flex items-start gap-2 font-mono text-xs text-[#ef4444] bg-[#ef4444]/5 border border-[#ef4444]/10 rounded-lg px-3 py-2">
-          <span className="opacity-60 flex-shrink-0">ERR</span>
-          <span className="break-all">{event.error}</span>
+        <div className="space-y-2">
+          <div className="flex items-start gap-2 font-mono text-xs text-[#ef4444] bg-[#ef4444]/5 border border-[#ef4444]/10 rounded-lg px-3 py-2">
+            <span className="opacity-60 flex-shrink-0">ERR</span>
+            <span className="break-all">{event.error}</span>
+          </div>
+          {onFixError && isLatest && (
+            <button
+              type="button"
+              onClick={() => onFixError(event.error)}
+              className="
+                inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg
+                bg-[#ef4444]/10 hover:bg-[#ef4444]/20
+                text-[#f87171] border border-[#ef4444]/20
+                transition-colors font-medium
+              "
+            >
+              ↻ Fix this error
+            </button>
+          )}
         </div>
       );
+
+    case 'run_paused':
+      return (
+        <div className="space-y-2">
+          <StatusChip label="Paused — long build checkpointed" color="indigo" />
+          {onResume && isLatest && (
+            <button
+              type="button"
+              onClick={() => onResume()}
+              className="
+                inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg
+                bg-[#6366f1]/10 hover:bg-[#6366f1]/20
+                text-[#818cf8] border border-[#6366f1]/20
+                transition-colors font-medium
+              "
+            >
+              ▶ Resume build
+            </button>
+          )}
+        </div>
+      );
+
+    case 'game_spec':
+      return <GameSpecCard event={event} />;
 
     case 'user_message':
       return (
@@ -180,19 +286,19 @@ function EventRow({ event }: { event: SseEvent }) {
       );
 
     case 'thinking_delta':
-      return (
-        <span className="text-xs text-[#52525b] italic leading-relaxed">
-          {event.delta}
-        </span>
-      );
+      return <span className="text-xs text-[#52525b] italic leading-relaxed">{event.delta}</span>;
 
     case 'tool_use':
-      return <ToolChip toolName={event.toolName} status={event.status} />;
+      return <ToolChip label={event.label ?? event.toolName} status={event.status} />;
 
     case 'tool_result':
+      // Results for write tools are folded into the per-iteration "Changed N
+      // files" summary on run_complete, so a successful write doesn't also emit
+      // a redundant result chip. Failures still surface so problems are visible.
+      if (event.success && event.path) return null;
       return (
         <ToolChip
-          toolName={event.toolName}
+          label={event.label ?? event.toolName}
           status={event.success ? 'done' : 'error'}
           isResult
         />
@@ -203,19 +309,78 @@ function EventRow({ event }: { event: SseEvent }) {
   }
 }
 
+// ─── Game spec card (Phase 2.2) ───────────────────────────────────────────────
+
+function GameSpecCard({
+  event,
+}: {
+  event: Extract<SseEvent, { type: 'game_spec' }>;
+}) {
+  return (
+    <div className="rounded-xl border border-[#6366f1]/25 bg-[#6366f1]/5 px-3.5 py-3 space-y-1.5">
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-mono uppercase tracking-widest text-[#818cf8]">
+          {event.amend ? "Updating what I'm building" : "Here's what I'm building"}
+        </span>
+      </div>
+      {event.genre && (
+        <p className="text-sm text-[#f4f4f5] font-medium capitalize">{event.genre}</p>
+      )}
+      {(event.winCondition || event.loseCondition) && (
+        <dl className="space-y-1 text-xs">
+          {event.winCondition && (
+            <div className="flex gap-2">
+              <dt className="text-[#22c55e] font-mono flex-shrink-0">Win</dt>
+              <dd className="text-[#a1a1aa]">{event.winCondition}</dd>
+            </div>
+          )}
+          {event.loseCondition && (
+            <div className="flex gap-2">
+              <dt className="text-[#ef4444] font-mono flex-shrink-0">Lose</dt>
+              <dd className="text-[#a1a1aa]">{event.loseCondition}</dd>
+            </div>
+          )}
+        </dl>
+      )}
+    </div>
+  );
+}
+
+// ─── "Changed N files" summary (Phase 2.6) ────────────────────────────────────
+
+function ChangedFilesSummary({ paths }: { paths: string[] }) {
+  return (
+    <div className="rounded-lg border border-[#222222] bg-[#0f0f0f] px-3 py-2">
+      <p className="text-[10px] font-mono uppercase tracking-widest text-[#52525b] mb-1.5">
+        Changed {paths.length} {paths.length === 1 ? 'file' : 'files'}
+      </p>
+      <ul className="space-y-0.5">
+        {paths.map((p) => (
+          <li
+            key={p}
+            className="text-xs font-mono text-[#a1a1aa] break-all flex items-center gap-1.5"
+          >
+            <span className="text-[#22c55e]">+</span>
+            {p}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 // ─── Tool call chip ───────────────────────────────────────────────────────────
 
 function ToolChip({
-  toolName,
+  label,
   status,
   isResult = false,
 }: {
-  toolName: string;
+  label: string;
   status: 'start' | 'done' | 'error';
   isResult?: boolean;
 }) {
-  const icon =
-    status === 'done' ? '✓' : status === 'error' ? '✗' : '●';
+  const icon = status === 'done' ? '✓' : status === 'error' ? '✗' : '●';
 
   const colorClass =
     status === 'done'
@@ -229,7 +394,7 @@ function ToolChip({
       className={`inline-flex items-center gap-1.5 font-mono text-[11px] border rounded-md px-2 py-1 ${colorClass} ${isResult ? 'opacity-70' : ''}`}
     >
       <span>{icon}</span>
-      <span>{toolName}</span>
+      <span>{label}</span>
     </div>
   );
 }

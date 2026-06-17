@@ -96,6 +96,10 @@ export interface ToolUseEvent {
   toolName: string;
   status: 'start' | 'done' | 'error';
   input?: Record<string, unknown>;
+  /** Human-readable activity label, e.g. "writing src/main.ts" (Phase 2.1). */
+  label?: string;
+  /** File path being written, when this tool writes a file (Phase 2.1/2.6). */
+  path?: string;
   timestamp: string;
 }
 
@@ -104,6 +108,10 @@ export interface ToolResultEvent {
   runId: string;
   toolName: string;
   success: boolean;
+  /** Human-readable label carried through from the matching tool_use (2.1). */
+  label?: string;
+  /** File path written by this tool, when applicable (2.6 "Changed N files"). */
+  path?: string;
   timestamp: string;
 }
 
@@ -111,6 +119,36 @@ export interface ThinkingDeltaEvent {
   type: 'thinking_delta';
   runId: string;
   delta: string;
+  timestamp: string;
+}
+
+/**
+ * The agent's declared game spec (Phase 2.2). Synthesized from a
+ * `declare_game_spec` / `amend_game_spec` tool-execution event so the builder
+ * can render a "here's what I'm building" card before `run_complete`. Fields
+ * mirror the `@playforge/shared` GameSpec but are all optional — the agent may
+ * amend only part of the spec.
+ */
+export interface GameSpecEvent {
+  type: 'game_spec';
+  runId: string;
+  genre?: string;
+  winCondition?: string;
+  loseCondition?: string;
+  /** True when this came from `amend_game_spec` (a partial patch). */
+  amend: boolean;
+  timestamp: string;
+}
+
+/**
+ * The backend paused a long run at a safe boundary (Phase 2.5). The server
+ * publishes `{ type: 'run_paused' }` then closes the stream; the builder shows
+ * a Resume button that re-fires generateGame (the server auto-applies the
+ * stored continuation). Client-normalized to carry runId/timestamp.
+ */
+export interface RunPausedEvent {
+  type: 'run_paused';
+  runId: string;
   timestamp: string;
 }
 
@@ -126,7 +164,9 @@ export type SseEvent =
   | TextDeltaEvent
   | ToolUseEvent
   | ToolResultEvent
-  | ThinkingDeltaEvent;
+  | ThinkingDeltaEvent
+  | GameSpecEvent
+  | RunPausedEvent;
 
 // ─── Chat history ─────────────────────────────────────────────────────────────
 

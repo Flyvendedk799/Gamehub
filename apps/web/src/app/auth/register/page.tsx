@@ -1,10 +1,11 @@
 'use client';
 
+import { createProject, generateGame, register } from '@/lib/api';
+import { setToken } from '@/lib/auth';
+import { deriveProjectName, takePendingPrompt } from '@/lib/pending-prompt';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { register } from '@/lib/api';
-import { setToken } from '@/lib/auth';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -23,13 +24,31 @@ export default function RegisterPage() {
     try {
       const { token } = await register(email, password, handle, displayName || undefined);
       setToken(token);
+
+      // Phase 2.4 — replay a prompt captured on the homepage before the auth
+      // wall: now that we hold a token, create the project + start the build
+      // and route straight into the builder so the prompt is never lost.
+      const pending = takePendingPrompt();
+      if (pending) {
+        try {
+          const { project } = await createProject(deriveProjectName(pending), 'phaser');
+          const { runId } = await generateGame(project.id, pending);
+          router.push(`/projects/${project.id}?runId=${runId}`);
+          return;
+        } catch {
+          // The account exists; if the build kick-off failed (e.g. transient),
+          // fall through to the home page rather than stranding the user.
+        }
+      }
       router.push('/');
     } catch (err) {
       setStatus('error');
       const msg = err instanceof Error ? err.message : 'Registration failed';
-      setErrorMsg(msg.includes('409') || msg.includes('email_or_handle_taken')
-        ? 'Email or username is already taken'
-        : msg);
+      setErrorMsg(
+        msg.includes('409') || msg.includes('email_or_handle_taken')
+          ? 'Email or username is already taken'
+          : msg,
+      );
     }
   }
 
@@ -75,7 +94,9 @@ export default function RegisterPage() {
                 Username
               </label>
               <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#52525b] text-sm select-none">@</span>
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#52525b] text-sm select-none">
+                  @
+                </span>
                 <input
                   id="handle"
                   type="text"
@@ -84,7 +105,9 @@ export default function RegisterPage() {
                   minLength={2}
                   maxLength={32}
                   value={handle}
-                  onChange={(e) => setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))}
+                  onChange={(e) =>
+                    setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))
+                  }
                   disabled={status === 'loading'}
                   className="w-full bg-[#0a0a0a] border border-[#222222] rounded-xl pl-8 pr-4 py-3 text-[#f4f4f5] placeholder-[#52525b] text-sm outline-none focus:border-[#6366f1] transition-colors disabled:opacity-50"
                   placeholder="yourname"
@@ -93,7 +116,10 @@ export default function RegisterPage() {
             </div>
 
             <div>
-              <label htmlFor="displayName" className="block text-sm font-medium text-[#a1a1aa] mb-1.5">
+              <label
+                htmlFor="displayName"
+                className="block text-sm font-medium text-[#a1a1aa] mb-1.5"
+              >
                 Display name <span className="text-[#52525b] font-normal">(optional)</span>
               </label>
               <input
@@ -145,7 +171,10 @@ export default function RegisterPage() {
 
         <p className="mt-4 text-center text-sm text-[#52525b]">
           Already have an account?{' '}
-          <Link href="/auth/login" className="text-[#6366f1] hover:text-[#818cf8] transition-colors">
+          <Link
+            href="/auth/login"
+            className="text-[#6366f1] hover:text-[#818cf8] transition-colors"
+          >
             Sign in
           </Link>
         </p>

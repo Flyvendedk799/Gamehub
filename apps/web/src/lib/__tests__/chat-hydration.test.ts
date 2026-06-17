@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { chatMessageToEvents, lastPreviewUrlFromHistory } from '../chat-hydration';
 import type { ChatHistoryMessage } from '../types';
 
-function msg(partial: Partial<ChatHistoryMessage> & Pick<ChatHistoryMessage, 'kind' | 'payload'>): ChatHistoryMessage {
+function msg(
+  partial: Partial<ChatHistoryMessage> & Pick<ChatHistoryMessage, 'kind' | 'payload'>,
+): ChatHistoryMessage {
   return {
     id: 1,
     projectId: 'p',
@@ -29,7 +31,10 @@ describe('chatMessageToEvents', () => {
 
   it('hydrates an artifact_delivered row into run_complete', () => {
     const events = chatMessageToEvents(
-      msg({ kind: 'artifact_delivered', payload: { runId: 'r2', previewUrl: '/v1/runs/r2/preview/' } }),
+      msg({
+        kind: 'artifact_delivered',
+        payload: { runId: 'r2', previewUrl: '/v1/runs/r2/preview/' },
+      }),
     );
     expect(events).toHaveLength(1);
     const ev = events[0]!;
@@ -43,6 +48,16 @@ describe('chatMessageToEvents', () => {
     const events = chatMessageToEvents(msg({ kind: 'user', payload: null }));
     expect(events[0]?.type).toBe('user_message');
     if (events[0]?.type === 'user_message') expect(events[0].content).toBe('');
+  });
+
+  it('hydrates a continuation_pending row into run_paused so Resume reappears on reload (2.5)', () => {
+    const events = chatMessageToEvents(
+      msg({ kind: 'continuation_pending', payload: { runId: 'r3', manifestKey: 'm1' } }),
+    );
+    expect(events).toHaveLength(1);
+    const ev = events[0]!;
+    expect(ev.type).toBe('run_paused');
+    if (ev.type === 'run_paused') expect(ev.runId).toBe('r3');
   });
 
   it('ignores unknown kinds', () => {

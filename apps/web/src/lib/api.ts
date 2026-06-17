@@ -1,3 +1,6 @@
+import { getToken } from './auth';
+import { API_BASE } from './config';
+import { RAW_AGENT_TYPES, isRawAgentType, normalizeAgentFrame } from './event-normalize';
 import type {
   ChatHistoryResponse,
   CreateProjectResponse,
@@ -7,8 +10,6 @@ import type {
   ListProjectsResponse,
   SseEvent,
 } from './types';
-import { getToken } from './auth';
-import { API_BASE } from './config';
 
 const BASE = API_BASE;
 
@@ -53,7 +54,11 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     try {
       const parsed: unknown = JSON.parse(text);
       body = parsed;
-      if (parsed && typeof parsed === 'object' && typeof (parsed as { error?: unknown }).error === 'string') {
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        typeof (parsed as { error?: unknown }).error === 'string'
+      ) {
         code = (parsed as { error: string }).error;
       }
     } catch {
@@ -163,7 +168,11 @@ export interface HubComment {
   createdAt: string;
 }
 
-export async function getHubFeed(opts?: { sort?: 'recent' | 'popular'; limit?: number; offset?: number }): Promise<{ games: HubGame[] }> {
+export async function getHubFeed(opts?: {
+  sort?: 'recent' | 'popular';
+  limit?: number;
+  offset?: number;
+}): Promise<{ games: HubGame[] }> {
   const params = new URLSearchParams();
   if (opts?.sort) params.set('sort', opts.sort);
   if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
@@ -176,7 +185,10 @@ export async function toggleLike(slug: string): Promise<{ liked: boolean }> {
   return apiFetch<{ liked: boolean }>(`/v1/hub/games/${slug}/like`, { method: 'POST' });
 }
 
-export async function setRating(slug: string, stars: number): Promise<{ ratingAvg: number; ratingCount: number }> {
+export async function setRating(
+  slug: string,
+  stars: number,
+): Promise<{ ratingAvg: number; ratingCount: number }> {
   return apiFetch<{ ratingAvg: number; ratingCount: number }>(`/v1/hub/games/${slug}/rate`, {
     method: 'POST',
     body: JSON.stringify({ stars }),
@@ -240,7 +252,10 @@ export async function getSnapshots(projectId: string): Promise<{ snapshots: Snap
   return apiFetch<{ snapshots: SnapshotEntry[] }>(`/v1/projects/${projectId}/snapshots`);
 }
 
-export async function revertToSnapshot(projectId: string, snapshotId: string): Promise<{ ok: boolean; snapshotId: string }> {
+export async function revertToSnapshot(
+  projectId: string,
+  snapshotId: string,
+): Promise<{ ok: boolean; snapshotId: string }> {
   return apiFetch<{ ok: boolean; snapshotId: string }>(
     `/v1/projects/${projectId}/snapshots/${snapshotId}/revert`,
     { method: 'POST' },
@@ -260,7 +275,13 @@ export interface StreamController {
   close: () => void;
 }
 
-/** SSE event types the server may emit as named events. */
+/**
+ * Already-normalized `SseEvent` types the server may emit directly (and that a
+ * reconnect may replay). The agent's RAW wire frames (tool_execution_start /
+ * _end, message_update, run_paused) are NOT in this list — they are parsed +
+ * normalized separately by `parseSseFrames` (Phase 2.1) so the build feed no
+ * longer silently drops the agent's rich events.
+ */
 export const SSE_NAMED_TYPES: ReadonlyArray<SseEvent['type']> = [
   'agent_start',
   'turn_start',
@@ -273,12 +294,24 @@ export const SSE_NAMED_TYPES: ReadonlyArray<SseEvent['type']> = [
   'tool_use',
   'tool_result',
   'thinking_delta',
+  'game_spec',
+  'run_paused',
 ];
+
+/**
+ * Every SSE event/frame type the EventSource should register a named listener
+ * for. The server currently sends frames as default `message` events (no
+ * `event:` line), but named listeners are belt-and-suspenders for any frame
+ * the server chooses to name (#10). Includes the raw agent frame types so a
+ * named `tool_execution_start`/etc. is not missed.
+ */
+export const SSE_LISTENER_TYPES: ReadonlyArray<string> = [...SSE_NAMED_TYPES, ...RAW_AGENT_TYPES];
 
 /**
  * Pure parser for a single SSE data frame. Returns the typed event or `null`
  * for malformed/empty frames. Extracted so it can be unit-tested without a
- * live EventSource (#16).
+ * live EventSource (#16). Only recognizes already-normalized `SseEvent` types;
+ * raw agent wire frames go through `parseSseFrames`.
  */
 export function parseSseFrame(data: string): SseEvent | null {
   if (typeof data !== 'string' || data.length === 0) return null;
@@ -295,9 +328,41 @@ export function parseSseFrame(data: string): SseEvent | null {
   return parsed as SseEvent;
 }
 
-/** True when an event ends the run for good and reconnection must stop (#10). */
+/**
+ * Parse a single SSE data frame into zero-or-more renderable `SseEvent`s
+ * (Phase 2.1). A RAW agent frame is normalized (one frame can fan out to
+ * multiple events — e.g. a spec tool start yields tool_use + game_spec); an
+ * already-normalized frame passes through as a single-element array. Malformed
+ * or unrecognized frames yield `[]` instead of vanishing silently.
+ *
+ * `runId` stamps synthesized events because the bus frames omit it.
+ */
+export function parseSseFrames(data: string, runId: string): SseEvent[] {
+  if (typeof data !== 'string' || data.length === 0) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(data);
+  } catch {
+    return [];
+  }
+  if (parsed === null || typeof parsed !== 'object') return [];
+  const type = (parsed as { type?: unknown }).type;
+  if (typeof type !== 'string') return [];
+  if (isRawAgentType(type)) {
+    return normalizeAgentFrame(parsed as Record<string, unknown>, { runId });
+  }
+  const normalized = parseSseFrame(data);
+  return normalized ? [normalized] : [];
+}
+
+/**
+ * True when an event ends the stream and reconnection must stop (#10). Includes
+ * `run_paused` (Phase 2.5) — the backend publishes it then closes the stream,
+ * so a reconnect must NOT spin trying to resume a paused run; the user resumes
+ * explicitly via the Resume button.
+ */
 export function isTerminalSseEvent(event: SseEvent): boolean {
-  return event.type === 'run_complete' || event.type === 'run_error';
+  return event.type === 'run_complete' || event.type === 'run_error' || event.type === 'run_paused';
 }
 
 export interface StreamRunOptions {
@@ -336,19 +401,24 @@ export function streamRun(
   if (token) url.searchParams.set('token', token);
 
   function handleFrame(data: string) {
-    const parsed = parseSseFrame(data);
-    if (!parsed) return;
-    if (isTerminalSseEvent(parsed)) {
-      // Terminal: deliver, then stop the stream and all reconnection (#10/#34).
-      terminal = true;
+    // One wire frame can normalize to several renderable events (Phase 2.1):
+    // a spec tool start yields tool_use + game_spec. Deliver each in order.
+    const events = parseSseFrames(data, runId);
+    if (events.length === 0) return;
+    for (const parsed of events) {
+      if (isTerminalSseEvent(parsed)) {
+        // Terminal: deliver, then stop the stream and all reconnection
+        // (#10/#34, Phase 2.5 run_paused).
+        terminal = true;
+        onEvent(parsed);
+        teardown();
+        return;
+      }
+      // Reset the backoff counter on any successful frame — the connection is
+      // healthy, so a later blip should retry from scratch.
+      attempt = 0;
       onEvent(parsed);
-      teardown();
-      return;
     }
-    // Reset the backoff counter on any successful frame — the connection is
-    // healthy, so a later blip should retry from scratch.
-    attempt = 0;
-    onEvent(parsed);
   }
 
   function teardown() {
@@ -366,7 +436,7 @@ export function streamRun(
 
     es.onmessage = (msgEvent: MessageEvent<string>) => handleFrame(msgEvent.data);
 
-    for (const eventType of SSE_NAMED_TYPES) {
+    for (const eventType of SSE_LISTENER_TYPES) {
       es.addEventListener(eventType, (evt: Event) => {
         handleFrame((evt as MessageEvent<string>).data);
       });

@@ -1,9 +1,11 @@
 'use client';
 
+import { createProject, generateGame } from '@/lib/api';
+import { isAuthenticated } from '@/lib/auth';
+import { deriveProjectName, setPendingPrompt } from '@/lib/pending-prompt';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
-import { createProject, generateGame } from '@/lib/api';
 
 const EXAMPLE_PROMPTS = [
   'A top-down space shooter with asteroids and power-ups',
@@ -27,9 +29,17 @@ export default function HomePage() {
     setStatus('loading');
     setErrorMsg('');
 
+    // Phase 2.4 — auth-aware submit. A logged-out visitor's prompt must NOT be
+    // lost at the 401 wall: stash it and route through register, which replays
+    // it after a token lands and continues straight into the build.
+    if (!isAuthenticated()) {
+      setPendingPrompt(trimmed);
+      router.push('/auth/register?next=build');
+      return;
+    }
+
     try {
-      // Derive a project name from the first few words of the prompt
-      const name = trimmed.slice(0, 60).replace(/[^a-zA-Z0-9 ]/g, '').trim() || 'My Game';
+      const name = deriveProjectName(trimmed);
 
       const { project } = await createProject(name, 'phaser');
       const { runId } = await generateGame(project.id, trimmed);
@@ -54,7 +64,13 @@ export default function HomePage() {
       <div className="mb-12 text-center">
         <div className="inline-flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-xl bg-[#6366f1] flex items-center justify-center shadow-lg shadow-indigo-500/20">
-            <svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 22 22"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
               <polygon points="4,3 18,11 4,19" fill="white" />
             </svg>
           </div>
@@ -169,14 +185,7 @@ function Spinner() {
       fill="none"
       viewBox="0 0 24 24"
     >
-      <circle
-        className="opacity-25"
-        cx="12"
-        cy="12"
-        r="10"
-        stroke="currentColor"
-        strokeWidth="4"
-      />
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
       <path
         className="opacity-75"
         fill="currentColor"
