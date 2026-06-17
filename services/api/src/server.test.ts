@@ -835,3 +835,224 @@ describe('credit reservation (#6)', () => {
     expect(enqueued).toHaveLength(1);
   });
 });
+
+/**
+ * Minimal BullMQ-Queue stub for the cancel route. Backs a single in-memory job
+ * keyed by id with a settable state; records remove() calls. Shaped to satisfy
+ * the `getJob` / `Job.getState` / `Job.remove` surface the route touches.
+ */
+function makeFakeGenerateQueue(opts?: { jobId?: string; state?: string }) {
+  const removed: string[] = [];
+  let jobState = opts?.state ?? 'waiting';
+  const jobId = opts?.jobId;
+  const job =
+    jobId === undefined
+      ? null
+      : {
+          async getState() {
+            return jobState;
+          },
+          async remove() {
+            removed.push(jobId);
+            jobState = 'removed';
+          },
+        };
+  const queue = {
+    async getJob(id: string) {
+      return id === jobId ? job : null;
+    },
+  } as unknown as NonNullable<ServerDeps['generateQueue']>;
+  return { queue, removed };
+}
+
+/**
+ * Refund-capable fake authDb for the cancel route. Unlike makeFakeAuthDb (which
+ * only exposes `transaction`), the cancel refund inserts directly via
+ * db.insert().values().onConflictDoNothing(), idempotent on (run_id) where
+ * reason='refund'.
+ */
+function makeFakeRefundDb(): {
+  authDb: ServerDeps['authDb'];
+  inserted: Array<{ reason: string; delta: number; runId?: string }>;
+} {
+  const inserted: Array<{ reason: string; delta: number; runId?: string }> = [];
+  const authDb = {
+    insert: () => ({
+      values: (row: { reason: string; delta: number; runId?: string }) => ({
+        onConflictDoNothing: () => ({
+          catch: async () => {
+            const dup = inserted.some((r) => r.reason === row.reason && r.runId === row.runId);
+            if (!dup) inserted.push(row);
+          },
+        }),
+      }),
+    }),
+  } as unknown as ServerDeps['authDb'];
+  return { authDb, inserted };
+}
+
+describe('run cancellation (2.7)', () => {
+  function makeCancelApp(opts?: {
+    runRepo?: InstanceType<typeof InMemoryRunRepo>;
+    bus?: InstanceType<typeof InMemoryEventBus>;
+    queue?: NonNullable<ServerDeps['generateQueue']>;
+    authDb?: ServerDeps['authDb'];
+  }) {
+    return buildServer({
+      repo: new InMemoryProjectRepo(),
+      auth: new HeaderAuthenticator(),
+      bus: opts?.bus ?? new InMemoryEventBus(),
+      runRepo: opts?.runRepo ?? new InMemoryRunRepo(),
+      enqueue: async () => {},
+      ...(opts?.queue !== undefined ? { generateQueue: opts.queue } : {}),
+      ...(opts?.authDb !== undefined ? { authDb: opts.authDb } : {}),
+    });
+  }
+
+  it('cancels a waiting run: removes the job, marks canceled, publishes run_canceled, refunds once', async () => {
+    const runRepo = new InMemoryRunRepo();
+    const bus = new InMemoryEventBus();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+    const { queue, removed } = makeFakeGenerateQueue({ jobId: run.id, state: 'waiting' });
+    const { authDb, inserted } = makeFakeRefundDb();
+
+    // Capture what lands on the run channel.
+    const events: Array<{ type?: string }> = [];
+    await bus.subscribe(runChannel(run.id), (m) => events.push(m as { type?: string }));
+
+    const app = makeCancelApp({ runRepo, bus, queue, authDb });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/runs/${run.id}/cancel`,
+      headers: AS_ALICE,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ status: 'canceled', canceled: true });
+
+    // Job removed from the queue.
+    expect(removed).toEqual([run.id]);
+    // Run persisted as canceled.
+    expect((await runRepo.get(run.id))?.status).toBe('canceled');
+    // run_canceled published so the SSE stream closes.
+    expect(events.some((e) => e.type === 'run_canceled')).toBe(true);
+    // Exactly one +CREDITS_PER_RUN refund row keyed on the run.
+    const refunds = inserted.filter((r) => r.reason === 'refund');
+    expect(refunds).toHaveLength(1);
+    expect(refunds[0]).toMatchObject({ delta: 10, runId: run.id });
+  });
+
+  it('re-cancel is idempotent — second call is a no-op and inserts no second refund', async () => {
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+    const { queue } = makeFakeGenerateQueue({ jobId: run.id, state: 'waiting' });
+    const { authDb, inserted } = makeFakeRefundDb();
+
+    const app = makeCancelApp({ runRepo, queue, authDb });
+    const first = await app.inject({ method: 'POST', url: `/v1/runs/${run.id}/cancel`, headers: AS_ALICE });
+    expect(first.statusCode).toBe(200);
+
+    // Second cancel: run is already 'canceled' → terminal no-op, no second refund.
+    const second = await app.inject({ method: 'POST', url: `/v1/runs/${run.id}/cancel`, headers: AS_ALICE });
+    expect(second.statusCode).toBe(200);
+    expect(second.json()).toMatchObject({ status: 'canceled', canceled: true });
+    expect(inserted.filter((r) => r.reason === 'refund')).toHaveLength(1);
+  });
+
+  it('returns 409 for an already-running run (active-cancel is a follow-up)', async () => {
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+    await runRepo.updateStatus(run.id, 'running');
+    const { queue, removed } = makeFakeGenerateQueue({ jobId: run.id, state: 'active' });
+
+    const app = makeCancelApp({ runRepo, queue });
+    const res = await app.inject({ method: 'POST', url: `/v1/runs/${run.id}/cancel`, headers: AS_ALICE });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ error: 'active_run_cancel_unsupported' });
+    // No job removal, status unchanged.
+    expect(removed).toEqual([]);
+    expect((await runRepo.get(run.id))?.status).toBe('running');
+  });
+
+  it('returns 200 no-op when the run is already terminal (completed)', async () => {
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+    await runRepo.updateStatus(run.id, 'completed');
+    const { queue } = makeFakeGenerateQueue({ jobId: run.id });
+
+    const app = makeCancelApp({ runRepo, queue });
+    const res = await app.inject({ method: 'POST', url: `/v1/runs/${run.id}/cancel`, headers: AS_ALICE });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ status: 'completed', canceled: false });
+  });
+
+  it('returns 503 when no generate queue is configured (no-Redis dev)', async () => {
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+    const app = makeCancelApp({ runRepo }); // no queue
+    const res = await app.inject({ method: 'POST', url: `/v1/runs/${run.id}/cancel`, headers: AS_ALICE });
+    expect(res.statusCode).toBe(503);
+    expect(res.json()).toMatchObject({ error: 'cancel_unavailable' });
+  });
+
+  it("rejects cancelling another user's run with 404", async () => {
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+    const { queue } = makeFakeGenerateQueue({ jobId: run.id });
+    const app = makeCancelApp({ runRepo, queue });
+    const res = await app.inject({ method: 'POST', url: `/v1/runs/${run.id}/cancel`, headers: AS_BOB });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('cancels a waiting run even when the job is already gone from the queue', async () => {
+    // Job may have been consumed/expired; cancel must still persist + publish + refund.
+    const runRepo = new InMemoryRunRepo();
+    const bus = new InMemoryEventBus();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+    const { queue } = makeFakeGenerateQueue(); // getJob returns null
+    const { authDb, inserted } = makeFakeRefundDb();
+    const events: Array<{ type?: string }> = [];
+    await bus.subscribe(runChannel(run.id), (m) => events.push(m as { type?: string }));
+
+    const app = makeCancelApp({ runRepo, bus, queue, authDb });
+    const res = await app.inject({ method: 'POST', url: `/v1/runs/${run.id}/cancel`, headers: AS_ALICE });
+    expect(res.statusCode).toBe(200);
+    expect((await runRepo.get(run.id))?.status).toBe('canceled');
+    expect(events.some((e) => e.type === 'run_canceled')).toBe(true);
+    expect(inserted.filter((r) => r.reason === 'refund')).toHaveLength(1);
+  });
+});
+
+describe('SSE relay terminal-event set (2.5b)', () => {
+  it('closes the stream on a run_paused frame (Resume button keys on this shape)', async () => {
+    const bus = new InMemoryEventBus();
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+    await bus.publish(runChannel(run.id), { type: 'tool_call', name: 'create_file' });
+    await bus.publish(runChannel(run.id), { type: 'run_paused' });
+
+    const app = makeApp({ bus, runRepo });
+    const res = await app.inject({ method: 'GET', url: `/v1/runs/${run.id}/stream`, headers: AS_ALICE });
+
+    // If run_paused weren't terminal, inject() would hang until timeout; getting
+    // a completed 200 response proves finish() fired on the paused frame.
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('"type":"run_paused"');
+    const lines = res.body.split('\n').filter((l) => l.startsWith('data:'));
+    // tool_call + run_paused; the exact {type:'run_paused'} frame is preserved.
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toBe('data: {"type":"run_paused"}');
+  });
+
+  it('closes the stream on a run_canceled frame', async () => {
+    const bus = new InMemoryEventBus();
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+    await bus.publish(runChannel(run.id), { type: 'run_canceled' });
+
+    const app = makeApp({ bus, runRepo });
+    const res = await app.inject({ method: 'GET', url: `/v1/runs/${run.id}/stream`, headers: AS_ALICE });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('"type":"run_canceled"');
+  });
+});

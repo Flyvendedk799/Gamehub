@@ -670,8 +670,95 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         if (m.type === 'run_error') {
           finish();
         }
+        // A paused or canceled run is terminal for THIS stream: the worker won't
+        // emit further events on this run channel. Without finishing here a
+        // `run_paused` (worker pause) or `run_canceled` (cancel endpoint) frame
+        // would be written but the stream would hang open until the client/HTTP
+        // timeout. The frontend keys its Resume button on the {type:'run_paused'}
+        // frame, so the shape must stay exactly that.
+        if (m.type === 'run_paused' || m.type === 'run_canceled') {
+          finish();
+        }
       });
     });
+  });
+
+  // ── run cancellation ──────────────────────────────────────────────────────
+  // POST /v1/runs/:id/cancel  (auth + run-ownership)
+  //
+  // Phase 2.7, WAITING-JOB-FIRST: cancels a run whose BullMQ job is still
+  // queued/waiting. Active-job cancel (interrupting a running agent via a
+  // checkpoint hint) is an explicit follow-up and returns 409 here.
+  //
+  //   - terminal run (completed/failed/canceled) → 200 no-op
+  //   - waiting/queued run → remove the job (jobId === runId), set status
+  //     'canceled', publish {type:'run_canceled'} (closes the SSE stream via
+  //     finish()), and REFUND the reservation exactly once (idempotent insert,
+  //     reason 'refund', keyed on runId by 'credit_ledger_refund_key').
+  //   - running run → 409 (active-job cancel not supported yet).
+  //
+  // Guarded behind deps.generateQueue: no-Redis dev has no job to remove, so it
+  // returns 503 (matching how queue-dependent routes guard).
+
+  app.post('/v1/runs/:id/cancel', async (req, reply) => {
+    if (!deps.generateQueue) {
+      return reply.code(503).send({ error: 'cancel_unavailable' });
+    }
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { id } = req.params as { id: string };
+    const run = await deps.runRepo.get(id);
+    if (!run || run.userId !== user.userId) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+
+    // Already terminal → idempotent no-op.
+    if (run.status === 'completed' || run.status === 'failed' || run.status === 'canceled') {
+      return reply.code(200).send({ status: run.status, canceled: run.status === 'canceled' });
+    }
+
+    // Inspect the live job state. The job is enqueued with jobId === runId, so a
+    // direct getJob(runId) finds it. A 'running' run, or a job already pulled
+    // into 'active', can't be safely torn down yet → 409 follow-up.
+    const job = await deps.generateQueue.getJob(id);
+    if (run.status === 'running') {
+      return reply.code(409).send({
+        error: 'active_run_cancel_unsupported',
+        message: 'This run is already executing; active-run cancellation is not supported yet.',
+      });
+    }
+    if (job) {
+      const state = await job.getState();
+      if (state === 'active') {
+        return reply.code(409).send({
+          error: 'active_run_cancel_unsupported',
+          message: 'This run is already executing; active-run cancellation is not supported yet.',
+        });
+      }
+      // Remove the waiting/queued/delayed job so the worker never picks it up.
+      await job.remove();
+    }
+
+    // Persist the canceled status, then notify any open SSE stream so it closes.
+    await deps.runRepo.updateStatus(id, 'canceled');
+    await deps.bus.publish(runChannel(id), { type: 'run_canceled' });
+
+    // Refund the enqueue-time reservation exactly once. Mirrors the worker
+    // 'failed' refund: insert delta +CREDITS_PER_RUN, reason 'refund', keyed on
+    // runId. The partial unique 'credit_ledger_refund_key' makes a re-cancel (or
+    // a later 'failed' handler) a no-op via onConflictDoNothing.
+    if (deps.authDb) {
+      const { schema: s } = await import('@playforge/db');
+      await deps.authDb
+        .insert(s.creditLedger)
+        .values({ userId: run.userId, delta: CREDITS_PER_RUN, reason: 'refund', runId: id })
+        .onConflictDoNothing()
+        .catch((refundErr: unknown) => {
+          console.error(`[cancel] credit refund failed for run ${id}:`, refundErr);
+        });
+    }
+
+    return reply.code(200).send({ status: 'canceled', canceled: true });
   });
 
   // ── chat history ──────────────────────────────────────────────────────────

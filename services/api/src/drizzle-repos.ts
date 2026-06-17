@@ -44,8 +44,12 @@ const RUN_STATUS_MAP: Record<string, Run['status']> = {
   running: 'running',
   completed: 'completed',
   failed: 'failed',
-  paused: 'running',
-  canceled: 'failed',
+  // `paused` and `canceled` are first-class run states (Phase 2): the SSE relay
+  // closes on a paused/canceled run, the resume flow reads `paused`, and the
+  // cancel endpoint persists `canceled`. They must round-trip faithfully — the
+  // old map collapsed paused→running and canceled→failed, hiding both states.
+  paused: 'paused',
+  canceled: 'canceled',
 };
 
 function rowToRun(row: typeof schema.runs.$inferSelect): Run {

@@ -8,7 +8,7 @@ export interface Run {
   id: string;
   projectId: string;
   userId: string;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'paused';
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'paused' | 'canceled';
   createdAt: string;
   snapshotManifestKey?: string;
   /** Populated when status === 'paused'. Carries the continuation payload. */
