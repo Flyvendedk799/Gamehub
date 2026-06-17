@@ -5,6 +5,10 @@ import { type Db, schema } from '@playforge/db';
 export interface PublishedGame {
   id: string;
   projectId: string;
+  /** The IMMUTABLE snapshot that was published. Remix forks this, not the live
+   *  project HEAD, so post-publish WIP never leaks. Null for games published
+   *  before snapshot-pinning landed. */
+  snapshotId: string | null;
   publishSlug: string;
   title: string;
   bundleKey: string;
@@ -20,6 +24,7 @@ export interface PublishRepo {
     publishSlug: string;
     title: string;
     bundleKey: string;
+    snapshotId?: string;
   }): Promise<PublishedGame>;
   getBySlug(slug: string): Promise<PublishedGame | null>;
   getByProject(projectId: string): Promise<PublishedGame | null>;
@@ -33,6 +38,7 @@ function rowToPublishedGame(row: typeof schema.publishedGames.$inferSelect): Pub
   return {
     id: row.id,
     projectId: row.projectId,
+    snapshotId: row.snapshotId ?? null,
     publishSlug: row.publishSlug,
     title: row.title,
     bundleKey: row.bundleKey,
@@ -46,17 +52,19 @@ function rowToPublishedGame(row: typeof schema.publishedGames.$inferSelect): Pub
 export class InMemoryPublishRepo implements PublishRepo {
   private readonly byId = new Map<string, PublishedGame>();
 
-  async upsert(input: { projectId: string; publishSlug: string; title: string; bundleKey: string }): Promise<PublishedGame> {
+  async upsert(input: { projectId: string; publishSlug: string; title: string; bundleKey: string; snapshotId?: string }): Promise<PublishedGame> {
     const existing = [...this.byId.values()].find((g) => g.projectId === input.projectId);
     const now = new Date().toISOString();
+    const snapshotId = input.snapshotId ?? null;
     if (existing) {
-      const updated: PublishedGame = { ...existing, ...input, updatedAt: now };
+      const updated: PublishedGame = { ...existing, ...input, snapshotId, updatedAt: now };
       this.byId.set(existing.id, updated);
       return updated;
     }
     const game: PublishedGame = {
       id: randomUUID(),
       ...input,
+      snapshotId,
       thumbnailUrl: null,
       status: 'live',
       publishedAt: now,
@@ -94,14 +102,19 @@ export class InMemoryPublishRepo implements PublishRepo {
 export class DrizzlePublishRepo implements PublishRepo {
   constructor(private readonly db: Db) {}
 
-  async upsert(input: { projectId: string; publishSlug: string; title: string; bundleKey: string }): Promise<PublishedGame> {
+  async upsert(input: { projectId: string; publishSlug: string; title: string; bundleKey: string; snapshotId?: string }): Promise<PublishedGame> {
     const existing = await this.db.query.publishedGames.findFirst({
       where: eq(schema.publishedGames.projectId, input.projectId),
     });
     if (existing) {
       const [row] = await this.db
         .update(schema.publishedGames)
-        .set({ bundleKey: input.bundleKey, title: input.title, updatedAt: new Date() })
+        .set({
+          bundleKey: input.bundleKey,
+          title: input.title,
+          updatedAt: new Date(),
+          ...(input.snapshotId !== undefined ? { snapshotId: input.snapshotId } : {}),
+        })
         .where(eq(schema.publishedGames.id, existing.id))
         .returning();
       if (!row) throw new Error('publish upsert returned no row');
@@ -110,7 +123,14 @@ export class DrizzlePublishRepo implements PublishRepo {
     const id = randomUUID();
     const [row] = await this.db
       .insert(schema.publishedGames)
-      .values({ id, projectId: input.projectId, publishSlug: input.publishSlug, title: input.title, bundleKey: input.bundleKey })
+      .values({
+        id,
+        projectId: input.projectId,
+        publishSlug: input.publishSlug,
+        title: input.title,
+        bundleKey: input.bundleKey,
+        ...(input.snapshotId !== undefined ? { snapshotId: input.snapshotId } : {}),
+      })
       .returning();
     if (!row) throw new Error('publish insert returned no row');
     return rowToPublishedGame(row);

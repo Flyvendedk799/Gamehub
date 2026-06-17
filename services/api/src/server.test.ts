@@ -476,7 +476,7 @@ describe('preview route', () => {
     await runRepo.setSnapshot(run.id, manifestKey);
 
     const app = makeApp({ store, runRepo });
-    const res = await app.inject({ method: 'GET', url: `/v1/runs/${run.id}/preview/` });
+    const res = await app.inject({ method: 'GET', url: `/v1/runs/${run.id}/preview/`, headers: AS_ALICE });
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toBe('text/html; charset=utf-8');
     expect(res.body).toBe(html);
@@ -498,9 +498,24 @@ describe('preview route', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/v1/runs/${run.id}/preview/assets/audio/sound.wav`,
+      headers: AS_ALICE,
     });
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toBe('audio/wav');
+  });
+
+  it("blocks another user from previewing a run they don't own (#30 IDOR)", async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+    const { manifestKey } = await store.write([
+      { path: 'index.html', bytes: Buffer.from('<html>secret</html>') },
+    ]);
+    await runRepo.setSnapshot(run.id, manifestKey);
+
+    const app = makeApp({ store, runRepo });
+    const res = await app.inject({ method: 'GET', url: `/v1/runs/${run.id}/preview/`, headers: AS_BOB });
+    expect(res.statusCode).toBe(404);
   });
 
   it('returns 404 when run has no snapshot yet', async () => {
@@ -509,7 +524,7 @@ describe('preview route', () => {
     const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
 
     const app = makeApp({ store, runRepo });
-    const res = await app.inject({ method: 'GET', url: `/v1/runs/${run.id}/preview/` });
+    const res = await app.inject({ method: 'GET', url: `/v1/runs/${run.id}/preview/`, headers: AS_ALICE });
     expect(res.statusCode).toBe(404);
     expect((res.json() as { error: string }).error).toBe('not_found');
   });

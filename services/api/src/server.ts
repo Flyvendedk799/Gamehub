@@ -242,21 +242,32 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   /**
    * Extract + authenticate a request's identity. EventSource (SSE) and
    * WebSocket cannot set custom headers, so a `?token=` (Bearer) or `?userId=`
-   * (dev HeaderAuth) query param is accepted as a fallback. Returns the user or
-   * null — callers decide how to reject (HTTP reply vs. socket close).
+   * (dev HeaderAuth) query param is accepted ONLY on routes that opt in via
+   * `allowQueryToken` — the SSE stream, the run preview, and the presence/collab
+   * WebSockets. Honoring it on every route would leak the session token into
+   * URLs and access logs platform-wide (#21a). Returns the user or null.
    */
-  async function authenticateRequest(req: FastifyRequest): Promise<AuthedUser | null> {
-    const q = req.query as Record<string, string | undefined>;
+  async function authenticateRequest(
+    req: FastifyRequest,
+    opts?: { allowQueryToken?: boolean },
+  ): Promise<AuthedUser | null> {
     const hdrs: Record<string, string | string[] | undefined> = { ...req.headers };
-    const qToken = q['token'];
-    if (qToken && !hdrs['authorization']) hdrs['authorization'] = `Bearer ${qToken}`;
-    const qUserId = q['userId'];
-    if (qUserId && !hdrs['x-user-id']) hdrs['x-user-id'] = qUserId;
+    if (opts?.allowQueryToken) {
+      const q = req.query as Record<string, string | undefined>;
+      const qToken = q['token'];
+      if (qToken && !hdrs['authorization']) hdrs['authorization'] = `Bearer ${qToken}`;
+      const qUserId = q['userId'];
+      if (qUserId && !hdrs['x-user-id']) hdrs['x-user-id'] = qUserId;
+    }
     return deps.auth.authenticate(hdrs);
   }
 
-  async function requireUser(req: FastifyRequest, reply: FastifyReply): Promise<AuthedUser | null> {
-    const user = await authenticateRequest(req);
+  async function requireUser(
+    req: FastifyRequest,
+    reply: FastifyReply,
+    opts?: { allowQueryToken?: boolean },
+  ): Promise<AuthedUser | null> {
+    const user = await authenticateRequest(req, opts);
     if (!user) {
       await reply.code(401).send({ error: 'unauthenticated' });
       return null;
@@ -275,7 +286,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     req: FastifyRequest,
     projectId: string,
   ): Promise<AuthedUser | null> {
-    const user = await authenticateRequest(req);
+    // WebSockets can't set headers — the ?token= query fallback is required here.
+    const user = await authenticateRequest(req, { allowQueryToken: true });
     if (!user) {
       socket.close(1008, 'unauthenticated');
       return null;
@@ -604,7 +616,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // ── SSE event relay ───────────────────────────────────────────────────────
 
   app.get('/v1/runs/:id/stream', async (req, reply) => {
-    const user = await requireUser(req, reply);
+    // EventSource can't set headers → allow the ?token= query fallback here.
+    const user = await requireUser(req, reply, { allowQueryToken: true });
     if (!user) return;
     const { id } = req.params as { id: string };
     const run: Run | null = await deps.runRepo.get(id);
@@ -679,17 +692,23 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // Serves files from a run's snapshot manifest so the iframe can load the game.
   // Route: GET /v1/runs/:id/preview/           → index.html
   //        GET /v1/runs/:id/preview/assets/...  → asset files
-  // No auth required — the run ID acts as an unguessable capability token for
-  // Phase 1. Origin isolation + CSP land in Phase 2.
+  // Owner-only (#30): the run id is unguessable, but we also bind access to the
+  // run's owner so an exposed run id can't be replayed by another user. The
+  // builder iframe passes ?token= (it can't set headers); query-token is scoped
+  // to this route + the SSE stream + the WS routes.
 
   app.get('/v1/runs/:id/preview/*', async (req, reply) => {
     if (!deps.store) return reply.code(503).send({ error: 'preview_unavailable' });
 
+    const user = await requireUser(req, reply, { allowQueryToken: true });
+    if (!user) return;
     const { id } = req.params as { id: string };
     const filePath = ((req.params as Record<string, string>)['*'] || '') || 'index.html';
 
     const run = await deps.runRepo.get(id);
-    if (!run?.snapshotManifestKey) return reply.code(404).send({ error: 'not_found' });
+    if (!run?.snapshotManifestKey || run.userId !== user.userId) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
 
     try {
       const manifest = await deps.store.readManifest(run.snapshotManifestKey);
@@ -753,6 +772,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       publishSlug: project.slug,
       title: project.name,
       bundleKey,
+      // Pin the published snapshot so remix forks this immutable version, not the
+      // project's live HEAD (#14). currentSnapshotId is the HEAD at publish time.
+      ...(project.currentSnapshotId !== null ? { snapshotId: project.currentSnapshotId } : {}),
     });
 
     // Auto-moderation: scan title + bundle for flagged patterns.
@@ -1236,14 +1258,29 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!sourceProject) {
       return reply.code(404).send({ error: 'source_project_not_found' });
     }
+
+    // Fork the PUBLISHED immutable snapshot's manifest, NOT the source project's
+    // live currentManifestKey (#14) — the live HEAD may contain unpublished WIP
+    // (edits made after publishing) that must not leak to a remixer. Resolve the
+    // pinned snapshot; fall back to the live HEAD only for legacy games published
+    // before snapshot-pinning (snapshotId null).
+    let remixManifestKey: string | null = null;
+    if (published.snapshotId && deps.snapshotRepo) {
+      const snap = await deps.snapshotRepo.getById(published.snapshotId);
+      remixManifestKey = snap?.filesManifestKey ?? null;
+    }
+    if (remixManifestKey === null) {
+      remixManifestKey = sourceProject.currentManifestKey;
+    }
+
     const newProject = await deps.repo.create({
       ownerId: user.userId,
       name: `Remix of ${published.title}`,
       ...(sourceProject.engine !== null ? { engine: sourceProject.engine } : {}),
       remixOfProjectId: published.projectId,
     });
-    if (sourceProject.currentManifestKey !== null) {
-      await deps.repo.setCurrentManifestKey(newProject.id, sourceProject.currentManifestKey);
+    if (remixManifestKey !== null) {
+      await deps.repo.setCurrentManifestKey(newProject.id, remixManifestKey);
     }
     return reply.code(201).send({ projectId: newProject.id });
   });
