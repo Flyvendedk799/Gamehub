@@ -34,7 +34,7 @@ describe('renderEvalReport', () => {
       correctionCount: 0,
     });
     const failed = evaluateFixture(PLATFORMER, {
-      engine: 'pygame',
+      engine: 'three',
       genre: 'platformer',
       inputTokens: 500_000,
       outputTokens: 20_000,

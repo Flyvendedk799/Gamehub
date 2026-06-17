@@ -202,7 +202,7 @@ export interface GenerateInput {
   /** gameplan §A6 — engine pin for game-mode runs (set by the New-design
    *  dialog or carried from a prior snapshot). When omitted on a game run
    *  the agent calls `choose_engine` first. */
-  engine?: 'three' | 'phaser' | 'pygame' | 'godot' | undefined;
+  engine?: 'three' | 'phaser' | undefined;
   /** motion-graphics-plan §1.1 — style pin for motion-mode runs. When
    *  omitted on a motion run the agent calls `choose_remotion_style` first. */
   motionStyle?: '2d' | '3d' | 'kinetic-text' | 'data-viz' | 'mixed' | undefined;

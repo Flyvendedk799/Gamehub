@@ -42,8 +42,6 @@ Every item below is a hard fail in production play-testing. The validator catche
 
 - **Three.js**: shipping without `renderer.dispose()` on unmount; using bare `<script src>` instead of the ESM importmap; missing `addEventListener('resize')`.
 - **Phaser**: `this.add.image('key')` where the key was never `load.image`-ed; `this.physics.add.*` without a `physics:` block in the Game config; mixing Phaser 3 and 4 APIs.
-- **Pygame** (Phase C): missing `pygame.display.flip()`; `while True` without a `QUIT` handler; using `pygame` instead of `pygame-ce` in the import.
-- **Godot** (Phase B): `[ext_resource path]` referencing files that don't exist; `print()` inside `_process` (perf hit and log spam).
 
 ## Visual taste (game UI/HUD specifically)
 

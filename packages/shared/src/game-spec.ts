@@ -160,9 +160,9 @@ export function applyGameSpecPatch(prior: GameSpec, patch: GameSpecPatch): GameS
  *   - 'warn' — engine can do it but is not the best choice
  *   - 'reject' — engine cannot reasonably do it; pick a different one
  *
- * Driven by the `choose_engine` gate (Phase 4). The brawler case
- * (3D fighting on Pygame) returns 'reject'; FPS on Phaser returns
- * 'warn'; FPS on Three returns 'ok'.
+ * Driven by the `choose_engine` gate (Phase 4). 2D briefs prefer phaser;
+ * 3D briefs prefer three. FPS on Phaser returns 'warn'; FPS on Three
+ * returns 'ok'.
  */
 export type EngineFitVerdict = 'ok' | 'warn' | 'reject';
 
@@ -171,82 +171,22 @@ export interface EngineFit {
   reason: string;
 }
 
-export type GameEngineId = 'three' | 'phaser' | 'pygame' | 'godot' | 'unity';
+export type GameEngineId = 'three' | 'phaser';
 
 export function checkEngineFit(spec: GameSpec, engine: GameEngineId): EngineFit {
-  // Unity is overkill for lightweight genres — the 5–15 min build loop
-  // wastes iteration. Reject when the brief is clearly browser-engine
-  // territory.
-  if (
-    engine === 'unity' &&
-    (spec.genre === 'idle' ||
-      spec.genre === 'topdown_arcade' ||
-      spec.genre === 'rhythm' ||
-      spec.genre === 'tycoon')
-  ) {
-    return {
-      verdict: 'reject',
-      reason:
-        "Unity's 5–15 min build loop is wasted iteration for idle / arcade / rhythm / tycoon briefs. Pick three or phaser.",
-    };
-  }
-  if (engine === 'unity' && spec.dimensions === '2d') {
+  // 3D briefs: phaser is 2.5D-only, so real 3D belongs on three.
+  if (spec.dimensions === '3d' && engine === 'phaser') {
     return {
       verdict: 'warn',
-      reason:
-        'Unity supports 2D, but Phaser ships faster for browser 2D and Three.js handles parallax fine. Pick unity only when Steam distribution is the goal.',
+      reason: 'Phaser supports 2.5D layering only. For real 3D pick three.',
     };
-  }
-
-  // 3D briefs: pygame can't sustain ≥60 fps for any 3D scene of
-  // interest; phaser is 2.5D-only.
-  if (spec.dimensions === '3d') {
-    if (engine === 'pygame') {
-      return {
-        verdict: 'reject',
-        reason:
-          'Pygame on Pyodide cannot maintain ≥60 fps for 3D scenes. Pick three (preferred), godot, or unity.',
-      };
-    }
-    if (engine === 'phaser') {
-      return {
-        verdict: 'warn',
-        reason: 'Phaser supports 2.5D layering only. For real 3D pick three or unity.',
-      };
-    }
   }
 
   // Genre-specific gates.
-  if (spec.genre === 'fighting' && engine === 'pygame') {
-    return {
-      verdict: 'reject',
-      reason:
-        'Frame-data fighting on Pygame/Pyodide loses ~10 fps under contention. Pick three or phaser.',
-    };
-  }
-  if (spec.genre === 'fps' && engine === 'pygame') {
-    return {
-      verdict: 'reject',
-      reason: 'FPS pointer-lock + raycasting needs WebGL. Pick three.',
-    };
-  }
   if (spec.genre === 'fps' && engine === 'phaser') {
     return {
       verdict: 'warn',
       reason: 'Phaser FPS is fake-3D raycaster territory. Three is the natural choice.',
-    };
-  }
-  if (spec.genre === 'rpg' && engine === 'pygame') {
-    return {
-      verdict: 'warn',
-      reason: 'Pygame works for retro RPG demos; godot is built for it.',
-    };
-  }
-  if (spec.genre === 'visual_novel' && (engine === 'three' || engine === 'pygame')) {
-    return {
-      verdict: 'warn',
-      reason:
-        'Visual novels are dialog/branching-heavy; godot has the editor + scenes built for it.',
     };
   }
 

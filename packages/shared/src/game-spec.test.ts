@@ -1,9 +1,9 @@
 /**
  * may9 Phase 4 — GameSpec round-trip + engine-fit gate.
  *
- * Covers the brawler regression case (3D fighting on Pygame must reject)
- * and the FPS vault-iteration coherence case (amend preserves untouched
- * features verbatim).
+ * Covers the two-engine fit matrix (three vs phaser) and the FPS
+ * vault-iteration coherence case (amend preserves untouched features
+ * verbatim).
  */
 import { describe, expect, it } from 'vitest';
 import { GameSpec, applyGameSpecPatch, checkEngineFit } from './game-spec';
@@ -112,7 +112,7 @@ describe('applyGameSpecPatch — feature carry-forward (FPS vault case)', () => 
 });
 
 describe('checkEngineFit — gating matrix', () => {
-  it('REJECTS 3D fighting on pygame (the brawler case)', () => {
+  it('OKs 3D fighting on three and WARNs on phaser (the brawler case)', () => {
     const spec = GameSpec.parse({
       genre: 'fighting',
       dimensions: '3d',
@@ -123,11 +123,11 @@ describe('checkEngineFit — gating matrix', () => {
       winCondition: 'Reduce opponent HP to zero.',
       loseCondition: 'Your HP hits zero.',
     });
-    const fit = checkEngineFit(spec, 'pygame');
-    expect(fit.verdict).toBe('reject');
+    expect(checkEngineFit(spec, 'three').verdict).toBe('ok');
+    expect(checkEngineFit(spec, 'phaser').verdict).toBe('warn');
   });
 
-  it('REJECTS FPS on pygame (raycasting + pointer-lock)', () => {
+  it('WARNs FPS on phaser and OKs FPS on three (raycaster vs WebGL)', () => {
     const spec = GameSpec.parse({
       genre: 'fps',
       dimensions: '3d',
@@ -138,7 +138,6 @@ describe('checkEngineFit — gating matrix', () => {
       winCondition: 'Survive all waves.',
       loseCondition: 'HP hits zero.',
     });
-    expect(checkEngineFit(spec, 'pygame').verdict).toBe('reject');
     expect(checkEngineFit(spec, 'phaser').verdict).toBe('warn');
     expect(checkEngineFit(spec, 'three').verdict).toBe('ok');
   });
@@ -171,45 +170,7 @@ describe('checkEngineFit — gating matrix', () => {
     expect(checkEngineFit(spec, 'three').verdict).toBe('warn');
   });
 
-  it('OKs Unity for 3D third-person combat (the AAA-target case)', () => {
-    const spec = GameSpec.parse({
-      genre: 'tps',
-      dimensions: '3d',
-      perspective: 'third_person',
-      cameraKind: 'follow_3d',
-      primaryInputs: ['keyboard', 'mouse'],
-      numActors: 4,
-      winCondition: 'Defeat the boss.',
-      loseCondition: 'HP zero.',
-    });
-    expect(checkEngineFit(spec, 'unity').verdict).toBe('ok');
-  });
-
-  it('REJECTS Unity for idle / topdown_arcade / rhythm / tycoon (build loop overkill)', () => {
-    const baseSpec = {
-      dimensions: '2d' as const,
-      perspective: 'top_down' as const,
-      cameraKind: 'static' as const,
-      primaryInputs: ['keyboard' as const],
-      numActors: 1,
-      winCondition: 'win',
-      loseCondition: 'lose',
-    };
-    expect(checkEngineFit(GameSpec.parse({ ...baseSpec, genre: 'idle' }), 'unity').verdict).toBe(
-      'reject',
-    );
-    expect(
-      checkEngineFit(GameSpec.parse({ ...baseSpec, genre: 'topdown_arcade' }), 'unity').verdict,
-    ).toBe('reject');
-    expect(checkEngineFit(GameSpec.parse({ ...baseSpec, genre: 'rhythm' }), 'unity').verdict).toBe(
-      'reject',
-    );
-    expect(checkEngineFit(GameSpec.parse({ ...baseSpec, genre: 'tycoon' }), 'unity').verdict).toBe(
-      'reject',
-    );
-  });
-
-  it('WARNs Unity for 2D briefs (Phaser ships faster)', () => {
+  it('OKs 2D briefs on three (parallax) as well as phaser', () => {
     const spec = GameSpec.parse({
       genre: 'platformer',
       dimensions: '2d',
@@ -220,6 +181,7 @@ describe('checkEngineFit — gating matrix', () => {
       winCondition: 'Reach the flag.',
       loseCondition: 'Out of lives.',
     });
-    expect(checkEngineFit(spec, 'unity').verdict).toBe('warn');
+    expect(checkEngineFit(spec, 'phaser').verdict).toBe('ok');
+    expect(checkEngineFit(spec, 'three').verdict).toBe('ok');
   });
 });

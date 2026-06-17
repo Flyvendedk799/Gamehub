@@ -120,8 +120,8 @@ export function makeGenerate3dAssetTool(
       'named character) instead of building it from procedural primitives — ' +
       "primitives can't approximate recognizable shapes (FPS Wave Defense user: " +
       '"the M4 doesn\'t look like an M4"). Async (~30-90s per model). Output ' +
-      'lands at assets/models/<slug>.glb, loadable via three.js GLTFLoader, ' +
-      'Phaser BabylonJSPlugin, or Godot import. ABSTRACT shapes (generic platform, ' +
+      'lands at assets/models/<slug>.glb, loadable via three.js GLTFLoader or ' +
+      'Phaser BabylonJSPlugin. ABSTRACT shapes (generic platform, ' +
       'blob enemy, ground plane) should still use primitives.',
     parameters: Generate3dAssetParams,
     async execute(_toolCallId, params, signal): Promise<AgentToolResult<Generate3dAssetDetails>> {
@@ -178,7 +178,7 @@ export function makeGenerate3dAssetTool(
         asset.triangleCount !== undefined ? ` (~${asset.triangleCount} tris)` : '';
       const revisedSuffix =
         asset.revisedPrompt !== undefined ? `\nRevised prompt: ${asset.revisedPrompt}` : '';
-      const text = `Generated 3D model at ${finalPath}${triangleSuffix}. Load via three.js: \`new GLTFLoader().load("${finalPath}", gltf => scene.add(gltf.scene))\`. For Phaser: \`BabylonJSPlugin.load("${finalPath}")\`. For Godot: \`var gltf = preload("res://${finalPath}")\`.${revisedSuffix}`;
+      const text = `Generated 3D model at ${finalPath}${triangleSuffix}. Load via three.js: \`new GLTFLoader().load("${finalPath}", gltf => scene.add(gltf.scene))\`. For Phaser: \`BabylonJSPlugin.load("${finalPath}")\`.${revisedSuffix}`;
       return {
         content: [{ type: 'text', text }],
         details: {

@@ -98,57 +98,6 @@ describe('assertGameInvariants', () => {
     expect(result.issues.map((i) => i.invariant)).toContain('feedback');
   });
 
-  it('passes Pygame projects that use pygame.K_r + pygame.mixer.Sound', () => {
-    const result = assertGameInvariants(
-      deps([
-        {
-          path: 'main.py',
-          content: `
-import pygame
-pygame.init()
-score = 0
-hit = pygame.mixer.Sound('hit.wav')
-def on_collision():
-    global score
-    score += 1
-    hit.play()
-def on_death():
-    global game_over
-    game_over = True
-for event in pygame.event.get():
-    if event.type == pygame.KEYDOWN and event.key == pygame.K_r:
-        score = 0
-          `,
-        },
-      ]),
-    );
-    expect(result.ok).toBe(true);
-  });
-
-  it('passes Godot projects that use ui_select + AudioStreamPlayer', () => {
-    const result = assertGameInvariants(
-      deps([
-        {
-          path: 'scripts/main.gd',
-          content: `
-extends Node2D
-var score = 0
-@onready var hit_sfx: AudioStreamPlayer = $HitSfx
-func _physics_process(_delta):
-    if Input.is_action_just_pressed("ui_select"):
-        score = 0
-func _on_collision():
-    score += 1
-    hit_sfx.play()
-func _on_death():
-    print("game over")
-          `,
-        },
-      ]),
-    );
-    expect(result.ok).toBe(true);
-  });
-
   it('skips data:base64 binary content (e.g. inlined PNGs / WAVs)', () => {
     const result = assertGameInvariants(
       deps([

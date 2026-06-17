@@ -13,10 +13,9 @@ export const DesignSnapshotV1 = z.object({
   message: z.string().optional(),
   /** Engine pin for game-mode snapshots (gameplan §6). NULL on every
    *  design-mode snapshot; required when artifactType === 'game'. */
-  engine: z.enum(['three', 'phaser', 'pygame', 'godot']).nullable().optional(),
+  engine: z.enum(['three', 'phaser']).nullable().optional(),
   /** Free-text engine version pin (gameplan §6, Appendix). e.g.
-   *  '0.170.0' for Three.js, '3.88.0' for Phaser, '2.5.5' for pygame-ce,
-   *  '4.3' for Godot. */
+   *  '0.170.0' for Three.js, '3.88.0' for Phaser. */
   engineVersion: z.string().nullable().optional(),
   /** may9 Phase 4 — serialized GameSpec JSON. Round-trips through the
    *  snapshot row so follow-up turns can re-inject the spec into the
@@ -352,7 +351,7 @@ export interface SnapshotCreateInput {
   artifactSource: string;
   message?: string;
   /** Game-mode only — engine pin for the snapshot. (gameplan §6) */
-  engine?: 'three' | 'phaser' | 'pygame' | 'godot' | null;
+  engine?: 'three' | 'phaser' | null;
   engineVersion?: string | null;
   /** may9 Phase 4 — serialized GameSpec JSON. Persisted alongside the
    *  snapshot so the next follow-up turn can re-inject the spec into

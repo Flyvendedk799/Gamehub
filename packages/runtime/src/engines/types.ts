@@ -5,7 +5,7 @@
  * pulling in the registry side-effects in the entry module.
  */
 
-export type GameEngineId = 'three' | 'phaser' | 'pygame' | 'godot' | 'unity';
+export type GameEngineId = 'three' | 'phaser';
 
 export interface BootstrapOptions {
   /** UUID of the design row this game belongs to. Used to build the
@@ -46,22 +46,20 @@ export interface GameEngineAdapter {
   /** Pinned default engine version (gameplan §1, Appendix). */
   readonly defaultVersion: string;
   /** The single entry-point file the runtime expects when previewing or
-   *  exporting. `index.html` for the JS engines, `main.py` for Pygame,
-   *  `project.godot` for Godot. */
+   *  exporting. `index.html` for both web engines (three + phaser). */
   readonly canonicalEntry: string;
   /** Lowercase file extensions (no leading dot) the engine guide tells the
    *  agent to author. Used by validators + the path-aware byte-cap helper. */
   readonly fileExtensions: readonly string[];
 
   /** Returns the starter HTML/scaffolding the agent should `text_editor.create`
-   *  as the project's `canonicalEntry`. For the JS engines this is a full
-   *  index.html with the engine ESM import-map and the `__game` global shim;
-   *  for Pygame this is a `main.py` template; for Godot a `project.godot`
-   *  + `main.tscn` template. The agent may then iterate via str_replace. */
+   *  as the project's `canonicalEntry`. For both web engines this is a full
+   *  index.html with the engine ESM import-map and the `__game` global shim.
+   *  The agent may then iterate via str_replace. */
   bootstrap(opts: BootstrapOptions): string;
 
-  /** True when the engine produces a runnable iframe preview today. Phase A:
-   *  three + phaser are true; pygame is false until C; godot is false until D. */
+  /** True when the engine produces a runnable iframe preview today. Both
+   *  web engines (three + phaser) preview live in the sandboxed iframe. */
   supportsLivePreview(): boolean;
 
   /** Engine-specific lint over the current file bundle. Called by the

@@ -22,13 +22,13 @@ describe('makeChooseEngineTool', () => {
     expect(result.details.rationale).toContain('Phaser');
   });
 
-  it('accepts all four engine ids', async () => {
+  it('accepts both engine ids', async () => {
     const setEngine = vi.fn();
     const tool = makeChooseEngineTool(setEngine);
-    for (const engine of ['three', 'phaser', 'pygame', 'godot'] satisfies ChooseEngineEngine[]) {
+    for (const engine of ['three', 'phaser'] satisfies ChooseEngineEngine[]) {
       await tool.execute(`id-${engine}`, { engine, rationale: 'because' });
     }
-    expect(setEngine).toHaveBeenCalledTimes(4);
+    expect(setEngine).toHaveBeenCalledTimes(2);
   });
 
   it('runs as a no-op when the host did not wire setEngine', async () => {
@@ -39,10 +39,10 @@ describe('makeChooseEngineTool', () => {
 
   it('returns a human-readable confirmation message', async () => {
     const tool = makeChooseEngineTool(vi.fn());
-    const result = await tool.execute('id-1', { engine: 'godot', rationale: 'real RPG' });
+    const result = await tool.execute('id-1', { engine: 'phaser', rationale: '2D platformer' });
     const text = result.content[0]?.type === 'text' ? result.content[0].text : '';
-    expect(text).toContain('godot');
-    expect(text).toContain('real RPG');
+    expect(text).toContain('phaser');
+    expect(text).toContain('2D platformer');
   });
 
   it('trims the rationale before persisting', async () => {
@@ -64,16 +64,6 @@ describe('makeChooseEngineTool — Phase 4 fit gate', () => {
     winCondition: 'Reach the exit door.',
     loseCondition: 'Health hits zero.',
   });
-  const fightingSpec = GameSpec.parse({
-    genre: 'fighting',
-    dimensions: '3d',
-    perspective: 'top_down',
-    cameraKind: 'follow_3d',
-    primaryInputs: ['keyboard'],
-    numActors: 2,
-    winCondition: 'Reduce opponent HP to zero.',
-    loseCondition: 'Your HP hits zero.',
-  });
   const platformerSpec = GameSpec.parse({
     genre: 'platformer',
     dimensions: '2d',
@@ -85,18 +75,14 @@ describe('makeChooseEngineTool — Phase 4 fit gate', () => {
     loseCondition: 'Out of lives.',
   });
 
-  it('REJECTS fighting + 3d on pygame and does NOT call setEngine (brawler case)', async () => {
+  it('WARNs on 3D + phaser but still pins the engine', async () => {
     const setEngine = vi.fn();
-    const tool = makeChooseEngineTool(setEngine, () => fightingSpec);
-    const result = await tool.execute('id-1', {
-      engine: 'pygame',
-      rationale: 'pygame is fine',
-    });
-    expect(setEngine).not.toHaveBeenCalled();
-    expect(result.details.fitVerdict).toBe('reject');
+    const tool = makeChooseEngineTool(setEngine, () => fpsSpec);
+    const result = await tool.execute('id-1', { engine: 'phaser', rationale: 'r' });
+    expect(setEngine).toHaveBeenCalledWith('phaser', 'r');
+    expect(result.details.fitVerdict).toBe('warn');
     const text = result.content[0]?.type === 'text' ? result.content[0].text : '';
-    expect(text).toContain('ERROR');
-    expect(text.toLowerCase()).toContain('reject');
+    expect(text).toContain('WARNING');
   });
 
   it('WARNs on FPS + phaser but still pins the engine', async () => {
@@ -128,7 +114,7 @@ describe('makeChooseEngineTool — Phase 4 fit gate', () => {
   it('skips the gate when getSpec returns undefined (no spec yet)', async () => {
     const setEngine = vi.fn();
     const tool = makeChooseEngineTool(setEngine, () => undefined);
-    const result = await tool.execute('id-1', { engine: 'pygame', rationale: 'r' });
+    const result = await tool.execute('id-1', { engine: 'phaser', rationale: 'r' });
     expect(setEngine).toHaveBeenCalled();
     expect(result.details.fitVerdict).toBe('ok');
   });

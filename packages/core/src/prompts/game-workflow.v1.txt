@@ -12,12 +12,10 @@ Artifacts run inside a sandboxed iframe over `game-files://`; do not assume top-
    - `cameraKind`: `static` / `follow_horizontal` / `follow_2d` / `follow_3d` / `first_person` / `third_person` / `orbital` / `parallax`
    - `features`: map of named feature → invariants the spec commits to (e.g. `{ vault: { trigger: 'manual', directional: true, animated: true } }`).
    On follow-up edits use **`amend_game_spec`** with a partial patch — restate the FULL feature spec for any feature you change; untouched features pass through verbatim from the prior turn so the user does not have to re-state them. The brawler `c44763af…` failure (6 corrections) and the FPS vault iteration (4 successive snapshots losing intent) were both caused by the absence of this typed step.
-2. **`choose_engine`** — emit `{ engine: 'three' | 'phaser' | 'pygame' | 'godot', rationale: 1-sentence }`. Match to brief AND to the spec from step 1:
+2. **`choose_engine`** — emit `{ engine: 'three' | 'phaser', rationale: 1-sentence }`. Match to brief AND to the spec from step 1:
    - 3D, parallax depth, first-person, WebGL effects → **three**
-   - 2D arcade / platformer / top-down / puzzle / runner → **phaser** (deepest training corpus for these)
-   - Retro arcade, "give me Python source", programmatic / generative → **pygame**
-   - "Real RPG", dialog systems, tilemap-heavy, "open in a real engine" → **godot**
-   When the user pre-picked an engine in the New-design dialog, this tool is skipped. Engine ↔ spec compatibility (e.g. `genre: 'fighting' + dimensions: '3d' + engine: 'pygame'` → reject; `genre: 'fps' + engine: 'phaser'` → warn) is enforced by the host's `checkEngineFit` matrix.
+   - 2D arcade / platformer / top-down / puzzle / runner / retro → **phaser** (deepest training corpus for these)
+   When the user pre-picked an engine in the New-design dialog, this tool is skipped. Engine ↔ spec compatibility (e.g. `genre: 'fps' + engine: 'phaser'` → warn; `dimensions: '3d' + engine: 'phaser'` → warn) is enforced by the host's `checkEngineFit` matrix.
 3. **Mechanic spec block (supplemental)** — emit ONE assistant_text block (≤ 120 words, no inline tool calls in the same turn) with EXACTLY this template, on its own line each:
    ```
    Genre: <brawler | shooter | platformer | puzzle | racer | runner | tower-defense | survival | rhythm | other>
@@ -29,8 +27,8 @@ Artifacts run inside a sandboxed iframe over `game-files://`; do not assume top-
    ```
    This is the single inter-tool text block allowed in a game run. It pins the design before any code. The user's brief vocabulary maps to genre conventions — "topview 3D fighting" → `Genre: brawler`, `Camera: 3rd-person-follow` (Hades-style), NOT `Camera: orthographic-top`. "Left/right hand attack" in a brawler means LEAD vs REAR hand (Jab vs Cross), not "attack to the left side" — both attacks fire forward; the hand alternation is the combo skill expression. Mis-grounding genre vocabulary is the dominant first-shot failure mode (production trace 2026-05-03 c44763af needed 6 corrections to recover from "topview" → orthographic + "L/R hand" → side-arc misreads).
 4. **`set_todos`** — Publish the section/scene/system list FIRST. One todo per scene-or-system (e.g. for Pong: "Field + paddles", "Ball physics + collisions", "Score HUD", "Win state + restart"). 4 todos minimum for a complete game. Items ≤ 8 words. **Call set_todos at most twice per turn** — once at the start to publish the plan and once near the end to mark completion. Do NOT update after every single item; mid-run updates are noise. (Server-side caps: 3 calls per turn / 12 calls per design lifetime.)
-5. **`text_editor.create`** with the engine's `canonicalEntry` (`index.html` for three/phaser, `main.py` for pygame, `project.godot` for godot). Use the engine's starter template — do **not** reinvent the import-map, base href, or `__game` global shim; those are load-bearing.
-6. **`text_editor.create` / `str_replace`** for the rest of the project — `src/main.js` + scenes/ + entities/ + assets/ for JS engines; `entities.py` + assets/ for Pygame; `*.tscn` + `*.gd` + assets/ for Godot.
+5. **`text_editor.create`** with the engine's `canonicalEntry` (`index.html` for three/phaser). Use the engine's starter template — do **not** reinvent the import-map, base href, or `__game` global shim; those are load-bearing.
+6. **`text_editor.create` / `str_replace`** for the rest of the project — `src/main.js` + scenes/ + entities/ + assets/ for the chosen engine.
 7. **`generate_image_asset`** for sprites and tiles when needed. `purpose: 'sprite'` for power-of-two transparent tiles; `'tile'` for seamless edges; `'background'` for full-bleed.
 8. **`generate_audio_asset`** for SFX / short music loops / voice cues. `purpose: 'sfx'` for clicks/jumps/hits/coins/footsteps/laser/explosion; `'music'` for menu jingle or ambient loop; `'voice'` for notification chime placeholder. Synchronous + free (CC0 sample bank, no API call). Call once per cue you'll wire into the game; the tool returns `assets/audio/<name>.wav` paths your engine's audio loader can reference. **MANDATORY whenever the brief mentions hits / impacts / pickups / shoots / explosions / coins / death / combat** — silent feedback on collision reads as broken (Mechanic-first: "every action gives a visible AND audible response"). The `assert_game_invariants` pass before `done` will flag the `feedback` invariant as missing if you ship audio-bearing gameplay without any audio asset wired in.
 9. **`verify_artifact`** between scene completions to catch breakage early; it's cheap.
@@ -83,4 +81,4 @@ If you have emitted ≥ 5 consecutive `str_replace` calls against the same file 
 
 ## Engine-specific guides
 
-Always-on for the chosen engine: `three-engine-guide.v1.txt`, `phaser-engine-guide.v1.txt`, `pygame-engine-guide.v1.txt`, or `godot-engine-guide.v1.txt`. Multi-file projects also receive `game-multi-file-guide.v1.txt`.
+Always-on for the chosen engine: `three-engine-guide.v1.txt` or `phaser-engine-guide.v1.txt`. Multi-file projects also receive `game-multi-file-guide.v1.txt`.

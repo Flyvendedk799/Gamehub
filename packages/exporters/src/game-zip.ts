@@ -21,7 +21,7 @@ export interface ExportGameZipOptions {
   /** UI-friendly name written into the README banner. */
   designName?: string;
   /** Engine pinned for the project. Drives the README "how to run" hint. */
-  engine?: 'three' | 'phaser' | 'pygame' | 'godot' | 'unity';
+  engine?: 'three' | 'phaser';
   /** Optional engine version pin to surface in the README. */
   engineVersion?: string;
 }
@@ -33,23 +33,11 @@ function readme(opts: ExportGameZipOptions): string {
       ? `Three.js${opts.engineVersion !== undefined ? ` ${opts.engineVersion}` : ''}`
       : opts.engine === 'phaser'
         ? `Phaser${opts.engineVersion !== undefined ? ` ${opts.engineVersion}` : ''}`
-        : opts.engine === 'pygame'
-          ? `Pygame${opts.engineVersion !== undefined ? ` ${opts.engineVersion}` : ''}`
-          : opts.engine === 'godot'
-            ? `Godot${opts.engineVersion !== undefined ? ` ${opts.engineVersion}` : ''}`
-            : opts.engine === 'unity'
-              ? `Unity${opts.engineVersion !== undefined ? ` ${opts.engineVersion}` : ''}`
-              : 'unknown engine';
+        : 'unknown engine';
   const howToRun =
     opts.engine === 'three' || opts.engine === 'phaser'
       ? '## How to run\n\n```sh\npython3 -m http.server\n# then open http://localhost:8000\n```\n\nThe engine library loads from cdn.jsdelivr.net the first time. After that, the browser caches it offline.'
-      : opts.engine === 'pygame'
-        ? '## How to run\n\n```sh\npython3 -m venv .venv && source .venv/bin/activate\npip install -r requirements.txt\npython main.py\n```'
-        : opts.engine === 'godot'
-          ? '## How to run\n\nOpen `project.godot` in Godot 4.3+, then press F5 (or click ▶) to run.'
-          : opts.engine === 'unity'
-            ? '## How to run\n\nOpen the unzipped folder via Unity Hub (requires Unity 6 LTS / `6000.0` or newer), then press Play. For native / WebGL / Steam builds use the open-codesign in-app Build button.'
-            : '## How to run\n\nDouble-click `index.html`, or serve with `python3 -m http.server`.';
+      : '## How to run\n\nDouble-click `index.html`, or serve with `python3 -m http.server`.';
   return `# ${name}
 
 Exported from [open-codesign](https://github.com/OpenCoworkAI/open-codesign) — game-mode.
@@ -63,9 +51,9 @@ ${howToRun}
 
 \`\`\`
 .
-├── index.html / main.py / project.godot   Entry point
-├── src/                                   Game source
-└── assets/                                Sprites, audio, etc.
+├── index.html                            Entry point
+├── src/                                  Game source
+└── assets/                               Sprites, audio, etc.
 \`\`\`
 `;
 }

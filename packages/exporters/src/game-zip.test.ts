@@ -81,33 +81,6 @@ describe('exportGameZip', () => {
     expect(readme).toContain('python3 -m http.server');
   });
 
-  it('writes a Pygame-shaped README (venv + pip install)', async () => {
-    const dest = join(workDir, 'py.zip');
-    await exportGameZip(dest, {
-      files: [{ path: 'main.py', content: 'import pygame' }],
-      engine: 'pygame',
-      engineVersion: '2.5.5',
-    });
-    const extractDir = join(workDir, 'unzipped');
-    await unzipTo(dest, extractDir);
-    const readme = readFileSync(join(extractDir, 'README.md'), 'utf8');
-    expect(readme).toContain('Pygame 2.5.5');
-    expect(readme).toContain('python3 -m venv');
-    expect(readme).toContain('pip install -r requirements.txt');
-  });
-
-  it('writes a Godot-shaped README (open in Godot)', async () => {
-    const dest = join(workDir, 'godot.zip');
-    await exportGameZip(dest, {
-      files: [{ path: 'project.godot', content: '[application]\nname="RPG"' }],
-      engine: 'godot',
-    });
-    const extractDir = join(workDir, 'unzipped');
-    await unzipTo(dest, extractDir);
-    const readme = readFileSync(join(extractDir, 'README.md'), 'utf8');
-    expect(readme).toContain('Open `project.godot`');
-  });
-
   it('does not overwrite a model-authored README', async () => {
     const dest = join(workDir, 'authored.zip');
     await exportGameZip(dest, {

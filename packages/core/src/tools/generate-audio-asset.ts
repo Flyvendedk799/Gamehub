@@ -96,8 +96,8 @@ export function makeGenerateAudioAssetTool(
       'clicks, jumps, hits, coin pickups), short music loops (menu jingle, ' +
       'ambient pad), or voice notification cues. Pass `purpose` to scope the ' +
       'search and a free-text `prompt` describing what you want. The tool ' +
-      'returns a relative path to load via pygame.mixer.Sound, new Audio(...), ' +
-      'phaser.sound.add, or godot AudioStreamPlayer. Synchronous and fast ' +
+      'returns a relative path to load via new Audio(...) or ' +
+      'phaser.sound.add. Synchronous and fast ' +
       '(no network); call as many times as you need cues.',
     parameters: GenerateAudioAssetParams,
     async execute(_toolCallId, params): Promise<AgentToolResult<GenerateAudioAssetDetails>> {

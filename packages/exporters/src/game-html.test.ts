@@ -75,9 +75,9 @@ describe('exportGameHtml', () => {
     await expect(
       exportGameHtml(dest, {
         files: [{ path: 'index.html', content: '<html></html>' }],
-        engine: 'pygame' as never,
+        engine: 'native' as never,
       }),
-    ).rejects.toThrow(/browser-engine-only|game-html.*does not support/);
+    ).rejects.toThrow(/browser-engine-only|game-html.*only supports browser engines/);
   });
 
   it('throws when the file bundle is missing index.html', async () => {

@@ -1811,10 +1811,10 @@ describe('game-mode composeSystemPrompt (gameplan §A4)', () => {
     expect(prompt).not.toContain('Three.js engine guide');
   });
 
-  it('mentions choose_engine + the four engine ids in the workflow section', () => {
+  it('mentions choose_engine + the two engine ids in the workflow section', () => {
     const prompt = composeSystemPrompt({ mode: 'create', artifactType: 'game' });
     expect(prompt).toContain('`choose_engine`');
-    expect(prompt).toContain("'three' | 'phaser' | 'pygame' | 'godot'");
+    expect(prompt).toContain("'three' | 'phaser'");
   });
 
   it('inherits SAFETY at the tail', () => {
@@ -1834,56 +1834,6 @@ describe('game-mode composeSystemPrompt (gameplan §A4)', () => {
   it('IDENTITY mentions game-builder mode (extension paragraph)', () => {
     const prompt = composeSystemPrompt({ mode: 'create' });
     expect(prompt).toContain('When the user asks for a game (artifactType:');
-  });
-});
-
-describe('Godot engine guide composition (gameplan §B1)', () => {
-  it('includes the Godot guide when engine = "godot"', () => {
-    const prompt = composeSystemPrompt({
-      mode: 'create',
-      artifactType: 'game',
-      engine: 'godot',
-    });
-    expect(prompt).toContain('Godot engine guide (pinned to Godot 4.3)');
-    expect(prompt).not.toContain('Three.js engine guide');
-    expect(prompt).not.toContain('Phaser engine guide');
-  });
-
-  it('layers the Godot multi-file guide alongside the generic one', () => {
-    const prompt = composeSystemPrompt({
-      mode: 'create',
-      artifactType: 'game',
-      engine: 'godot',
-    });
-    expect(prompt).toContain('Game multi-file authoring guide');
-    expect(prompt).toContain('Godot multi-file project guide');
-  });
-
-  it('does NOT layer the Godot multi-file guide on three / phaser runs', () => {
-    const three = composeSystemPrompt({ mode: 'create', artifactType: 'game', engine: 'three' });
-    const phaser = composeSystemPrompt({ mode: 'create', artifactType: 'game', engine: 'phaser' });
-    expect(three).not.toContain('Godot multi-file project guide');
-    expect(phaser).not.toContain('Godot multi-file project guide');
-  });
-
-  it('explicitly mentions the Godot 3.x format=2 rejection', () => {
-    const prompt = composeSystemPrompt({
-      mode: 'create',
-      artifactType: 'game',
-      engine: 'godot',
-    });
-    expect(prompt).toContain('Godot 3.x format files');
-    expect(prompt).toContain('format=2');
-  });
-
-  it('flags res:// scheme as the only acceptable path form', () => {
-    const prompt = composeSystemPrompt({
-      mode: 'create',
-      artifactType: 'game',
-      engine: 'godot',
-    });
-    expect(prompt).toContain('res://');
-    expect(prompt).toContain('Forward slashes only');
   });
 });
 
@@ -1931,76 +1881,6 @@ describe('GAME_WORKFLOW mechanic spec / camera-lock / edit-budget directives', (
     expect(prompt).toContain('`assert_game_invariants`');
     expect(prompt).toContain('Genre-aware');
     expect(prompt).toContain('combo + hitstop + per-attack-limb + aim/hitbox parity');
-  });
-});
-
-describe('Pygame engine guide composition (gameplan §C1)', () => {
-  it('includes the Pygame guide when engine = "pygame"', () => {
-    const prompt = composeSystemPrompt({
-      mode: 'create',
-      artifactType: 'game',
-      engine: 'pygame',
-    });
-    expect(prompt).toContain('Pygame engine guide (pinned to pygame-ce 2.5.5');
-    expect(prompt).not.toContain('Three.js engine guide');
-    expect(prompt).not.toContain('Phaser engine guide');
-    expect(prompt).not.toContain('Godot engine guide');
-  });
-
-  it('layers the Pygame multi-file guide alongside the generic one', () => {
-    const prompt = composeSystemPrompt({
-      mode: 'create',
-      artifactType: 'game',
-      engine: 'pygame',
-    });
-    expect(prompt).toContain('Game multi-file authoring guide');
-    expect(prompt).toContain('Pygame multi-file project guide');
-  });
-
-  it('does NOT layer the Pygame multi-file guide on three/phaser/godot runs', () => {
-    for (const engine of ['three', 'phaser', 'godot'] as const) {
-      const prompt = composeSystemPrompt({ mode: 'create', artifactType: 'game', engine });
-      expect(prompt).not.toContain('Pygame multi-file project guide');
-    }
-  });
-
-  it('explicitly tells the agent NOT to author index.html (engine bootstrap provides it)', () => {
-    const prompt = composeSystemPrompt({
-      mode: 'create',
-      artifactType: 'game',
-      engine: 'pygame',
-    });
-    expect(prompt).toContain('NOT to author the Pyodide bootstrap');
-    expect(prompt).toContain('Authoring `index.html`');
-  });
-
-  it('flags pygame.mixer.music as Pyodide-incompatible', () => {
-    const prompt = composeSystemPrompt({
-      mode: 'create',
-      artifactType: 'game',
-      engine: 'pygame',
-    });
-    expect(prompt).toContain('pygame.mixer.music');
-    expect(prompt).toContain('unsupported');
-  });
-
-  it('mandates the asyncio.sleep(0) yield pattern', () => {
-    const prompt = composeSystemPrompt({
-      mode: 'create',
-      artifactType: 'game',
-      engine: 'pygame',
-    });
-    expect(prompt).toContain('asyncio.sleep(0)');
-    expect(prompt).toContain('YIELD to the JS event loop');
-  });
-
-  it('mentions __init__.py requirement for multi-file projects', () => {
-    const prompt = composeSystemPrompt({
-      mode: 'create',
-      artifactType: 'game',
-      engine: 'pygame',
-    });
-    expect(prompt).toContain('__init__.py');
   });
 });
 

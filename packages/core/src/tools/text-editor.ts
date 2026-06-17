@@ -182,15 +182,6 @@ const MAX_STR_REPLACE_NEW_BYTES_INDEX = 24576;
 const MAX_CREATE_BYTES_SIDECAR = 65536;
 const MAX_STR_REPLACE_NEW_BYTES_SIDECAR = 49152;
 
-// gameplan §A5 / Q5 — game-mode files get per-extension caps. Godot scenes
-// (.tscn) carry node trees that can legitimately exceed 16 KB; GDScript
-// (.gd) and Python (.py) are scripts that sit between the index.html
-// skeleton cap and the sidecar cap.
-const MAX_CREATE_BYTES_TSCN = 32768;
-const MAX_STR_REPLACE_NEW_BYTES_TSCN = 32768;
-const MAX_CREATE_BYTES_GAME_SCRIPT = 16384;
-const MAX_STR_REPLACE_NEW_BYTES_GAME_SCRIPT = 16384;
-
 /** Sidecar files (CSS / JS / JSON) get the relaxed cap. The `index.html`
  *  and any other `.html` file stays on the tighter cap so the JSX-pattern
  *  skeleton-then-fills cadence is still enforced. */
@@ -204,24 +195,11 @@ function isSidecarFile(path: string): boolean {
   );
 }
 
-function isGodotScene(path: string): boolean {
-  return path.toLowerCase().endsWith('.tscn');
-}
-
-function isGameScript(path: string): boolean {
-  const lower = path.toLowerCase();
-  return lower.endsWith('.gd') || lower.endsWith('.py');
-}
-
 function maxCreateBytesFor(path: string): number {
-  if (isGodotScene(path)) return MAX_CREATE_BYTES_TSCN;
-  if (isGameScript(path)) return MAX_CREATE_BYTES_GAME_SCRIPT;
   return isSidecarFile(path) ? MAX_CREATE_BYTES_SIDECAR : MAX_CREATE_BYTES_INDEX;
 }
 
 function maxStrReplaceBytesFor(path: string): number {
-  if (isGodotScene(path)) return MAX_STR_REPLACE_NEW_BYTES_TSCN;
-  if (isGameScript(path)) return MAX_STR_REPLACE_NEW_BYTES_GAME_SCRIPT;
   return isSidecarFile(path) ? MAX_STR_REPLACE_NEW_BYTES_SIDECAR : MAX_STR_REPLACE_NEW_BYTES_INDEX;
 }
 
@@ -236,13 +214,7 @@ function maxInsertBytesFor(path: string): number {
 
 function throwOversizedCreate(path: string, byteLen: number, cap: number): never {
   let guidance: string;
-  if (isGodotScene(path)) {
-    guidance =
-      "Godot scenes (.tscn) accept up to 32 KB per create. Past that, split the scene into a parent .tscn that instantiates child scenes — one .tscn per logical sub-tree. Don't flatten everything into main.tscn.";
-  } else if (isGameScript(path)) {
-    guidance =
-      'Game scripts (.gd / .py) accept up to 16 KB per create. Past that, split the script by responsibility — one file per entity / system / scene controller. Pull shared helpers into a `_shared.gd` / `shared.py` module.';
-  } else if (isSidecarFile(path)) {
+  if (isSidecarFile(path)) {
     guidance =
       'Sidecar files (.css, .js, .json) accept up to 65 KB per create. Even so, prefer splitting genuinely large modules across two creates (e.g. data + engine).';
   } else {

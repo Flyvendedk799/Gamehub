@@ -12,7 +12,7 @@
 
 export const EVAL_FIXTURE_SCHEMA_VERSION = 1 as const;
 
-export const EVAL_ENGINES = ['three', 'phaser', 'pygame', 'godot'] as const;
+export const EVAL_ENGINES = ['three', 'phaser'] as const;
 export type EvalEngine = (typeof EVAL_ENGINES)[number];
 export const EvalEngine = {
   parse(value: unknown): EvalEngine {

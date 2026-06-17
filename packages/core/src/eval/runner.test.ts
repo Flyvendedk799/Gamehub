@@ -62,8 +62,8 @@ describe('evaluateFixture — passing case', () => {
 });
 
 describe('evaluateFixture — engine + genre assertions', () => {
-  it('FAILS when engine != expected (brawler-on-pygame class)', () => {
-    const r = evaluateFixture(FPS_FIXTURE, { ...PASSING_OBS, engine: 'pygame' });
+  it('FAILS when engine != expected (fps-on-phaser class)', () => {
+    const r = evaluateFixture(FPS_FIXTURE, { ...PASSING_OBS, engine: 'phaser' });
     expect(r.pass).toBe(false);
     expect(r.failures.join(' ')).toContain('engine: expected');
   });

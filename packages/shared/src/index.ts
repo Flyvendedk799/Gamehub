@@ -107,7 +107,7 @@ export type MotionPreviewMode = z.infer<typeof MotionPreviewMode>;
  *    - branch in packages/core/src/tools/validate-game-scene.ts
  *    - cell in the §3 engine matrix in docs/gameplan.md
  */
-export const GameEngine = z.enum(['three', 'phaser', 'pygame', 'godot']);
+export const GameEngine = z.enum(['three', 'phaser']);
 export type GameEngine = z.infer<typeof GameEngine>;
 
 export const Artifact = z.object({
@@ -392,8 +392,6 @@ export {
   ImageGenerationQualitySchema,
   ImageGenerationSettingsSchema,
   ImageGenerationSizeSchema,
-  STEAM_SCHEMA_VERSION,
-  SteamSettingsSchema,
   THREED_ASSET_SCHEMA_VERSION,
   ThreeDAssetProviderSchema,
   ThreeDAssetSettingsSchema,
@@ -424,7 +422,6 @@ export type {
   ImageGenerationQuality,
   ImageGenerationSettings,
   ImageGenerationSize,
-  SteamSettings,
   ThreeDAssetProviderId,
   ThreeDAssetSettings,
   OnboardingState,

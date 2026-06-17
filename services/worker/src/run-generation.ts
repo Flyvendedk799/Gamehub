@@ -41,9 +41,9 @@ export interface SceneIssue {
 
 /** Engine scene validator (host delegates to the @playforge/runtime adapter). */
 export type SceneValidator = (
-  engine: 'three' | 'phaser' | 'pygame' | 'godot',
+  engine: 'three' | 'phaser',
   files: ReadonlyArray<{ path: string; content: string }>,
-) => { ok: boolean; engine: 'three' | 'phaser' | 'pygame' | 'godot'; issues: SceneIssue[] };
+) => { ok: boolean; engine: 'three' | 'phaser'; issues: SceneIssue[] };
 
 export interface GenerationRequest {
   prompt: string;
@@ -149,7 +149,10 @@ export async function runGeneration(
         if (engine === 'three' || engine === 'phaser') state.engine = engine;
       },
       getCurrentEngine: () => state.engine,
-      validate: (engine, files) => validateScene(engine, files),
+      validate: (engine, files) =>
+        engine === 'three' || engine === 'phaser'
+          ? validateScene(engine, files)
+          : { ok: true, engine: 'phaser', issues: [] },
       setSpec: (spec) => {
         state.spec = spec;
       },

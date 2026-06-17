@@ -13,7 +13,7 @@
  * for itch.io single-file uploads, email attachments, sharing offline.
  *
  * Limitations (Phase A scope):
- *   - JS / Three / Phaser only. Pygame and Godot have separate exporters.
+ *   - JS / Three / Phaser only — the only engines this product ships.
  *   - Asset references are rewritten via path-string match. The agent's
  *     guide instructs it to use stable relative paths (`assets/foo.png`),
  *     which the rewriter handles. Unusual constructs (string concat for
@@ -124,7 +124,7 @@ function applyExportCsp(html: string): string {
 export async function buildGameHtml(opts: ExportGameHtmlOptions): Promise<string> {
   if (opts.engine !== 'three' && opts.engine !== 'phaser') {
     throw new CodesignError(
-      `game-html exporter does not support engine "${opts.engine}". Use game-py for pygame, game-godot-project for godot.`,
+      `game-html exporter only supports browser engines (three / phaser). Got "${opts.engine}".`,
       ERROR_CODES.EXPORTER_FORMAT_REJECTED,
     );
   }

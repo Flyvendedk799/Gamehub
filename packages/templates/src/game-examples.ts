@@ -13,7 +13,7 @@ export interface GameExampleBrief {
   slug: string;
   /** Human label shown on the card. ≤ 28 chars to stay scannable. */
   label: string;
-  engine: 'three' | 'phaser' | 'pygame' | 'godot';
+  engine: 'three' | 'phaser';
   /** One of the GameGenre values the dialog knows about. */
   genre: string;
   /** The actual prompt text the agent receives when picked. */
@@ -62,17 +62,17 @@ export const GAME_EXAMPLE_BRIEFS: ReadonlyArray<GameExampleBrief> = [
       'Top-down 3D brawler with two opposing fighters. Lead-hand punch + rear-hand punch (both fire forward). Combos extend the chain. HP bars + win on opponent KO. Hit/whiff SFX + brief hitstop on hit.',
   },
   {
-    slug: 'godot-rpg',
-    label: 'Top-down RPG skeleton (Godot)',
-    engine: 'godot',
+    slug: 'phaser-rpg',
+    label: 'Top-down RPG skeleton (Phaser)',
+    engine: 'phaser',
     genre: 'rpg',
     brief:
-      'Top-down 2D RPG skeleton with player movement, an NPC who speaks via dialog box, an inventory of 3 starter items, and a save/load slot in slot 1. Use Godot 4.3.',
+      'Top-down 2D RPG skeleton with player movement, an NPC who speaks via dialog box, an inventory of 3 starter items, and a save/load slot in slot 1.',
   },
   {
-    slug: 'pygame-shmup',
-    label: 'Vertical shmup (Pygame)',
-    engine: 'pygame',
+    slug: 'phaser-shmup',
+    label: 'Vertical shmup (Phaser)',
+    engine: 'phaser',
     genre: 'shmup',
     brief:
       'Vertical shoot-em-up. Player ship at bottom moves with arrow keys, fires Space. Enemies descend in waves; bullets cull on screen edge; score per kill. Game over on player hit; press R to restart.',

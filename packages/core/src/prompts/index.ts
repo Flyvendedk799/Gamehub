@@ -1144,12 +1144,10 @@ Artifacts run inside a sandboxed iframe over \`game-files://\`; do not assume to
    - \`cameraKind\`: \`static\` / \`follow_horizontal\` / \`follow_2d\` / \`follow_3d\` / \`first_person\` / \`third_person\` / \`orbital\` / \`parallax\`
    - \`features\`: map of named feature → invariants the spec commits to (e.g. \`{ vault: { trigger: 'manual', directional: true, animated: true } }\`).
    On follow-up edits use **\`amend_game_spec\`** with a partial patch — restate the FULL feature spec for any feature you change; untouched features pass through verbatim from the prior turn so the user does not have to re-state them. The brawler \`c44763af…\` failure (6 corrections) and the FPS vault iteration (4 successive snapshots losing intent) were both caused by the absence of this typed step.
-2. **\`choose_engine\`** — emit \`{ engine: 'three' | 'phaser' | 'pygame' | 'godot', rationale: 1-sentence }\`. Match to brief AND to the spec from step 1:
+2. **\`choose_engine\`** — emit \`{ engine: 'three' | 'phaser', rationale: 1-sentence }\`. Match to brief AND to the spec from step 1:
    - 3D, parallax depth, first-person, WebGL effects → **three**
-   - 2D arcade / platformer / top-down / puzzle / runner → **phaser** (deepest training corpus for these)
-   - Retro arcade, "give me Python source", programmatic / generative → **pygame**
-   - "Real RPG", dialog systems, tilemap-heavy, "open in a real engine" → **godot**
-   When the user pre-picked an engine in the New-design dialog, this tool is skipped. Engine ↔ spec compatibility (e.g. \`genre: 'fighting' + dimensions: '3d' + engine: 'pygame'\` → reject; \`genre: 'fps' + engine: 'phaser'\` → warn) is enforced by the host's \`checkEngineFit\` matrix.
+   - 2D arcade / platformer / top-down / puzzle / runner / retro → **phaser** (deepest training corpus for these)
+   When the user pre-picked an engine in the New-design dialog, this tool is skipped. Engine ↔ spec compatibility (e.g. \`genre: 'fps' + engine: 'phaser'\` → warn; \`dimensions: '3d' + engine: 'phaser'\` → warn) is enforced by the host's \`checkEngineFit\` matrix.
 3. **Mechanic spec block (supplemental)** — emit ONE assistant_text block (≤ 120 words, no inline tool calls in the same turn) with EXACTLY this template, on its own line each:
    \`\`\`
    Genre: <brawler | shooter | platformer | puzzle | racer | runner | tower-defense | survival | rhythm | other>
@@ -1161,8 +1159,8 @@ Artifacts run inside a sandboxed iframe over \`game-files://\`; do not assume to
    \`\`\`
    This is the single inter-tool text block allowed in a game run. It pins the design before any code. The user's brief vocabulary maps to genre conventions — "topview 3D fighting" → \`Genre: brawler\`, \`Camera: 3rd-person-follow\` (Hades-style), NOT \`Camera: orthographic-top\`. "Left/right hand attack" in a brawler means LEAD vs REAR hand (Jab vs Cross), not "attack to the left side" — both attacks fire forward; the hand alternation is the combo skill expression. Mis-grounding genre vocabulary is the dominant first-shot failure mode (production trace 2026-05-03 c44763af needed 6 corrections to recover from "topview" → orthographic + "L/R hand" → side-arc misreads).
 4. **\`set_todos\`** — Publish the section/scene/system list FIRST. One todo per scene-or-system (e.g. for Pong: "Field + paddles", "Ball physics + collisions", "Score HUD", "Win state + restart"). 4 todos minimum for a complete game. Items ≤ 8 words. **Call set_todos at most twice per turn** — once at the start to publish the plan and once near the end to mark completion. Do NOT update after every single item; mid-run updates are noise. (Server-side caps: 3 calls per turn / 12 calls per design lifetime.)
-5. **\`text_editor.create\`** with the engine's \`canonicalEntry\` (\`index.html\` for three/phaser, \`main.py\` for pygame, \`project.godot\` for godot). Use the engine's starter template — do **not** reinvent the import-map, base href, or \`__game\` global shim; those are load-bearing.
-6. **\`text_editor.create\` / \`str_replace\`** for the rest of the project — \`src/main.js\` + scenes/ + entities/ + assets/ for JS engines; \`entities.py\` + assets/ for Pygame; \`*.tscn\` + \`*.gd\` + assets/ for Godot.
+5. **\`text_editor.create\`** with the engine's \`canonicalEntry\` (\`index.html\` for three/phaser). Use the engine's starter template — do **not** reinvent the import-map, base href, or \`__game\` global shim; those are load-bearing.
+6. **\`text_editor.create\` / \`str_replace\`** for the rest of the project — \`src/main.js\` + scenes/ + entities/ + assets/ for the chosen engine.
 7. **\`generate_image_asset\`** for sprites and tiles when needed. \`purpose: 'sprite'\` for power-of-two transparent tiles; \`'tile'\` for seamless edges; \`'background'\` for full-bleed.
 8. **\`generate_audio_asset\`** for SFX / short music loops / voice cues. \`purpose: 'sfx'\` for clicks/jumps/hits/coins/footsteps/laser/explosion; \`'music'\` for menu jingle or ambient loop; \`'voice'\` for notification chime placeholder. Synchronous + free (CC0 sample bank, no API call). Call once per cue you'll wire into the game; the tool returns \`assets/audio/<name>.wav\` paths your engine's audio loader can reference. **MANDATORY whenever the brief mentions hits / impacts / pickups / shoots / explosions / coins / death / combat** — silent feedback on collision reads as broken (Mechanic-first: "every action gives a visible AND audible response"). The \`assert_game_invariants\` pass before \`done\` will flag the \`feedback\` invariant as missing if you ship audio-bearing gameplay without any audio asset wired in.
 9. **\`verify_artifact\`** between scene completions to catch breakage early; it's cheap.
@@ -1215,7 +1213,7 @@ If you have emitted ≥ 5 consecutive \`str_replace\` calls against the same fil
 
 ## Engine-specific guides
 
-Always-on for the chosen engine: \`three-engine-guide.v1.txt\`, \`phaser-engine-guide.v1.txt\`, \`pygame-engine-guide.v1.txt\`, or \`godot-engine-guide.v1.txt\`. Multi-file projects also receive \`game-multi-file-guide.v1.txt\`.`;
+Always-on for the chosen engine: \`three-engine-guide.v1.txt\` or \`phaser-engine-guide.v1.txt\`. Multi-file projects also receive \`game-multi-file-guide.v1.txt\`.`;
 
 const THREE_ENGINE_GUIDE = `# Three.js engine guide (pinned to three@0.170.0)
 
@@ -1462,8 +1460,6 @@ Every item below is a hard fail in production play-testing. The validator catche
 
 - **Three.js**: shipping without \`renderer.dispose()\` on unmount; using bare \`<script src>\` instead of the ESM importmap; missing \`addEventListener('resize')\`.
 - **Phaser**: \`this.add.image('key')\` where the key was never \`load.image\`-ed; \`this.physics.add.*\` without a \`physics:\` block in the Game config; mixing Phaser 3 and 4 APIs.
-- **Pygame** (Phase C): missing \`pygame.display.flip()\`; \`while True\` without a \`QUIT\` handler; using \`pygame\` instead of \`pygame-ce\` in the import.
-- **Godot** (Phase B): \`[ext_resource path]\` referencing files that don't exist; \`print()\` inside \`_process\` (perf hit and log spam).
 
 ## Visual taste (game UI/HUD specifically)
 
@@ -1577,7 +1573,7 @@ Use multi-file authoring when *any* of these hold (most non-trivial games hit at
 - ≥ 200 LOC anticipated in any one file
 - ≥ 2 entity types with substantive behaviour (player + enemy + projectile)
 - An asset bundle (sprites, tilemaps, audio) that wants its own folder
-- The user asked for "a real game / a real engine / a Godot project"
+- The user asked for "a real game" with multiple systems
 
 ## When to stay single-file (rare)
 
@@ -1589,9 +1585,7 @@ Stay single-file (\`main.js\` inlined into \`index.html\` only, no \`src/\`) ONL
 
 If the brief is just "an endless runner" or "a 2D platformer", that's NOT trivial — split. Don't pre-split for the sake of looking professional; do split when readability or asset structure is starting to suffer. Default toward splitting; the user almost always benefits more from a structured tree than from a 700-line single file.
 
-## Recommended layouts per engine
-
-### Three.js / Phaser (multi-scene)
+## Recommended layout (Three.js / Phaser, multi-scene)
 
 \`\`\`
 index.html                # entry — provided by engine starter
@@ -1612,43 +1606,6 @@ assets/
   sprites/
   audio/
   tilemaps/
-\`\`\`
-
-### Pygame (Phase C)
-
-\`\`\`
-main.py                   # entry — pygame.init, main loop, scene dispatch
-scenes/
-  __init__.py             # empty
-  play.py
-  gameover.py
-entities/
-  player.py
-  enemy.py
-assets/
-  sprites/
-  sounds/
-requirements.txt          # pygame-ce==2.5.5
-README.md                 # how to run locally
-\`\`\`
-
-### Godot (Phase B)
-
-\`\`\`
-project.godot             # Godot project descriptor
-main.tscn                 # root scene
-scenes/
-  player.tscn
-  enemy.tscn
-  ui.tscn
-scripts/
-  player.gd
-  enemy.gd
-  game_manager.gd
-assets/
-  sprites/
-  audio/
-README.md                 # "open in Godot 4.3 → run main.tscn"
 \`\`\`
 
 ## Entrypoint discipline (Three.js / Phaser — JS engines)
@@ -1673,17 +1630,12 @@ If you replace the importmap mid-run (e.g. swapping \`three.module.js\` for the 
 ## Asset paths
 
 - Inside JS: \`this.load.image('player', 'assets/sprites/player.png')\` — relative path from the project root, resolved by \`<base href>\`.
-- Inside Python: \`pygame.image.load('assets/sprites/player.png')\` — Pyodide mounts the project at the working dir.
-- Inside GDScript: \`preload('res://assets/sprites/player.png')\` — Godot resolves \`res://\` to the project root.
 
 ## Per-extension byte caps (gameplan §4 / Q5)
 
 \`text_editor.create\` enforces these per-extension caps:
 
 - \`.html\` → 12 KB (skeleton-only — fill via \`str_replace\`)
-- \`.tscn\` → 32 KB (Godot scenes can legitimately be large)
-- \`.gd\`   → 16 KB (per-script ceiling; split big scripts into subscenes)
-- \`.py\`   → 16 KB
 - other game-mode files → 16 KB
 
 If you hit a cap, the right move is *not* to compress — it's to split the responsibility into a second file.
@@ -1699,684 +1651,6 @@ Every successful \`done\` snapshots the full project tree into \`design_snapshot
 - Filenames containing spaces or special characters.
 - Files outside the project root.
 - Splitting a 50-line script into 5 files for the sake of "cleanliness."`;
-
-// gameplan §B1 — Godot prompts (project-download mode in v1; live preview
-// lands as Phase D). composeGame routes to GODOT_ENGINE_GUIDE when
-// engine === 'godot'. The multi-file guide always ships for game-mode
-// runs (it covers all four engines' layouts).
-
-const GODOT_ENGINE_GUIDE = `# Godot engine guide (pinned to Godot 4.3)
-
-Godot 4.3 is project-download mode in v1. The agent authors a clean Godot project (\`project.godot\`, \`*.tscn\`, \`*.gd\`, \`assets/\`) that the user opens in their installed Godot 4.3+. Phase D (later) adds an in-app web preview when \`godot --headless\` is on the user's \`\$PATH\`.
-
-**Do NOT** generate Godot 3.x format files (\`[gd_scene format=2]\`). The validator rejects them. Pin every scene to format=3 (4.x).
-
-## Required project files
-
-\`\`\`
-project.godot                # top-level manifest — required
-main.tscn                    # root scene named in run/main_scene — required
-scenes/                      # one .tscn per logical scene
-scripts/                     # one .gd per behaviour
-assets/sprites/              # PNG / JPG textures
-assets/audio/                # WAV / OGG (Godot 4 reads both natively)
-\`\`\`
-
-## project.godot — minimum shape
-
-\`\`\`
-[application]
-config/name="Game name"
-run/main_scene="res://main.tscn"
-config/features=PackedStringArray("4.3", "GL Compatibility")
-
-[rendering]
-renderer/rendering_method="gl_compatibility"
-\`\`\`
-
-The \`gl_compatibility\` renderer is the safe default — works on every machine including older laptops. Switch to \`forward_plus\` only when the brief explicitly asks for high-end PBR.
-
-## main.tscn — minimum shape
-
-\`\`\`
-[gd_scene format=3]
-
-[ext_resource type="Script" path="res://scripts/main.gd" id="1"]
-
-[node name="Main" type="Node2D"]
-script = ExtResource("1")
-\`\`\`
-
-Every \`[ext_resource path=…]\` MUST resolve to a file you also create in the bundle. The validator catches dangling references.
-
-## GDScript 2 essentials
-
-\`\`\`gdscript
-extends CharacterBody2D
-
-@export var speed: float = 200.0
-@onready var sprite: AnimatedSprite2D = \$Sprite
-signal hit_pickup(pickup_name)
-
-func _ready() -> void:
-    sprite.play("idle")
-
-func _physics_process(delta: float) -> void:
-    var dir := Vector2(
-        Input.get_axis("ui_left", "ui_right"),
-        Input.get_axis("ui_up", "ui_down")
-    )
-    velocity = dir.normalized() * speed
-    move_and_slide()
-
-func _on_pickup_area_entered(area: Area2D) -> void:
-    hit_pickup.emit(area.name)
-    area.queue_free()
-\`\`\`
-
-Use \`@export\` for inspector-tweakable values, \`@onready\` for child-node references, and signals for cross-node events. Static typing (\`-> void\`, \`: float\`) is encouraged but not required.
-
-## Common nodes
-
-- \`CharacterBody2D\` / \`CharacterBody3D\` — player + smart-physics characters. Use \`move_and_slide()\` for slope handling.
-- \`RigidBody2D\` / \`RigidBody3D\` — physics-driven props (boxes, balls).
-- \`Area2D\` / \`Area3D\` — overlap detection (pickups, triggers). Connect \`body_entered\` / \`area_entered\`.
-- \`AnimatedSprite2D\` — sprite-sheet animations. Pair with a \`SpriteFrames\` resource.
-- \`AudioStreamPlayer\` — non-positional audio (UI cues, music). \`AudioStreamPlayer2D\` for spatial.
-- \`Tween\` (transient) — short animations: \`create_tween().tween_property(node, "modulate", Color.RED, 0.2)\`.
-- \`CanvasLayer\` — UI elements that ignore camera. HUD lives here.
-
-## Lifecycle
-
-- \`_ready()\` — once when the node enters the tree. Do \`@onready\` after this; child nodes exist now.
-- \`_process(delta)\` — every frame. **Never** \`print()\` here (validator warns).
-- \`_physics_process(delta)\` — fixed-timestep, 60 Hz default. Use for movement / collision.
-- \`_input(event)\` — global input. Prefer \`Input.is_action_pressed("…")\` polling for game controls.
-- \`_unhandled_input(event)\` — input that no UI consumed. Right place for game-only shortcuts.
-
-## Resource paths
-
-Always \`res://path/to/file.ext\`. Forward slashes only. Paths are case-sensitive on Linux/Mac.
-
-\`\`\`gdscript
-var tex: Texture2D = preload("res://assets/sprites/player.png")
-var scene: PackedScene = preload("res://scenes/enemy.tscn")
-var enemy: Node = scene.instantiate()
-add_child(enemy)
-\`\`\`
-
-## Autoloads (singletons)
-
-Add to \`project.godot\` under \`[autoload]\`:
-
-\`\`\`
-[autoload]
-GameState="*res://scripts/game_state.gd"
-\`\`\`
-
-The leading \`*\` means autoloaded as a singleton accessible globally. Use sparingly — one for \`GameState\`, one for \`AudioBus\` is plenty.
-
-## Forbidden
-
-- Godot 3.x format files (\`[gd_scene format=2]\`).
-- \`.gd\` files without an \`extends\` declaration (parse errors).
-- \`print()\` inside \`_process()\` — log spam + frame-stutter.
-- Absolute paths (\`/Users/...\`). Always \`res://…\`.
-- Binary \`.tscn\` files. Always plain text format=3.
-- Referencing files that don't exist in the bundle (validator rejects).`;
-
-const GODOT_MULTI_FILE_GUIDE = `# Godot multi-file project guide
-
-Godot is multi-file by design. Even the simplest project is \`project.godot\` + \`main.tscn\` + at least one \`.gd\` script. This guide covers the structural decisions that hit first-shot quality.
-
-## Recommended layout
-
-\`\`\`
-project.godot              # required — manifest with [application] section
-main.tscn                  # root scene; named in run/main_scene
-scenes/
-  player.tscn              # one scene per logical "thing"
-  enemy.tscn
-  ui_hud.tscn
-scripts/
-  main.gd                  # script attached to main.tscn root node
-  player.gd
-  enemy.gd
-  game_state.gd            # autoload singleton
-assets/
-  sprites/                 # PNG textures
-  audio/                   # WAV / OGG
-  fonts/                   # TTF / OTF (when needed)
-README.md                  # how to open in Godot 4.3 (optional but nice)
-\`\`\`
-
-Group by *role*: scenes/ + scripts/ + assets/. Don't co-locate a script next to its scene; the \`[ext_resource path]\` reference works regardless and the split keeps the inspector tidy.
-
-## .tscn format primer
-
-Godot scene files are plain text. Key concepts the validator enforces:
-
-\`\`\`
-[gd_scene load_steps=3 format=3]
-
-[ext_resource type="Script" path="res://scripts/player.gd" id="1_a"]
-[ext_resource type="Texture2D" path="res://assets/sprites/player.png" id="2_b"]
-
-[node name="Player" type="CharacterBody2D"]
-script = ExtResource("1_a")
-
-[node name="Sprite" type="Sprite2D" parent="."]
-texture = ExtResource("2_b")
-position = Vector2(0, -16)
-\`\`\`
-
-- \`[gd_scene format=3]\` — required (Godot 4.x). Format 2 is rejected.
-- \`[ext_resource path=…]\` — every referenced path must exist in the bundle.
-- \`[node ... parent="."]\` — the dot means "root node of this scene".
-- IDs are arbitrary strings — Godot uses them only for cross-references inside the same file.
-
-## Sub-scenes (instancing)
-
-Reusable components — Player, Enemy, Pickup — get their own \`.tscn\`. Instantiate from another scene via:
-
-\`\`\`
-[ext_resource type="PackedScene" path="res://scenes/enemy.tscn" id="1_e"]
-[node name="Enemy1" parent="." instance=ExtResource("1_e")]
-position = Vector2(200, 100)
-\`\`\`
-
-Override per-instance properties (position, scale, custom @export vars) inline. Keep enemy *behaviour* in \`enemy.gd\`, attached to the root of \`enemy.tscn\`.
-
-## Autoload singletons
-
-Game-wide state (score, current level, audio bus) lives in autoloads. Declared in \`project.godot\`:
-
-\`\`\`
-[autoload]
-GameState="*res://scripts/game_state.gd"
-\`\`\`
-
-The \`*\` prefix marks it as a singleton — accessible from any script as \`GameState.score = 5\`. Don't autoload more than 2–3 singletons; past that, scenes start hidden-coupling and the project becomes hard to reason about.
-
-## Asset paths
-
-- Inside \`.tscn\` / \`.tres\`: \`res://assets/sprites/player.png\` — always with the scheme.
-- Inside \`.gd\`: \`preload("res://assets/sprites/player.png")\` for compile-time, \`load("res://…")\` for runtime-conditional.
-- Forward slashes only. Case-sensitive on Linux/Mac. Lowercase + underscores for filenames is the safest convention.
-
-## Per-extension byte caps (gameplan §4 / Q5)
-
-\`text_editor.create\` enforces these for game-mode files:
-
-- \`.tscn\` → 32 KB. Past that, split the scene: extract a sub-tree into a child .tscn the parent instances. A 200-node main.tscn is a code smell — break it.
-- \`.gd\` → 16 KB per file. Past that, move logic into a separate script attached to a child node, or extract a helper \`static class\` / utility module.
-
-If you hit a cap, the right move is structural: more scenes / more scripts. Not compression.
-
-## .godot/ + .import/ — DO NOT author
-
-Godot generates \`.godot/\`, \`.import/\`, and \`.tmp\` files at editor open time. The agent must NOT create these — they're per-machine cache. The exporter zips the project tree but excludes them via \`.gitignore\`. If you find yourself authoring \`*.import\` files, stop and just author the source asset; Godot creates the import sidecar on first open.
-
-## .gd.uid files (Godot 4.4+ — skip in 4.3)
-
-Godot 4.4 added deterministic UID files (\`script.gd.uid\`) alongside scripts. We pin to 4.3, so **do not** generate \`.gd.uid\` files. They'll be created the first time the user opens the project in 4.4+.
-
-## Forbidden
-
-- Absolute paths (\`/Users/...\`, \`C:\\...\`). Use \`res://…\`.
-- Binary \`.tscn\` / \`.tres\` files. Always plain text.
-- Referencing files that don't exist in the bundle.
-- Circular preload imports.
-- Splitting one 50-line script into 5 files for the sake of "cleanliness."
-- Committing \`.godot/\`, \`.import/cache/\`, \`*.tmp\` (export \`.gitignore\` handles this).`;
-
-// gameplan §C1 — Pygame prompts. composeGame routes to PYGAME_ENGINE_GUIDE
-// when engine === 'pygame'. The pygame multi-file guide layers alongside
-// the cross-engine guide because Python package-import rules + asyncio
-// patterns differ enough from JS / Godot to warrant their own treatment.
-
-const PYGAME_ENGINE_GUIDE = `## Pygame engine guide (pinned to pygame-ce 2.5.5 on Pyodide 0.26.4)
-
-Pygame runs **inside the iframe** via Pyodide. The starter \`index.html\` (provided by the engine, NOT authored by you) loads Pyodide + \`pygame-ce==2.5.5\` from \`cdn.jsdelivr.net\`, mounts the project files into Pyodide's MEMFS at \`/home/pyodide\`, and executes \`main.py\`. Your job is to write \`main.py\` (and any helper modules) — NOT to author the Pyodide bootstrap.
-
-The first preview run downloads ~13 MB (Pyodide + pygame-ce). Show empathy: keep the first useful frame visible within ~1 s of \`pygame.display.flip()\`. Subsequent runs hit the browser cache and load in <1 s.
-
-## Required \`main.py\` skeleton (asyncio-aware)
-
-Pyodide runs Python on the browser's main thread. A traditional \`while True:\` blocking loop **freezes the page** until the loop exits. Always yield to the JS event loop with \`await asyncio.sleep(0)\`:
-
-\`\`\`python
-import asyncio
-import pygame
-
-async def main():
-    pygame.init()
-    screen = pygame.display.set_mode((800, 600))
-    pygame.display.set_caption("Game")
-    clock = pygame.time.Clock()
-    running = True
-
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-
-        # update + draw here
-
-        screen.fill((11, 11, 14))
-        # blit sprites, draw shapes, etc.
-        pygame.display.flip()
-        clock.tick(60)
-        await asyncio.sleep(0)  # YIELD to the JS event loop — required on Pyodide
-
-    pygame.quit()
-
-asyncio.ensure_future(main())
-\`\`\`
-
-The synchronous-loop pattern (\`while running: ...\` without \`await\`) DOES work on desktop Python but hangs the browser on Pyodide. The validator does not catch this — discipline matters here.
-
-## Asset loading
-
-Mounted at \`/home/pyodide/<your-path>\`. Reference assets relative to the project root:
-
-\`\`\`python
-player_img = pygame.image.load("assets/sprites/player.png").convert_alpha()
-jump_sfx = pygame.mixer.Sound("assets/audio/jump.wav")
-\`\`\`
-
-Always \`convert_alpha()\` for PNGs with transparency, \`convert()\` for opaque images. Skipping the conversion costs ~3× per-blit cost.
-
-## Audio (Pyodide gotchas)
-
-\`pygame.mixer.Sound\` works for one-shot SFX and short loops:
-
-\`\`\`python
-pygame.mixer.init()
-hit = pygame.mixer.Sound("assets/audio/hit.wav")
-hit.set_volume(0.4)
-hit.play()
-\`\`\`
-
-\`pygame.mixer.music\` (streaming long-form music) is **unsupported** on Pyodide. The validator rejects \`pygame.mixer.music.load(...)\` calls. If the brief calls for music, load it as a \`Sound\` instead and accept that the whole file is decoded into memory upfront.
-
-The browser's autoplay policy gates audio until first user input. Respect \`window.__game.config.startMuted\`:
-
-\`\`\`python
-import js  # Pyodide bridge — exposes the host's window/document
-muted = bool(getattr(js.window.__game.config, "startMuted", False))
-if not muted:
-    hit.play()
-\`\`\`
-
-## Input
-
-Keyboard:
-\`\`\`python
-keys = pygame.key.get_pressed()
-if keys[pygame.K_LEFT]:
-    player.x -= speed * dt
-\`\`\`
-
-Or the event-driven version:
-\`\`\`python
-for event in pygame.event.get():
-    if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-        player.jump()
-\`\`\`
-
-Mouse:
-\`\`\`python
-mx, my = pygame.mouse.get_pos()
-buttons = pygame.mouse.get_pressed()
-\`\`\`
-
-## Tweak parameters via window.__game.params
-
-The host exposes live tweak knobs via \`window.__game.params\`. Read them through Pyodide's \`js\` bridge:
-
-\`\`\`python
-import js
-def get_param(name, default):
-    try:
-        return getattr(js.window.__game.params, name)
-    except Exception:
-        return default
-
-speed = get_param("player_speed", 200)
-\`\`\`
-
-Declare the schema via \`declare_tweak_schema\` with \`kind: 'param'\` so the host's TweakPanel renders sliders that postMessage updates.
-
-## Performance
-
-- 60 fps target. \`clock.tick(60)\` caps it on slow machines.
-- \`convert_alpha()\` / \`convert()\` every loaded surface ONCE at load time.
-- Group sprites with \`pygame.sprite.Group\` and call \`.draw(screen)\` instead of per-sprite \`.blit\`.
-- Don't allocate Vector2 / new Rect per frame — pool them in \`__init__\`.
-
-## Forbidden
-
-- \`import requests\` / \`import urllib3\` / \`import aiohttp\` / \`import httpx\` — the iframe sandbox blocks network and Pyodide loading these adds megabytes for nothing.
-- \`pygame.mixer.music.load(...)\` — unsupported on Pyodide. Use \`Sound\`.
-- Synchronous \`while True:\` loops without \`await asyncio.sleep(0)\` — freezes the page.
-- Authoring \`index.html\` — the engine's bootstrap provides it. Author \`main.py\` and modules only.
-- \`time.sleep(...)\` for animation — use \`pygame.time.Clock.tick(60)\` (same wall-clock effect, but yields to the engine).
-- \`os\` / \`subprocess\` / \`shutil\` calls — Pyodide ships them but they hit a virtual FS only; don't pretend you can spawn anything.`;
-
-const PYGAME_MULTI_FILE_GUIDE = `## Pygame multi-file project guide
-
-Pygame projects can ship as a single \`main.py\` for jam-scale games (≤ 200 LOC, one mechanic, one screen). Beyond that, split — the validator and per-extension byte caps assume a real package layout.
-
-## Recommended layout
-
-\`\`\`
-main.py                # entry — pygame.init, async main loop, scene dispatch
-entities/
-  __init__.py          # empty file — required for the import system
-  player.py
-  enemy.py
-  projectile.py
-scenes/
-  __init__.py
-  play.py              # the active mechanic
-  gameover.py          # restart screen
-systems/
-  __init__.py
-  audio.py             # Sound wrapper + autoplay-policy unlock
-  input.py             # uniform keyboard / mouse polling
-assets/
-  sprites/
-  audio/
-  fonts/               # TTF if needed
-requirements.txt       # pygame-ce==2.5.5
-README.md              # how to run locally (venv + pip)
-\`\`\`
-
-## Per-extension byte caps (gameplan §4 / Q5)
-
-\`text_editor.create\` enforces these for game-mode files:
-
-- \`.py\` → 16 KB. Past that, split by responsibility — one file per entity / system / scene controller. Pull shared helpers into \`systems/_shared.py\`.
-
-If you hit the cap, the right move is structural: more modules. Not compression.
-
-## \`__init__.py\` is required
-
-Every directory under the project root that contains importable modules MUST have an empty \`__init__.py\`. Without it, Pyodide's importer treats the directory as a namespace and \`from entities.player import Player\` fails at runtime.
-
-\`\`\`python
-# entities/__init__.py — empty file is fine
-\`\`\`
-
-## Asset paths
-
-Pyodide mounts the project tree at \`/home/pyodide\` and chdir's there before running \`main.py\`. Use **relative** paths from the project root:
-
-\`\`\`python
-img = pygame.image.load("assets/sprites/player.png").convert_alpha()
-\`\`\`
-
-Don't use absolute paths (\`/home/pyodide/...\`). Don't use \`__file__\`-relative paths (Pyodide's \`__file__\` works but is brittle). Relative-from-cwd is canonical.
-
-## Module imports
-
-\`\`\`python
-# main.py
-from entities.player import Player
-from scenes.play import PlayScene
-from systems.audio import AudioBank
-\`\`\`
-
-Pyodide's import system mirrors CPython's — relative imports, package-style imports, and standard-library imports all work. Third-party imports (other than \`pygame\` / \`pygame_ce\`) are limited to packages Pyodide ships natively (no \`pip install\` at runtime).
-
-## requirements.txt
-
-For the downloadable-zip exporter (\`game-py\`), include a \`requirements.txt\` so users can \`pip install -r requirements.txt\` locally:
-
-\`\`\`
-pygame-ce==2.5.5
-\`\`\`
-
-ONE pinned line. Don't add any other deps unless the brief explicitly requires them — the in-app preview only ships pygame-ce, and a deeper pip install on local machines fights with venv conventions.
-
-## README.md (recommended)
-
-For project-download exports, ship a README that names the venv + pip path:
-
-\`\`\`markdown
-# <Game name>
-
-## Run locally
-\\\`\\\`\\\`bash
-python3 -m venv .venv
-source .venv/bin/activate    # macOS / Linux
-# .venv\\\\Scripts\\\\activate     # Windows PowerShell
-pip install -r requirements.txt
-python main.py
-\\\`\\\`\\\`
-
-## Controls
-- Arrow keys: move
-- Space: jump / fire
-- Esc: quit
-\`\`\`
-
-The exporter generates a basic README when one isn't authored, but a model-authored one is more useful (knows the actual controls).
-
-## Forbidden
-
-- Absolute paths (\`/Users/...\`, \`C:\\\\...\`).
-- Authoring \`__pycache__/\` files (regenerated automatically).
-- \`os.system(...)\`, \`subprocess.run(...)\` — Pyodide can't actually shell out.
-- Filenames with spaces or hyphens (Python module names disallow both).
-- Top-level \`await\` in modules other than \`main.py\` — Pyodide's \`runPythonAsync\` only awaits the entry script's body.`;
-
-// UNITY_PIPELINE.md §U1 — Unity 6 LTS engine guide. Project-download mode
-// only; live preview routed through a Three.js shadow scene (U2). Build +
-// Steam upload arrive in U3 / U4.
-const UNITY_ENGINE_GUIDE = `# Unity engine guide (pinned to Unity 6 LTS — \`m_EditorVersion: 6000.0\`)
-
-Unity 6 is **project-download mode** in U1. The agent authors a clean Unity project tree (\`Assets/\`, \`Packages/manifest.json\`, \`ProjectSettings/\`) that the user opens in Unity Hub. Native + WebGL builds happen in U3 via \`-batchmode\`. Steam upload happens in U4 via \`steamcmd\`.
-
-**Do NOT** try to author \`.unity\` scene YAML by hand for anything beyond the empty placeholder scene — Unity's serialized YAML is fragile (GUIDs, file IDs, transform references) and one off-by-one breaks the whole project. Build scenes programmatically from a small \`Assets/Editor/SceneBuilder.cs\` script that uses \`EditorSceneManager.NewScene()\` + \`GameObject.CreatePrimitive()\` + component adds. Unity runs the script on first open via \`[InitializeOnLoadMethod]\`.
-
-**Live preview comes from a Three.js shadow scene the agent authors in parallel** (UNITY_PIPELINE.md §U2). The runtime renders \`index.html\` (the shadow scene) in the iframe; the Unity tree under \`Assets/\` is the export target. Both must be authored every Unity-mode run:
-
-- \`index.html\` — Three.js scene approximating the Unity scene. Same camera kind (first-person ↔ first-person), same named actors ("Player", "Enemy", etc.). The user iterates against this preview.
-- \`Assets/\` + \`Packages/\` + \`ProjectSettings/\` — the Unity project tree. The user opens this in Unity Hub for native + Steam builds.
-
-Before \`done\`, call \`verify_unity_matches_preview\` — it lints camera-kind drift and named-actor drift between the two artifacts. Drift means the preview lies about the export target.
-
-## Required project files
-
-\`\`\`
-ProjectSettings/ProjectVersion.txt    # required — Unity Hub reads this
-Packages/manifest.json                # required — even { "dependencies": {} } works
-Assets/Scenes/Main.unity              # required — placeholder scene OK
-Assets/Editor/SceneBuilder.cs         # populates Main.unity on Editor open
-Assets/Scripts/                       # MonoBehaviour subclasses
-Assets/Resources/                     # runtime-loaded assets (Resources.Load path-relative)
-Assets/Prefabs/                       # reusable game objects
-\`\`\`
-
-## ProjectSettings/ProjectVersion.txt — minimum shape
-
-\`\`\`
-m_EditorVersion: 6000.0.23f1
-m_EditorVersionWithRevision: 6000.0.23f1 (a1b2c3d4)
-\`\`\`
-
-## Packages/manifest.json — minimum shape
-
-\`\`\`json
-{
-  "dependencies": {
-    "com.unity.render-pipelines.universal": "17.0.3",
-    "com.unity.inputsystem": "1.7.0"
-  }
-}
-\`\`\`
-
-URP is the default. New Input System is the default. Don't use the deprecated \`Input.GetKey\`.
-
-## Scene authoring — the SceneBuilder pattern
-
-\`Assets/Editor/SceneBuilder.cs\`:
-
-\`\`\`csharp
-using UnityEditor;
-using UnityEditor.SceneManagement;
-using UnityEngine;
-
-[InitializeOnLoad]
-public static class SceneBuilder {
-  static SceneBuilder() { EditorApplication.delayCall += BuildIfEmpty; }
-
-  static void BuildIfEmpty() {
-    var scene = EditorSceneManager.OpenScene("Assets/Scenes/Main.unity");
-    if (scene.rootCount > 1) return;
-
-    var camera = new GameObject("Main Camera");
-    camera.AddComponent<Camera>();
-    camera.tag = "MainCamera";
-    camera.transform.position = new Vector3(0, 5, -10);
-
-    var player = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-    player.name = "Player";
-    player.AddComponent<PlayerController>();
-    player.AddComponent<Rigidbody>();
-
-    var ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
-    ground.name = "Ground";
-    ground.transform.localScale = new Vector3(5, 1, 5);
-
-    var lightGO = new GameObject("Directional Light");
-    lightGO.AddComponent<Light>().type = LightType.Directional;
-
-    EditorSceneManager.MarkSceneDirty(scene);
-    EditorSceneManager.SaveScene(scene);
-    AssetDatabase.Refresh();  // CRITICAL — without this the build runs against the empty scene
-  }
-}
-\`\`\`
-
-The \`AssetDatabase.Refresh()\` call is mandatory. The validator warns when an Editor script writes assets without it.
-
-## MonoBehaviour patterns
-
-\`\`\`csharp
-using UnityEngine;
-using UnityEngine.InputSystem;
-
-[RequireComponent(typeof(Rigidbody))]
-public class PlayerController : MonoBehaviour {
-  [SerializeField] float moveSpeed = 5f;
-  Rigidbody rb;
-  Vector2 moveInput;
-
-  void Awake() { rb = GetComponent<Rigidbody>(); }
-  public void OnMove(InputValue v) { moveInput = v.Get<Vector2>(); }
-
-  void FixedUpdate() {
-    var move = new Vector3(moveInput.x, 0, moveInput.y) * moveSpeed;
-    rb.linearVelocity = new Vector3(move.x, rb.linearVelocity.y, move.z);
-  }
-}
-\`\`\`
-
-Notice: \`FixedUpdate\` for physics. \`linearVelocity\` (Unity 6 name; \`velocity\` is deprecated).
-
-## Anti-patterns the validator catches
-
-- **\`GameObject.Find("...")\` inside \`Update()\` / \`FixedUpdate()\` / \`LateUpdate()\`** — string search every frame. Cache the reference in \`Awake()\` or \`Start()\`.
-- **\`transform.Translate(speed)\` without \`Time.deltaTime\`** — frame-rate-dependent. Multiply by \`Time.deltaTime\` in Update or use \`Rigidbody.linearVelocity\` in FixedUpdate.
-- **\`Resources.Load("path")\` for a missing asset** — runtime null. Path is relative to \`Assets/Resources/\`, no extension.
-- **Editor scripts that write assets without \`AssetDatabase.Refresh()\`** — next build won't see the new asset.
-- **\`Debug.Log\` in hot paths** — allocates strings every frame. Wrap in \`#if UNITY_EDITOR\` for production.
-
-## Build pipeline (U3)
-
-The host has wired \`build_unity\` for this run when Unity Editor is on the user's machine. Call it AFTER \`verify_unity_matches_preview\` reports OK and the project tree is complete:
-
-\`\`\`
-build_unity({ target: "StandaloneOSX" | "StandaloneWindows64" | "StandaloneLinux64" | "WebGL", development?: true })
-\`\`\`
-
-The host injects \`Assets/Editor/CodesignBuilder.cs\` and invokes Unity Editor in \`-batchmode\`. **Don't author CodesignBuilder.cs yourself** — duplicate type errors. Build time: 3–10 min depending on target. Failed builds return CS#### errors inline; fix them and call again.
-
-If \`build_unity\` is not registered (host couldn't find Unity Editor), the user opens the exported \`game-unity-project\` ZIP in Unity Hub by hand — still ships, just without the in-app build button.
-
-## Genre fit
-
-- **Fits well:** third-person combat, AAA-target FPS, vehicle sims, anything destined for Steam.
-- **Overkill:** puzzle, card, idle, arcade — the 5–15 min build loop is wasted iteration. Pick Three.js or Phaser instead.
-- **Steam target?** Unity is the right choice. Browser engines can't ship to Steam at all; Godot can but the asset ecosystem is narrower.
-
-## Silent failures to watch for
-
-- **License not activated.** Unity Editor in batch mode without a Unity ID errors out. The host detects this and surfaces an actionable message — don't try to work around with flags.
-- **Multiple Editor versions installed.** The host picks the version pinned in \`ProjectVersion.txt\`. If the user only has 2022.3 installed and the project pins 6000.0, the build refuses. Don't downgrade silently.`;
-
-const UNITY_MULTI_FILE_GUIDE = `# Unity multi-file project guide
-
-Unity is multi-file by design.
-
-## Recommended layout
-
-\`\`\`
-ProjectSettings/ProjectVersion.txt
-Packages/manifest.json
-Assets/
-  Scenes/Main.unity            # placeholder scene; SceneBuilder.cs populates it
-  Editor/SceneBuilder.cs       # programmatic scene authoring
-  Editor/CodesignBuilder.cs    # DO NOT author — host injects this for U3 builds
-  Scripts/                     # MonoBehaviour subclasses
-  Prefabs/                     # reusable game objects
-  Resources/                   # runtime-loadable via Resources.Load
-  Materials/
-  Models/                      # GLB/FBX from generate_3d_asset
-README.md
-\`\`\`
-
-## File ownership boundaries
-
-Don't author these — Unity or the host owns them:
-- \`Library/\`, \`Temp/\`, \`Logs/\`, \`obj/\` — regenerated on every Editor open. Never include.
-- \`*.csproj\`, \`*.sln\` — regenerated by Unity from \`*.asmdef\`. Don't write by hand.
-- \`*.meta\` files — Unity regenerates missing \`.meta\` with a fresh GUID on first open. Acceptable for U1 (no cross-asset GUID dependencies).
-- \`Assets/Editor/CodesignBuilder.cs\` — host-injected at build time (U3). Authoring it yourself errors out.
-
-## Editor/ vs runtime/
-
-\`Assets/Editor/\` is stripped from builds; use it for scene generation, build hooks, and asset pipeline tooling. Code outside \`Editor/\` ships to runtime.
-
-## Resources/ vs Prefabs/
-
-Files under \`Assets/Resources/\` are loadable via \`Resources.Load("path-without-extension")\`. Files outside aren't. Prefer Resources/ for runtime spawning (enemies, projectiles); use Prefabs/ outside for scene-placed objects.
-
-## Naming conventions
-
-- **Class names match file names exactly.** \`Assets/Scripts/PlayerController.cs\` defines \`class PlayerController\`. Mismatches break at scene load.
-- **Tags are strings.** Stick to default tags (\`Player\`, \`MainCamera\`, \`Respawn\`, \`Finish\`).
-
-## Inputs — New Input System
-
-Use the New Input System component-driven pattern: attach \`Player Input\` component to the Player GameObject in SceneBuilder, set its actions asset to a generated \`*.inputactions\`, and define \`OnMove\` / \`OnJump\` / \`OnFire\` methods that the component invokes by name.
-
-## Asset references — by path, not GUID
-
-The agent CANNOT predict Unity's GUIDs. Reference assets by path:
-- Runtime: \`Resources.Load<GameObject>("Prefabs/Player")\` — under Assets/Resources/
-- Editor (SceneBuilder): \`AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Player.prefab")\` — full path with extension
-- Inspector references: leave \`[SerializeField]\`; not for U1 since iteration is via the agent
-
-## Common Unity 6 gotchas
-
-- \`Rigidbody.velocity\` deprecated; use \`linearVelocity\`.
-- Compare \`(a-b).sqrMagnitude\` to \`range*range\` instead of \`Vector.Distance\` in tight loops.
-- Coroutines are single-threaded. Don't use them for CPU-heavy work.
-- \`Camera.main\` does a tag scan every call — cache it in Awake().`;
 
 // Split CRAFT_DIRECTIVES into a Map<subsectionName, "## name\n\nbody"> so the
 // progressive-disclosure composer can include only the subsections relevant to
@@ -2404,16 +1678,6 @@ const CRAFT_SUBSECTIONS = buildCraftSubsectionMap();
 function craftSubsection(name: string): string | undefined {
   return CRAFT_SUBSECTIONS.get(name);
 }
-
-// ---------------------------------------------------------------------------
-// motion-graphics-plan §3 — motion-mode prompts. Mirror the byte-for-byte
-// .txt sibling files (motion-workflow.v1.txt, motion-composition-guide.v1.txt,
-// motion-anti-slop.v1.txt). When `composeSystemPrompt({ artifactType: 'motion',
-// motionStyle })` runs, the layered composition is:
-//
-//   IDENTITY + MOTION_WORKFLOW + OUTPUT_RULES + MOTION_COMPOSITION_GUIDE +
-//   MOTION_ANTI_SLOP + SAFETY
-// ---------------------------------------------------------------------------
 
 const MOTION_WORKFLOW = `# Motion graphics workflow (mandatory for \`artifactType: 'motion'\`)
 
@@ -2718,15 +1982,6 @@ export const PROMPT_SECTIONS: Record<string, string> = {
   phaserEngineGuide: PHASER_ENGINE_GUIDE,
   gameAntiSlop: GAME_ANTI_SLOP,
   gameMultiFileGuide: GAME_MULTI_FILE_GUIDE,
-  // gameplan §B1
-  godotEngineGuide: GODOT_ENGINE_GUIDE,
-  godotMultiFileGuide: GODOT_MULTI_FILE_GUIDE,
-  // gameplan §C1
-  pygameEngineGuide: PYGAME_ENGINE_GUIDE,
-  pygameMultiFileGuide: PYGAME_MULTI_FILE_GUIDE,
-  // UNITY_PIPELINE.md §U1
-  unityEngineGuide: UNITY_ENGINE_GUIDE,
-  unityMultiFileGuide: UNITY_MULTI_FILE_GUIDE,
   // motion-graphics-plan §3
   motionWorkflow: MOTION_WORKFLOW,
   motionCompositionGuide: MOTION_COMPOSITION_GUIDE,
@@ -2757,12 +2012,6 @@ export const PROMPT_SECTION_FILES: Record<keyof typeof PROMPT_SECTIONS, string> 
   phaserEngineGuide: 'phaser-engine-guide.v1.txt',
   gameAntiSlop: 'game-anti-slop.v1.txt',
   gameMultiFileGuide: 'game-multi-file-guide.v1.txt',
-  godotEngineGuide: 'godot-engine-guide.v1.txt',
-  godotMultiFileGuide: 'godot-multi-file-guide.v1.txt',
-  pygameEngineGuide: 'pygame-engine-guide.v1.txt',
-  pygameMultiFileGuide: 'pygame-multi-file-guide.v1.txt',
-  unityEngineGuide: 'unity-engine-guide.v1.txt',
-  unityMultiFileGuide: 'unity-multi-file-guide.v1.txt',
   motionWorkflow: 'motion-workflow.v1.txt',
   motionCompositionGuide: 'motion-composition-guide.v1.txt',
   motionAntiSlop: 'motion-anti-slop.v1.txt',
@@ -2813,7 +2062,7 @@ export interface PromptComposeOptions {
    *  artifactType === 'game', the model is told to call `choose_engine`
    *  first and the prompt omits the engine guide (added on the next turn
    *  once the engine is set). */
-  engine?: 'three' | 'phaser' | 'pygame' | 'godot' | 'unity' | undefined;
+  engine?: 'three' | 'phaser' | undefined;
   /** motion-graphics-plan §3 — style pin for motion-mode runs. When
    *  undefined and artifactType === 'motion', the prompt instructs the
    *  agent to call `choose_remotion_style` first. */
@@ -2956,17 +2205,9 @@ function composeGame(engine: PromptComposeOptions['engine']): string[] {
   ];
   if (engine === 'three') sections.push(THREE_ENGINE_GUIDE);
   else if (engine === 'phaser') sections.push(PHASER_ENGINE_GUIDE);
-  else if (engine === 'godot') sections.push(GODOT_ENGINE_GUIDE);
-  else if (engine === 'pygame') sections.push(PYGAME_ENGINE_GUIDE);
-  else if (engine === 'unity') sections.push(UNITY_ENGINE_GUIDE);
 
-  // Engine-specific multi-file guide layered alongside the generic one.
-  // Godot's .tscn format, Pygame's __init__.py / asyncio rules, and Unity's
-  // Editor/ vs runtime split each warrant their own treatment.
+  // Generic multi-file guide for both engines.
   sections.push(GAME_MULTI_FILE_GUIDE);
-  if (engine === 'godot') sections.push(GODOT_MULTI_FILE_GUIDE);
-  else if (engine === 'pygame') sections.push(PYGAME_MULTI_FILE_GUIDE);
-  else if (engine === 'unity') sections.push(UNITY_MULTI_FILE_GUIDE);
 
   sections.push(SAFETY);
   return sections;

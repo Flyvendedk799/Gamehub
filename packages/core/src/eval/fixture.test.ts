@@ -36,11 +36,9 @@ describe('EvalFixture.parse', () => {
     expect(() => EvalEngine.parse('unity')).toThrow(/Invalid engine/);
   });
 
-  it('accepts every may9 bundled engine', () => {
+  it('accepts every bundled engine', () => {
     expect(EvalEngine.parse('three')).toBe('three');
     expect(EvalEngine.parse('phaser')).toBe('phaser');
-    expect(EvalEngine.parse('pygame')).toBe('pygame');
-    expect(EvalEngine.parse('godot')).toBe('godot');
   });
 
   it('rejects maxStrReplaceFailureRate outside [0,1]', () => {

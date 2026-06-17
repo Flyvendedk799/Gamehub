@@ -5,7 +5,7 @@
  * game must hit: a restart binding, a fail state, score / state change,
  * and *some* feedback within the collision/hit handler. These cut across
  * engine boundaries, so we run pattern checks over the project's source
- * tree (.js / .ts / .py / .gd) instead of dispatching to per-engine
+ * tree (.js / .ts / .html) instead of dispatching to per-engine
  * validators.
  *
  * v1 is intentionally pattern-based — fast, cheap, runs over the whole
@@ -83,7 +83,7 @@ export interface AssertGameInvariantsDetails {
   genre: GameGenre | null;
 }
 
-const SOURCE_EXTENSIONS = ['.js', '.ts', '.jsx', '.tsx', '.mjs', '.py', '.gd', '.html'] as const;
+const SOURCE_EXTENSIONS = ['.js', '.ts', '.jsx', '.tsx', '.mjs', '.html'] as const;
 
 export interface AssertGameInvariantsDeps {
   /** Returns every authored project file the agent has written. The host
@@ -112,9 +112,7 @@ function gatherSource(deps: AssertGameInvariantsDeps): string {
 const RESTART_PATTERNS: readonly RegExp[] = [
   /\b(restart|reset|new[_]?game|reset[_]?game)\s*\(/i,
   /K_r\b|key\s*===?\s*['"]r['"]|key\s*===?\s*['"]R['"]|\.code\s*===?\s*['"]KeyR['"]/,
-  /pygame\.K_r\b|pygame\.K_SPACE\b/,
   /location\.reload\b/,
-  /Input\.is_action_just_pressed\(["']ui_select["']\)/,
 ];
 
 const FAIL_PATTERNS: readonly RegExp[] = [
@@ -132,7 +130,6 @@ const SCORE_PATTERNS: readonly RegExp[] = [
   /\b(score|points?|coins?|stars?|kills?|level|wave|round)\s*[+\-*/]?=\s*[+\-]?\s*\d/i,
   /\b(score|points?|coins?)\s*\+\+/i,
   /\bsetScore\s*\(/i,
-  /\bemit_signal\(["']score_changed/i,
 ];
 
 const FEEDBACK_PATTERNS: readonly RegExp[] = [
@@ -140,8 +137,6 @@ const FEEDBACK_PATTERNS: readonly RegExp[] = [
   /\bplay\s*\(\s*\)/i,
   /\bnew\s+Audio\s*\(/,
   /\.sound\.add\b|\.sound\.play\b/i,
-  /pygame\.mixer\.Sound\b/,
-  /AudioStreamPlayer\b/,
   // Visual / particle / shake
   /\b(flash|shake|particle|emit_particle|spark|ripple)/i,
   /\bcontext\.fillRect\b|\bdrawRect\b/i,
@@ -232,7 +227,7 @@ export function assertGameInvariants(
       invariant: 'restart',
       severity: 'warn',
       message:
-        'No restart binding detected. Wire R or Space (or ui_select for Godot) to reset state without a page reload — losing without restart is a hard fail per the gameplan §3.',
+        'No restart binding detected. Wire R or Space to reset state without a page reload — losing without restart is a hard fail per the gameplan §3.',
     });
   }
   if (!anyMatch(source, FAIL_PATTERNS)) {
