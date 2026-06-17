@@ -368,6 +368,9 @@ importers:
       '@playforge/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@playforge/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
       '@playforge/shared':
         specifier: workspace:*
         version: link:../../packages/shared

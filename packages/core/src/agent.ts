@@ -1793,7 +1793,19 @@ export async function generateViaAgent(
       // with forced tools on turn 1 (one extra round-trip in the bad
       // case; full thinking quality otherwise).
       if (agentTurnIndex <= 1) turn0EmittedTools = true;
-      if (toolCallCount > maxToolCalls) {
+      // #1.2 — Reserve a validation tail. Past the soft tool-call cap we STILL
+      // let the mandatory finishing tools (validate_game_scene / playtest_game /
+      // done) execute, so a build never aborts before it can validate and finish
+      // — otherwise a busy build ships unvalidated. A hard ceiling (soft cap +
+      // grace) still stops an infinite finishing-tool loop, and the token ceiling
+      // (run-generation.ts) remains the real cost guard.
+      const FINISHING_TAIL_GRACE = 12;
+      const isFinishingTool =
+        ev.toolName === 'validate_game_scene' ||
+        ev.toolName === 'playtest_game' ||
+        ev.toolName === 'done';
+      const overHardCap = toolCallCount > maxToolCalls + FINISHING_TAIL_GRACE;
+      if ((toolCallCount > maxToolCalls && !isFinishingTool) || overHardCap) {
         budgetReason = 'tool_calls';
         log.warn('[generate] step=budget_exceeded', {
           ...ctx,

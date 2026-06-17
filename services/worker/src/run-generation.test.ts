@@ -9,7 +9,21 @@ import type { AgentEvent, GenerateOutput } from '@playforge/agent-core';
 import type { GameSpec } from '@playforge/shared';
 import { InMemoryBlobStore, SnapshotStore } from '@playforge/storage';
 import { describe, expect, it } from 'vitest';
-import { type GenerateFn, runGeneration } from './run-generation';
+import { ENGINE_SCENE_VALIDATOR, type GenerateFn, runGeneration } from './run-generation';
+
+describe('ENGINE_SCENE_VALIDATOR (#1.1 — the worker now runs a REAL engine lint, not the old no-op)', () => {
+  it('flags a Phaser add.image with no matching load.image as ok:false (was always ok:true)', () => {
+    const result = ENGINE_SCENE_VALIDATOR('phaser', [
+      {
+        path: 'game.js',
+        content: `class Scene extends Phaser.Scene { create() { this.add.image(100, 100, 'hero'); } }`,
+      },
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.engine).toBe('phaser');
+    expect(result.issues.some((i) => i.severity === 'error' && i.message.includes('hero'))).toBe(true);
+  });
+});
 
 const RED_SQUARE = `<!doctype html><html><body>
 <canvas id="game"></canvas>

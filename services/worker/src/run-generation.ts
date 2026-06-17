@@ -20,6 +20,10 @@ import {
   type GenerateViaAgentDeps,
   generateViaAgent,
 } from '@playforge/agent-core';
+// Import from the engines subpath, NOT the package root — the root re-exports the
+// desktop React/Babel design-canvas vendor (?raw) which has no business in the
+// game-gen worker and won't resolve under its tsconfig.
+import { GAME_ENGINE_ADAPTERS } from '@playforge/runtime/engines';
 import { makeAssetGenerator } from './asset-generator';
 import type { GameSpec, ModelRef } from '@playforge/shared';
 import type { SnapshotStore, WriteResult } from '@playforge/storage';
@@ -78,14 +82,32 @@ export interface GenerationResult {
   fsState: Array<{ path: string; bytes: number }>;
 }
 
-const PASS_VALIDATOR: SceneValidator = (engine) => ({ ok: true, engine, issues: [] });
+/**
+ * Real engine scene validator (#1.1): dispatches to the @playforge/runtime
+ * adapter for the current engine and maps its ValidationResult to the host
+ * SceneValidator shape. Replaces the old PASS_VALIDATOR no-op so the agent's
+ * MANDATORY `validate_game_scene` gate runs a genuine engine lint (e.g. a
+ * Phaser `this.add.image('hero')` with no prior `load.image('hero')`, or a
+ * Three.js unreachable-trigger) instead of always returning ok:true. Before
+ * this, the cloud worker handed the agent a permissive pass, so the headline
+ * "win/lose-validated, anti-slop" guarantee ran on nothing server-side.
+ */
+export const ENGINE_SCENE_VALIDATOR: SceneValidator = (engine, files) => {
+  const adapter = GAME_ENGINE_ADAPTERS.get(engine);
+  if (!adapter) return { ok: true, engine, issues: [] };
+  const result = adapter.validate(files);
+  if (result.ok) return { ok: true, engine, issues: [] };
+  // ValidationIssue and the host SceneIssue are the same shape ({path,line?,
+  // message,severity}) — pass through.
+  return { ok: false, engine, issues: result.issues };
+};
 
 export async function runGeneration(
   req: GenerationRequest,
   ports: GenerationPorts,
 ): Promise<GenerationResult> {
   const generate = ports.generate ?? generateViaAgent;
-  const validateScene = ports.validateScene ?? PASS_VALIDATOR;
+  const validateScene = ports.validateScene ?? ENGINE_SCENE_VALIDATOR;
   const tree = new WorkingTree(req.initialFiles);
 
   // Hard run ceiling (#18) — abort cleanly when a token budget is set.
@@ -103,9 +125,13 @@ export async function runGeneration(
   if (ports.maxTokens !== undefined) {
     tokenAbortController = new AbortController();
   }
+  // #1.2 — game runs need enough tool headroom to actually REACH the mandatory
+  // validate → playtest → done tail; a stingy floor aborts a build before it can
+  // validate, shipping an unvalidated game. (The token CEILING above is the real
+  // cost guard; this is just the soft tool-call cap's floor.)
   const maxToolCalls = ports.maxTokens !== undefined
-    ? Math.max(10, Math.floor(ports.maxTokens / 3000))
-    : 80;
+    ? Math.max(40, Math.floor(ports.maxTokens / 3000))
+    : 120;
   const maxWallClockMs = 20 * 60 * 1000; // 20 minutes hard wall
 
   // In-run mutable state the agent reads/writes via the gameMode callbacks and
