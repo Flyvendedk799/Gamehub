@@ -12,8 +12,9 @@ import {
   toggleLike,
 } from '@/lib/api';
 import type { HubComment } from '@/lib/api';
+import { API_BASE } from '@/lib/config';
 
-const BASE = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3191';
+const BASE = API_BASE;
 
 interface Props {
   slug: string;

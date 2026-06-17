@@ -9,9 +9,9 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { API_WS_BASE } from './config';
 
-const BASE_WS = (process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3191')
-  .replace(/^http/, 'ws');
+const BASE_WS = API_WS_BASE;
 
 interface PresenceMessage {
   type: string;

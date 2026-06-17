@@ -71,6 +71,18 @@ export interface MessageUpdateEvent {
   timestamp: string;
 }
 
+/**
+ * A real user turn in the chat log. Replaces the prior hack of pushing a
+ * `message_update` with a `> ` prefix to mark user input (#34). Client-synthesized
+ * (the server doesn't emit this over SSE); rendered as a distinct bubble.
+ */
+export interface UserMessageEvent {
+  type: 'user_message';
+  runId: string;
+  content: string;
+  timestamp: string;
+}
+
 export interface TextDeltaEvent {
   type: 'text_delta';
   runId: string;
@@ -110,6 +122,7 @@ export type SseEvent =
   | RunCompleteEvent
   | RunErrorEvent
   | MessageUpdateEvent
+  | UserMessageEvent
   | TextDeltaEvent
   | ToolUseEvent
   | ToolResultEvent

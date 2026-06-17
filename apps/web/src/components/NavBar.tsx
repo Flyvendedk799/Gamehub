@@ -3,24 +3,32 @@
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { logout } from '@/lib/api';
+import { getMe, logout } from '@/lib/api';
 import { clearToken, getToken } from '@/lib/auth';
 
 export default function NavBar() {
   const router = useRouter();
   const pathname = usePathname();
   const [handle, setHandle] = useState<string | null>(null);
+  const [balance, setBalance] = useState<number | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     const token = getToken();
-    if (!token) { setHandle(null); return; }
-    fetch(`${process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3191'}/v1/auth/me`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => r.ok ? r.json() as Promise<{ handle: string }> : Promise.resolve(null))
-      .then((data) => setHandle(data?.handle ?? null))
-      .catch(() => setHandle(null));
+    if (!token) { setHandle(null); setBalance(null); return; }
+    let cancelled = false;
+    void getMe()
+      .then((data) => {
+        if (cancelled) return;
+        setHandle(data.handle);
+        setBalance(data.balance ?? null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setHandle(null);
+        setBalance(null);
+      });
+    return () => { cancelled = true; };
   }, [pathname]);
 
   async function handleLogout() {
@@ -54,6 +62,17 @@ export default function NavBar() {
         >
           Hub
         </Link>
+
+        {handle && balance !== null && (
+          <span
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-[#a1a1aa] rounded-lg bg-[#161616] border border-[#222222] font-mono"
+            title={`${balance} credits remaining`}
+            aria-label={`${balance} credits remaining`}
+          >
+            <span className="text-[#f59e0b]">◆</span>
+            {balance.toLocaleString()}
+          </span>
+        )}
 
         {handle ? (
           <div className="relative">

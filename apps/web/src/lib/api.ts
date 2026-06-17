@@ -8,14 +8,33 @@ import type {
   SseEvent,
 } from './types';
 import { getToken } from './auth';
+import { API_BASE } from './config';
 
-const BASE = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3191';
+const BASE = API_BASE;
 
 function headers(): HeadersInit {
   const token = getToken();
   const h: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) h['Authorization'] = `Bearer ${token}`;
   return h;
+}
+
+/**
+ * Typed API error so callers can branch on HTTP status / server error code
+ * (e.g. 402 insufficient_credits, 429 concurrent_run_limit) instead of
+ * string-matching a message (#27).
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string | undefined;
+  readonly body: unknown;
+  constructor(status: number, message: string, code: string | undefined, body: unknown) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+    this.body = body;
+  }
 }
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -29,10 +48,47 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
-    throw new Error(`API ${res.status}: ${text}`);
+    let code: string | undefined;
+    let body: unknown = text;
+    try {
+      const parsed: unknown = JSON.parse(text);
+      body = parsed;
+      if (parsed && typeof parsed === 'object' && typeof (parsed as { error?: unknown }).error === 'string') {
+        code = (parsed as { error: string }).error;
+      }
+    } catch {
+      // non-JSON body — leave code undefined
+    }
+    throw new ApiError(res.status, `API ${res.status}: ${text}`, code, body);
   }
 
   return res.json() as Promise<T>;
+}
+
+/** Map a thrown ApiError (or any error) to a short, user-facing message (#27). */
+export function describeApiError(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 402 || err.code === 'insufficient_credits') {
+      const bal = (err.body as { balance?: number } | null)?.balance;
+      return typeof bal === 'number'
+        ? `Out of credits — you have ${bal} left and each build costs more.`
+        : 'Out of credits — top up to keep building.';
+    }
+    if (err.status === 429) {
+      if (err.code === 'concurrent_run_limit') {
+        return 'Too many builds at once — wait for the current one to finish.';
+      }
+      return 'Slow down — too many requests. Try again in a moment.';
+    }
+    if (err.status === 401 || err.status === 403) {
+      return 'You need to sign in to do that.';
+    }
+    if (err.status >= 500) {
+      return 'Something went wrong on our side. Please try again.';
+    }
+    return err.message;
+  }
+  return err instanceof Error ? err.message : 'Something went wrong.';
 }
 
 // ─── Projects ────────────────────────────────────────────────────────────────
@@ -204,59 +260,144 @@ export interface StreamController {
   close: () => void;
 }
 
+/** SSE event types the server may emit as named events. */
+export const SSE_NAMED_TYPES: ReadonlyArray<SseEvent['type']> = [
+  'agent_start',
+  'turn_start',
+  'turn_end',
+  'agent_end',
+  'run_complete',
+  'run_error',
+  'message_update',
+  'text_delta',
+  'tool_use',
+  'tool_result',
+  'thinking_delta',
+];
+
+/**
+ * Pure parser for a single SSE data frame. Returns the typed event or `null`
+ * for malformed/empty frames. Extracted so it can be unit-tested without a
+ * live EventSource (#16).
+ */
+export function parseSseFrame(data: string): SseEvent | null {
+  if (typeof data !== 'string' || data.length === 0) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(data);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== 'object') return null;
+  const type = (parsed as { type?: unknown }).type;
+  if (typeof type !== 'string') return null;
+  if (!SSE_NAMED_TYPES.includes(type as SseEvent['type'])) return null;
+  return parsed as SseEvent;
+}
+
+/** True when an event ends the run for good and reconnection must stop (#10). */
+export function isTerminalSseEvent(event: SseEvent): boolean {
+  return event.type === 'run_complete' || event.type === 'run_error';
+}
+
+export interface StreamRunOptions {
+  /** Fired when a transient disconnect triggers a reconnect attempt (#10). */
+  onReconnecting?: (attempt: number, delayMs: number) => void;
+  /** Fired once the stream gives up after exhausting retries. */
+  onGiveUp?: () => void;
+  /** Max reconnect attempts before giving up. Default 6. */
+  maxAttempts?: number;
+}
+
+const RECONNECT_BASE_DELAY_MS = 500;
+const RECONNECT_MAX_DELAY_MS = 16_000;
+
+/** Capped exponential backoff: 0.5s, 1s, 2s, …, capped at ~16s (#10). */
+export function reconnectDelay(attempt: number): number {
+  return Math.min(RECONNECT_BASE_DELAY_MS * 2 ** attempt, RECONNECT_MAX_DELAY_MS);
+}
+
 export function streamRun(
   runId: string,
   onEvent: (event: SseEvent) => void,
   onError?: (err: Event) => void,
+  options?: StreamRunOptions,
 ): StreamController {
+  const maxAttempts = options?.maxAttempts ?? 6;
+
+  let es: EventSource | null = null;
+  let closed = false;
+  let terminal = false;
+  let attempt = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
   const url = new URL(`${BASE}/v1/runs/${runId}/stream`);
   const token = getToken();
   if (token) url.searchParams.set('token', token);
 
-  const es = new EventSource(url.toString());
-
-  es.onmessage = (msgEvent: MessageEvent<string>) => {
-    try {
-      const parsed = JSON.parse(msgEvent.data) as SseEvent;
+  function handleFrame(data: string) {
+    const parsed = parseSseFrame(data);
+    if (!parsed) return;
+    if (isTerminalSseEvent(parsed)) {
+      // Terminal: deliver, then stop the stream and all reconnection (#10/#34).
+      terminal = true;
       onEvent(parsed);
-    } catch {
-      // ignore malformed frames
+      teardown();
+      return;
     }
-  };
+    // Reset the backoff counter on any successful frame — the connection is
+    // healthy, so a later blip should retry from scratch.
+    attempt = 0;
+    onEvent(parsed);
+  }
 
-  // Listen to named event types the server may emit
-  const namedTypes: SseEvent['type'][] = [
-    'agent_start',
-    'turn_start',
-    'turn_end',
-    'agent_end',
-    'run_complete',
-    'run_error',
-    'message_update',
-    'text_delta',
-    'tool_use',
-    'tool_result',
-    'thinking_delta',
-  ];
+  function teardown() {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    es?.close();
+    es = null;
+  }
 
-  for (const eventType of namedTypes) {
-    es.addEventListener(eventType, (evt: Event) => {
-      const msgEvt = evt as MessageEvent<string>;
-      try {
-        const parsed = JSON.parse(msgEvt.data) as SseEvent;
-        onEvent(parsed);
-      } catch {
-        // ignore
+  function connect() {
+    if (closed || terminal) return;
+    es = new EventSource(url.toString());
+
+    es.onmessage = (msgEvent: MessageEvent<string>) => handleFrame(msgEvent.data);
+
+    for (const eventType of SSE_NAMED_TYPES) {
+      es.addEventListener(eventType, (evt: Event) => {
+        handleFrame((evt as MessageEvent<string>).data);
+      });
+    }
+
+    es.onerror = (err: Event) => {
+      onError?.(err);
+      if (closed || terminal) return;
+      // EventSource auto-reconnects on its own, but we layer a capped backoff
+      // and a give-up bound so a permanently-dead run doesn't spin forever.
+      // The server bus replays history on reconnect, so resume is clean (#10).
+      es?.close();
+      es = null;
+      if (attempt >= maxAttempts) {
+        options?.onGiveUp?.();
+        return;
       }
-    });
+      const delay = reconnectDelay(attempt);
+      attempt += 1;
+      options?.onReconnecting?.(attempt, delay);
+      reconnectTimer = setTimeout(connect, delay);
+    };
   }
 
-  if (onError) {
-    es.onerror = onError;
-  }
+  connect();
 
   return {
-    close: () => es.close(),
+    close: () => {
+      closed = true;
+      teardown();
+    },
   };
 }
 
@@ -296,6 +437,24 @@ export async function logout(): Promise<void> {
   await apiFetch<unknown>('/v1/auth/logout', { method: 'POST' });
 }
 
-export async function getMe(): Promise<{ userId: string; handle: string }> {
-  return apiFetch<{ userId: string; handle: string }>('/v1/auth/me');
+export interface MeResponse {
+  userId: string;
+  handle: string;
+  /** Credit balance; omitted for BYOK/unmetered users (Infinity server-side). */
+  balance?: number;
+}
+
+export async function getMe(): Promise<MeResponse> {
+  return apiFetch<MeResponse>('/v1/auth/me');
+}
+
+// ─── Hub search ────────────────────────────────────────────────────────────────
+
+export async function searchHub(
+  q: string,
+  opts?: { limit?: number },
+): Promise<{ results: HubGame[] }> {
+  const params = new URLSearchParams({ q });
+  if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
+  return apiFetch<{ results: HubGame[] }>(`/v1/hub/search?${params.toString()}`);
 }

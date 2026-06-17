@@ -16,9 +16,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import * as Y from 'yjs';
+import { API_WS_BASE } from './config';
+import { encodeVarUint, readVarUint } from './varint';
 
-const BASE_WS = (process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3191')
-  .replace(/^http/, 'ws');
+const BASE_WS = API_WS_BASE;
 
 // y-websocket message type constants
 const MSG_SYNC = 0;
@@ -26,30 +27,6 @@ const MSG_AWARENESS = 1;
 const SYNC_STEP_1 = 0;
 const SYNC_STEP_2 = 1;
 const SYNC_UPDATE = 2;
-
-function encodeVarUint(n: number): Uint8Array {
-  const buf: number[] = [];
-  while (n > 0x7f) {
-    buf.push((n & 0x7f) | 0x80);
-    n >>>= 7;
-  }
-  buf.push(n);
-  return new Uint8Array(buf);
-}
-
-function readVarUint(buf: Uint8Array, offset: number): [number, number] {
-  let num = 0;
-  let shift = 0;
-  let pos = offset;
-  while (pos < buf.length) {
-    const b = buf[pos]!;
-    pos++;
-    num |= (b & 0x7f) << shift;
-    if ((b & 0x80) === 0) break;
-    shift += 7;
-  }
-  return [num, pos];
-}
 
 function encodeSyncStep1(doc: Y.Doc): Uint8Array {
   const sv = Y.encodeStateVector(doc);

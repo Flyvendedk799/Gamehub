@@ -5,36 +5,14 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChatPanel } from '@/components/ChatPanel';
 import { PreviewPane, type TweakSchema } from '@/components/PreviewPane';
-import { generateGame, getChatHistory, getProject, getSnapshots, publishProject, revertToSnapshot, streamRun, type SnapshotEntry } from '@/lib/api';
+import { describeApiError, generateGame, getChatHistory, getProject, getSnapshots, publishProject, revertToSnapshot, streamRun, type SnapshotEntry } from '@/lib/api';
+import { chatMessageToEvents, lastPreviewUrlFromHistory } from '@/lib/chat-hydration';
+import { API_BASE } from '@/lib/config';
 import { useCollab } from '@/lib/use-collab';
 import { usePresence } from '@/lib/use-presence';
-import type { ChatHistoryMessage, Project, RunCompleteEvent, RunErrorEvent, SseEvent } from '@/lib/types';
+import type { Project, RunCompleteEvent, RunErrorEvent, SseEvent } from '@/lib/types';
 
-const BASE = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3191';
-
-function chatMessageToEvents(msg: ChatHistoryMessage): SseEvent[] {
-  if (msg.kind === 'user') {
-    const p = msg.payload as { text?: string; runId?: string } | null;
-    return [{
-      type: 'message_update',
-      runId: p?.runId ?? '',
-      role: 'assistant',
-      content: `> ${p?.text ?? ''}`,
-      timestamp: msg.createdAt,
-    }];
-  }
-  if (msg.kind === 'artifact_delivered') {
-    const p = msg.payload as { runId?: string; previewUrl?: string } | null;
-    return [{
-      type: 'run_complete',
-      runId: p?.runId ?? '',
-      snapshotPath: '',
-      previewUrl: p?.previewUrl ?? '',
-      timestamp: msg.createdAt,
-    }];
-  }
-  return [];
-}
+const BASE = API_BASE;
 
 export default function BuilderPage() {
   const params = useParams();
@@ -46,9 +24,11 @@ export default function BuilderPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [events, setEvents] = useState<SseEvent[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [currentRunId, setCurrentRunId] = useState<string | null>(initialRunId);
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishUrl, setPublishUrl] = useState<string | null>(null);
@@ -89,9 +69,10 @@ export default function BuilderPage() {
   // ─── Load project metadata + chat history ─────────────────────────────────
   useEffect(() => {
     if (!projectId) return;
+    setLoadError(null);
     void getProject(projectId)
       .then(({ project }) => setProject(project))
-      .catch(() => {});
+      .catch((err) => setLoadError(describeApiError(err)));
 
     refreshSnapshots();
 
@@ -100,17 +81,12 @@ export default function BuilderPage() {
         if (messages.length === 0) return;
 
         const syntheticEvents: SseEvent[] = [];
-        let lastPreviewUrl: string | null = null;
-
         for (const msg of messages) {
           syntheticEvents.push(...chatMessageToEvents(msg));
-          if (msg.kind === 'artifact_delivered') {
-            const p = (msg.payload as { previewUrl?: string } | null);
-            if (p?.previewUrl) lastPreviewUrl = p.previewUrl;
-          }
         }
 
         setEvents(syntheticEvents);
+        const lastPreviewUrl = lastPreviewUrlFromHistory(messages);
         if (lastPreviewUrl) {
           const url = lastPreviewUrl.startsWith('http')
             ? lastPreviewUrl
@@ -118,7 +94,7 @@ export default function BuilderPage() {
           setPreviewUrl(url);
         }
       })
-      .catch(() => {});
+      .catch((err) => setLoadError(describeApiError(err)));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, refreshSnapshots]);
 
@@ -127,12 +103,15 @@ export default function BuilderPage() {
     // Close any existing stream
     streamCtrlRef.current?.close();
     setIsStreaming(true);
+    setReconnecting(false);
     setHasError(false);
     setErrorMessage(undefined);
 
     const ctrl = streamRun(
       runId,
       (event) => {
+        // A frame arrived → the connection is healthy again.
+        setReconnecting(false);
         setEvents((prev) => [...prev, event]);
 
         if (event.type === 'run_complete') {
@@ -155,18 +134,26 @@ export default function BuilderPage() {
           streamCtrlRef.current?.close();
         }
 
-        if (event.type === 'agent_end') {
-          setIsStreaming(false);
-        }
+        // NOTE (#34): do NOT end the streaming UI on `agent_end`. Only the
+        // terminal `run_complete` / `run_error` events stop streaming — the
+        // artifact may still be packaging after the agent finishes its turns.
       },
-      () => {
-        // SSE error / connection closed
-        setIsStreaming(false);
+      undefined,
+      {
+        // #10: surface transient disconnects as a "reconnecting" state; the
+        // server bus replays history on reconnect so resume is clean.
+        onReconnecting: () => setReconnecting(true),
+        onGiveUp: () => {
+          setReconnecting(false);
+          setIsStreaming(false);
+          setHasError(true);
+          setErrorMessage('Lost connection to the build stream. Reload to resume.');
+        },
       },
     );
 
     streamCtrlRef.current = ctrl;
-  }, []);
+  }, [refreshSnapshots]);
 
   useEffect(() => {
     if (initialRunId) {
@@ -183,12 +170,11 @@ export default function BuilderPage() {
   async function handleSend(prompt: string) {
     if (!projectId || isStreaming) return;
 
-    // Add a synthetic "user" message to the log
+    // Add a real user turn to the log (#34 — no more `> ` prefix hack).
     const userEvent: SseEvent = {
-      type: 'message_update',
+      type: 'user_message',
       runId: currentRunId ?? '',
-      role: 'assistant',
-      content: `> ${prompt}`,
+      content: prompt,
       timestamp: new Date().toISOString(),
     };
     setEvents((prev) => [...prev, userEvent]);
@@ -198,10 +184,12 @@ export default function BuilderPage() {
       setCurrentRunId(runId);
       startStream(runId);
     } catch (err) {
+      // #27: surface 402 (out of credits) / 429 (rate / concurrent limit) and
+      // any other failure with a human message instead of a raw error string.
       const errEvent: SseEvent = {
         type: 'run_error',
         runId: currentRunId ?? '',
-        error: err instanceof Error ? err.message : 'Failed to start generation',
+        error: describeApiError(err),
         timestamp: new Date().toISOString(),
       };
       setEvents((prev) => [...prev, errEvent]);
@@ -216,7 +204,7 @@ export default function BuilderPage() {
       const full = url.startsWith('http') ? url : `${BASE}${url}`;
       setPublishUrl(full);
     } catch (err) {
-      console.error('Publish failed:', err);
+      setLoadError(`Publish failed — ${describeApiError(err)}`);
     } finally {
       setIsPublishing(false);
     }
@@ -231,7 +219,7 @@ export default function BuilderPage() {
       setPreviewUrl(`${BASE}/v1/projects/${projectId}/preview/`);
       setShowTimeline(false);
     } catch (err) {
-      console.error('Revert failed:', err);
+      setLoadError(`Restore failed — ${describeApiError(err)}`);
     } finally {
       setIsReverting(null);
     }
@@ -265,12 +253,17 @@ export default function BuilderPage() {
         </div>
 
         <div className="flex items-center gap-2 md:gap-3 flex-shrink-0">
-          {isBuilding && (
-            <span className="flex items-center gap-1.5 text-xs text-[#6366f1] font-mono">
+          {reconnecting ? (
+            <span className="flex items-center gap-1.5 text-xs text-[#f59e0b] font-mono" role="status">
+              <PulseRing color="#f59e0b" />
+              <span className="hidden sm:inline">reconnecting</span>
+            </span>
+          ) : isBuilding ? (
+            <span className="flex items-center gap-1.5 text-xs text-[#6366f1] font-mono" role="status">
               <PulseRing />
               <span className="hidden sm:inline">building</span>
             </span>
-          )}
+          ) : null}
           {previewUrl && (
             <>
               {/* Full screen — icon-only on small screens */}
@@ -364,6 +357,17 @@ export default function BuilderPage() {
         </div>
       </header>
 
+      {/* Load-error banner (#27) — replaces the prior silent catch */}
+      {loadError && (
+        <div
+          role="alert"
+          className="flex-shrink-0 px-4 py-2 bg-[#ef4444]/10 border-b border-[#ef4444]/20 text-xs text-[#ef4444] flex items-center gap-2"
+        >
+          <span className="opacity-70">⚠</span>
+          <span>{loadError}</span>
+        </div>
+      )}
+
       {/* Main split */}
       <div className="flex flex-col md:flex-row flex-1 overflow-hidden relative">
         {/* Chat panel — full width on mobile (50vh), 35% sidebar on md+ */}
@@ -372,6 +376,7 @@ export default function BuilderPage() {
             events={events}
             onSend={(prompt) => { void handleSend(prompt); }}
             isStreaming={isStreaming}
+            reconnecting={reconnecting}
           />
         </div>
 
@@ -452,11 +457,17 @@ export default function BuilderPage() {
   );
 }
 
-function PulseRing() {
+function PulseRing({ color = '#6366f1' }: { color?: string }) {
   return (
     <span className="relative flex h-1.5 w-1.5">
-      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#6366f1] opacity-75" />
-      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#6366f1]" />
+      <span
+        className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
+        style={{ backgroundColor: color }}
+      />
+      <span
+        className="relative inline-flex rounded-full h-1.5 w-1.5"
+        style={{ backgroundColor: color }}
+      />
     </span>
   );
 }

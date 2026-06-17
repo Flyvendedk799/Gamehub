@@ -1,15 +1,18 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { buildRenderItems } from '@/lib/chat-render';
 import type { SseEvent } from '@/lib/types';
 
 interface ChatPanelProps {
   events: SseEvent[];
   onSend: (prompt: string) => void;
   isStreaming: boolean;
+  /** When set, a transient SSE disconnect is being retried (#10). */
+  reconnecting?: boolean;
 }
 
-export function ChatPanel({ events, onSend, isStreaming }: ChatPanelProps) {
+export function ChatPanel({ events, onSend, isStreaming, reconnecting = false }: ChatPanelProps) {
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -34,6 +37,8 @@ export function ChatPanel({ events, onSend, isStreaming }: ChatPanelProps) {
     }
   }
 
+  const renderItems = useMemo(() => buildRenderItems(events), [events]);
+
   return (
     <div className="flex flex-col h-full bg-[#111111] border-r border-[#222222]">
       {/* Header */}
@@ -41,12 +46,17 @@ export function ChatPanel({ events, onSend, isStreaming }: ChatPanelProps) {
         <span className="text-xs font-mono uppercase tracking-widest text-[#52525b]">
           Build log
         </span>
-        {isStreaming && (
-          <span className="flex items-center gap-1.5 text-xs text-[#6366f1]">
+        {reconnecting ? (
+          <span className="flex items-center gap-1.5 text-xs text-[#f59e0b]" role="status">
+            <PulseIcon color="#f59e0b" />
+            Reconnecting…
+          </span>
+        ) : isStreaming ? (
+          <span className="flex items-center gap-1.5 text-xs text-[#6366f1]" role="status">
             <PulseIcon />
             Running
           </span>
-        )}
+        ) : null}
       </div>
 
       {/* Event stream */}
@@ -59,9 +69,18 @@ export function ChatPanel({ events, onSend, isStreaming }: ChatPanelProps) {
             Waiting for your first build…
           </div>
         )}
-        {events.map((ev, i) => (
-          <EventRow key={i} event={ev} />
-        ))}
+        {renderItems.map((item) =>
+          item.kind === 'text' ? (
+            <div
+              key={item.key}
+              className="text-sm text-[#f4f4f5] leading-relaxed whitespace-pre-wrap py-1"
+            >
+              {item.text}
+            </div>
+          ) : (
+            <EventRow key={item.key} event={item.event} />
+          ),
+        )}
       </div>
 
       {/* Input */}
@@ -135,6 +154,15 @@ function EventRow({ event }: { event: SseEvent }) {
         </div>
       );
 
+    case 'user_message':
+      return (
+        <div className="flex justify-end py-1">
+          <div className="max-w-[85%] rounded-xl rounded-br-sm bg-[#6366f1]/15 border border-[#6366f1]/25 px-3 py-2 text-sm text-[#e0e7ff] leading-relaxed whitespace-pre-wrap">
+            {event.content}
+          </div>
+        </div>
+      );
+
     case 'message_update':
       return (
         <div className="text-sm text-[#f4f4f5] leading-relaxed py-1 whitespace-pre-wrap">
@@ -143,6 +171,8 @@ function EventRow({ event }: { event: SseEvent }) {
       );
 
     case 'text_delta':
+      // Coalesced into a single bubble upstream by buildRenderItems (#51);
+      // a standalone delta should still render rather than vanish.
       return (
         <span className="text-sm text-[#f4f4f5] leading-relaxed whitespace-pre-wrap">
           {event.delta}
@@ -232,11 +262,17 @@ function StatusChip({
 
 // ─── Pulse dot ───────────────────────────────────────────────────────────────
 
-function PulseIcon() {
+function PulseIcon({ color = '#6366f1' }: { color?: string }) {
   return (
     <span className="relative flex h-1.5 w-1.5">
-      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#6366f1] opacity-75" />
-      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#6366f1]" />
+      <span
+        className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
+        style={{ backgroundColor: color }}
+      />
+      <span
+        className="relative inline-flex rounded-full h-1.5 w-1.5"
+        style={{ backgroundColor: color }}
+      />
     </span>
   );
 }

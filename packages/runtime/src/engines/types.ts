@@ -7,6 +7,18 @@
 
 export type GameEngineId = 'three' | 'phaser';
 
+/**
+ * Cross-origin postMessage protocol constant for the host→iframe live-tweak
+ * bridge. The host (builder preview pane) posts `{ type: TWEAKS_UPDATE_MESSAGE_TYPE,
+ * tokens }` and the in-iframe bridge (see `tweaks-bridge.ts`) listens for the
+ * same `type`. Centralizing the literal here keeps the host and the bridge in
+ * lockstep so a rename can't silently break the channel (#20). The host must
+ * post with an explicit `targetOrigin` (the preview/play API origin), never
+ * `'*'`, and the bridge/host must validate `event.origin` on inbound messages.
+ */
+export const TWEAKS_UPDATE_MESSAGE_TYPE = 'codesign:tweaks:update' as const;
+export type TweaksUpdateMessageType = typeof TWEAKS_UPDATE_MESSAGE_TYPE;
+
 export interface BootstrapOptions {
   /** UUID of the design row this game belongs to. Used to build the
    *  game-files:// base URL the iframe resolves relative imports against. */

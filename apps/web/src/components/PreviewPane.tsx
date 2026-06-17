@@ -1,6 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { getToken } from '@/lib/auth';
+import {
+  PREVIEW_IFRAME_ORIGIN,
+  TWEAKS_UPDATE_MESSAGE_TYPE,
+  parseInboundBridgeMessage,
+} from '@/lib/iframe-bridge';
 
 type TweakKind = 'color' | 'number' | 'boolean';
 
@@ -42,12 +48,45 @@ export function PreviewPane({
     setShowTweaks(false);
   }, [previewUrl]);
 
+  // The owner-gated preview route accepts the session token via ?token= because
+  // an iframe/EventSource cannot set Authorization headers (#30). Same-origin
+  // play URLs (/v1/play/...) are public and must NOT carry a token.
+  const iframeSrc = useMemo(() => {
+    if (!previewUrl) return null;
+    if (!previewUrl.includes('/preview')) return previewUrl;
+    const token = getToken();
+    if (!token) return previewUrl;
+    try {
+      const u = new URL(previewUrl);
+      u.searchParams.set('token', token);
+      return u.toString();
+    } catch {
+      return previewUrl;
+    }
+  }, [previewUrl]);
+
+  // Validate inbound bridge messages: only trust the preview origin + a
+  // well-formed `{ type }` payload (#20). We don't act on any message today
+  // beyond ignoring untrusted ones, but this closes the "trust any inbound
+  // origin" gap and gives a typed seam for future bridge acks.
+  useEffect(() => {
+    function onMessage(event: MessageEvent<unknown>) {
+      const msg = parseInboundBridgeMessage(event);
+      if (!msg) return; // untrusted origin or malformed shape → ignore
+      // Reserved for future bridge ack handling.
+    }
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
   const hasTweaks = tweakSchema && Object.keys(tweakSchema).length > 0;
 
   const sendTweaks = useCallback((values: Record<string, string | number | boolean>) => {
+    // Explicit targetOrigin — never '*' (#20). The preview iframe is served by
+    // the API origin, so that is the only origin we will postMessage to.
     iframeRef.current?.contentWindow?.postMessage(
-      { type: 'codesign:tweaks:update', tokens: values },
-      '*',
+      { type: TWEAKS_UPDATE_MESSAGE_TYPE, tokens: values },
+      PREVIEW_IFRAME_ORIGIN,
     );
   }, []);
 
@@ -80,6 +119,8 @@ export function PreviewPane({
           {hasTweaks && previewUrl && (
             <button
               onClick={() => setShowTweaks((v) => !v)}
+              aria-pressed={showTweaks}
+              aria-label="Toggle live tweaks panel"
               className={`
                 text-[10px] px-2 py-1 rounded border transition-colors font-mono
                 ${showTweaks
@@ -107,10 +148,19 @@ export function PreviewPane({
       <div className="flex-1 relative overflow-hidden flex">
         {/* Preview iframe */}
         <div className="flex-1 relative overflow-hidden">
-          {previewUrl && !hasError && (
+          {iframeSrc && !hasError && (
+            // NOTE (#20): `allow-same-origin` is retained intentionally. The
+            // preview is served from a DIFFERENT origin (the API) than this app,
+            // so the iframe never shares the host's origin. Keeping
+            // allow-same-origin gives the iframe its real API origin, which is
+            // what lets the host postMessage with an EXPLICIT targetOrigin
+            // (PREVIEW_IFRAME_ORIGIN) instead of '*'. Dropping it would force an
+            // opaque origin and reintroduce a '*' broadcast for the tweak bridge.
+            // Residual: a same-origin preview can script its own (API) origin —
+            // mitigated server-side by the locked game CSP + owner-gated route.
             <iframe
               ref={iframeRef}
-              src={previewUrl}
+              src={iframeSrc}
               title="Game preview"
               sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-downloads"
               className="absolute inset-0 w-full h-full border-0"
@@ -262,10 +312,16 @@ function TweakControl({ tweakKey, entry, value, onChange }: TweakControlProps) {
 
   if (entry.kind === 'boolean') {
     const boolVal = typeof value === 'boolean' ? value : false;
+    const switchId = `tweak-${tweakKey}`;
     return (
       <div className="flex items-center justify-between">
-        <label className="text-[10px] text-[#52525b] capitalize">{label}</label>
+        <label id={switchId} className="text-[10px] text-[#52525b] capitalize">{label}</label>
         <button
+          type="button"
+          role="switch"
+          aria-checked={boolVal}
+          aria-labelledby={switchId}
+          aria-label={`Toggle ${label}`}
           onClick={() => onChange(!boolVal)}
           className={`
             w-8 h-4 rounded-full transition-colors relative flex-shrink-0
