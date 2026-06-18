@@ -13,12 +13,16 @@ describe('describeApiError', () => {
   });
 
   it('maps 402 without a balance to a generic out-of-credits message', () => {
-    const err = new ApiError(402, 'API 402', 'insufficient_credits', { error: 'insufficient_credits' });
+    const err = new ApiError(402, 'API 402', 'insufficient_credits', {
+      error: 'insufficient_credits',
+    });
     expect(describeApiError(err)).toMatch(/out of credits/i);
   });
 
   it('maps 429 concurrent_run_limit to a too-many-builds message', () => {
-    const err = new ApiError(429, 'API 429', 'concurrent_run_limit', { error: 'concurrent_run_limit' });
+    const err = new ApiError(429, 'API 429', 'concurrent_run_limit', {
+      error: 'concurrent_run_limit',
+    });
     expect(describeApiError(err)).toMatch(/too many builds/i);
   });
 

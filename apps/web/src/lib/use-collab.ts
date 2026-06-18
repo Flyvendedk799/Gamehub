@@ -32,12 +32,15 @@ function encodeSyncStep1(doc: Y.Doc): Uint8Array {
   const sv = Y.encodeStateVector(doc);
   const payload = new Uint8Array(
     encodeVarUint(MSG_SYNC).length +
-    encodeVarUint(SYNC_STEP_1).length +
-    encodeVarUint(sv.length).length +
-    sv.length,
+      encodeVarUint(SYNC_STEP_1).length +
+      encodeVarUint(sv.length).length +
+      sv.length,
   );
   let offset = 0;
-  const write = (a: Uint8Array) => { payload.set(a, offset); offset += a.length; };
+  const write = (a: Uint8Array) => {
+    payload.set(a, offset);
+    offset += a.length;
+  };
   write(encodeVarUint(MSG_SYNC));
   write(encodeVarUint(SYNC_STEP_1));
   write(encodeVarUint(sv.length));
@@ -49,12 +52,15 @@ function encodeSyncStep2(doc: Y.Doc, remoteStateVector: Uint8Array): Uint8Array 
   const update = Y.encodeStateAsUpdate(doc, remoteStateVector);
   const payload = new Uint8Array(
     encodeVarUint(MSG_SYNC).length +
-    encodeVarUint(SYNC_STEP_2).length +
-    encodeVarUint(update.length).length +
-    update.length,
+      encodeVarUint(SYNC_STEP_2).length +
+      encodeVarUint(update.length).length +
+      update.length,
   );
   let offset = 0;
-  const write = (a: Uint8Array) => { payload.set(a, offset); offset += a.length; };
+  const write = (a: Uint8Array) => {
+    payload.set(a, offset);
+    offset += a.length;
+  };
   write(encodeVarUint(MSG_SYNC));
   write(encodeVarUint(SYNC_STEP_2));
   write(encodeVarUint(update.length));
@@ -65,12 +71,15 @@ function encodeSyncStep2(doc: Y.Doc, remoteStateVector: Uint8Array): Uint8Array 
 function encodeSyncUpdate(update: Uint8Array): Uint8Array {
   const payload = new Uint8Array(
     encodeVarUint(MSG_SYNC).length +
-    encodeVarUint(SYNC_UPDATE).length +
-    encodeVarUint(update.length).length +
-    update.length,
+      encodeVarUint(SYNC_UPDATE).length +
+      encodeVarUint(update.length).length +
+      update.length,
   );
   let offset = 0;
-  const write = (a: Uint8Array) => { payload.set(a, offset); offset += a.length; };
+  const write = (a: Uint8Array) => {
+    payload.set(a, offset);
+    offset += a.length;
+  };
   write(encodeVarUint(MSG_SYNC));
   write(encodeVarUint(SYNC_UPDATE));
   write(encodeVarUint(update.length));
@@ -78,7 +87,9 @@ function encodeSyncUpdate(update: Uint8Array): Uint8Array {
   return payload;
 }
 
-function decodeMessage(buf: Uint8Array): { msgType: number; syncType?: number; payload?: Uint8Array } | null {
+function decodeMessage(
+  buf: Uint8Array,
+): { msgType: number; syncType?: number; payload?: Uint8Array } | null {
   try {
     let pos = 0;
     const [msgType, p1] = readVarUint(buf, pos);
@@ -132,7 +143,10 @@ export function useCollab(projectId: string | null | undefined): CollabState {
       ws.binaryType = 'arraybuffer';
 
       ws.onopen = () => {
-        if (destroyed) { ws.close(); return; }
+        if (destroyed) {
+          ws.close();
+          return;
+        }
         setConnected(true);
         // Announce ourselves — send sync step1 so peers can reply with their state
         ws.send(encodeSyncStep1(doc));
@@ -140,9 +154,10 @@ export function useCollab(projectId: string | null | undefined): CollabState {
 
       ws.onmessage = (event: MessageEvent<ArrayBuffer | string>) => {
         if (destroyed) return;
-        const raw = event.data instanceof ArrayBuffer
-          ? new Uint8Array(event.data)
-          : new TextEncoder().encode(String(event.data));
+        const raw =
+          event.data instanceof ArrayBuffer
+            ? new Uint8Array(event.data)
+            : new TextEncoder().encode(String(event.data));
 
         const decoded = decodeMessage(raw);
         if (!decoded) return;
@@ -151,7 +166,10 @@ export function useCollab(projectId: string | null | undefined): CollabState {
           if (decoded.syncType === SYNC_STEP_1 && decoded.payload) {
             // A peer wants our state — respond with step2 (our diff vs their vector)
             ws.send(encodeSyncStep2(doc, decoded.payload));
-          } else if ((decoded.syncType === SYNC_STEP_2 || decoded.syncType === SYNC_UPDATE) && decoded.payload) {
+          } else if (
+            (decoded.syncType === SYNC_STEP_2 || decoded.syncType === SYNC_UPDATE) &&
+            decoded.payload
+          ) {
             // Apply incoming update silently (origin='remote' to suppress re-broadcast loop)
             Y.applyUpdate(doc, decoded.payload, 'remote');
           }

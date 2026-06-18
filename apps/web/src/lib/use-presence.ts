@@ -52,7 +52,10 @@ export function usePresence(
       wsRef.current = ws;
 
       ws.onopen = () => {
-        if (destroyed) { ws.close(); return; }
+        if (destroyed) {
+          ws.close();
+          return;
+        }
         setConnected(true);
       };
 
@@ -78,7 +81,9 @@ export function usePresence(
         }
       };
 
-      ws.onerror = () => { ws.close(); };
+      ws.onerror = () => {
+        ws.close();
+      };
     }
 
     connect();

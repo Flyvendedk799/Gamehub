@@ -159,6 +159,11 @@ window.__game.reportScore = window.__game.reportScore || function (score) {
   } catch (e) { /* cross-origin parent may throw; ignore */ }
 };
 window.addEventListener('message', function (e) {
+  // Only the embedding parent may drive runtime params. Reject any message from
+  // a real window that is NOT the parent (a third-party embedder/foreign frame
+  // trying to mutate gameplay state / cheat). A same-document synthetic dispatch
+  // has source null — the game's own already-trusted code. (CSP H1)
+  if (e.source && e.source !== window.parent) return;
   if (e && e.data && e.data.type === 'game:setParams' && e.data.params) {
     Object.assign(window.__game.params, e.data.params);
     window.dispatchEvent(new CustomEvent('game:params-changed', { detail: e.data.params }));

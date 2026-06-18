@@ -49,9 +49,7 @@ export type GetGameSpecFn = () =>
   | undefined
   | Promise<import('@playforge/shared').GameSpec | undefined>;
 
-export type SetGameSpecFn = (
-  spec: import('@playforge/shared').GameSpec,
-) => void | Promise<void>;
+export type SetGameSpecFn = (spec: import('@playforge/shared').GameSpec) => void | Promise<void>;
 
 export function makeAmendGameSpecTool(
   getSpec: GetGameSpecFn | undefined,

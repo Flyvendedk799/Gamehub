@@ -14,7 +14,8 @@ import { exportGameHtml } from './game-html';
 
 const FAKE_THREE_SOURCE = '/* three.js stub */\nexport const THREE = {};';
 const FAKE_PHASER_SOURCE = '/* phaser stub */\nexport default class Phaser {}';
-const FAKE_ADDON_SOURCE = "/* orbit-controls stub */\nimport * as THREE from 'three';\nexport class OrbitControls {}";
+const FAKE_ADDON_SOURCE =
+  "/* orbit-controls stub */\nimport * as THREE from 'three';\nexport class OrbitControls {}";
 
 let workDir = '';
 
@@ -149,9 +150,7 @@ describe('exportGameHtml', () => {
     });
     const written = readFileSync(dest, 'utf8');
     // CSP meta present.
-    expect(written).toMatch(
-      /<meta\s+http-equiv="Content-Security-Policy"\s+content="[^"]*"\s*>/i,
-    );
+    expect(written).toMatch(/<meta\s+http-equiv="Content-Security-Policy"\s+content="[^"]*"\s*>/i);
     // No network egress allowed.
     expect(written).toContain("connect-src 'none'");
     // default-src locked down.
@@ -166,8 +165,7 @@ describe('exportGameHtml', () => {
     expect(imgDirective).not.toContain('*');
     expect(imgDirective).toContain("'self'");
     // The engine is inlined (no live CDN), so script-src must NOT pin a CDN host.
-    const scriptDirective =
-      policy.split(';').find((d) => d.trim().startsWith('script-src')) ?? '';
+    const scriptDirective = policy.split(';').find((d) => d.trim().startsWith('script-src')) ?? '';
     expect(scriptDirective).not.toContain('cdn.jsdelivr.net');
     expect(scriptDirective).toContain("'unsafe-inline'");
   });
@@ -268,7 +266,8 @@ describe('exportGameHtml', () => {
         { path: 'src/main.js', content: 'console.log("game");' },
         {
           path: 'styles/game.css',
-          content: 'body { background: url(assets/tile.png); }\n#hud { background: url("assets/hud.png"); }',
+          content:
+            'body { background: url(assets/tile.png); }\n#hud { background: url("assets/hud.png"); }',
         },
         { path: 'assets/tile.png', content: Buffer.from([0x89, 0x50, 0x4e, 0x47]) },
         { path: 'assets/hud.png', content: Buffer.from([0x89, 0x50, 0x4e, 0x48]) },
@@ -280,7 +279,12 @@ describe('exportGameHtml', () => {
     expect(written).toMatch(/href=["']data:text\/css;base64,/);
     // No remaining un-inlined local asset paths anywhere in the output —
     // inline-style url(), css url() (bare + quoted), and the css href.
-    assertNoLocalRefs(written, ['assets/tile.png', 'assets/hud.png', 'styles/game.css', 'src/main.js']);
+    assertNoLocalRefs(written, [
+      'assets/tile.png',
+      'assets/hud.png',
+      'styles/game.css',
+      'src/main.js',
+    ]);
     // Both pngs were embedded.
     expect(written).toContain('data:image/png;base64,');
   });

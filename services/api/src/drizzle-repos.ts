@@ -6,13 +6,13 @@
  * contracts are identical; routes and tests need no changes.
  */
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { type Db, schema } from '@playforge/db';
 import type { ChatMessageKind } from '@playforge/shared';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { ChatMessage, ChatRepo } from './chat-repo';
 import type { CreateProjectInput, Engine, Project, ProjectRepo, Visibility } from './repo';
 import type { CreateRunInput, Run, RunRepo, RunStats } from './run-repo';
-import type { SnapshotEntry, SnapshotRepo, SnapshotEngine } from './snapshot-repo';
+import type { SnapshotEngine, SnapshotEntry, SnapshotRepo } from './snapshot-repo';
 
 function slugify(name: string, id: string): string {
   const base = name
@@ -59,9 +59,7 @@ function rowToRun(row: typeof schema.runs.$inferSelect): Run {
     userId: row.userId,
     status: RUN_STATUS_MAP[row.status] ?? 'failed',
     createdAt: row.createdAt.toISOString(),
-    ...(row.snapshotManifestKey !== null
-      ? { snapshotManifestKey: row.snapshotManifestKey }
-      : {}),
+    ...(row.snapshotManifestKey !== null ? { snapshotManifestKey: row.snapshotManifestKey } : {}),
   };
 }
 
@@ -158,7 +156,11 @@ export class DrizzleProjectRepo implements ProjectRepo {
   async setCurrentSnapshot(id: string, snapshotId: string, manifestKey: string): Promise<void> {
     await this.db
       .update(schema.projects)
-      .set({ currentSnapshotId: snapshotId, currentManifestKey: manifestKey, updatedAt: new Date() })
+      .set({
+        currentSnapshotId: snapshotId,
+        currentManifestKey: manifestKey,
+        updatedAt: new Date(),
+      })
       .where(eq(schema.projects.id, id));
   }
 }
@@ -207,15 +209,14 @@ export class DrizzleRunRepo implements RunRepo {
       .select({ count: sql<number>`count(*)::int` })
       .from(schema.runs)
       .where(
-        and(
-          eq(schema.runs.userId, userId),
-          inArray(schema.runs.status, ['queued', 'running']),
-        ),
+        and(eq(schema.runs.userId, userId), inArray(schema.runs.status, ['queued', 'running'])),
       );
     return row?.count ?? 0;
   }
 
-  async getPausedContinuation(projectId: string): Promise<{ continuation: unknown; snapshotManifestKey: string | null } | null> {
+  async getPausedContinuation(
+    projectId: string,
+  ): Promise<{ continuation: unknown; snapshotManifestKey: string | null } | null> {
     const row = await this.db.query.runs.findFirst({
       where: and(eq(schema.runs.projectId, projectId), eq(schema.runs.status, 'paused')),
       orderBy: [desc(schema.runs.createdAt)],

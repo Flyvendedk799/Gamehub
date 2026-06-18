@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
+import { ERROR_CODES, PlayforgeError } from '@playforge/shared';
 import { type TokenSet, decodeJwtClaims, refreshTokens as defaultRefreshTokens } from './oauth';
 
 export interface StoredCodexAuth {

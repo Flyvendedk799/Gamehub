@@ -1,7 +1,7 @@
 import {
   BUILTIN_PROVIDERS,
-  PlayforgeError,
   ERROR_CODES,
+  PlayforgeError,
   type SupportedOnboardingProvider,
   isSupportedOnboardingProvider,
   stripInferenceEndpointSuffix,

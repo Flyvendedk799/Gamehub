@@ -139,5 +139,4 @@ writeWav(join(here, 'music/menu_jingle.wav'), blipMelody(1.2, [523, 659, 784, 10
 
 writeWav(join(here, 'voice/notify_chime.wav'), blipMelody(0.6, [659, 880]));
 
-// biome-ignore lint/suspicious/noConsole: this file is a one-shot script run via tsx, not part of the runtime
 console.log('Wrote starter audio samples to', here);

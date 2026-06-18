@@ -52,9 +52,6 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);`;
     expect(out).toContain('AGENT_BODY_BEGIN');
     expect(out).toContain('AGENT_BODY_END');
     expect(out).toContain('text/babel');
-    // Vendored runtime + frame snippets must be inlined.
-    expect(out).toContain('IOSDevice');
-    expect(out).toContain('DesignCanvas');
     // Overlay still present so element-selection / error reporting work.
     expect(out).toContain('ELEMENT_SELECTED');
     // The agent's payload is embedded between the markers.

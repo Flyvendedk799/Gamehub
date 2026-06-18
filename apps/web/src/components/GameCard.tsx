@@ -1,7 +1,7 @@
 'use client';
 
-import Link from 'next/link';
 import { placeholderGradient, resolveThumbnailUrl } from '@/lib/thumbnail';
+import Link from 'next/link';
 
 /**
  * Phase 3.1 — thumbnail-gallery card shared by the Hub feed and creator
@@ -97,6 +97,7 @@ export function GameCard({
             {game.tags.slice(0, 3).map((t) => (
               <button
                 key={t}
+                type="button"
                 onClick={(e) => {
                   // The card is a Link; don't navigate when filtering by a tag.
                   e.preventDefault();

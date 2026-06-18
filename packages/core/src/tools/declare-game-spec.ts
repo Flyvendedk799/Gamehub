@@ -94,9 +94,7 @@ export interface DeclareGameSpecDetails {
   features: number;
 }
 
-export type SetGameSpecFn = (
-  spec: import('@playforge/shared').GameSpec,
-) => void | Promise<void>;
+export type SetGameSpecFn = (spec: import('@playforge/shared').GameSpec) => void | Promise<void>;
 
 export function makeDeclareGameSpecTool(
   setSpec: SetGameSpecFn | undefined,

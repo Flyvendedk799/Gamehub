@@ -9,8 +9,10 @@ import Phaser from 'phaser';
 
 /** Squash (wide + short) then spring back. Call on landing / hard hit. */
 export function squash(scene, sprite, amount = 0.25, ms = 130) {
-  const bx = sprite._feelBaseX ?? (sprite._feelBaseX = sprite.scaleX);
-  const by = sprite._feelBaseY ?? (sprite._feelBaseY = sprite.scaleY);
+  sprite._feelBaseX ??= sprite.scaleX;
+  sprite._feelBaseY ??= sprite.scaleY;
+  const bx = sprite._feelBaseX;
+  const by = sprite._feelBaseY;
   scene.tweens.killTweensOf(sprite);
   scene.tweens.add({
     targets: sprite,
@@ -25,8 +27,10 @@ export function squash(scene, sprite, amount = 0.25, ms = 130) {
 
 /** Stretch (tall + thin) then spring back. Call on jump / launch / dash. */
 export function stretch(scene, sprite, amount = 0.22, ms = 150) {
-  const bx = sprite._feelBaseX ?? (sprite._feelBaseX = sprite.scaleX);
-  const by = sprite._feelBaseY ?? (sprite._feelBaseY = sprite.scaleY);
+  sprite._feelBaseX ??= sprite.scaleX;
+  sprite._feelBaseY ??= sprite.scaleY;
+  const bx = sprite._feelBaseX;
+  const by = sprite._feelBaseY;
   scene.tweens.killTweensOf(sprite);
   scene.tweens.add({
     targets: sprite,
@@ -42,8 +46,10 @@ export function stretch(scene, sprite, amount = 0.22, ms = 150) {
 /** Pop — a quick overshoot-and-settle on spawn or pickup. Uses Back ease for
  *  the satisfying bounce. */
 export function popIn(scene, sprite, ms = 220) {
-  const bx = sprite._feelBaseX ?? (sprite._feelBaseX = sprite.scaleX);
-  const by = sprite._feelBaseY ?? (sprite._feelBaseY = sprite.scaleY);
+  sprite._feelBaseX ??= sprite.scaleX;
+  sprite._feelBaseY ??= sprite.scaleY;
+  const bx = sprite._feelBaseX;
+  const by = sprite._feelBaseY;
   sprite.setScale(bx * 0.1, by * 0.1);
   scene.tweens.add({
     targets: sprite,

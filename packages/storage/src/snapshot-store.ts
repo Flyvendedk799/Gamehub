@@ -62,7 +62,6 @@ export function contentTypeFor(path: string): string {
 function canonicalManifestJson(manifest: SnapshotManifest): string {
   const sortedFiles: Record<string, ManifestEntry> = {};
   for (const key of Object.keys(manifest.files).sort()) {
-    // biome-ignore lint/style/noNonNullAssertion: keys come from Object.keys
     sortedFiles[key] = manifest.files[key]!;
   }
   return JSON.stringify({ version: manifest.version, files: sortedFiles });

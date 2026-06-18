@@ -1,8 +1,5 @@
 'use client';
 
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
 import {
   addComment,
   getComments,
@@ -15,6 +12,9 @@ import {
 } from '@/lib/api';
 import type { HubComment, LeaderboardEntry } from '@/lib/api';
 import { API_BASE } from '@/lib/config';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useEffect, useRef, useState } from 'react';
 
 const BASE = API_BASE;
 
@@ -137,6 +137,9 @@ export default function PlayClient({
 
   // ─── Leaderboard (Phase 3.8) ────────────────────────────────────────────────
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  // Ref to the game iframe so the score listener can verify a message actually
+  // came from THIS frame's window, not an arbitrary script/embed. (CSP H2)
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   async function refreshLeaderboard() {
     try {
@@ -148,6 +151,7 @@ export default function PlayClient({
   }
 
   // Initial load.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: run once per slug — intentionally excludes refreshLeaderboard to avoid refetch loops
   useEffect(() => {
     if (!slug) return;
     void refreshLeaderboard();
@@ -156,9 +160,16 @@ export default function PlayClient({
 
   // Listen for the game's `window.__game.reportScore(n)` frames, submit them,
   // then refresh the board. Best-effort: a 429 (rate-cap) is swallowed.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-bind the listener only per slug — intentionally excludes refreshLeaderboard to avoid re-subscribing on every render
   useEffect(() => {
     if (!slug) return;
     function onMessage(e: MessageEvent) {
+      // Only trust score frames from THIS game's iframe window. The iframe is a
+      // sandboxed, opaque origin (no allow-same-origin), so an origin string
+      // check is unreliable — gate on the source window identity instead. This
+      // stops any other script/embed on the page from spoofing a leaderboard
+      // submission as the signed-in user. (CSP H2)
+      if (iframeRef.current && e.source !== iframeRef.current.contentWindow) return;
       if (!isScoreFrame(e.data)) return;
       const score = Math.trunc(e.data.score);
       if (score < 0) return;
@@ -195,7 +206,7 @@ export default function PlayClient({
       <header className="flex-shrink-0 h-12 border-b border-[#222222] bg-[#111111] flex items-center px-4 gap-4 z-10">
         <Link href="/" className="flex items-center gap-2 group flex-shrink-0">
           <div className="w-6 h-6 rounded-md bg-[#6366f1] flex items-center justify-center">
-            <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
               <polygon points="2,1 9,5.5 2,10" fill="white" />
             </svg>
           </div>
@@ -207,7 +218,9 @@ export default function PlayClient({
         <div className="w-px h-5 bg-[#222222] flex-shrink-0" />
 
         <div className="flex-1 min-w-0">
-          <span className="text-sm font-medium text-[#a1a1aa] truncate">{initialTitle ?? slug}</span>
+          <span className="text-sm font-medium text-[#a1a1aa] truncate">
+            {initialTitle ?? slug}
+          </span>
         </div>
 
         <div className="flex items-center gap-3 flex-shrink-0">
@@ -231,10 +244,15 @@ export default function PlayClient({
       {/* Game iframe */}
       <div className="w-full h-[60vh] relative">
         <iframe
+          ref={iframeRef}
           src={gameUrl}
           title={`Play ${initialTitle ?? slug}`}
           className="w-full h-full border-0 absolute inset-0"
-          sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-downloads"
+          // No allow-same-origin: the public play iframe must run at an opaque
+          // origin so a hostile game can't read another game's localStorage/
+          // cookies on the shared games origin (until per-game subdomains land).
+          // The score bridge uses postMessage-to-parent, which works without it. (CSP C2)
+          sandbox="allow-scripts allow-pointer-lock allow-downloads"
           allow="autoplay; fullscreen"
         />
       </div>
@@ -267,7 +285,10 @@ export default function PlayClient({
       <div className="border-t border-[#222222] bg-[#111111] px-4 py-3 flex items-center gap-4 flex-wrap">
         {/* Like button */}
         <button
-          onClick={() => { void handleLike(); }}
+          type="button"
+          onClick={() => {
+            void handleLike();
+          }}
           disabled={liking}
           className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors font-medium disabled:opacity-50 ${
             liked
@@ -285,7 +306,10 @@ export default function PlayClient({
             {[1, 2, 3, 4, 5].map((star) => (
               <button
                 key={star}
-                onClick={() => { void handleRate(star); }}
+                type="button"
+                onClick={() => {
+                  void handleRate(star);
+                }}
                 onMouseEnter={() => setHoveredStar(star)}
                 onMouseLeave={() => setHoveredStar(0)}
                 disabled={rating}
@@ -308,7 +332,10 @@ export default function PlayClient({
 
         {/* Remix */}
         <button
-          onClick={() => { void handleRemix(); }}
+          type="button"
+          onClick={() => {
+            void handleRemix();
+          }}
           disabled={remixing}
           className="text-xs px-3 py-1.5 rounded-lg bg-[#6366f1]/10 hover:bg-[#6366f1]/20 text-[#6366f1] border border-[#6366f1]/20 transition-colors font-medium disabled:opacity-50"
         >
@@ -317,7 +344,10 @@ export default function PlayClient({
 
         {/* Report */}
         <button
-          onClick={() => { void handleReport(); }}
+          type="button"
+          onClick={() => {
+            void handleReport();
+          }}
           disabled={reported}
           className="text-xs px-3 py-1.5 rounded-lg bg-[#1a1a1a] hover:bg-[#222222] text-[#52525b] hover:text-[#71717a] border border-[#2a2a2a] transition-colors font-medium disabled:opacity-50"
         >
@@ -370,7 +400,12 @@ export default function PlayClient({
         <h2 className="text-sm font-semibold text-[#f4f4f5] mb-6">Comments</h2>
 
         {/* Add comment */}
-        <form onSubmit={(e) => { void handleAddComment(e); }} className="mb-8">
+        <form
+          onSubmit={(e) => {
+            void handleAddComment(e);
+          }}
+          className="mb-8"
+        >
           <textarea
             value={commentBody}
             onChange={(e) => setCommentBody(e.target.value)}
@@ -394,7 +429,10 @@ export default function PlayClient({
         {commentsLoading && (
           <div className="space-y-3">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="bg-[#111111] border border-[#222222] rounded-xl p-4 animate-pulse">
+              <div
+                key={i}
+                className="bg-[#111111] border border-[#222222] rounded-xl p-4 animate-pulse"
+              >
                 <div className="h-3 bg-[#1a1a1a] rounded w-1/4 mb-2" />
                 <div className="h-3 bg-[#1a1a1a] rounded w-3/4" />
               </div>
@@ -403,9 +441,7 @@ export default function PlayClient({
         )}
 
         {!commentsLoading && comments.length === 0 && (
-          <p className="text-sm text-[#52525b] text-center py-8">
-            No comments yet. Be the first!
-          </p>
+          <p className="text-sm text-[#52525b] text-center py-8">No comments yet. Be the first!</p>
         )}
 
         {!commentsLoading && comments.length > 0 && (
@@ -504,6 +540,7 @@ function HeartIcon({ filled }: { filled: boolean }) {
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
+      aria-hidden="true"
     >
       <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
     </svg>

@@ -23,13 +23,7 @@ import { users } from './identity';
 
 export const engineKind = pgEnum('engine_kind', ['three', 'phaser']);
 export const projectVisibility = pgEnum('project_visibility', ['private', 'unlisted', 'public']);
-export const snapshotType = pgEnum('snapshot_type', [
-  'initial',
-  'edit',
-  'fork',
-  'remix',
-  'revert',
-]);
+export const snapshotType = pgEnum('snapshot_type', ['initial', 'edit', 'fork', 'remix', 'revert']);
 
 export const projects = pgTable(
   'projects',

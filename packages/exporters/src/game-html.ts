@@ -29,7 +29,7 @@
  *     worker / e2e package.
  */
 
-import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
+import { ERROR_CODES, PlayforgeError } from '@playforge/shared';
 import type { ExportResult } from './index';
 import type { ZipAsset } from './zip';
 
@@ -296,8 +296,7 @@ async function inlineImportMap(
   engineDataUrl: string,
   importedSpecifiers: Set<string>,
 ): Promise<string> {
-  const importmapRe =
-    /(<script\b[^>]*\btype\s*=\s*["']importmap["'][^>]*>)([\s\S]*?)(<\/script>)/i;
+  const importmapRe = /(<script\b[^>]*\btype\s*=\s*["']importmap["'][^>]*>)([\s\S]*?)(<\/script>)/i;
   const match = html.match(importmapRe);
   if (match === null) return html;
 
@@ -450,16 +449,8 @@ export async function buildGameHtml(opts: ExportGameHtmlOptions): Promise<string
   // 3. Rewrite the importmap so EVERY entry (engine + addon prefixes + any
   //    other remote entry) resolves to an inlined source. Done before the
   //    bare-URL fallback so a structured rewrite always wins.
-  const importedSpecifiers = collectSpecifiers(
-    jsFiles.map((f) => contentToString(f.content)),
-  );
-  html = await inlineImportMap(
-    html,
-    opts.engine,
-    engineUrl,
-    engineDataUrl,
-    importedSpecifiers,
-  );
+  const importedSpecifiers = collectSpecifiers(jsFiles.map((f) => contentToString(f.content)));
+  html = await inlineImportMap(html, opts.engine, engineUrl, engineDataUrl, importedSpecifiers);
 
   // Belt-and-braces: if the engine URL still appears anywhere (e.g. a
   // hard-coded reference outside the importmap), swap it for the data URL.
@@ -485,9 +476,7 @@ export async function buildGameHtml(opts: ExportGameHtmlOptions): Promise<string
   //    those are inlined into the HTML). We inline by data: URL regardless
   //    of extension (text or binary), driven by reference, not a hardcoded
   //    extension allowlist.
-  const assetFiles = opts.files.filter(
-    (f) => f.path !== 'index.html' && !isJsPath(f.path),
-  );
+  const assetFiles = opts.files.filter((f) => f.path !== 'index.html' && !isJsPath(f.path));
   // Build data: URLs for every asset. CSS files are inlined too — but first
   // rewrite any `url(...)`/quoted references INSIDE them to the other
   // assets' data: URLs so a stylesheet's background images resolve offline.
@@ -507,7 +496,10 @@ export async function buildGameHtml(opts: ExportGameHtmlOptions): Promise<string
     if (extOf(f.path).toLowerCase() !== 'css') continue;
     let css = contentToString(f.content);
     css = rewriteLocalReferences(css, assetDataUrlByPath);
-    assetDataUrlByPath.set(f.path, `data:text/css;base64,${Buffer.from(css, 'utf8').toString('base64')}`);
+    assetDataUrlByPath.set(
+      f.path,
+      `data:text/css;base64,${Buffer.from(css, 'utf8').toString('base64')}`,
+    );
   }
 
   // Now rewrite every referenced asset path in the HTML to its data: URL.

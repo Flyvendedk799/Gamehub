@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { InMemoryEventBus, RedisEventBus, runChannel } from './index';
+import { describe, expect, it, vi } from 'vitest';
+import { InMemoryEventBus, RedisEventBus, runChannel, safeParseStreamData } from './index';
 
 /**
  * A minimal in-memory stand-in for an ioredis client. Records xadd calls and
@@ -90,6 +90,20 @@ describe('RedisEventBus connection model', () => {
       { channel: 'run:1', data: JSON.stringify({ type: 'text_delta', text: 'b' }) },
       { channel: 'run:2', data: JSON.stringify({ type: 'run_complete' }) },
     ]);
+  });
+
+  it('safeParseStreamData parses valid JSON and skips (without throwing) corrupt entries', () => {
+    const ok = safeParseStreamData(JSON.stringify({ type: 'text_delta', text: 'hi' }));
+    expect(ok).toEqual({ ok: true, value: { type: 'text_delta', text: 'hi' } });
+
+    // A corrupt entry (truncated/garbage) must never throw — that would reject
+    // the whole subscribe() replay or kill the live XREAD loop, stranding the
+    // stream. It logs and returns { ok: false } so the caller skips it. (C3)
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const bad = safeParseStreamData('{not valid json');
+    expect(bad).toEqual({ ok: false });
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
   });
 
   it('close() disconnects the shared publisher and is idempotent', async () => {

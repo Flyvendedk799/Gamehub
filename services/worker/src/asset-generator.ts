@@ -40,7 +40,13 @@ export function makeAssetGenerator(opts: {
     const path = filenameHint ?? `assets/${purpose}-${Date.now()}.png`;
 
     if (opts.provider !== 'openai') {
-      return { path, dataUrl: PLACEHOLDER_PNG, mimeType: 'image/png', model: 'placeholder', provider: opts.provider };
+      return {
+        path,
+        dataUrl: PLACEHOLDER_PNG,
+        mimeType: 'image/png',
+        model: 'placeholder',
+        provider: opts.provider,
+      };
     }
 
     const size = ASPECT_TO_SIZE[aspectRatio] ?? '1024x1024';
@@ -67,13 +73,27 @@ export function makeAssetGenerator(opts: {
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       console.warn(`[asset-generator] OpenAI images API error ${res.status}: ${text}`);
-      return { path, dataUrl: PLACEHOLDER_PNG, mimeType: 'image/png', model: 'dall-e-3', provider: 'openai' };
+      return {
+        path,
+        dataUrl: PLACEHOLDER_PNG,
+        mimeType: 'image/png',
+        model: 'dall-e-3',
+        provider: 'openai',
+      };
     }
 
-    const json = await res.json() as { data?: Array<{ b64_json?: string; revised_prompt?: string }> };
+    const json = (await res.json()) as {
+      data?: Array<{ b64_json?: string; revised_prompt?: string }>;
+    };
     const b64 = json.data?.[0]?.b64_json;
     if (!b64) {
-      return { path, dataUrl: PLACEHOLDER_PNG, mimeType: 'image/png', model: 'dall-e-3', provider: 'openai' };
+      return {
+        path,
+        dataUrl: PLACEHOLDER_PNG,
+        mimeType: 'image/png',
+        model: 'dall-e-3',
+        provider: 'openai',
+      };
     }
 
     return {

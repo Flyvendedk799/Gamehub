@@ -112,12 +112,19 @@ describe('evaluatePredicate — total / defensive (never throws)', () => {
     expect(r.reason).toMatch(/missing/);
   });
   it('out-of-range frame index is a deterministic FAIL', () => {
-    const r = evaluatePredicate(trace, { field: 'playerPos.x', op: 'increased', frame: { step: 9 } });
+    const r = evaluatePredicate(trace, {
+      field: 'playerPos.x',
+      op: 'increased',
+      frame: { step: 9 },
+    });
     expect(r.pass).toBe(false);
     expect(r.reason).toMatch(/out of range/);
   });
   it('non-numeric value for gt is a FAIL', () => {
-    const t: PlaytestTrace = { baseline: { v: 'x' }, frames: [{ stepIndex: 0, snapshot: { v: 'x' } }] };
+    const t: PlaytestTrace = {
+      baseline: { v: 'x' },
+      frames: [{ stepIndex: 0, snapshot: { v: 'x' } }],
+    };
     expect(evaluatePredicate(t, { field: 'v', op: 'gt', value: 1 }).pass).toBe(false);
   });
 });

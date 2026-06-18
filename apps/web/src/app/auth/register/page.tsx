@@ -58,7 +58,7 @@ export default function RegisterPage() {
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 mb-6 group">
             <div className="w-8 h-8 rounded-lg bg-[#6366f1] flex items-center justify-center">
-              <svg width="16" height="16" viewBox="0 0 22 22" fill="none">
+              <svg width="16" height="16" viewBox="0 0 22 22" fill="none" aria-hidden="true">
                 <polygon points="4,3 18,11 4,19" fill="white" />
               </svg>
             </div>

@@ -8,12 +8,17 @@
  * Dev/test uses HeaderAuthenticator (no DB, trusts x-user-id header) so
  * tests run without Postgres.
  */
-import { randomBytes, scrypt, timingSafeEqual, type ScryptOptions } from 'node:crypto';
-import { and, eq, gt, isNull } from 'drizzle-orm';
+import { type ScryptOptions, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import type { Db } from '@playforge/db';
 import { schema } from '@playforge/db';
+import { and, eq, gt, isNull } from 'drizzle-orm';
 
-function scryptAsync(password: string, salt: string, keylen: number, opts: ScryptOptions): Promise<Buffer> {
+function scryptAsync(
+  password: string,
+  salt: string,
+  keylen: number,
+  opts: ScryptOptions,
+): Promise<Buffer> {
   return new Promise((resolve, reject) =>
     scrypt(password, salt, keylen, opts, (err, buf) => (err ? reject(err) : resolve(buf))),
   );

@@ -85,7 +85,9 @@ const PLATFORMER: PlaytestPlaybook = {
       // jump; the agent picks increased/decreased for its coordinate
       // system. `changed` is the engine-agnostic floor that still catches
       // a no-op jump (y never moves).
-      predicates: [{ field: 'playerPos.y', op: 'changed', frame: { step: 1 }, against: { step: 0 } }],
+      predicates: [
+        { field: 'playerPos.y', op: 'changed', frame: { step: 1 }, against: { step: 0 } },
+      ],
     },
     { kind: 'wait', durationFrames: 30, assert: 'Player y peaks then descends.' },
     {
@@ -93,7 +95,13 @@ const PLATFORMER: PlaytestPlaybook = {
       durationFrames: 60,
       assert: 'Player is back on ground; y matches the pre-jump value within ±1.',
       predicates: [
-        { field: 'playerPos.y', op: 'unchanged', frame: { step: 3 }, against: { step: 0 }, epsilon: 1 },
+        {
+          field: 'playerPos.y',
+          op: 'unchanged',
+          frame: { step: 3 },
+          against: { step: 0 },
+          epsilon: 1,
+        },
       ],
     },
   ],

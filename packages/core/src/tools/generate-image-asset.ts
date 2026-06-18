@@ -1,6 +1,7 @@
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import { type CoreLogger, NOOP_LOGGER } from '../logger.js';
+import { assertSafeToolPath } from './path-safety.js';
 import type { TextEditorFsCallbacks } from './text-editor';
 
 const GenerateImageAssetParams = Type.Object({
@@ -177,6 +178,11 @@ export function makeGenerateImageAssetTool(
         throw err;
       }
       if (fs !== undefined) {
+        // The asset path derives from a model-supplied filenameHint; run it
+        // through the same tool-layer traversal guard as text_editor so this
+        // write sink has the two-independent-checks property (tool guard +
+        // storage guard) rather than relying on the storage layer alone. (path LOW)
+        assertSafeToolPath(asset.path, 'generate_image_asset');
         fs.create(asset.path, asset.dataUrl);
       }
       const alt = params.alt?.trim() || `${params.purpose} image`;

@@ -60,11 +60,15 @@ describe('eval-games exit-code contract', () => {
 
   it('a violating recording → at least one FAIL (CLI would exit non-zero)', () => {
     // Regress the platformer recording: blow the input-token cap.
-    const report = buildReport(fixtures, (slug) => {
-      const obs = diskLoader(slug);
-      if (slug === 'platformer' && obs) return { ...obs, inputTokens: 9_000_000 };
-      return obs;
-    }, '2026-06-17');
+    const report = buildReport(
+      fixtures,
+      (slug) => {
+        const obs = diskLoader(slug);
+        if (slug === 'platformer' && obs) return { ...obs, inputTokens: 9_000_000 };
+        return obs;
+      },
+      '2026-06-17',
+    );
     expect(report.summary.failed).toBeGreaterThan(0);
     const platformer = report.results.find((r) => r.fixture.slug === 'platformer');
     expect(platformer?.pass).toBe(false);
@@ -73,22 +77,30 @@ describe('eval-games exit-code contract', () => {
 
   it('regressing the platformer recording drops the pass count', () => {
     const good = buildReport(fixtures, diskLoader, '2026-06-17');
-    const regressed = buildReport(fixtures, (slug) => {
-      const obs = diskLoader(slug);
-      // Throw-on-boot: the output-quality (5.3) gate must catch it even
-      // though every process proxy still looks healthy.
-      if (slug === 'platformer' && obs) {
-        return { ...obs, runtimeVerify: { booted: false, fatalErrors: ['TypeError on boot'] } };
-      }
-      return obs;
-    }, '2026-06-17');
+    const regressed = buildReport(
+      fixtures,
+      (slug) => {
+        const obs = diskLoader(slug);
+        // Throw-on-boot: the output-quality (5.3) gate must catch it even
+        // though every process proxy still looks healthy.
+        if (slug === 'platformer' && obs) {
+          return { ...obs, runtimeVerify: { booted: false, fatalErrors: ['TypeError on boot'] } };
+        }
+        return obs;
+      },
+      '2026-06-17',
+    );
     expect(regressed.summary.passed).toBe(good.summary.passed - 1);
     const platformer = regressed.results.find((r) => r.fixture.slug === 'platformer');
     expect(platformer?.failures.join(' ')).toMatch(/did not boot/i);
   });
 
   it('a missing recording is a FAIL, not a vacuous pass', () => {
-    const report = buildReport(fixtures, (slug) => (slug === 'fps' ? null : diskLoader(slug)), '2026-06-17');
+    const report = buildReport(
+      fixtures,
+      (slug) => (slug === 'fps' ? null : diskLoader(slug)),
+      '2026-06-17',
+    );
     const fps = report.results.find((r) => r.fixture.slug === 'fps');
     expect(fps?.pass).toBe(false);
     expect(fps?.failures.join(' ')).toContain('no recording');

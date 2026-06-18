@@ -75,10 +75,6 @@ export function buildPasswordResetEmail(opts: {
   return {
     to: opts.to,
     subject: 'Reset your Playforge password',
-    text:
-      `We received a request to reset your Playforge password.\n\n` +
-      `${action}\n\n` +
-      `This link expires in ${opts.ttlMinutes} minutes and can be used once. ` +
-      `If you didn't request this, you can safely ignore this email.`,
+    text: `We received a request to reset your Playforge password.\n\n${action}\n\nThis link expires in ${opts.ttlMinutes} minutes and can be used once. If you didn't request this, you can safely ignore this email.`,
   };
 }

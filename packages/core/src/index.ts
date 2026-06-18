@@ -18,7 +18,7 @@ import type {
   StoredDesignSystem,
   WireApi,
 } from '@playforge/shared';
-import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
+import { ERROR_CODES, PlayforgeError } from '@playforge/shared';
 import { remapProviderError } from './errors.js';
 import { type CoreLogger, NOOP_LOGGER } from './logger.js';
 import { type PromptComposeOptions, composeSystemPrompt } from './prompts/index.js';
@@ -122,8 +122,6 @@ export {
   extractCssTokens,
   type TokenChange,
 } from './theme-token-diff.js';
-export { FRAME_TEMPLATES, type FrameName } from './frames/index.js';
-export { DESIGN_SKILLS, type DesignSkillName } from './design-skills/index.js';
 export {
   makeTextEditorTool,
   type TextEditorFsCallbacks,
@@ -144,10 +142,6 @@ export {
   type GenerateImageAssetRequest,
   type GenerateImageAssetResult,
 } from './tools/generate-image-asset.js';
-export {
-  makeReadDesignSystemTool,
-  type ReadDesignSystemDetails,
-} from './tools/read-design-system.js';
 export {
   makeDoneTool,
   makeVerifyArtifactTool,

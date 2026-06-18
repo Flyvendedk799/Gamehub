@@ -8,9 +8,9 @@
 
 import {
   type ChatMessage,
-  PlayforgeError,
   ERROR_CODES,
   type ModelRef,
+  PlayforgeError,
   type WireApi,
 } from '@playforge/shared';
 import {

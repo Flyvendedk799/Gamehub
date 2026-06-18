@@ -101,6 +101,27 @@ describe('hmr-patcher — Backlog-3 §1', () => {
     expect(acks[0]?.ok).toBe(false);
   });
 
+  it('ignores an HMR message from a foreign window (not the host parent) (CSP H4)', () => {
+    document.body.innerHTML = '<script data-test="a">window.A = 1;</script>';
+    loadPatcher();
+    // A foreign frame's window object — distinct from window.parent.
+    const foreignWindow = { name: 'evil-frame' } as unknown as Window;
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        source: foreignWindow,
+        data: {
+          __playforge_hmr: true,
+          protocolVersion: 1,
+          kind: 'js',
+          oldScripts: ['window.A = 1;'],
+          newScripts: ['window.A = 999;'],
+        },
+      }),
+    );
+    // The patch must NOT have been applied — the foreign source was rejected.
+    expect(document.querySelector('script[data-test="a"]')?.textContent).toBe('window.A = 1;');
+  });
+
   it('non-HMR messages are ignored', () => {
     loadPatcher();
     const acks: unknown[] = [];

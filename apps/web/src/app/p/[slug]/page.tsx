@@ -1,6 +1,6 @@
+import { API_BASE } from '@/lib/config';
 import type { Metadata } from 'next';
 import PlayClient from './play-client';
-import { API_BASE } from '@/lib/config';
 
 const BASE = API_BASE;
 
@@ -35,13 +35,24 @@ async function fetchGameMeta(slug: string): Promise<GameMeta | null> {
   }
 }
 
-export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+export async function generateMetadata({
+  params,
+}: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
   const meta = await fetchGameMeta(slug);
   const title = meta?.title ?? slug;
   const description = `Play "${title}" — an AI-generated game on Playforge`;
   const images = meta?.thumbnailUrl
-    ? [{ url: meta.thumbnailUrl.startsWith('http') ? meta.thumbnailUrl : `${BASE}${meta.thumbnailUrl}`, width: 640, height: 360, alt: title }]
+    ? [
+        {
+          url: meta.thumbnailUrl.startsWith('http')
+            ? meta.thumbnailUrl
+            : `${BASE}${meta.thumbnailUrl}`,
+          width: 640,
+          height: 360,
+          alt: title,
+        },
+      ]
     : [];
 
   return {

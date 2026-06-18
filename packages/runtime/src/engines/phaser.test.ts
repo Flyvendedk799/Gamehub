@@ -69,7 +69,9 @@ describe('phaserAdapter.bootstrap (gameplan §3 + §7.3)', () => {
   });
 
   it('#47 — rejects javascript:/data: gameBaseUrl bases', () => {
-    expect(() => phaserAdapter.bootstrap({ ...opts, gameBaseUrl: 'javascript:alert(1)' })).toThrow();
+    expect(() =>
+      phaserAdapter.bootstrap({ ...opts, gameBaseUrl: 'javascript:alert(1)' }),
+    ).toThrow();
     expect(() =>
       phaserAdapter.bootstrap({ ...opts, gameBaseUrl: 'data:text/html,<script>1</script>' }),
     ).toThrow();

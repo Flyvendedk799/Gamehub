@@ -28,7 +28,9 @@ describe('ENGINE_SCENE_VALIDATOR (#1.1 — the worker now runs a REAL engine lin
     ]);
     expect(result.ok).toBe(false);
     expect(result.engine).toBe('phaser');
-    expect(result.issues.some((i) => i.severity === 'error' && i.message.includes('hero'))).toBe(true);
+    expect(result.issues.some((i) => i.severity === 'error' && i.message.includes('hero'))).toBe(
+      true,
+    );
   });
 });
 
@@ -74,7 +76,11 @@ describe('runGeneration (offline E2E)', () => {
     const events: AgentEvent[] = [];
 
     const result = await runGeneration(
-      { prompt: 'make a red square', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      {
+        prompt: 'make a red square',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
       { store, generate: fakeAgent, onEvent: (e) => events.push(e) },
     );
 
@@ -84,7 +90,9 @@ describe('runGeneration (offline E2E)', () => {
     expect(result.fileCount).toBe(1);
 
     // Snapshot persisted to content-addressed storage; index.html readable back.
-    expect(result.snapshot.manifestKey).toBe(`snapshots/${result.snapshot.filesHash}/manifest.json`);
+    expect(result.snapshot.manifestKey).toBe(
+      `snapshots/${result.snapshot.filesHash}/manifest.json`,
+    );
     const bytes = await store.readFile(result.snapshot.manifest, 'index.html');
     expect(new TextDecoder().decode(bytes)).toContain('0xff0000');
 
@@ -106,7 +114,10 @@ describe('runGeneration (offline E2E)', () => {
         model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
         apiKey: 'sk-test',
         engine: 'three',
-        initialFiles: [['index.html', '<canvas></canvas>'], ['src/main.js', 'scene()']],
+        initialFiles: [
+          ['index.html', '<canvas></canvas>'],
+          ['src/main.js', 'scene()'],
+        ],
       },
       { store, generate: noopAgent },
     );
@@ -124,7 +135,9 @@ describe('runGeneration token ceiling (#18)', () => {
   function turnEnd(input: number, output: number): AgentEvent {
     return {
       type: 'turn_end',
-      message: { usage: { input, output, cacheRead: 0, cacheWrite: 0, totalTokens: input + output } },
+      message: {
+        usage: { input, output, cacheRead: 0, cacheWrite: 0, totalTokens: input + output },
+      },
       toolResults: [],
     } as unknown as AgentEvent;
   }
@@ -145,11 +158,46 @@ describe('runGeneration token ceiling (#18)', () => {
     };
 
     await runGeneration(
-      { prompt: 'big game', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      {
+        prompt: 'big game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
       { store, generate: meteredAgent, maxTokens: 100_000 },
     );
 
     expect(signalAbortedAtSecondTurn).toBe(true);
+  });
+
+  it('aborts on CUMULATIVE usage even when every single turn is under budget (H1)', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+
+    // Each turn (40k) is individually under the 100k ceiling, but three of them
+    // sum to 120k. The old per-turn check never tripped here — letting a
+    // many-turn run spend an unbounded multiple of the budget. The fix sums
+    // across turns, so the signal aborts once the running total crosses 100k.
+    let abortedByTurn3 = false;
+    const dripAgent: GenerateFn = async (input, deps) => {
+      deps.onEvent?.(turnEnd(35_000, 5_000)); // 40k total → cum 40k
+      expect(input.signal?.aborted ?? false).toBe(false);
+      deps.onEvent?.(turnEnd(35_000, 5_000)); // 40k total → cum 80k
+      expect(input.signal?.aborted ?? false).toBe(false);
+      deps.onEvent?.(turnEnd(35_000, 5_000)); // 40k total → cum 120k > 100k
+      abortedByTurn3 = input.signal?.aborted ?? false;
+      await deps.fs?.create('index.html', RED_SQUARE);
+      return emptyOutput('cumulative ceiling');
+    };
+
+    await runGeneration(
+      {
+        prompt: 'long game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: dripAgent, maxTokens: 100_000 },
+    );
+
+    expect(abortedByTurn3).toBe(true);
   });
 
   it('does not abort when usage stays under maxTokens', async () => {
@@ -164,7 +212,11 @@ describe('runGeneration token ceiling (#18)', () => {
     };
 
     await runGeneration(
-      { prompt: 'small game', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      {
+        prompt: 'small game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
       { store, generate: underBudgetAgent, maxTokens: 100_000 },
     );
 
@@ -213,7 +265,11 @@ describe('runGeneration browser-jobs wiring (#1.4 — out-of-process runtimeVeri
     };
 
     await runGeneration(
-      { prompt: 'broken game', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      {
+        prompt: 'broken game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
       { store, generate: agent, browserJobs },
     );
 
@@ -240,7 +296,11 @@ describe('runGeneration browser-jobs wiring (#1.4 — out-of-process runtimeVeri
     };
 
     await runGeneration(
-      { prompt: 'good game', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      {
+        prompt: 'good game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
       { store, generate: agent, browserJobs },
     );
 
@@ -273,7 +333,11 @@ describe('runGeneration browser-jobs wiring (#1.4 — out-of-process runtimeVeri
     };
 
     await runGeneration(
-      { prompt: 'movement game', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      {
+        prompt: 'movement game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
       { store, generate: agent, browserJobs },
     );
 
@@ -301,7 +365,11 @@ describe('runGeneration browser-jobs wiring (#1.4 — out-of-process runtimeVeri
     };
 
     await runGeneration(
-      { prompt: 'offline game', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      {
+        prompt: 'offline game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
       { store, generate: agent },
     );
 
@@ -330,7 +398,11 @@ describe('runGeneration browser-jobs wiring (#1.4 — out-of-process runtimeVeri
     };
 
     await runGeneration(
-      { prompt: 'queue down', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      {
+        prompt: 'queue down',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
       { store, generate: agent, browserJobs },
     );
 
@@ -367,10 +439,26 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
       hasDebugContract: true,
       baselineSnapshot: { playerPos: { x: 100, y: 100 } },
       steps: [
-        { step: { kind: 'key', code: 'KeyW' }, snapshotAfter: { playerPos: { x: 100, y: 70 } }, errors: [] },
-        { step: { kind: 'key', code: 'KeyS' }, snapshotAfter: { playerPos: { x: 100, y: 110 } }, errors: [] },
-        { step: { kind: 'key', code: 'KeyA' }, snapshotAfter: { playerPos: { x: 70, y: 110 } }, errors: [] },
-        { step: { kind: 'key', code: 'KeyD' }, snapshotAfter: { playerPos: { x: 110, y: 110 } }, errors: [] },
+        {
+          step: { kind: 'key', code: 'KeyW' },
+          snapshotAfter: { playerPos: { x: 100, y: 70 } },
+          errors: [],
+        },
+        {
+          step: { kind: 'key', code: 'KeyS' },
+          snapshotAfter: { playerPos: { x: 100, y: 110 } },
+          errors: [],
+        },
+        {
+          step: { kind: 'key', code: 'KeyA' },
+          snapshotAfter: { playerPos: { x: 70, y: 110 } },
+          errors: [],
+        },
+        {
+          step: { kind: 'key', code: 'KeyD' },
+          snapshotAfter: { playerPos: { x: 110, y: 110 } },
+          errors: [],
+        },
       ],
       bootErrors: [],
     };
@@ -386,7 +474,11 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
         v.steps[0]!,
         v.steps[1]!,
         v.steps[2]!,
-        { step: { kind: 'key', code: 'KeyD' }, snapshotAfter: { playerPos: { x: 40, y: 110 } }, errors: [] },
+        {
+          step: { kind: 'key', code: 'KeyD' },
+          snapshotAfter: { playerPos: { x: 40, y: 110 } },
+          errors: [],
+        },
       ],
     };
   }
@@ -433,7 +525,11 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     });
 
     const result = await runGeneration(
-      { prompt: 'topdown game', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      {
+        prompt: 'topdown game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
       { store, generate: agent, browserJobs },
     );
 
@@ -455,7 +551,11 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     };
 
     const result = await runGeneration(
-      { prompt: 'topdown game', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      {
+        prompt: 'topdown game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
       { store, generate: agent, browserJobs },
     );
 
@@ -480,7 +580,11 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     });
 
     const result = await runGeneration(
-      { prompt: 'broken topdown', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      {
+        prompt: 'broken topdown',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
       { store, generate: agent, browserJobs },
     );
 
@@ -498,7 +602,11 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     });
 
     const result = await runGeneration(
-      { prompt: 'broken topdown', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      {
+        prompt: 'broken topdown',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
       { store, generate: agent, browserJobs, maxRepairRounds: 99 },
     );
 
@@ -516,7 +624,11 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     });
 
     const result = await runGeneration(
-      { prompt: 'topdown', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      {
+        prompt: 'topdown',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
       { store, generate: agent, browserJobs, maxRepairRounds: 0 },
     );
 
@@ -542,7 +654,11 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     };
 
     const result = await runGeneration(
-      { prompt: 'endless topdown', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      {
+        prompt: 'endless topdown',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
       { store, generate: agent, browserJobs },
     );
 
@@ -562,7 +678,11 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     };
 
     const result = await runGeneration(
-      { prompt: 'an rpg', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      {
+        prompt: 'an rpg',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
       { store, generate: agent, browserJobs },
     );
 
@@ -586,7 +706,11 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     };
 
     const result = await runGeneration(
-      { prompt: 'topdown', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      {
+        prompt: 'topdown',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
       { store, generate: agent, browserJobs },
     );
 
@@ -598,7 +722,11 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
   it('without a browser-jobs port the loop is inert (no_verdict, 0 rounds)', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());
     const result = await runGeneration(
-      { prompt: 'topdown', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      {
+        prompt: 'topdown',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
       { store, generate: specAgent() },
     );
     expect(result.repairRounds).toBe(0);

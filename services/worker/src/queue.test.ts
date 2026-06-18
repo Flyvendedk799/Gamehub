@@ -7,8 +7,8 @@ import type { AgentEvent, GenerateOutput } from '@playforge/agent-core';
 import { InMemoryEventBus, runChannel } from '@playforge/bus';
 import { InMemoryBlobStore, SnapshotStore } from '@playforge/storage';
 import { describe, expect, it } from 'vitest';
-import { type GenerateFn } from './run-generation';
 import { enqueueRun } from './queue';
+import type { GenerateFn } from './run-generation';
 
 function emptyOutput(): GenerateOutput {
   return {
@@ -48,7 +48,13 @@ describe('enqueueRun', () => {
     await bus.subscribe(runChannel(runId), (msg) => received.push(msg));
 
     await enqueueRun(
-      { runId, projectId: 'proj_1', prompt: 'red square', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      {
+        runId,
+        projectId: 'proj_1',
+        prompt: 'red square',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
       { bus, store, generate: successAgent },
     );
 
@@ -67,7 +73,13 @@ describe('enqueueRun', () => {
 
     await expect(
       enqueueRun(
-        { runId, projectId: 'proj_1', prompt: 'fail', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+        {
+          runId,
+          projectId: 'proj_1',
+          prompt: 'fail',
+          model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+          apiKey: 'sk-test',
+        },
         { bus, store, generate: failAgent },
       ),
     ).rejects.toThrow('provider timeout');
@@ -87,7 +99,13 @@ describe('enqueueRun', () => {
 
     // Run completes before subscriber connects
     await enqueueRun(
-      { runId, projectId: 'proj_1', prompt: 'test', model: { provider: 'anthropic', modelId: 'claude-opus-4-8' }, apiKey: 'sk-test' },
+      {
+        runId,
+        projectId: 'proj_1',
+        prompt: 'test',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
       { bus, store, generate: successAgent },
     );
 

@@ -217,13 +217,15 @@ export function evaluatePredicate(
           ? pass(`${label}: ${String(subjectRaw)} === ${predicate.value}`)
           : fail(`${label}: ${String(subjectRaw)} !== ${predicate.value}`);
       }
-      return fail(
-        `${label}: field '${predicate.field}' is non-numeric (${String(subjectRaw)})`,
-      );
+      return fail(`${label}: field '${predicate.field}' is non-numeric (${String(subjectRaw)})`);
     }
     const v = predicate.value;
     const ok =
-      predicate.op === 'eq' ? subjectNum === v : predicate.op === 'gt' ? subjectNum > v : subjectNum < v;
+      predicate.op === 'eq'
+        ? subjectNum === v
+        : predicate.op === 'gt'
+          ? subjectNum > v
+          : subjectNum < v;
     const sym = predicate.op === 'eq' ? '===' : predicate.op === 'gt' ? '>' : '<';
     return ok
       ? pass(`${label}: ${subjectNum} ${sym} ${v}`, subjectNum, v)
@@ -323,7 +325,7 @@ export function parsePlaytestPredicate(raw: unknown): PlaytestPredicate {
   if (!isRecord(raw)) throw new Error('predicate must be an object');
   const field = raw['field'];
   if (typeof field !== 'string' || field.length === 0) {
-    throw new Error("predicate.field must be a non-empty string");
+    throw new Error('predicate.field must be a non-empty string');
   }
   const op = raw['op'];
   if (typeof op !== 'string' || !VALID_OPS.has(op)) {
@@ -339,7 +341,11 @@ export function parsePlaytestPredicate(raw: unknown): PlaytestPredicate {
     out.value = raw['value'];
   }
   if (raw['epsilon'] !== undefined) {
-    if (typeof raw['epsilon'] !== 'number' || !Number.isFinite(raw['epsilon']) || raw['epsilon'] < 0) {
+    if (
+      typeof raw['epsilon'] !== 'number' ||
+      !Number.isFinite(raw['epsilon']) ||
+      raw['epsilon'] < 0
+    ) {
       throw new Error('predicate.epsilon must be a non-negative number');
     }
     out.epsilon = raw['epsilon'];

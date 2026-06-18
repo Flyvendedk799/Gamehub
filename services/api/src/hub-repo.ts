@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { type Db, schema } from '@playforge/db';
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 
 export interface HubGame {
   id: string;
@@ -79,13 +79,31 @@ export interface HubRepo {
    * salted-IP throttle key the play route already computes; null for an
    * authenticated/unkeyed play. Best-effort — never blocks the play response.
    */
-  recordPlayEvent(input: { publishedGameId: string; userId?: string; sessionHash?: string }): Promise<void>;
+  recordPlayEvent(input: {
+    publishedGameId: string;
+    userId?: string;
+    sessionHash?: string;
+  }): Promise<void>;
   getLike(userId: string, publishedGameId: string): Promise<boolean>;
   toggleLike(userId: string, publishedGameId: string): Promise<boolean>; // returns new liked state
-  setRating(userId: string, publishedGameId: string, stars: number): Promise<{ ratingAvg: number; ratingCount: number }>;
+  setRating(
+    userId: string,
+    publishedGameId: string,
+    stars: number,
+  ): Promise<{ ratingAvg: number; ratingCount: number }>;
   listComments(publishedGameId: string): Promise<HubComment[]>;
-  addComment(publishedGameId: string, userId: string, body: string, parentCommentId?: string): Promise<HubComment>;
-  addReport(input: { reporterId?: string; targetType: string; targetId: string; reason?: string }): Promise<void>;
+  addComment(
+    publishedGameId: string,
+    userId: string,
+    body: string,
+    parentCommentId?: string,
+  ): Promise<HubComment>;
+  addReport(input: {
+    reporterId?: string;
+    targetType: string;
+    targetId: string;
+    reason?: string;
+  }): Promise<void>;
   setEmbedding(id: string, embedding: number[]): Promise<void>;
   /**
    * Record a remix lineage edge (#3.6): a direct depth-1 edge from the source
@@ -125,7 +143,10 @@ const TRENDING_HALF_LIFE_MS = 24 * 60 * 60 * 1000;
 const TRENDING_LIKE_WEIGHT = 5;
 
 /** Fill defaults so a partially-specified seed still yields a complete HubGame. */
-function normalizeHubGame(game: Partial<HubGame> & Pick<HubGame, 'id' | 'projectId' | 'publishSlug' | 'title' | 'status' | 'publishedAt'>): HubGame {
+function normalizeHubGame(
+  game: Partial<HubGame> &
+    Pick<HubGame, 'id' | 'projectId' | 'publishSlug' | 'title' | 'status' | 'publishedAt'>,
+): HubGame {
   return {
     thumbnailUrl: null,
     description: null,
@@ -145,13 +166,21 @@ export class InMemoryHubRepo implements HubRepo {
   private readonly ratings = new Map<string, number>(); // `${userId}:${gameId}` → stars
   private readonly comments = new Map<string, HubComment>();
   // reports are fire-and-forget; stored only to satisfy the interface
-  private readonly reports: Array<{ reporterId?: string; targetType: string; targetId: string; reason?: string }> = [];
+  private readonly reports: Array<{
+    reporterId?: string;
+    targetType: string;
+    targetId: string;
+    reason?: string;
+  }> = [];
   // play events for trending velocity: gameId → array of epoch-ms timestamps
   private readonly playEvents = new Map<string, number[]>();
   // remix lineage edges: `${ancestorProjectId}:${descendantProjectId}` → depth
   private readonly remixEdges = new Map<string, number>();
   // leaderboard scores (Phase 3.8): gameId → submitted score rows.
-  private readonly scores = new Map<string, Array<{ userId: string | null; score: number; createdAt: string }>>();
+  private readonly scores = new Map<
+    string,
+    Array<{ userId: string | null; score: number; createdAt: string }>
+  >();
   // creator follows (Phase 3.9): set of `${followerId}:${followeeId}`.
   private readonly follows = new Set<string>();
   // user directory for author/handle resolution (Phase 3.9): userId → profile.
@@ -169,7 +198,10 @@ export class InMemoryHubRepo implements HubRepo {
   }
 
   /** Seed a game for testing. Missing optional fields default sensibly. */
-  seedGame(game: Partial<HubGame> & Pick<HubGame, 'id' | 'projectId' | 'publishSlug' | 'title' | 'status' | 'publishedAt'>): void {
+  seedGame(
+    game: Partial<HubGame> &
+      Pick<HubGame, 'id' | 'projectId' | 'publishSlug' | 'title' | 'status' | 'publishedAt'>,
+  ): void {
     const full = normalizeHubGame(game);
     this.games.set(full.id, full);
   }
@@ -181,7 +213,7 @@ export class InMemoryHubRepo implements HubRepo {
     let score = 0;
     for (const ts of events) {
       const ageMs = Math.max(now - ts, 0);
-      score += Math.pow(0.5, ageMs / TRENDING_HALF_LIFE_MS);
+      score += 0.5 ** (ageMs / TRENDING_HALF_LIFE_MS);
     }
     // Likes count as a steady, non-decayed signal of quality.
     const likeCount = [...this.likes].filter((k) => k.endsWith(`:${game.id}`)).length;
@@ -209,13 +241,20 @@ export class InMemoryHubRepo implements HubRepo {
     }
   }
 
-  async recordPlayEvent(input: { publishedGameId: string; userId?: string; sessionHash?: string }): Promise<void> {
+  async recordPlayEvent(input: {
+    publishedGameId: string;
+    userId?: string;
+    sessionHash?: string;
+  }): Promise<void> {
     const list = this.playEvents.get(input.publishedGameId) ?? [];
     list.push(this.now());
     this.playEvents.set(input.publishedGameId, list);
   }
 
-  async addRemixEdge(input: { ancestorProjectId: string; descendantProjectId: string }): Promise<void> {
+  async addRemixEdge(input: {
+    ancestorProjectId: string;
+    descendantProjectId: string;
+  }): Promise<void> {
     // Direct depth-1 edge.
     this.setRemixEdge(input.ancestorProjectId, input.descendantProjectId, 1);
     // Copy every ancestor edge of the source at depth+1 so the full tree is queryable.
@@ -256,7 +295,11 @@ export class InMemoryHubRepo implements HubRepo {
     return this.directRemixCount(projectId);
   }
 
-  async addScore(input: { publishedGameId: string; userId?: string; score: number }): Promise<void> {
+  async addScore(input: {
+    publishedGameId: string;
+    userId?: string;
+    score: number;
+  }): Promise<void> {
     const list = this.scores.get(input.publishedGameId) ?? [];
     list.push({
       userId: input.userId ?? null,
@@ -268,16 +311,20 @@ export class InMemoryHubRepo implements HubRepo {
 
   async topScores(publishedGameId: string, limit = 10): Promise<LeaderboardEntry[]> {
     const list = this.scores.get(publishedGameId) ?? [];
-    return [...list]
-      // Highest score first; earliest submission wins ties.
-      .sort((a, b) => (b.score !== a.score ? b.score - a.score : a.createdAt < b.createdAt ? -1 : 1))
-      .slice(0, limit)
-      .map((row) => ({
-        score: row.score,
-        userId: row.userId,
-        handle: row.userId !== null ? this.userProfiles.get(row.userId)?.handle ?? null : null,
-        createdAt: row.createdAt,
-      }));
+    return (
+      [...list]
+        // Highest score first; earliest submission wins ties.
+        .sort((a, b) =>
+          b.score !== a.score ? b.score - a.score : a.createdAt < b.createdAt ? -1 : 1,
+        )
+        .slice(0, limit)
+        .map((row) => ({
+          score: row.score,
+          userId: row.userId,
+          handle: row.userId !== null ? (this.userProfiles.get(row.userId)?.handle ?? null) : null,
+          createdAt: row.createdAt,
+        }))
+    );
   }
 
   async addFollow(followerId: string, followeeId: string): Promise<void> {
@@ -317,7 +364,11 @@ export class InMemoryHubRepo implements HubRepo {
     return true;
   }
 
-  async setRating(userId: string, publishedGameId: string, stars: number): Promise<{ ratingAvg: number; ratingCount: number }> {
+  async setRating(
+    userId: string,
+    publishedGameId: string,
+    stars: number,
+  ): Promise<{ ratingAvg: number; ratingCount: number }> {
     const key = `${userId}:${publishedGameId}`;
     this.ratings.set(key, stars);
 
@@ -353,7 +404,12 @@ export class InMemoryHubRepo implements HubRepo {
       .map((c) => this.resolveAuthor(c));
   }
 
-  async addComment(publishedGameId: string, userId: string, body: string, parentCommentId?: string): Promise<HubComment> {
+  async addComment(
+    publishedGameId: string,
+    userId: string,
+    body: string,
+    parentCommentId?: string,
+  ): Promise<HubComment> {
     const comment: HubComment = {
       id: randomUUID(),
       publishedGameId,
@@ -368,7 +424,12 @@ export class InMemoryHubRepo implements HubRepo {
     return this.resolveAuthor(comment);
   }
 
-  async addReport(input: { reporterId?: string; targetType: string; targetId: string; reason?: string }): Promise<void> {
+  async addReport(input: {
+    reporterId?: string;
+    targetType: string;
+    targetId: string;
+    reason?: string;
+  }): Promise<void> {
     this.reports.push(input);
   }
 
@@ -491,7 +552,11 @@ export class DrizzleHubRepo implements HubRepo {
       .where(eq(schema.publishedGames.id, id));
   }
 
-  async recordPlayEvent(input: { publishedGameId: string; userId?: string; sessionHash?: string }): Promise<void> {
+  async recordPlayEvent(input: {
+    publishedGameId: string;
+    userId?: string;
+    sessionHash?: string;
+  }): Promise<void> {
     await this.db.insert(schema.playEvents).values({
       publishedGameId: input.publishedGameId,
       ...(input.userId !== undefined ? { userId: input.userId } : {}),
@@ -499,7 +564,10 @@ export class DrizzleHubRepo implements HubRepo {
     });
   }
 
-  async addRemixEdge(input: { ancestorProjectId: string; descendantProjectId: string }): Promise<void> {
+  async addRemixEdge(input: {
+    ancestorProjectId: string;
+    descendantProjectId: string;
+  }): Promise<void> {
     // Direct depth-1 edge, plus every ancestor of the source at depth+1, so the
     // whole lineage tree is queryable. One INSERT … SELECT keeps it atomic and
     // idempotent via onConflictDoNothing on the (ancestor, descendant) PK.
@@ -525,11 +593,17 @@ export class DrizzleHubRepo implements HubRepo {
     const [row] = await this.db
       .select({ n: sql<number>`COUNT(*)::int` })
       .from(schema.remixEdges)
-      .where(and(eq(schema.remixEdges.ancestorProjectId, projectId), eq(schema.remixEdges.depth, 1)));
+      .where(
+        and(eq(schema.remixEdges.ancestorProjectId, projectId), eq(schema.remixEdges.depth, 1)),
+      );
     return Number(row?.n ?? 0);
   }
 
-  async addScore(input: { publishedGameId: string; userId?: string; score: number }): Promise<void> {
+  async addScore(input: {
+    publishedGameId: string;
+    userId?: string;
+    score: number;
+  }): Promise<void> {
     await this.db.insert(schema.gameScores).values({
       publishedGameId: input.publishedGameId,
       score: input.score,
@@ -564,20 +638,14 @@ export class DrizzleHubRepo implements HubRepo {
 
   async addFollow(followerId: string, followeeId: string): Promise<void> {
     // Idempotent on the (follower_id, followee_id) PK — a repeat follow no-ops.
-    await this.db
-      .insert(schema.follows)
-      .values({ followerId, followeeId })
-      .onConflictDoNothing();
+    await this.db.insert(schema.follows).values({ followerId, followeeId }).onConflictDoNothing();
   }
 
   async removeFollow(followerId: string, followeeId: string): Promise<void> {
     await this.db
       .delete(schema.follows)
       .where(
-        and(
-          eq(schema.follows.followerId, followerId),
-          eq(schema.follows.followeeId, followeeId),
-        ),
+        and(eq(schema.follows.followerId, followerId), eq(schema.follows.followeeId, followeeId)),
       );
   }
 
@@ -621,10 +689,7 @@ export class DrizzleHubRepo implements HubRepo {
       await this.db
         .delete(schema.likes)
         .where(
-          and(
-            eq(schema.likes.userId, userId),
-            eq(schema.likes.publishedGameId, publishedGameId),
-          ),
+          and(eq(schema.likes.userId, userId), eq(schema.likes.publishedGameId, publishedGameId)),
         );
       return false;
     }
@@ -633,7 +698,11 @@ export class DrizzleHubRepo implements HubRepo {
     return true;
   }
 
-  async setRating(userId: string, publishedGameId: string, stars: number): Promise<{ ratingAvg: number; ratingCount: number }> {
+  async setRating(
+    userId: string,
+    publishedGameId: string,
+    stars: number,
+  ): Promise<{ ratingAvg: number; ratingCount: number }> {
     await this.db
       .insert(schema.ratings)
       .values({ userId, publishedGameId, stars })
@@ -668,7 +737,11 @@ export class DrizzleHubRepo implements HubRepo {
     // Author-resolve (Phase 3.9): left-join users so each comment carries the
     // author's @handle + displayName for the web to link to /u/:handle.
     const rows = await this.db
-      .select({ comment: schema.commentsSocial, handle: schema.users.handle, displayName: schema.users.displayName })
+      .select({
+        comment: schema.commentsSocial,
+        handle: schema.users.handle,
+        displayName: schema.users.displayName,
+      })
       .from(schema.commentsSocial)
       .leftJoin(schema.users, eq(schema.commentsSocial.userId, schema.users.id))
       .where(
@@ -684,7 +757,12 @@ export class DrizzleHubRepo implements HubRepo {
     );
   }
 
-  async addComment(publishedGameId: string, userId: string, body: string, parentCommentId?: string): Promise<HubComment> {
+  async addComment(
+    publishedGameId: string,
+    userId: string,
+    body: string,
+    parentCommentId?: string,
+  ): Promise<HubComment> {
     const id = randomUUID();
     const [row] = await this.db
       .insert(schema.commentsSocial)
@@ -709,7 +787,12 @@ export class DrizzleHubRepo implements HubRepo {
     });
   }
 
-  async addReport(input: { reporterId?: string; targetType: string; targetId: string; reason?: string }): Promise<void> {
+  async addReport(input: {
+    reporterId?: string;
+    targetType: string;
+    targetId: string;
+    reason?: string;
+  }): Promise<void> {
     await this.db.insert(schema.reports).values({
       id: randomUUID(),
       targetType: input.targetType,
@@ -744,8 +827,8 @@ export class DrizzleHubRepo implements HubRepo {
       .where(
         and(
           eq(schema.publishedGames.status, 'live'),
-          sql`(${schema.publishedGames.title} ILIKE ${'%' + opts.query + '%'}
-           OR ${schema.publishedGames.description} ILIKE ${'%' + opts.query + '%'})`,
+          sql`(${schema.publishedGames.title} ILIKE ${`%${opts.query}%`}
+           OR ${schema.publishedGames.description} ILIKE ${`%${opts.query}%`})`,
         ),
       )
       .orderBy(desc(schema.publishedGames.publishedAt))

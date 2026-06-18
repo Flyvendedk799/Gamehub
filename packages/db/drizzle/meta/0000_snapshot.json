@@ -53,12 +53,8 @@
           "name": "api_keys_user_id_users_id_fk",
           "tableFrom": "api_keys",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -146,12 +142,8 @@
           "name": "credit_ledger_user_id_users_id_fk",
           "tableFrom": "credit_ledger",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -232,12 +224,8 @@
           "name": "subscriptions_user_id_users_id_fk",
           "tableFrom": "subscriptions",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -466,12 +454,8 @@
           "name": "projects_owner_id_users_id_fk",
           "tableFrom": "projects",
           "tableTo": "users",
-          "columnsFrom": [
-            "owner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["owner_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -597,12 +581,8 @@
           "name": "snapshots_project_id_projects_id_fk",
           "tableFrom": "snapshots",
           "tableTo": "projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -696,12 +676,8 @@
           "name": "chat_messages_project_id_projects_id_fk",
           "tableFrom": "chat_messages",
           "tableTo": "projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -879,12 +855,8 @@
           "name": "runs_project_id_projects_id_fk",
           "tableFrom": "runs",
           "tableTo": "projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -892,12 +864,8 @@
           "name": "runs_user_id_users_id_fk",
           "tableFrom": "runs",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -905,12 +873,8 @@
           "name": "runs_parent_snapshot_id_snapshots_id_fk",
           "tableFrom": "runs",
           "tableTo": "snapshots",
-          "columnsFrom": [
-            "parent_snapshot_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["parent_snapshot_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -918,12 +882,8 @@
           "name": "runs_byok_key_id_api_keys_id_fk",
           "tableFrom": "runs",
           "tableTo": "api_keys",
-          "columnsFrom": [
-            "byok_key_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["byok_key_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -989,12 +949,8 @@
           "name": "comments_social_published_game_id_published_games_id_fk",
           "tableFrom": "comments_social",
           "tableTo": "published_games",
-          "columnsFrom": [
-            "published_game_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["published_game_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1002,12 +958,8 @@
           "name": "comments_social_user_id_users_id_fk",
           "tableFrom": "comments_social",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1048,12 +1000,8 @@
           "name": "likes_user_id_users_id_fk",
           "tableFrom": "likes",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1061,12 +1009,8 @@
           "name": "likes_published_game_id_published_games_id_fk",
           "tableFrom": "likes",
           "tableTo": "published_games",
-          "columnsFrom": [
-            "published_game_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["published_game_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1074,10 +1018,7 @@
       "compositePrimaryKeys": {
         "likes_user_id_published_game_id_pk": {
           "name": "likes_user_id_published_game_id_pk",
-          "columns": [
-            "user_id",
-            "published_game_id"
-          ]
+          "columns": ["user_id", "published_game_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1148,12 +1089,8 @@
           "name": "moderation_actions_moderator_id_users_id_fk",
           "tableFrom": "moderation_actions",
           "tableTo": "users",
-          "columnsFrom": [
-            "moderator_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["moderator_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1228,12 +1165,8 @@
           "name": "play_events_published_game_id_published_games_id_fk",
           "tableFrom": "play_events",
           "tableTo": "published_games",
-          "columnsFrom": [
-            "published_game_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["published_game_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1396,12 +1329,8 @@
           "name": "published_games_project_id_projects_id_fk",
           "tableFrom": "published_games",
           "tableTo": "projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1409,12 +1338,8 @@
           "name": "published_games_snapshot_id_snapshots_id_fk",
           "tableFrom": "published_games",
           "tableTo": "snapshots",
-          "columnsFrom": [
-            "snapshot_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["snapshot_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1468,12 +1393,8 @@
           "name": "ratings_user_id_users_id_fk",
           "tableFrom": "ratings",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1481,12 +1402,8 @@
           "name": "ratings_published_game_id_published_games_id_fk",
           "tableFrom": "ratings",
           "tableTo": "published_games",
-          "columnsFrom": [
-            "published_game_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["published_game_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1494,10 +1411,7 @@
       "compositePrimaryKeys": {
         "ratings_user_id_published_game_id_pk": {
           "name": "ratings_user_id_published_game_id_pk",
-          "columns": [
-            "user_id",
-            "published_game_id"
-          ]
+          "columns": ["user_id", "published_game_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1534,12 +1448,8 @@
           "name": "remix_edges_ancestor_project_id_projects_id_fk",
           "tableFrom": "remix_edges",
           "tableTo": "projects",
-          "columnsFrom": [
-            "ancestor_project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["ancestor_project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1547,12 +1457,8 @@
           "name": "remix_edges_descendant_project_id_projects_id_fk",
           "tableFrom": "remix_edges",
           "tableTo": "projects",
-          "columnsFrom": [
-            "descendant_project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["descendant_project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1560,10 +1466,7 @@
       "compositePrimaryKeys": {
         "remix_edges_ancestor_project_id_descendant_project_id_pk": {
           "name": "remix_edges_ancestor_project_id_descendant_project_id_pk",
-          "columns": [
-            "ancestor_project_id",
-            "descendant_project_id"
-          ]
+          "columns": ["ancestor_project_id", "descendant_project_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1627,12 +1530,8 @@
           "name": "reports_reporter_id_users_id_fk",
           "tableFrom": "reports",
           "tableTo": "users",
-          "columnsFrom": [
-            "reporter_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["reporter_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1648,72 +1547,37 @@
     "public.subscription_tier": {
       "name": "subscription_tier",
       "schema": "public",
-      "values": [
-        "free",
-        "plus",
-        "pro",
-        "team"
-      ]
+      "values": ["free", "plus", "pro", "team"]
     },
     "public.engine_kind": {
       "name": "engine_kind",
       "schema": "public",
-      "values": [
-        "three",
-        "phaser"
-      ]
+      "values": ["three", "phaser"]
     },
     "public.project_visibility": {
       "name": "project_visibility",
       "schema": "public",
-      "values": [
-        "private",
-        "unlisted",
-        "public"
-      ]
+      "values": ["private", "unlisted", "public"]
     },
     "public.snapshot_type": {
       "name": "snapshot_type",
       "schema": "public",
-      "values": [
-        "initial",
-        "edit",
-        "fork",
-        "remix",
-        "revert"
-      ]
+      "values": ["initial", "edit", "fork", "remix", "revert"]
     },
     "public.run_status": {
       "name": "run_status",
       "schema": "public",
-      "values": [
-        "queued",
-        "running",
-        "paused",
-        "completed",
-        "failed",
-        "canceled"
-      ]
+      "values": ["queued", "running", "paused", "completed", "failed", "canceled"]
     },
     "public.moderation_action_kind": {
       "name": "moderation_action_kind",
       "schema": "public",
-      "values": [
-        "flag",
-        "hide",
-        "remove",
-        "restore",
-        "ban_user"
-      ]
+      "values": ["flag", "hide", "remove", "restore", "ban_user"]
     },
     "public.published_status": {
       "name": "published_status",
       "schema": "public",
-      "values": [
-        "live",
-        "unpublished",
-        "removed_by_mod"
-      ]
+      "values": ["live", "unpublished", "removed_by_mod"]
     }
   },
   "schemas": {},

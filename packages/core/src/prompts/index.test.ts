@@ -33,8 +33,7 @@ describe('composeSystemPrompt — product landing completeness', () => {
     const out = composeSystemPrompt({
       mode: 'create',
       agentMode: true,
-      userPrompt:
-        'Create a beautifully apple type animated landing page for an AI Game QA Tester',
+      userPrompt: 'Create a beautifully apple type animated landing page for an AI Game QA Tester',
     });
     expect(out).toContain('Product landing completeness');
     expect(out).toContain('nightly run queue');

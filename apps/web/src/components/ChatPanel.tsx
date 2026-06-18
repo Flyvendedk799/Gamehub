@@ -36,6 +36,7 @@ export function ChatPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new events arrive
+  // biome-ignore lint/correctness/useExhaustiveDependencies: events is the intended trigger — the effect must re-run on each new event to scroll to the bottom
   useEffect(() => {
     const el = scrollRef.current;
     if (el) {
@@ -71,15 +72,15 @@ export function ChatPanel({
           Build log
         </span>
         {reconnecting ? (
-          <span className="flex items-center gap-1.5 text-xs text-[#f59e0b]" role="status">
+          <output className="flex items-center gap-1.5 text-xs text-[#f59e0b]">
             <PulseIcon color="#f59e0b" />
             Reconnecting…
-          </span>
+          </output>
         ) : isStreaming ? (
-          <span className="flex items-center gap-1.5 text-xs text-[#6366f1]" role="status">
+          <output className="flex items-center gap-1.5 text-xs text-[#6366f1]">
             <PulseIcon />
             Running
-          </span>
+          </output>
         ) : null}
       </div>
 
@@ -136,6 +137,7 @@ export function ChatPanel({
             "
           />
           <button
+            type="button"
             onClick={handleSend}
             disabled={isStreaming || !input.trim()}
             className="

@@ -9,9 +9,8 @@ this scaffold and customise the content.
 
 ## Frame & viewport
 
-Wrap the entire artifact in the bundled `iphone.jsx` frame (390×844,
-dynamic-island, home-indicator). Never hand-roll device chrome —
-`view_frame iphone.jsx` returns a working frame in one tool call.
+Wrap the entire artifact in an iPhone-style frame (390×844,
+dynamic-island, home-indicator) so the prototype reads as a real device mock.
 
 ## TabBar pattern
 

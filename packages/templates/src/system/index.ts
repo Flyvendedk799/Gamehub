@@ -51,7 +51,7 @@ When the user follows up to tweak the design, regenerate the full artifact - the
 /**
  * Mobile-flow scaffolding template — keyword-routed into the system
  * prompt by `composeSystemPrompt` when the user's prompt matches
- * KEYWORDS_MOBILE. NOT a lazy-loaded design-skill: this shape recurs
+ * KEYWORDS_MOBILE. Always-inlined: this shape recurs
  * on every mobile prompt, so the agent picks it up as a skeleton
  * instead of reinventing tab bars, screen routing, safe-area
  * handling, and lesson/quiz scaffolding per run. See backlog-2 #6.
@@ -64,7 +64,7 @@ When the brief implies a multi-screen mobile prototype (e-learning flow, onboard
 
 ## Frame & viewport
 
-Wrap the entire artifact in the bundled \`iphone.jsx\` frame (390×844, dynamic-island, home-indicator). Never hand-roll device chrome — \`view_frame iphone.jsx\` returns a working frame in one tool call.
+Wrap the entire artifact in an iPhone-style frame (390×844, dynamic-island, home-indicator) so the prototype reads as a real device mock.
 
 ## TabBar pattern
 

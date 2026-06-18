@@ -34,7 +34,6 @@
  * over data only.
  */
 
-import { isCompletableSpec, type CompletabilitySpec } from './tools/assert-game-invariants.js';
 import {
   type PlaytestPredicate,
   type PlaytestScore,
@@ -42,6 +41,7 @@ import {
   type PredicateResult,
   scorePlaytest,
 } from './eval/playtest-score.js';
+import { type CompletabilitySpec, isCompletableSpec } from './tools/assert-game-invariants.js';
 
 /** Default number of repair rounds attempted before shipping the best
  *  attempt. A single repair round already recovers the common sign-error /

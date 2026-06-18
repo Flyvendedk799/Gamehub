@@ -26,7 +26,9 @@ export function createAudio() {
     if (ctx.state === 'suspended') void ctx.resume();
   }
   // Autoplay-policy: arm on first user gesture
-  ['pointerdown', 'keydown'].forEach((evt) => window.addEventListener(evt, unlock, { once: true }));
+  for (const evt of ['pointerdown', 'keydown']) {
+    window.addEventListener(evt, unlock, { once: true });
+  }
 
   return {
     setMuted(v) {

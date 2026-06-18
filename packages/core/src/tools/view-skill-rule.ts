@@ -4,7 +4,7 @@
  * Folder-format skills (e.g. the bundled Remotion skill) expose
  * `rules/*.md` subpages alongside the main SKILL.md body. The agent
  * uses this tool to fetch one rule on demand, mirroring the
- * `view_design_skill` pattern. Always registered globally so the
+ * skill-lookup pattern. Always registered globally so the
  * tool catalog stays stable across runs; calls against flat skills
  * (no rules) return a clear "no rules" message instead of failing.
  */

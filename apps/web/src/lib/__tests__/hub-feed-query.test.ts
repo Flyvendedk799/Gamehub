@@ -27,7 +27,13 @@ describe('buildHubFeedQuery (#3.3/#3.4)', () => {
 
   it('composes sort + genre + tag + paging', () => {
     const parsed = parse(
-      buildHubFeedQuery({ sort: 'trending', genre: 'platformer', tag: 'retro', limit: 24, offset: 12 }),
+      buildHubFeedQuery({
+        sort: 'trending',
+        genre: 'platformer',
+        tag: 'retro',
+        limit: 24,
+        offset: 12,
+      }),
     );
     expect(parsed).toEqual({
       sort: 'trending',

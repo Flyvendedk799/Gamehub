@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { GAME_ENGINE_ADAPTERS, getEngineAdapter, listLivePreviewEngines } from './index';
-import { gameGlobalSetupSnippet, isScoreMessage, SCORE_MESSAGE_TYPE } from './types';
+import { SCORE_MESSAGE_TYPE, gameGlobalSetupSnippet, isScoreMessage } from './types';
 
 describe('GAME_ENGINE_ADAPTERS registry', () => {
   it('registers exactly the two supported web engines (three + phaser)', () => {

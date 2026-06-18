@@ -8,8 +8,7 @@
  *     ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
  *
  * `buildSrcdoc` wraps it in a vendored React 18 + ReactDOM + @babel/standalone
- * skeleton (plus our window-scoped component library — IOSDevice,
- * DesignCanvas, …) so the model never has to think about the runtime
+ * skeleton so the model never has to think about the runtime
  * plumbing. Anything passed in — including a full `<!doctype html>` payload —
  * is embedded verbatim inside a `<script type="text/babel">`; if it isn't
  * valid JSX, Babel will surface a syntax error via the iframe error overlay.
@@ -18,8 +17,6 @@
 import { ensureEditmodeMarkers } from '@playforge/shared';
 
 import BABEL_STANDALONE from '../vendor/babel.standalone.js?raw';
-import DESIGN_CANVAS_JSX from '../vendor/design-canvas.jsx?raw';
-import IOS_FRAME_JSX from '../vendor/ios-frame.jsx?raw';
 import REACT_DOM_UMD from '../vendor/react-dom.umd.js?raw';
 import REACT_UMD from '../vendor/react.umd.js?raw';
 
@@ -140,8 +137,6 @@ function wrapJsxAsSrcdoc(jsx: string): string {
 <script>${SRC_LINE_TAGGER_SCRIPT}</script>
 <script>${BABEL_STANDALONE}</script>
 <script>${TWEAKS_BRIDGE_SETUP}</script>
-<script type="text/babel" data-presets="react">${IOS_FRAME_JSX}</script>
-<script type="text/babel" data-presets="react">${DESIGN_CANVAS_JSX}</script>
 ${JSX_TEMPLATE_BEGIN}
 <script type="text/babel" data-presets="react" data-plugins="transform-react-jsx-source">
 ${jsx}

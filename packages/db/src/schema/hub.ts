@@ -32,11 +32,7 @@ const vector = customType<{ data: number[]; driverData: string; config: { dimens
     return config?.dimensions !== undefined ? `vector(${config.dimensions})` : 'vector';
   },
   fromDriver(value: string): number[] {
-    return value
-      .replace(/^\[/, '')
-      .replace(/\]$/, '')
-      .split(',')
-      .map(Number);
+    return value.replace(/^\[/, '').replace(/\]$/, '').split(',').map(Number);
   },
   toDriver(value: number[]): string {
     return `[${value.join(',')}]`;
@@ -65,8 +61,7 @@ export const publishedGames = pgTable(
     projectId: uuid('project_id')
       .notNull()
       .references(() => projects.id, { onDelete: 'cascade' }),
-    snapshotId: uuid('snapshot_id')
-      .references(() => snapshots.id, { onDelete: 'restrict' }),
+    snapshotId: uuid('snapshot_id').references(() => snapshots.id, { onDelete: 'restrict' }),
     publishSlug: text('publish_slug').notNull(),
     title: text('title').notNull(),
     description: text('description'),

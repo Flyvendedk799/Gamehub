@@ -11,7 +11,9 @@ describe('resolveThumbnailUrl (#3.1 fallback selection)', () => {
   });
 
   it('passes through absolute http/https/data URLs unchanged', () => {
-    expect(resolveThumbnailUrl('https://cdn.example.com/a.png')).toBe('https://cdn.example.com/a.png');
+    expect(resolveThumbnailUrl('https://cdn.example.com/a.png')).toBe(
+      'https://cdn.example.com/a.png',
+    );
     expect(resolveThumbnailUrl('http://x/y.jpg')).toBe('http://x/y.jpg');
     expect(resolveThumbnailUrl('//cdn/x.png')).toBe('//cdn/x.png');
     expect(resolveThumbnailUrl('data:image/png;base64,AAAA')).toBe('data:image/png;base64,AAAA');
@@ -28,7 +30,9 @@ describe('placeholderGradient (#3.1 deterministic fallback)', () => {
   });
 
   it('returns a CSS linear-gradient string', () => {
-    expect(placeholderGradient('anything')).toMatch(/^linear-gradient\(135deg, #[0-9a-f]{6} 0%, #[0-9a-f]{6} 100%\)$/);
+    expect(placeholderGradient('anything')).toMatch(
+      /^linear-gradient\(135deg, #[0-9a-f]{6} 0%, #[0-9a-f]{6} 100%\)$/,
+    );
   });
 
   it('different seeds can land on different gradients', () => {

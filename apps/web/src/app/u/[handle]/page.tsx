@@ -1,18 +1,13 @@
 'use client';
 
-import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
 import { GameCard } from '@/components/GameCard';
 import type { GameCardData } from '@/components/GameCard';
-import {
-  followUser,
-  getCreatorGames,
-  getCreatorProfile,
-  unfollowUser,
-} from '@/lib/api';
+import { followUser, getCreatorGames, getCreatorProfile, unfollowUser } from '@/lib/api';
 import type { CreatorGame, CreatorProfile } from '@/lib/api';
 import { isAuthenticated } from '@/lib/auth';
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
 /** Map a creator's published game onto the shared gallery-card shape (#3.1). */
 function toCardData(game: CreatorGame): GameCardData {
@@ -91,7 +86,7 @@ export default function CreatorProfilePage() {
           <div className="flex items-center gap-4">
             <Link href="/" className="flex items-center gap-2 group">
               <div className="w-7 h-7 rounded-lg bg-[#6366f1] flex items-center justify-center">
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                   <polygon points="2,1 12,7 2,13" fill="white" />
                 </svg>
               </div>
@@ -136,6 +131,7 @@ export default function CreatorProfilePage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {Array.from({ length: 3 }).map((_, i) => (
                 <div
+                  // biome-ignore lint/suspicious/noArrayIndexKey: static skeleton list, never reordered
                   key={i}
                   className="bg-[#111111] border border-[#222222] rounded-xl overflow-hidden"
                 >
@@ -181,6 +177,7 @@ export default function CreatorProfilePage() {
               {/* Follow / Unfollow (#3.9) — auth-gated. */}
               {profile && signedIn && (
                 <button
+                  type="button"
                   onClick={() => {
                     void handleToggleFollow();
                   }}
@@ -200,7 +197,7 @@ export default function CreatorProfilePage() {
             {games.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-24 border border-dashed border-[#222222] rounded-2xl text-center">
                 <div className="w-12 h-12 rounded-xl bg-[#111111] border border-[#222222] flex items-center justify-center mb-4">
-                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                     <polygon points="4,2.5 16,10 4,17.5" fill="#3f3f46" />
                   </svg>
                 </div>

@@ -1,9 +1,9 @@
 'use client';
 
-import Link from 'next/link';
-import { useEffect, useState } from 'react';
 import { listProjects } from '@/lib/api';
 import type { Project } from '@/lib/types';
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -26,7 +26,7 @@ export default function ProjectsPage() {
         <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2 group">
             <div className="w-7 h-7 rounded-lg bg-[#6366f1] flex items-center justify-center">
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                 <polygon points="2,1 12,7 2,13" fill="white" />
               </svg>
             </div>
@@ -34,10 +34,7 @@ export default function ProjectsPage() {
               Playforge
             </span>
           </Link>
-          <Link
-            href="/"
-            className="text-sm text-[#a1a1aa] hover:text-[#f4f4f5] transition-colors"
-          >
+          <Link href="/" className="text-sm text-[#a1a1aa] hover:text-[#f4f4f5] transition-colors">
             + New game
           </Link>
         </div>
@@ -62,10 +59,7 @@ export default function ProjectsPage() {
         {!loading && !error && projects.length === 0 && (
           <div className="text-center py-24 border border-dashed border-[#222222] rounded-2xl">
             <p className="text-[#52525b] text-sm">No projects yet.</p>
-            <Link
-              href="/"
-              className="mt-4 inline-block text-sm text-[#6366f1] hover:underline"
-            >
+            <Link href="/" className="mt-4 inline-block text-sm text-[#6366f1] hover:underline">
               Build your first game →
             </Link>
           </div>
@@ -101,7 +95,14 @@ function ProjectCard({ project }: { project: Project }) {
     >
       {/* Engine badge + preview thumbnail placeholder */}
       <div className="h-32 rounded-xl bg-[#0a0a0a] border border-[#1a1a1a] mb-4 flex items-center justify-center">
-        <svg width="32" height="32" viewBox="0 0 32 32" fill="none" className="opacity-20">
+        <svg
+          width="32"
+          height="32"
+          viewBox="0 0 32 32"
+          fill="none"
+          className="opacity-20"
+          aria-hidden="true"
+        >
           <polygon points="6,4 26,16 6,28" fill="#6366f1" />
         </svg>
       </div>

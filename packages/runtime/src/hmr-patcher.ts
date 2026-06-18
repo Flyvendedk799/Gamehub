@@ -134,6 +134,12 @@ export function hmrPatcherScript(): string {
     ack(true, 'js', 'script ' + changedIdx + ' re-evaluated');
   }
   window.addEventListener('message', function(event) {
+    // The HMR envelope replaces <script> contents — i.e. runs supplied JS in
+    // this preview. Reject any message from a real window that is NOT the
+    // embedding host parent, so a foreign frame can't inject code here. (A
+    // same-document synthetic dispatch has source null — that's this iframe's
+    // own already-trusted code, not a cross-frame escalation.) (CSP H4)
+    if (event.source && event.source !== window.parent) return;
     var data = event && event.data;
     if (!data || data.__playforge_hmr !== true) return;
     if (data.protocolVersion !== PROTOCOL) {

@@ -63,7 +63,12 @@ export class BrowserJobQueue {
   async enqueueThumbnail(htmlContent: string): Promise<string> {
     const job = await this.queue.add(
       'thumbnail',
-      { kind: 'thumbnail', htmlContent, viewport: { width: 640, height: 360 }, bootTimeoutMs: 8000 },
+      {
+        kind: 'thumbnail',
+        htmlContent,
+        viewport: { width: 640, height: 360 },
+        bootTimeoutMs: 8000,
+      },
       { removeOnComplete: 10, removeOnFail: 10 },
     );
     return job.id ?? 'unknown';
