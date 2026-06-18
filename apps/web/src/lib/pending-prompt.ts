@@ -21,6 +21,16 @@ export function setPendingPrompt(prompt: string): void {
   }
 }
 
+export function hasPendingPrompt(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const value = sessionStorage.getItem(PENDING_PROMPT_KEY);
+    return value !== null && value.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 /** Reads and clears the pending prompt in one shot (consume-once). */
 export function takePendingPrompt(): string | null {
   if (typeof window === 'undefined') return null;

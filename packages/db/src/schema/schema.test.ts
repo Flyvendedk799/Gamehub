@@ -4,6 +4,7 @@
 import { getTableConfig } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
 import {
+  apiKeys,
   chatMessages,
   creditLedger,
   engineKind,
@@ -33,7 +34,16 @@ describe('schema', () => {
     const cfg = getTableConfig(users);
     expect(cfg.name).toBe('users');
     expect(columnNames(users)).toEqual(
-      expect.arrayContaining(['id', 'email', 'password_hash', 'handle', 'display_name']),
+      expect.arrayContaining([
+        'id',
+        'email',
+        'password_hash',
+        'handle',
+        'display_name',
+        'default_provider',
+        'default_model_id',
+        'onboarding_completed_at',
+      ]),
     );
     // Clerk's external subject id was dropped when native auth landed.
     expect(columnNames(users)).not.toContain('clerk_user_id');
@@ -95,6 +105,18 @@ describe('schema', () => {
     expect(columnNames(creditLedger)).toEqual(
       expect.arrayContaining(['user_id', 'delta', 'reason']),
     );
+  });
+
+  it('api_keys stores one encrypted BYOK key per provider', () => {
+    expect(columnNames(apiKeys)).toEqual(
+      expect.arrayContaining(['user_id', 'provider', 'ciphertext', 'last4', 'updated_at']),
+    );
+    expect(indexNames(apiKeys)).toEqual(
+      expect.arrayContaining(['api_keys_user_provider_key', 'api_keys_user_idx']),
+    );
+    const cfg = getTableConfig(apiKeys);
+    const providerKey = cfg.indexes.find((i) => i.config.name === 'api_keys_user_provider_key');
+    expect(providerKey?.config.unique).toBe(true);
   });
 
   it('credit_ledger carries the reservation/refund idempotency + balance indexes', () => {

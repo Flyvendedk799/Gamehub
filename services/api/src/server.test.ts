@@ -1,6 +1,7 @@
 import { InMemoryEventBus, runChannel } from '@playforge/bus';
 import { InMemoryBlobStore, SnapshotStore } from '@playforge/storage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { InMemoryAccountRepo } from './account-repo';
 import { HeaderAuthenticator } from './auth';
 import { InMemoryHubRepo } from './hub-repo';
 import { InMemoryPublishRepo } from './publish-repo';
@@ -24,6 +25,7 @@ function makeApp(overrides?: {
   publishRepo?: InMemoryPublishRepo;
   hubRepo?: InMemoryHubRepo;
   adminToken?: string;
+  accountRepo?: InMemoryAccountRepo;
 }) {
   return buildServer({
     repo: overrides?.repo ?? new InMemoryProjectRepo(),
@@ -35,6 +37,13 @@ function makeApp(overrides?: {
     ...(overrides?.publishRepo !== undefined ? { publishRepo: overrides.publishRepo } : {}),
     ...(overrides?.hubRepo !== undefined ? { hubRepo: overrides.hubRepo } : {}),
     ...(overrides?.adminToken !== undefined ? { adminToken: overrides.adminToken } : {}),
+    ...(overrides?.accountRepo !== undefined
+      ? {
+          accountRepo: overrides.accountRepo,
+          apiKeyEncryptionSecret: 'test-secret',
+          platformModel: { provider: 'openai', modelId: 'o4-mini' },
+        }
+      : {}),
   });
 }
 
@@ -53,6 +62,110 @@ describe('auth', () => {
   it('rejects unauthenticated project access', async () => {
     const res = await makeApp().inject({ method: 'GET', url: '/v1/projects' });
     expect(res.statusCode).toBe(401);
+  });
+});
+
+describe('account settings', () => {
+  function makeAccountApp() {
+    const accountRepo = new InMemoryAccountRepo();
+    accountRepo.ensureUser('alice', 'alice');
+    const repo = new InMemoryProjectRepo();
+    const enqueued: Parameters<EnqueueFn>[0][] = [];
+    const app = makeApp({
+      repo,
+      accountRepo,
+      enqueue: async (input) => {
+        enqueued.push(input);
+      },
+    });
+    return { app, repo, enqueued };
+  }
+
+  it('returns profile and provider metadata without exposing ciphertext', async () => {
+    const { app } = makeAccountApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/account/settings',
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      user: { handle: 'alice' },
+      defaultProvider: 'platform',
+      onboardingComplete: false,
+    });
+    expect(JSON.stringify(res.json())).not.toContain('ciphertext');
+  });
+
+  it('requires a key before switching to Claude or OpenAI', async () => {
+    const { app } = makeAccountApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/v1/account/provider',
+      headers: AS_ALICE,
+      payload: { provider: 'anthropic', modelId: 'claude-sonnet-4-6' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'api_key_required', provider: 'anthropic' });
+  });
+
+  it('saves a Claude key, masks it, and uses it for generation', async () => {
+    const { app, repo, enqueued } = makeAccountApp();
+    const saved = await app.inject({
+      method: 'PUT',
+      url: '/v1/account/provider',
+      headers: AS_ALICE,
+      payload: {
+        provider: 'anthropic',
+        modelId: 'claude-sonnet-4-6',
+        apiKey: 'sk-ant-test-1234',
+      },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).toMatchObject({
+      defaultProvider: 'anthropic',
+      defaultModelId: 'claude-sonnet-4-6',
+      onboardingComplete: true,
+    });
+    const anthropic = saved
+      .json()
+      .providers.find((p: { provider: string }) => p.provider === 'anthropic');
+    expect(anthropic).toMatchObject({ configured: true, last4: '1234' });
+    expect(JSON.stringify(saved.json())).not.toContain('sk-ant-test-1234');
+
+    const project = await repo.create({ ownerId: 'alice', name: 'BYOK', engine: 'phaser' });
+    const generated = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${project.id}/generate`,
+      headers: AS_ALICE,
+      payload: { prompt: 'make a tiny platformer' },
+    });
+    expect(generated.statusCode).toBe(202);
+    expect(enqueued[0]).toMatchObject({
+      apiKey: 'sk-ant-test-1234',
+      model: { provider: 'anthropic', modelId: 'claude-sonnet-4-6' },
+    });
+  });
+
+  it('falls back to platform when the active provider key is deleted', async () => {
+    const { app } = makeAccountApp();
+    await app.inject({
+      method: 'PUT',
+      url: '/v1/account/provider',
+      headers: AS_ALICE,
+      payload: { provider: 'openai', modelId: 'gpt-4o', apiKey: 'sk-openai-9999' },
+    });
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: '/v1/account/provider/openai',
+      headers: AS_ALICE,
+    });
+    expect(deleted.statusCode).toBe(200);
+    expect(deleted.json()).toMatchObject({ defaultProvider: 'platform' });
+    const openai = deleted
+      .json()
+      .providers.find((p: { provider: string }) => p.provider === 'openai');
+    expect(openai).toMatchObject({ configured: false, last4: null });
   });
 });
 

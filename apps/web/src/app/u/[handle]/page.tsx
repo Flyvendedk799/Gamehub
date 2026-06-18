@@ -158,8 +158,29 @@ export default function CreatorProfilePage() {
           <>
             {/* Hero */}
             <div className="mb-10 flex items-start justify-between gap-4 flex-wrap">
+              <div className="flex items-start gap-4">
+                {profile?.avatarUrl ? (
+                  <img
+                    src={profile.avatarUrl}
+                    alt=""
+                    className="h-14 w-14 rounded-lg border border-[#222222] object-cover"
+                  />
+                ) : (
+                  <div className="flex h-14 w-14 items-center justify-center rounded-lg border border-[#222222] bg-[#111111] text-lg font-semibold text-[#818cf8]">
+                    {(profile?.displayName ?? handle).slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+                <div>
+                  <h1 className="text-3xl font-bold text-[#f4f4f5] tracking-tight">
+                    {profile?.displayName ?? `@${handle}`}
+                  </h1>
+                  <p className="mt-1 text-sm text-[#71717a]">@{handle}</p>
+                  {profile?.bio && (
+                    <p className="mt-3 max-w-xl text-sm leading-6 text-[#a1a1aa]">{profile.bio}</p>
+                  )}
+                </div>
+              </div>
               <div>
-                <h1 className="text-3xl font-bold text-[#f4f4f5] tracking-tight">@{handle}</h1>
                 <p className="text-sm text-[#52525b] mt-1">
                   {games.length} published {games.length === 1 ? 'game' : 'games'}
                   {profile && (

@@ -307,6 +307,9 @@ export async function getLeaderboard(slug: string): Promise<{ entries: Leaderboa
 
 export interface CreatorProfile {
   handle: string;
+  displayName: string;
+  bio: string | null;
+  avatarUrl: string | null;
   projectCount: number;
   /** Follower count (Phase 3.9). */
   followerCount: number;
@@ -649,12 +652,76 @@ export async function logout(): Promise<void> {
 export interface MeResponse {
   userId: string;
   handle: string;
+  onboardingComplete?: boolean;
+  defaultProvider?: AccountProvider;
   /** Credit balance; omitted for BYOK/unmetered users (Infinity server-side). */
   balance?: number;
 }
 
 export async function getMe(): Promise<MeResponse> {
   return apiFetch<MeResponse>('/v1/auth/me');
+}
+
+// ─── Account settings ───────────────────────────────────────────────────────
+
+export type AccountProvider = 'platform' | 'anthropic' | 'openai';
+
+export interface AccountProviderState {
+  provider: AccountProvider;
+  label: string;
+  configured: boolean;
+  last4: string | null;
+  defaultModelId: string;
+  active: boolean;
+  keyHelpUrl?: string;
+}
+
+export interface AccountSettingsResponse {
+  user: {
+    id: string;
+    email: string;
+    handle: string;
+    displayName: string;
+    avatarUrl: string | null;
+    bio: string | null;
+  };
+  defaultProvider: AccountProvider;
+  defaultModelId: string;
+  onboardingComplete: boolean;
+  providers: AccountProviderState[];
+}
+
+export async function getAccountSettings(): Promise<AccountSettingsResponse> {
+  return apiFetch<AccountSettingsResponse>('/v1/account/settings');
+}
+
+export async function updateAccountProfile(input: {
+  displayName?: string;
+  bio?: string;
+  avatarUrl?: string;
+}): Promise<AccountSettingsResponse> {
+  return apiFetch<AccountSettingsResponse>('/v1/account/profile', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function saveAccountProvider(input: {
+  provider: AccountProvider;
+  modelId?: string;
+  apiKey?: string;
+  completeOnboarding?: boolean;
+}): Promise<AccountSettingsResponse> {
+  return apiFetch<AccountSettingsResponse>('/v1/account/provider', {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteAccountProvider(provider: Exclude<AccountProvider, 'platform'>) {
+  return apiFetch<AccountSettingsResponse>(`/v1/account/provider/${provider}`, {
+    method: 'DELETE',
+  });
 }
 
 // ─── Hub search ────────────────────────────────────────────────────────────────
