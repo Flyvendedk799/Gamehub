@@ -77,10 +77,32 @@ export function assertSafeToolPath(path: string, toolName: string): void {
     throw new Error(`${toolName} refused: home-relative paths ("~") are not allowed ("${path}").`);
   }
 
-  // Any parent-traversal segment.
-  if (segments(path).includes('..')) {
-    throw new Error(
-      `${toolName} refused: parent-directory traversal (".." segment) is not allowed ("${path}").`,
-    );
+  // Reject non-NFC (decomposed / look-alike) forms. The storage layer rejects
+  // these too; aligning here means the model gets the rejection at the tool call
+  // instead of a surprising late failure when the whole snapshot aborts at
+  // persist time. (path-traversal divergence fix)
+  if (path.normalize('NFC') !== path) {
+    throw new Error(`${toolName} refused: path must be Unicode NFC-normalized ("${path}").`);
+  }
+
+  // Any parent-traversal ("..") or bare current-dir (".") segment, and empty
+  // segments (leading/trailing/double slash). Mirrors the storage guard's
+  // per-segment rule so the two layers accept exactly the same set.
+  for (const seg of segments(path)) {
+    if (seg === '..') {
+      throw new Error(
+        `${toolName} refused: parent-directory traversal (".." segment) is not allowed ("${path}").`,
+      );
+    }
+    if (seg === '.') {
+      throw new Error(
+        `${toolName} refused: "." path segments are not allowed ("${path}"). Use a clean root-relative path.`,
+      );
+    }
+    if (seg === '') {
+      throw new Error(
+        `${toolName} refused: empty path segment (leading/trailing/double slash) is not allowed ("${path}").`,
+      );
+    }
   }
 }

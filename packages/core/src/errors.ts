@@ -17,7 +17,7 @@
 
 import { extractHttpStatus, looksLikeGatewayMissingMessagesApi } from '@playforge/providers';
 import type { ProviderId, WireApi } from '@playforge/shared';
-import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
+import { ERROR_CODES, PlayforgeError } from '@playforge/shared';
 
 export const PROVIDER_KEY_HELP_URL: Partial<Record<ProviderId, string>> = {
   openai: 'https://platform.openai.com/account/api-keys',

@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { Worker } from 'bullmq';
 /**
  * Browser-worker — Playwright Chromium pool for game verification.
  *
@@ -38,9 +40,7 @@
  *   DATABASE_URL        Postgres — for writing thumbnail_url back to published_games
  *   WORKER_CONCURRENCY  parallel browser jobs (default: 2)
  */
-import { chromium, type Browser, type BrowserContext, type Page, type Route } from 'playwright';
-import { Worker } from 'bullmq';
-import { execFileSync } from 'node:child_process';
+import { type Browser, type BrowserContext, type Page, type Route, chromium } from 'playwright';
 
 function parseRedisUrl(url: string): { host: string; port: number } {
   try {
@@ -59,6 +59,15 @@ function parseRedisUrl(url: string): { host: string; port: number } {
  * be reached from inside an untrusted game context — everything else is aborted.
  */
 export const ENGINE_CDN_ALLOWLIST: ReadonlySet<string> = new Set(['cdn.jsdelivr.net']);
+
+/**
+ * Allowed path PREFIXES on the engine CDN. A host-only allowlist is too broad:
+ * cdn.jsdelivr.net proxies ALL npm packages AND arbitrary GitHub repos
+ * (`/gh/<user>/<repo>@<ref>/…`), so a hostile game could load attacker-authored
+ * code from `cdn.jsdelivr.net/gh/attacker/x@main/p.js`. Pin to the two engine
+ * packages the runtime adapters actually request. (CSP M3)
+ */
+export const ENGINE_CDN_PATH_PREFIXES: readonly string[] = ['/npm/three@', '/npm/phaser@'];
 
 /** Hard ceiling on total wall-clock time for any single job, in ms. */
 export const JOB_HARD_TIMEOUT_MS = 30_000;
@@ -87,11 +96,13 @@ export function isRequestAllowed(rawUrl: string): boolean {
   // Inline payloads carry no network egress: always safe.
   if (scheme === 'data:' || scheme === 'blob:') return true;
 
-  // Only http(s) may reach the network, and only to the pinned CDN host(s).
-  // This blocks 169.254.169.254, RFC1918, loopback, and any arbitrary origin,
-  // as well as exotic schemes (file:, ftp:, ws:, gopher:, …).
+  // Only http(s) may reach the network, and only the pinned engine packages on
+  // the pinned CDN host. This blocks 169.254.169.254, RFC1918, loopback, any
+  // arbitrary origin, exotic schemes (file:, ftp:, ws:, gopher:, …), AND the
+  // jsdelivr /gh/ + arbitrary-npm proxy paths an attacker could load code from.
   if (scheme === 'http:' || scheme === 'https:') {
-    return ENGINE_CDN_ALLOWLIST.has(parsed.hostname.toLowerCase());
+    if (!ENGINE_CDN_ALLOWLIST.has(parsed.hostname.toLowerCase())) return false;
+    return ENGINE_CDN_PATH_PREFIXES.some((prefix) => parsed.pathname.startsWith(prefix));
   }
 
   return false;
@@ -286,7 +297,7 @@ export class BrowserPool {
 
   /** True if a live, connected browser is currently held. */
   public get isAlive(): boolean {
-    return this.browser !== undefined && this.browser.isConnected();
+    return this.browser?.isConnected() ?? false;
   }
 
   /** Wire the disconnected handler so a crash marks the browser dead. */
@@ -373,7 +384,7 @@ export class BrowserPool {
     const b = this.browser;
     this.browser = undefined;
     this.pid = undefined;
-    if (b !== undefined && b.isConnected()) {
+    if (b?.isConnected()) {
       try {
         await b.close();
       } catch {
@@ -694,13 +705,19 @@ export async function runRuntimeVerify(
   page.setDefaultTimeout(bootTimeoutMs);
 
   try {
-    await page.setContent(data.htmlContent, { timeout: bootTimeoutMs, waitUntil: 'domcontentloaded' });
+    await page.setContent(data.htmlContent, {
+      timeout: bootTimeoutMs,
+      waitUntil: 'domcontentloaded',
+    });
     // Wait up to bootTimeoutMs for window.__game to appear.
     let hasGameContract = false;
     try {
-      await page.waitForFunction(() => typeof (window as Window & { __game?: unknown }).__game === 'object', {
-        timeout: bootTimeoutMs,
-      });
+      await page.waitForFunction(
+        () => typeof (window as Window & { __game?: unknown }).__game === 'object',
+        {
+          timeout: bootTimeoutMs,
+        },
+      );
       hasGameContract = true;
     } catch {
       hasGameContract = false;
@@ -735,7 +752,10 @@ export async function runThumbnail(
   const bootTimeoutMs = data.bootTimeoutMs ?? 8_000;
 
   try {
-    await page.setContent(data.htmlContent, { timeout: bootTimeoutMs, waitUntil: 'domcontentloaded' });
+    await page.setContent(data.htmlContent, {
+      timeout: bootTimeoutMs,
+      waitUntil: 'domcontentloaded',
+    });
     // Brief settle — let the game canvas render first frame.
     await page.waitForTimeout(1500);
     const pngBytes = await page.screenshot({ type: 'png', clip: { x: 0, y: 0, ...vp } });

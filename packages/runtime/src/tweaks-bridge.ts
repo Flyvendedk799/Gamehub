@@ -55,6 +55,12 @@ export const TWEAKS_BRIDGE_LISTENER = `(function() {
     }
   }
   window.addEventListener('message', function(event) {
+    // applyTokens re-evals agent source with attacker-influenceable tokens — an
+    // XSS-grade primitive. Reject any message from a real window that is NOT the
+    // embedding host parent so a foreign frame cannot run code in this preview.
+    // (A same-document synthetic dispatch has source null — the iframe's own
+    // already-trusted code, not a cross-frame escalation.) (CSP H3)
+    if (event.source && event.source !== window.parent) return;
     var data = event && event.data;
     if (!data || data.type !== 'playforge:tweaks:update') return;
     if (!data.tokens || typeof data.tokens !== 'object') return;

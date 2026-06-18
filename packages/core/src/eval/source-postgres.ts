@@ -95,9 +95,7 @@ function round4(n: number): number {
  * Pure aggregation: roll a flat list of telemetry rows up into one aggregate per
  * genre. Exposed for direct unit testing (no source, no DB).
  */
-export function aggregateGenreQuality(
-  rows: ReadonlyArray<RunQualityRow>,
-): GenreQualityAggregate[] {
+export function aggregateGenreQuality(rows: ReadonlyArray<RunQualityRow>): GenreQualityAggregate[] {
   interface Acc {
     runs: number;
     passed: number;

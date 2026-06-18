@@ -17,8 +17,8 @@
  */
 process.env['BROWSER_WORKER_NO_AUTOSTART'] = '1';
 
+import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { chromium, type Browser } from 'playwright';
 // Dynamic import so BROWSER_WORKER_NO_AUTOSTART is set *before* main.ts module
 // init runs — a static import is hoisted above the assignment and would let the
 // BullMQ worker auto-start and try to reach Redis.
@@ -49,11 +49,24 @@ afterAll(async () => {
 });
 
 describe('isRequestAllowed (egress policy unit)', () => {
-  it('allows the pinned engine CDN host only', () => {
+  it('allows the pinned engine CDN host + engine package paths only', () => {
     expect(ENGINE_CDN_ALLOWLIST().has('cdn.jsdelivr.net')).toBe(true);
-    expect(isRequestAllowed('https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js')).toBe(
+    expect(
+      isRequestAllowed('https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js'),
+    ).toBe(true);
+    expect(isRequestAllowed('https://cdn.jsdelivr.net/npm/phaser@3.88.0/dist/phaser.esm.js')).toBe(
       true,
     );
+  });
+
+  it('BLOCKS non-engine paths on the CDN host (jsdelivr /gh/ + arbitrary npm proxy) (CSP M3)', () => {
+    // jsdelivr proxies arbitrary GitHub repos and any npm package — a host-only
+    // allowlist would let a hostile game load attacker-authored code.
+    expect(isRequestAllowed('https://cdn.jsdelivr.net/gh/attacker/x@main/p.js')).toBe(false);
+    expect(isRequestAllowed('https://cdn.jsdelivr.net/npm/evil-package@1.0.0/index.js')).toBe(
+      false,
+    );
+    expect(isRequestAllowed('https://cdn.jsdelivr.net/')).toBe(false);
   });
 
   it('allows data: and blob: URLs', () => {
@@ -240,12 +253,8 @@ describe('runRuntimeVerify (real Chromium)', () => {
       bootTimeoutMs: 5_000,
     });
     // The metadata SSRF must have been aborted by the route handler.
-    expect(
-      result.blockedRequests.some((u) => u.includes('169.254.169.254')),
-    ).toBe(true);
-    expect(
-      result.blockedRequests.some((u) => u.includes('10.0.0.5')),
-    ).toBe(true);
+    expect(result.blockedRequests.some((u) => u.includes('169.254.169.254'))).toBe(true);
+    expect(result.blockedRequests.some((u) => u.includes('10.0.0.5'))).toBe(true);
   }, 30_000);
 });
 
@@ -360,10 +369,10 @@ describe('createHardenedContext (no permissions)', () => {
     const { context, egress } = await createHardenedContext(browser, { width: 320, height: 240 });
     try {
       const page = await context.newPage();
-      await page.setContent(
-        `<img src="http://192.168.1.50/track.png">`,
-        { waitUntil: 'domcontentloaded', timeout: 3_000 },
-      );
+      await page.setContent(`<img src="http://192.168.1.50/track.png">`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 3_000,
+      });
       // Give the image request a beat to be intercepted.
       await page.waitForTimeout(300);
       expect(egress.blocked.some((u) => u.includes('192.168.1.50'))).toBe(true);
@@ -525,7 +534,7 @@ describe('BrowserPool — real Chromium disconnect→relaunch (#33b)', () => {
       const r1 = await runJob(live1, {
         kind: 'runtime-verify',
         htmlContent:
-          `<!doctype html><body><script>window.__game={debug:{snapshot(){return{ok:true}}}};</script></body>`,
+          '<!doctype html><body><script>window.__game={debug:{snapshot(){return{ok:true}}}};</script></body>',
         bootTimeoutMs: 5_000,
       });
       expect('hasGameContract' in r1 && r1.hasGameContract).toBe(true);
@@ -542,7 +551,7 @@ describe('BrowserPool — real Chromium disconnect→relaunch (#33b)', () => {
       const r2 = await runJob(live2, {
         kind: 'runtime-verify',
         htmlContent:
-          `<!doctype html><body><script>window.__game={debug:{snapshot(){return{ok:true}}}};</script></body>`,
+          '<!doctype html><body><script>window.__game={debug:{snapshot(){return{ok:true}}}};</script></body>',
         bootTimeoutMs: 5_000,
       });
       expect('hasGameContract' in r2 && r2.hasGameContract).toBe(true);
@@ -572,9 +581,14 @@ describe('withHardTimeout kill-switch (#33c)', () => {
   it('does not call onTimeout when the job finishes in time', async () => {
     let killed = false;
     await expect(
-      withHardTimeout(async () => 'ok', 1000, 'fast', () => {
-        killed = true;
-      }),
+      withHardTimeout(
+        async () => 'ok',
+        1000,
+        'fast',
+        () => {
+          killed = true;
+        },
+      ),
     ).resolves.toBe('ok');
     expect(killed).toBe(false);
   });
@@ -585,8 +599,7 @@ describe('runJob kill-switch force-closes a hung context (#33c, real Chromium)',
     // A page that hangs forever inside setContent-then-waitForFunction: no
     // __game ever appears AND a long sync spin keeps the page busy. With a tiny
     // job timeout the kill-switch must force the context closed.
-    const html =
-      `<!doctype html><body><p>no game, intentionally hangs</p></body>`;
+    const html = '<!doctype html><body><p>no game, intentionally hangs</p></body>';
     // Use a context-sink-aware runJob path indirectly: drive runRuntimeVerify
     // with a generous bootTimeout but a (separately asserted) short JOB timeout
     // is not configurable here — instead assert the normal no-__game verdict

@@ -1,3 +1,6 @@
+import { type EventBus, InMemoryEventBus, RedisEventBus } from '@playforge/bus';
+import { createDb, schema } from '@playforge/db';
+import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
 /**
  * Live API entry point.
  *
@@ -19,18 +22,20 @@
  *   BLOB_DIR            local blob-store root (default: .playforge-blobs)
  */
 import { Queue } from 'bullmq';
-import { createDb, schema } from '@playforge/db';
-import { InMemoryEventBus, RedisEventBus, type EventBus } from '@playforge/bus';
-import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
 import { enqueueRun } from '../../worker/src/queue';
 import { SessionAuthenticator } from './auth';
 import { BrowserJobQueue } from './browser-queue';
-import { MockCreditProvider, type CreditPurchaseProvider } from './credit-purchase';
+import { type CreditPurchaseProvider, MockCreditProvider } from './credit-purchase';
+import {
+  DrizzleChatRepo,
+  DrizzleProjectRepo,
+  DrizzleRunRepo,
+  DrizzleSnapshotRepo,
+} from './drizzle-repos';
 import { ConsoleEmailTransport, type EmailPort } from './email';
-import { DrizzleChatRepo, DrizzleProjectRepo, DrizzleRunRepo, DrizzleSnapshotRepo } from './drizzle-repos';
 import { DrizzleHubRepo } from './hub-repo';
 import { DrizzlePublishRepo } from './publish-repo';
-import { buildServer, type EnqueueFn } from './server';
+import { type EnqueueFn, buildServer } from './server';
 
 /** Run cost in credits — must match server.ts and worker/main.ts. */
 const CREDITS_PER_RUN = 10;
@@ -50,17 +55,49 @@ function parseRedisUrl(url: string): { host: string; port: number } {
   }
 }
 
+/**
+ * Parse a positive-integer env var, falling back to `fallback` for unset OR
+ * malformed values. A typo like `MAX_RUN_TOKENS=abc` → `NaN` would otherwise
+ * silently disable the run token ceiling (`used > NaN` is always false), and a
+ * bad `PORT`/`MAX_CONCURRENT_RUNS` would misconfigure the server. (M1)
+ */
+export function parsePositiveIntEnv(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    console.warn(
+      `[playforge-api] ignoring invalid numeric env value ${JSON.stringify(raw)}; using ${fallback}`,
+    );
+    return fallback;
+  }
+  return Math.floor(n);
+}
+
 async function main() {
   const databaseUrl = requireEnv('DATABASE_URL');
   const apiKey = requireEnv('PLATFORM_API_KEY');
   const modelId = process.env['PLATFORM_MODEL_ID'] ?? 'o4-mini';
   const modelProvider = process.env['PLATFORM_PROVIDER'] ?? 'openai';
-  const port = Number(process.env['PORT'] ?? '3100');
+  const port = parsePositiveIntEnv(process.env['PORT'], 3100);
   const redisUrl = process.env['REDIS_URL'];
   const blobDir = process.env['BLOB_DIR'] ?? '.playforge-blobs';
   const adminToken = process.env['ADMIN_TOKEN'];
-  const maxConcurrentRunsPerUser = Number(process.env['MAX_CONCURRENT_RUNS'] ?? '1');
-  const maxRunTokens = process.env['MAX_RUN_TOKENS'] ? Number(process.env['MAX_RUN_TOKENS']) : undefined;
+  const maxConcurrentRunsPerUser = parsePositiveIntEnv(process.env['MAX_CONCURRENT_RUNS'], 1);
+  // Stays undefined when unset (no ceiling). A malformed value must NOT become
+  // NaN — that would silently disable the ceiling (`used > NaN` is always
+  // false) — so an invalid value is treated as "unset" with a warning. (M1)
+  const rawMaxRunTokens = process.env['MAX_RUN_TOKENS'];
+  let maxRunTokens: number | undefined;
+  if (rawMaxRunTokens !== undefined && rawMaxRunTokens.trim() !== '') {
+    const n = Number(rawMaxRunTokens);
+    if (Number.isFinite(n) && n > 0) {
+      maxRunTokens = Math.floor(n);
+    } else {
+      console.warn(
+        `[playforge-api] ignoring invalid MAX_RUN_TOKENS ${JSON.stringify(rawMaxRunTokens)}; no run token ceiling`,
+      );
+    }
+  }
   // Public app base URL for the exported game's "Remix this" CTA (#3.2). Configurable.
   const appBaseUrl = process.env['APP_BASE_URL'];
 
@@ -76,7 +113,9 @@ async function main() {
   // Phase 6.2 — password-reset email. Console transport is the dev default
   // (logs the reset link); a real provider swaps in behind EmailPort later.
   const email: EmailPort | undefined =
-    (process.env['EMAIL_TRANSPORT'] ?? 'console') === 'console' ? new ConsoleEmailTransport() : undefined;
+    (process.env['EMAIL_TRANSPORT'] ?? 'console') === 'console'
+      ? new ConsoleEmailTransport()
+      : undefined;
 
   const db = createDb(databaseUrl);
 
@@ -100,23 +139,49 @@ async function main() {
     console.log('[playforge-api] no REDIS_URL — running generation in-process');
   }
 
-  const enqueue: EnqueueFn = async ({ runId, projectId, userId, prompt, parentManifestKey, maxTokens, continuation, isRemix }) => {
+  const enqueue: EnqueueFn = async ({
+    runId,
+    projectId,
+    userId,
+    prompt,
+    parentManifestKey,
+    maxTokens,
+    continuation,
+    isRemix,
+  }) => {
     if (queue) {
-      await queue.add(
-        'generate',
-        {
-          runId,
-          projectId,
-          userId,
-          prompt,
-          model: { provider: modelProvider, modelId },
-          ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
-          ...(maxTokens !== undefined ? { maxTokens } : {}),
-          ...(continuation !== undefined ? { continuation } : {}),
-          ...(isRemix === true ? { isRemix } : {}),
-        },
-        { jobId: runId },
-      );
+      try {
+        await queue.add(
+          'generate',
+          {
+            runId,
+            projectId,
+            userId,
+            prompt,
+            model: { provider: modelProvider, modelId },
+            ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
+            ...(maxTokens !== undefined ? { maxTokens } : {}),
+            ...(continuation !== undefined ? { continuation } : {}),
+            ...(isRemix === true ? { isRemix } : {}),
+          },
+          { jobId: runId },
+        );
+      } catch (err) {
+        // The credit reservation is already committed by the time we enqueue, so
+        // a transient Redis failure here would otherwise strand a *paid* run in
+        // 'queued' until the 30-min reaper. Mark it failed and refund now, so the
+        // user is charged nothing and isn't frozen. Idempotent via the partial
+        // unique 'credit_ledger_refund_key'. (correctness C3)
+        console.error(`[run:${runId}] enqueue to BullMQ failed:`, err);
+        await runRepo.updateStatus(runId, 'failed').catch(() => {});
+        await db
+          .insert(schema.creditLedger)
+          .values({ userId, delta: CREDITS_PER_RUN, reason: 'refund', runId })
+          .onConflictDoNothing()
+          .catch((refundErr: unknown) => {
+            console.error(`[run:${runId}] credit refund after enqueue failure failed:`, refundErr);
+          });
+      }
       return;
     }
 
@@ -132,49 +197,52 @@ async function main() {
         ...(isRemix === true ? { isRemix } : {}),
       },
       { bus, store },
-    ).then(async (result) => {
-      const manifestKey = result.snapshot.manifestKey;
-      await Promise.all([
-        runRepo.setSnapshot(runId, manifestKey),
-        projectRepo.setCurrentManifestKey(projectId, manifestKey),
-        chatRepo.add(projectId, 'artifact_delivered', {
-          runId,
-          previewUrl: `/v1/runs/${runId}/preview/`,
-          engine: result.engine,
-        }),
-      ]).catch((err: unknown) => {
-        console.error(`[run:${runId}] post-completion update failed:`, err);
-      });
-    }).catch(async (err: unknown) => {
-      console.error(`[run:${runId}] generation failed:`, err);
-      await runRepo.updateStatus(runId, 'failed').catch(() => {});
-      // Refund the enqueue-time reservation so a failed run costs nothing. This
-      // mirrors the worker.on('failed') refund for the no-Redis in-process path.
-      // Idempotent via the partial unique 'credit_ledger_refund_key'.
-      await db
-        .insert(schema.creditLedger)
-        .values({ userId, delta: CREDITS_PER_RUN, reason: 'refund', runId })
-        .onConflictDoNothing()
-        .catch((refundErr: unknown) => {
-          console.error(`[run:${runId}] credit refund failed:`, refundErr);
+    )
+      .then(async (result) => {
+        const manifestKey = result.snapshot.manifestKey;
+        await Promise.all([
+          runRepo.setSnapshot(runId, manifestKey),
+          projectRepo.setCurrentManifestKey(projectId, manifestKey),
+          chatRepo.add(projectId, 'artifact_delivered', {
+            runId,
+            previewUrl: `/v1/runs/${runId}/preview/`,
+            engine: result.engine,
+          }),
+        ]).catch((err: unknown) => {
+          console.error(`[run:${runId}] post-completion update failed:`, err);
         });
-    });
+      })
+      .catch(async (err: unknown) => {
+        console.error(`[run:${runId}] generation failed:`, err);
+        await runRepo.updateStatus(runId, 'failed').catch(() => {});
+        // Refund the enqueue-time reservation so a failed run costs nothing. This
+        // mirrors the worker.on('failed') refund for the no-Redis in-process path.
+        // Idempotent via the partial unique 'credit_ledger_refund_key'.
+        await db
+          .insert(schema.creditLedger)
+          .values({ userId, delta: CREDITS_PER_RUN, reason: 'refund', runId })
+          .onConflictDoNothing()
+          .catch((refundErr: unknown) => {
+            console.error(`[run:${runId}] credit refund failed:`, refundErr);
+          });
+      });
   };
 
   // OpenAI embeddings for Hub semantic search — only wired when provider is OpenAI.
-  const embedText = modelProvider === 'openai'
-    ? async (text: string): Promise<number[]> => {
-        const res = await fetch('https://api.openai.com/v1/embeddings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-          body: JSON.stringify({ input: text, model: 'text-embedding-3-small' }),
-        });
-        const json = await res.json() as { data?: Array<{ embedding: number[] }> };
-        const embedding = json.data?.[0]?.embedding;
-        if (!embedding) throw new Error('Embedding API returned no vector');
-        return embedding;
-      }
-    : undefined;
+  const embedText =
+    modelProvider === 'openai'
+      ? async (text: string): Promise<number[]> => {
+          const res = await fetch('https://api.openai.com/v1/embeddings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({ input: text, model: 'text-embedding-3-small' }),
+          });
+          const json = (await res.json()) as { data?: Array<{ embedding: number[] }> };
+          const embedding = json.data?.[0]?.embedding;
+          if (!embedding) throw new Error('Embedding API returned no vector');
+          return embedding;
+        }
+      : undefined;
 
   const server = buildServer({
     repo: projectRepo,
@@ -205,6 +273,16 @@ async function main() {
   // event-bus publisher/readers and the BullMQ generate queue — so the process
   // exits cleanly instead of hanging on open sockets. Mirrors the browser-worker
   // pattern. Idempotent against a double signal.
+  // Last-resort safety net: a stray rejection on a fire-and-forget path must be
+  // logged, not silently dropped (Node may also terminate the process on an
+  // unhandled rejection in a future major). We log and keep serving. (C3)
+  process.on('unhandledRejection', (reason) => {
+    console.error(
+      '[playforge-api] unhandledRejection:',
+      reason instanceof Error ? (reason.stack ?? reason.message) : reason,
+    );
+  });
+
   let shuttingDown = false;
   for (const sig of ['SIGINT', 'SIGTERM'] as const) {
     process.on(sig, () => {
@@ -212,10 +290,16 @@ async function main() {
       shuttingDown = true;
       console.log(`[playforge-api] ${sig} — draining…`);
       void (async () => {
-        await server.close().catch((err: unknown) => console.error('[playforge-api] server close failed:', err));
-        await bus.close().catch((err: unknown) => console.error('[playforge-api] bus close failed:', err));
+        await server
+          .close()
+          .catch((err: unknown) => console.error('[playforge-api] server close failed:', err));
+        await bus
+          .close()
+          .catch((err: unknown) => console.error('[playforge-api] bus close failed:', err));
         if (queue) {
-          await queue.close().catch((err: unknown) => console.error('[playforge-api] queue close failed:', err));
+          await queue
+            .close()
+            .catch((err: unknown) => console.error('[playforge-api] queue close failed:', err));
         }
         process.exit(0);
       })();
@@ -231,4 +315,9 @@ async function main() {
   }
 }
 
-void main();
+// Autostart unless under test (Vitest sets VITEST) or explicitly disabled, so
+// importing this module for its exported helpers doesn't try to boot the server
+// (which would throw on missing DATABASE_URL). Mirrors the worker entrypoint.
+if (process.env['API_NO_AUTOSTART'] !== '1' && process.env['VITEST'] === undefined) {
+  void main();
+}

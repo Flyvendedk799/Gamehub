@@ -1,3 +1,6 @@
+import { type Db, createDb, schema } from '@playforge/db';
+import type { GameSpec } from '@playforge/shared';
+import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
 /**
  * Dev seed script — creates a usable dev account with known credentials AND a
  * starter showcase gallery of playable, remixable published games (#3.7).
@@ -8,9 +11,6 @@
  * already exists (matched on its stable publish slug).
  */
 import { eq } from 'drizzle-orm';
-import { createDb, schema, type Db } from '@playforge/db';
-import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
-import type { GameSpec } from '@playforge/shared';
 import { generateSessionToken, hashPassword, sessionExpiresAt } from './auth';
 
 const DEV_EMAIL = 'dev@playforge.local';
@@ -161,7 +161,9 @@ async function seed() {
     });
 
     const token = generateSessionToken();
-    await db.insert(schema.sessions).values({ token, userId: user.id, expiresAt: sessionExpiresAt() });
+    await db
+      .insert(schema.sessions)
+      .values({ token, userId: user.id, expiresAt: sessionExpiresAt() });
 
     console.log('Dev account created:');
     console.log(`  Email:    ${DEV_EMAIL}`);

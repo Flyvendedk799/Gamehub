@@ -131,6 +131,28 @@ describe('assertSafeUrlString', () => {
     expect(() => assertSafeUrlString('http://')).toThrow(/SSRF_BLOCKED/);
     expect(() => assertSafeUrlString('not a url')).toThrow(/SSRF_BLOCKED/);
   });
+
+  it.each([
+    'https://example.com', // default 443
+    'http://example.com', // default 80
+    'https://example.com:443',
+    'http://example.com:80',
+    'https://example.com:8080',
+    'https://example.com:8443',
+  ])('accepts allowed web port %s', (url) => {
+    expect(() => assertSafeUrlString(url)).not.toThrow();
+  });
+
+  it.each([
+    'http://example.com:6379', // Redis
+    'http://example.com:5432', // Postgres
+    'http://example.com:22', // SSH
+    'http://example.com:25', // SMTP
+    'http://example.com:9200', // Elasticsearch
+    'http://example.com:3000', // arbitrary internal app
+  ])('rejects a public host on a non-web port %s (internal-service SSRF)', (url) => {
+    expect(() => assertSafeUrlString(url)).toThrow(/SSRF_BLOCKED: port not allowed/);
+  });
 });
 
 describe('assertSafeUrl (async)', () => {

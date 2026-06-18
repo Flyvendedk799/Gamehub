@@ -1,12 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getToken } from '@/lib/auth';
 import {
   PREVIEW_IFRAME_ORIGIN,
   TWEAKS_UPDATE_MESSAGE_TYPE,
   parseInboundBridgeMessage,
 } from '@/lib/iframe-bridge';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type TweakKind = 'color' | 'number' | 'boolean';
 
@@ -43,6 +43,7 @@ export function PreviewPane({
   const [tweakValues, setTweakValues] = useState<Record<string, string | number | boolean>>({});
 
   // Reset tweak values when URL changes (new game loaded)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: previewUrl is the intended trigger — reset tweak state whenever a new game URL loads
   useEffect(() => {
     setTweakValues({});
     setShowTweaks(false);
@@ -111,21 +112,22 @@ export function PreviewPane({
           </span>
         )}
         {!previewUrl && (
-          <span className="flex-1 text-center text-xs font-mono text-[#3f3f46]">
-            no preview
-          </span>
+          <span className="flex-1 text-center text-xs font-mono text-[#3f3f46]">no preview</span>
         )}
         <div className="flex items-center gap-2">
           {hasTweaks && previewUrl && (
             <button
+              type="button"
               onClick={() => setShowTweaks((v) => !v)}
               aria-pressed={showTweaks}
               aria-label="Toggle live tweaks panel"
               className={`
                 text-[10px] px-2 py-1 rounded border transition-colors font-mono
-                ${showTweaks
-                  ? 'bg-[#6366f1]/20 text-[#6366f1] border-[#6366f1]/40'
-                  : 'bg-[#1a1a1a] text-[#52525b] border-[#222222] hover:text-[#a1a1aa]'}
+                ${
+                  showTweaks
+                    ? 'bg-[#6366f1]/20 text-[#6366f1] border-[#6366f1]/40'
+                    : 'bg-[#1a1a1a] text-[#52525b] border-[#222222] hover:text-[#a1a1aa]'
+                }
               `}
             >
               ⚙ tweaks
@@ -175,9 +177,7 @@ export function PreviewPane({
                   <BuildingAnimation />
                   <div className="text-center">
                     <p className="text-[#f4f4f5] text-sm font-medium">Building your game…</p>
-                    <p className="mt-1 text-[#52525b] text-xs">
-                      This usually takes 15–60 seconds
-                    </p>
+                    <p className="mt-1 text-[#52525b] text-xs">This usually takes 15–60 seconds</p>
                   </div>
                 </>
               ) : (
@@ -185,9 +185,7 @@ export function PreviewPane({
                   <IdleGraphic />
                   <div className="text-center">
                     <p className="text-[#3f3f46] text-sm">Preview will appear here</p>
-                    <p className="mt-1 text-[#2a2a2a] text-xs">
-                      Start a build to see your game
-                    </p>
+                    <p className="mt-1 text-[#2a2a2a] text-xs">Start a build to see your game</p>
                   </div>
                 </>
               )}
@@ -204,6 +202,7 @@ export function PreviewPane({
                   viewBox="0 0 20 20"
                   fill="none"
                   xmlns="http://www.w3.org/2000/svg"
+                  aria-hidden="true"
                 >
                   <path
                     d="M10 6v4M10 14h.01M19 10a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
@@ -230,9 +229,13 @@ export function PreviewPane({
         {showTweaks && hasTweaks && (
           <div className="w-56 flex-shrink-0 bg-[#0f0f0f] border-l border-[#222222] overflow-y-auto flex flex-col">
             <div className="px-3 py-2 border-b border-[#1a1a1a] flex items-center justify-between">
-              <span className="text-[10px] font-semibold text-[#52525b] uppercase tracking-wider">Live tweaks</span>
+              <span className="text-[10px] font-semibold text-[#52525b] uppercase tracking-wider">
+                Live tweaks
+              </span>
               <button
+                type="button"
                 onClick={() => setShowTweaks(false)}
+                aria-label="Close live tweaks panel"
                 className="text-[#3f3f46] hover:text-[#52525b] text-xs"
               >
                 ✕
@@ -264,13 +267,17 @@ interface TweakControlProps {
 }
 
 function TweakControl({ tweakKey, entry, value, onChange }: TweakControlProps) {
-  const label = tweakKey.replace(/_/g, ' ').replace(/([A-Z])/g, ' $1').toLowerCase().trim();
+  const label = tweakKey
+    .replace(/_/g, ' ')
+    .replace(/([A-Z])/g, ' $1')
+    .toLowerCase()
+    .trim();
 
   if (entry.kind === 'color') {
     const colorVal = typeof value === 'string' ? value : '#6366f1';
     return (
       <div className="flex flex-col gap-1.5">
-        <label className="text-[10px] text-[#52525b] capitalize">{label}</label>
+        <span className="text-[10px] text-[#52525b] capitalize">{label}</span>
         <div className="flex items-center gap-2">
           <input
             type="color"
@@ -292,9 +299,10 @@ function TweakControl({ tweakKey, entry, value, onChange }: TweakControlProps) {
     return (
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center justify-between">
-          <label className="text-[10px] text-[#52525b] capitalize">{label}</label>
+          <span className="text-[10px] text-[#52525b] capitalize">{label}</span>
           <span className="text-[10px] font-mono text-[#3f3f46]">
-            {numVal}{entry.unit ?? ''}
+            {numVal}
+            {entry.unit ?? ''}
           </span>
         </div>
         <input
@@ -315,7 +323,9 @@ function TweakControl({ tweakKey, entry, value, onChange }: TweakControlProps) {
     const switchId = `tweak-${tweakKey}`;
     return (
       <div className="flex items-center justify-between">
-        <label id={switchId} className="text-[10px] text-[#52525b] capitalize">{label}</label>
+        <span id={switchId} className="text-[10px] text-[#52525b] capitalize">
+          {label}
+        </span>
         <button
           type="button"
           role="switch"
@@ -328,10 +338,12 @@ function TweakControl({ tweakKey, entry, value, onChange }: TweakControlProps) {
             ${boolVal ? 'bg-[#6366f1]' : 'bg-[#222222]'}
           `}
         >
-          <span className={`
+          <span
+            className={`
             absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform
             ${boolVal ? 'translate-x-4' : 'translate-x-0.5'}
-          `} />
+          `}
+          />
         </button>
       </div>
     );
@@ -352,6 +364,7 @@ function BuildingAnimation() {
         viewBox="0 0 64 64"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
+        aria-hidden="true"
       >
         <circle
           cx="32"
@@ -365,7 +378,7 @@ function BuildingAnimation() {
       </svg>
       {/* Inner icon */}
       <div className="absolute inset-0 flex items-center justify-center">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <polygon points="4,3 20,12 4,21" fill="#6366f1" className="opacity-80" />
         </svg>
       </div>
@@ -376,7 +389,7 @@ function BuildingAnimation() {
 function IdleGraphic() {
   return (
     <div className="w-16 h-16 rounded-2xl border border-[#1a1a1a] bg-[#111111] flex items-center justify-center">
-      <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
         <polygon points="5,3 23,14 5,25" fill="#2a2a2a" />
       </svg>
     </div>

@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  generateSessionToken,
-  hashPassword,
-  sessionExpiresAt,
-  verifyPassword,
-} from './auth';
+import { generateSessionToken, hashPassword, sessionExpiresAt, verifyPassword } from './auth';
 
 describe('hashPassword / verifyPassword', () => {
   it('produces salt:hex format', async () => {

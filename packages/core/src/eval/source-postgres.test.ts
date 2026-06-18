@@ -8,9 +8,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   PostgresEvalSource,
-  aggregateGenreQuality,
   type QualityWindow,
   type RunQualityRow,
+  aggregateGenreQuality,
 } from './source-postgres';
 
 function row(over: Partial<RunQualityRow> = {}): RunQualityRow {

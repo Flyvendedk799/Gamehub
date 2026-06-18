@@ -4,10 +4,11 @@
  * HTML-stripper edge cases.
  */
 
-import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
+import { ERROR_CODES, PlayforgeError } from '@playforge/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   READ_URL_BODY_TIMEOUT_MS,
+  READ_URL_MAX_BYTES,
   makeReadUrlTool,
   stripHtmlToText,
   wrapFetchedContent,
@@ -116,6 +117,34 @@ describe('read_url — failure paths', () => {
     // it is no longer at end-of-string (the closing tag follows it).
     expect(text).toContain('[…truncated at 1000 chars]');
     expect(text).toMatch(/\[…truncated at 1000 chars\]\n<\/untrusted_fetched_content>$/);
+  });
+
+  it('stops reading at READ_URL_MAX_BYTES instead of buffering an unbounded body (SSRF H1)', async () => {
+    // An origin that would stream far more than the byte cap. We must cancel the
+    // stream once the cap is hit rather than buffer it all into worker memory.
+    const ONE_MB = new Uint8Array(1_000_000).fill(0x61); // 'a' * 1MB
+    let chunksPulled = 0;
+    let cancelled = false;
+    const flood = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        chunksPulled += 1;
+        controller.enqueue(ONE_MB);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(flood, { status: 200 })),
+    );
+
+    const res = await run('https://example.com', 100);
+    // Truncated, and the stream was cancelled — we did not drain it forever.
+    expect(res.details.truncated).toBe(true);
+    expect(cancelled).toBe(true);
+    // We pulled only enough 1MB chunks to reach the cap (a handful), not unbounded.
+    expect(chunksPulled).toBeLessThanOrEqual(READ_URL_MAX_BYTES / 1_000_000 + 1);
   });
 
   it('throws PlayforgeError with REFERENCE_URL_FETCH_TIMEOUT on body-drain timeout', async () => {

@@ -11,8 +11,19 @@
  *   2. `assertSafeUrlString`  — sync: scheme + hostname + literal-IP checks.
  *   3. `assertSafeUrl`        — async: the above, THEN DNS-resolves the
  *                               hostname and re-checks every answer so a public
- *                               name that resolves to 169.254.169.254 / 10.x /
- *                               ::1 is still rejected (basic DNS-rebind defense).
+ *                               name that *statically* resolves to
+ *                               169.254.169.254 / 10.x / ::1 is rejected.
+ *
+ * ⚠️ DNS REBINDING IS NOT FULLY CLOSED HERE. `assertSafeUrl` resolves the host
+ * and validates the answers, but the caller's `fetch()` then performs its OWN
+ * independent DNS resolution to connect — a TOCTOU window in which a low-TTL
+ * attacker record can flip from a public IP (passes the guard) to a private one
+ * (used by the socket). Fully closing this requires PINNING the connection to
+ * the validated IP at connect time (e.g. an undici `Agent` whose `connect.lookup`
+ * returns only the address `assertSafeUrl` validated, applied to every redirect
+ * hop). That needs network-level integration testing and is tracked as a
+ * pre-public-launch hardening item (see SECURITY_AUDIT.md). The guard here still
+ * blocks the far more common static-record and literal-IP cases.
  *
  * REDIRECTS ARE NOT COVERED HERE. A single `assertSafeUrl` call validates one
  * URL. If the caller's fetch follows redirects, the guard is bypassed the
@@ -114,7 +125,7 @@ function parseIpv6(input: string): number[] | null {
     for (const g of segment.split(':')) {
       if (g === '') return null; // stray empty group outside of "::"
       if (!/^[0-9a-fA-F]{1,4}$/.test(g)) return null;
-      groups.push(parseInt(g, 16));
+      groups.push(Number.parseInt(g, 16));
     }
     return groups;
   };
@@ -220,6 +231,16 @@ function isLiteralIp(host: string): boolean {
 const BLOCKED_HOST_SUFFIXES = ['.localhost', '.local', '.internal'] as const;
 
 /**
+ * Ports we allow an outbound server-side fetch to target. `read_url` exists to
+ * pull copy from public *web* pages, which live on 80/443 (plus the common
+ * alt-web ports). An allowlist — rather than a denylist of "bad" ports — closes
+ * SSRF against internal services on non-web ports (Redis 6379, Postgres 5432,
+ * SSH 22, SMTP 25, Elasticsearch 9200, …) by default. The empty string is the
+ * scheme default (http→80, https→443), which `URL.port` reports as ''.
+ */
+const ALLOWED_PORTS = new Set(['', '80', '443', '8080', '8443']);
+
+/**
  * Synchronous, DNS-free URL safety check. Throws `Error('SSRF_BLOCKED: …')`
  * when:
  *   - the URL does not parse,
@@ -241,6 +262,11 @@ export function assertSafeUrlString(url: string): void {
 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error(`SSRF_BLOCKED: scheme not allowed — ${parsed.protocol}`);
+  }
+
+  // Port allowlist — block reaching internal services on non-web ports.
+  if (!ALLOWED_PORTS.has(parsed.port)) {
+    throw new Error(`SSRF_BLOCKED: port not allowed — ${parsed.port}`);
   }
 
   // URL lowercases the hostname already; strip IPv6 brackets so the literal-IP

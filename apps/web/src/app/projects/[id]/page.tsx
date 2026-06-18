@@ -181,6 +181,7 @@ export default function BuilderPage() {
     [refreshSnapshots],
   );
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: run once on mount — kicks off the initial stream and excludes initialRunId/startStream so it doesn't restart on re-render
   useEffect(() => {
     if (initialRunId) {
       startStream(initialRunId);
@@ -292,7 +293,7 @@ export default function BuilderPage() {
       <header className="flex-shrink-0 h-12 border-b border-[#222222] bg-[#111111] flex items-center px-4 gap-3 z-10">
         <Link href="/" className="flex items-center gap-2 group flex-shrink-0">
           <div className="w-6 h-6 rounded-md bg-[#6366f1] flex items-center justify-center">
-            <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
               <polygon points="2,1 9,5.5 2,10" fill="white" />
             </svg>
           </div>
@@ -313,21 +314,15 @@ export default function BuilderPage() {
 
         <div className="flex items-center gap-2 md:gap-3 flex-shrink-0">
           {reconnecting ? (
-            <span
-              className="flex items-center gap-1.5 text-xs text-[#f59e0b] font-mono"
-              role="status"
-            >
+            <output className="flex items-center gap-1.5 text-xs text-[#f59e0b] font-mono">
               <PulseRing color="#f59e0b" />
               <span className="hidden sm:inline">reconnecting</span>
-            </span>
+            </output>
           ) : isBuilding ? (
-            <span
-              className="flex items-center gap-1.5 text-xs text-[#6366f1] font-mono"
-              role="status"
-            >
+            <output className="flex items-center gap-1.5 text-xs text-[#6366f1] font-mono">
               <PulseRing />
               <span className="hidden sm:inline">building</span>
-            </span>
+            </output>
           ) : null}
           {previewUrl && (
             <>
@@ -376,6 +371,7 @@ export default function BuilderPage() {
                 </a>
               ) : (
                 <button
+                  type="button"
                   onClick={() => {
                     void handlePublish();
                   }}
@@ -396,6 +392,7 @@ export default function BuilderPage() {
           {/* History — hidden on small screens */}
           {snapshots.length > 0 && (
             <button
+              type="button"
               onClick={() => setShowTimeline((v) => !v)}
               className={`
                 hidden md:inline-flex
@@ -479,7 +476,9 @@ export default function BuilderPage() {
             <div className="flex items-center justify-between px-4 py-3 border-b border-[#222222]">
               <span className="text-xs font-semibold text-[#f4f4f5]">Version history</span>
               <button
+                type="button"
                 onClick={() => setShowTimeline(false)}
+                aria-label="Close version history"
                 className="text-[#52525b] hover:text-[#a1a1aa] text-xs"
               >
                 ✕
@@ -521,6 +520,7 @@ export default function BuilderPage() {
                       </p>
                     </div>
                     <button
+                      type="button"
                       onClick={() => {
                         void handleRevert(snap.id);
                       }}

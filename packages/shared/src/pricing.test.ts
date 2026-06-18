@@ -97,28 +97,48 @@ describe('computeImpliedCost (Phase 3)', () => {
     // 1M fresh input → $5
     expect(
       computeImpliedCost(
-        { inputTokens: 1_000_000, cachedInputTokens: 0, cacheCreationInputTokens: 0, outputTokens: 0 },
+        {
+          inputTokens: 1_000_000,
+          cachedInputTokens: 0,
+          cacheCreationInputTokens: 0,
+          outputTokens: 0,
+        },
         'claude-opus-4-8',
       ),
     ).toBeCloseTo(5, 6);
     // 1M cached input → $0.50
     expect(
       computeImpliedCost(
-        { inputTokens: 1_000_000, cachedInputTokens: 1_000_000, cacheCreationInputTokens: 0, outputTokens: 0 },
+        {
+          inputTokens: 1_000_000,
+          cachedInputTokens: 1_000_000,
+          cacheCreationInputTokens: 0,
+          outputTokens: 0,
+        },
         'claude-opus-4-8',
       ),
     ).toBeCloseTo(0.5, 6);
     // 1M cache-creation → $6.25
     expect(
       computeImpliedCost(
-        { inputTokens: 1_000_000, cachedInputTokens: 0, cacheCreationInputTokens: 1_000_000, outputTokens: 0 },
+        {
+          inputTokens: 1_000_000,
+          cachedInputTokens: 0,
+          cacheCreationInputTokens: 1_000_000,
+          outputTokens: 0,
+        },
         'claude-opus-4-8',
       ),
     ).toBeCloseTo(6.25, 6);
     // 1M output → $25
     expect(
       computeImpliedCost(
-        { inputTokens: 0, cachedInputTokens: 0, cacheCreationInputTokens: 0, outputTokens: 1_000_000 },
+        {
+          inputTokens: 0,
+          cachedInputTokens: 0,
+          cacheCreationInputTokens: 0,
+          outputTokens: 1_000_000,
+        },
         'claude-opus-4-8',
       ),
     ).toBeCloseTo(25, 6);
@@ -128,28 +148,48 @@ describe('computeImpliedCost (Phase 3)', () => {
     // 1M fresh input → $1
     expect(
       computeImpliedCost(
-        { inputTokens: 1_000_000, cachedInputTokens: 0, cacheCreationInputTokens: 0, outputTokens: 0 },
+        {
+          inputTokens: 1_000_000,
+          cachedInputTokens: 0,
+          cacheCreationInputTokens: 0,
+          outputTokens: 0,
+        },
         'claude-haiku-4-5',
       ),
     ).toBeCloseTo(1, 6);
     // 1M cached input → $0.10
     expect(
       computeImpliedCost(
-        { inputTokens: 1_000_000, cachedInputTokens: 1_000_000, cacheCreationInputTokens: 0, outputTokens: 0 },
+        {
+          inputTokens: 1_000_000,
+          cachedInputTokens: 1_000_000,
+          cacheCreationInputTokens: 0,
+          outputTokens: 0,
+        },
         'claude-haiku-4-5',
       ),
     ).toBeCloseTo(0.1, 6);
     // 1M cache-creation → $1.25
     expect(
       computeImpliedCost(
-        { inputTokens: 1_000_000, cachedInputTokens: 0, cacheCreationInputTokens: 1_000_000, outputTokens: 0 },
+        {
+          inputTokens: 1_000_000,
+          cachedInputTokens: 0,
+          cacheCreationInputTokens: 1_000_000,
+          outputTokens: 0,
+        },
         'claude-haiku-4-5',
       ),
     ).toBeCloseTo(1.25, 6);
     // 1M output → $5
     expect(
       computeImpliedCost(
-        { inputTokens: 0, cachedInputTokens: 0, cacheCreationInputTokens: 0, outputTokens: 1_000_000 },
+        {
+          inputTokens: 0,
+          cachedInputTokens: 0,
+          cacheCreationInputTokens: 0,
+          outputTokens: 1_000_000,
+        },
         'claude-haiku-4-5',
       ),
     ).toBeCloseTo(5, 6);

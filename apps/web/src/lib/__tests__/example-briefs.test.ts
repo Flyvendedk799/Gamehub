@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  GAME_EXAMPLE_BRIEFS,
-  briefEngineToApiEngine,
-  briefToPrompt,
-} from '../example-briefs';
+import { GAME_EXAMPLE_BRIEFS, briefEngineToApiEngine, briefToPrompt } from '../example-briefs';
 
 describe('example-briefs (#3.5)', () => {
   it('maps the templates engine spelling to the createProject Engine union', () => {

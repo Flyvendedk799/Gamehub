@@ -83,6 +83,26 @@ export function runChannel(runId: string): string {
 }
 
 /**
+ * Parse a stream entry's JSON payload, returning a sentinel-free result. A
+ * single corrupt entry must never throw: in the XRANGE replay it would reject
+ * the whole `subscribe()`; in the live XREAD loop it would escape the `try`
+ * (which only wraps `xread`) and kill the polling loop, silently stranding the
+ * stream. We log and skip the bad entry instead.
+ */
+export function safeParseStreamData(raw: string): { ok: true; value: unknown } | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(raw) as unknown };
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(
+      '[bus] skipping unparseable stream entry:',
+      err instanceof Error ? err.message : err,
+    );
+    return { ok: false };
+  }
+}
+
+/**
  * Production event bus backed by Redis Streams.
  *
  * Uses XADD for publish and XRANGE + XREAD(BLOCK) for subscribe-with-replay:
@@ -157,7 +177,10 @@ export class RedisEventBus implements EventBus {
       const dataIdx = fields.indexOf('data');
       if (dataIdx !== -1) {
         const raw = fields[dataIdx + 1];
-        if (raw !== undefined) handler(JSON.parse(raw) as unknown);
+        if (raw !== undefined) {
+          const parsed = safeParseStreamData(raw);
+          if (parsed.ok) handler(parsed.value);
+        }
       }
       lastId = id;
     }
@@ -169,7 +192,13 @@ export class RedisEventBus implements EventBus {
         let result: XResult | null = null;
         try {
           result = (await reader.xread(
-            'COUNT', '100', 'BLOCK', '5000', 'STREAMS', channel, lastId,
+            'COUNT',
+            '100',
+            'BLOCK',
+            '5000',
+            'STREAMS',
+            channel,
+            lastId,
           )) as XResult | null;
         } catch {
           if (!active) break;
@@ -183,7 +212,10 @@ export class RedisEventBus implements EventBus {
               const dataIdx = fields.indexOf('data');
               if (dataIdx !== -1) {
                 const raw = fields[dataIdx + 1];
-                if (raw !== undefined) handler(JSON.parse(raw) as unknown);
+                if (raw !== undefined) {
+                  const parsed = safeParseStreamData(raw);
+                  if (parsed.ok) handler(parsed.value);
+                }
               }
               lastId = id;
             }

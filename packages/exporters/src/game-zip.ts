@@ -12,7 +12,7 @@
  * `data:base64,` content before handing to this exporter.
  */
 
-import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
+import { ERROR_CODES, PlayforgeError } from '@playforge/shared';
 import type { ExportResult } from './index';
 import type { ZipAsset } from './zip';
 

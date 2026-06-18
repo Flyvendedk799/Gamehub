@@ -1,3 +1,10 @@
+import type { ContinuationPromptInput } from '@playforge/agent-core';
+import { RedisEventBus } from '@playforge/bus';
+import { createDb, schema } from '@playforge/db';
+import type { AbortKind, ModelRef } from '@playforge/shared';
+import { classifyAbortKind } from '@playforge/shared';
+import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
+import { Queue, Worker } from 'bullmq';
 /**
  * Generation worker — BullMQ consumer.
  *
@@ -25,13 +32,6 @@
  *   WORKER_CONCURRENCY  parallel jobs per instance (default: 2)
  */
 import { and, eq, inArray, sql } from 'drizzle-orm';
-import { Queue, Worker } from 'bullmq';
-import { RedisEventBus } from '@playforge/bus';
-import { createDb, schema } from '@playforge/db';
-import type { AbortKind, ModelRef } from '@playforge/shared';
-import { classifyAbortKind } from '@playforge/shared';
-import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
-import type { ContinuationPromptInput } from '@playforge/agent-core';
 import {
   BrowserJobsClient,
   type PlaytestResult,
@@ -45,6 +45,25 @@ function requireEnv(name: string): string {
   const val = process.env[name];
   if (!val) throw new Error(`Missing required env var: ${name}`);
   return val;
+}
+
+/**
+ * Parse a positive-integer env var, falling back to `fallback` for unset OR
+ * malformed values. Guards against a typo like `WORKER_CONCURRENCY=two` →
+ * `NaN`, which silently breaks downstream consumers: `new Worker({concurrency:
+ * NaN})`, `setInterval(fn, NaN)` (NaN coerces to a 0ms hot loop), and a `NaN`
+ * token ceiling makes every `used > NaN` comparison false, disabling the budget. (M1)
+ */
+export function parsePositiveIntEnv(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    console.warn(
+      `[playforge-worker] ignoring invalid numeric env value ${JSON.stringify(raw)}; using ${fallback}`,
+    );
+    return fallback;
+  }
+  return Math.floor(n);
 }
 
 function parseRedisUrl(url: string): { host: string; port: number } {
@@ -172,7 +191,7 @@ async function main() {
   const modelId = process.env['PLATFORM_MODEL_ID'] ?? 'o4-mini';
   const modelProvider = process.env['PLATFORM_PROVIDER'] ?? 'openai';
   const blobDir = process.env['BLOB_DIR'] ?? '.playforge-blobs';
-  const concurrency = Number(process.env['WORKER_CONCURRENCY'] ?? '2');
+  const concurrency = parsePositiveIntEnv(process.env['WORKER_CONCURRENCY'], 2);
 
   const db = createDb(databaseUrl);
   const bus = new RedisEventBus(redisUrl);
@@ -215,7 +234,17 @@ async function main() {
   const worker = new Worker<GenerateJobData>(
     'generate',
     async (job) => {
-      const { runId, projectId, prompt, parentManifestKey, apiKey: jobApiKey, model: jobModel, continuation, maxTokens, isRemix } = job.data;
+      const {
+        runId,
+        projectId,
+        prompt,
+        parentManifestKey,
+        apiKey: jobApiKey,
+        model: jobModel,
+        continuation,
+        maxTokens,
+        isRemix,
+      } = job.data;
       const apiKey = jobApiKey ?? platformApiKey;
       const model: ModelRef = jobModel ?? { provider: modelProvider, modelId };
 
@@ -459,8 +488,14 @@ async function main() {
   // (insert +CREDITS_PER_RUN, reason 'refund', runId, onConflictDoNothing —
   // guarded by the partial-unique 'credit_ledger_refund_key').
   const reapQueue = new Queue('generate', { connection });
-  const stuckAfterMs = Number(process.env['REAP_STUCK_AFTER_MS'] ?? String(DEFAULT_REAP_STUCK_AFTER_MS));
-  const reapIntervalMs = Number(process.env['REAP_INTERVAL_MS'] ?? String(DEFAULT_REAP_INTERVAL_MS));
+  const stuckAfterMs = parsePositiveIntEnv(
+    process.env['REAP_STUCK_AFTER_MS'],
+    DEFAULT_REAP_STUCK_AFTER_MS,
+  );
+  const reapIntervalMs = parsePositiveIntEnv(
+    process.env['REAP_INTERVAL_MS'],
+    DEFAULT_REAP_INTERVAL_MS,
+  );
 
   async function reapStuckRunsOnce(): Promise<number> {
     // Pull non-terminal runs; the pure selector decides which are stale.
@@ -507,8 +542,18 @@ async function main() {
       try {
         const updated = await db
           .update(schema.runs)
-          .set({ status: 'failed', abortKind: REAPED_ABORT_KIND, updatedAt: new Date(), finishedAt: new Date() })
-          .where(and(eq(schema.runs.id, candidate.id), inArray(schema.runs.status, ['queued', 'running'])))
+          .set({
+            status: 'failed',
+            abortKind: REAPED_ABORT_KIND,
+            updatedAt: new Date(),
+            finishedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(schema.runs.id, candidate.id),
+              inArray(schema.runs.status, ['queued', 'running']),
+            ),
+          )
           .returning({ id: schema.runs.id });
         transitioned = updated.length > 0;
       } catch (err) {
@@ -520,7 +565,12 @@ async function main() {
       // Refund EXACTLY ONCE — idempotent via 'credit_ledger_refund_key'.
       await db
         .insert(schema.creditLedger)
-        .values({ userId: candidate.userId, delta: CREDITS_PER_RUN, reason: 'refund', runId: candidate.id })
+        .values({
+          userId: candidate.userId,
+          delta: CREDITS_PER_RUN,
+          reason: 'refund',
+          runId: candidate.id,
+        })
         .onConflictDoNothing()
         .catch((refundErr: unknown) => {
           console.error(`[reaper] credit refund failed for run ${candidate.id}:`, refundErr);
@@ -573,6 +623,15 @@ async function main() {
   // reaper, let the BullMQ Worker finish/release its active job, then close
   // every Redis-backed handle (worker, reaper queue, browser-jobs client, bus)
   // so the process exits instead of hanging on open connections.
+  // Last-resort safety net for stray rejections on fire-and-forget paths (e.g.
+  // a publish that loses Redis mid-job): log, don't let the process die silently. (C3)
+  process.on('unhandledRejection', (reason) => {
+    console.error(
+      '[playforge-worker] unhandledRejection:',
+      reason instanceof Error ? (reason.stack ?? reason.message) : reason,
+    );
+  });
+
   let shuttingDown = false;
   for (const sig of ['SIGINT', 'SIGTERM'] as const) {
     process.on(sig, () => {
@@ -584,8 +643,12 @@ async function main() {
         // worker.close() waits for the in-flight job to finish, then stops
         // pulling new jobs and releases its Redis connection.
         await worker.close().catch((err: unknown) => console.error('[worker] close failed:', err));
-        await reapQueue.close().catch((err: unknown) => console.error('[reaper] queue close failed:', err));
-        await browserClient?.close().catch((err: unknown) => console.error('[browser-jobs] close failed:', err));
+        await reapQueue
+          .close()
+          .catch((err: unknown) => console.error('[reaper] queue close failed:', err));
+        await browserClient
+          ?.close()
+          .catch((err: unknown) => console.error('[browser-jobs] close failed:', err));
         await bus.close().catch((err: unknown) => console.error('[bus] close failed:', err));
         process.exit(0);
       })();

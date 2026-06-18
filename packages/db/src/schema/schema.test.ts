@@ -55,7 +55,13 @@ describe('schema', () => {
 
   it('snapshots point at a content-addressed manifest', () => {
     expect(columnNames(snapshots)).toEqual(
-      expect.arrayContaining(['project_id', 'seq', 'files_manifest_key', 'files_hash', 'game_spec']),
+      expect.arrayContaining([
+        'project_id',
+        'seq',
+        'files_manifest_key',
+        'files_hash',
+        'game_spec',
+      ]),
     );
   });
 
@@ -123,10 +129,7 @@ describe('schema', () => {
 
   it('password_reset_tokens has a unique hash index + a user lookup index', () => {
     expect(indexNames(passwordResetTokens)).toEqual(
-      expect.arrayContaining([
-        'password_reset_tokens_hash_key',
-        'password_reset_tokens_user_idx',
-      ]),
+      expect.arrayContaining(['password_reset_tokens_hash_key', 'password_reset_tokens_user_idx']),
     );
     const cfg = getTableConfig(passwordResetTokens);
     const hashKey = cfg.indexes.find((i) => i.config.name === 'password_reset_tokens_hash_key');

@@ -114,6 +114,7 @@ export class InMemoryProjectRepo implements ProjectRepo {
 
   async setCurrentSnapshot(id: string, snapshotId: string, manifestKey: string): Promise<void> {
     const p = this.byId.get(id);
-    if (p) this.byId.set(id, { ...p, currentSnapshotId: snapshotId, currentManifestKey: manifestKey });
+    if (p)
+      this.byId.set(id, { ...p, currentSnapshotId: snapshotId, currentManifestKey: manifestKey });
   }
 }

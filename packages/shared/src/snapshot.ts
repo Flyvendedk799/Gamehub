@@ -261,9 +261,9 @@ export interface ChatContinuationPendingPayload {
 // ---------------------------------------------------------------------------
 // Virtual FS (Workstream E — Phase 2 agent tools)
 //
-// Per-design file tree stored in SQLite, written by the text_editor tool via
+// Per-project file tree stored in SQLite, written by the text_editor tool via
 // the agent runtime. Paths are POSIX-relative ("index.html",
-// "_starters/ios-frame.jsx"); never absolute, never contain "..".
+// "assets/sprite.png"); never absolute, never contain "..".
 // ---------------------------------------------------------------------------
 
 export const DesignFileV1 = z.object({
@@ -363,18 +363,18 @@ export interface SnapshotCreateInput {
 
 // ---------------------------------------------------------------------------
 // User-authored skills (backlog-2 #7) — the "Skills hub tab" output of the
-// in-app authoring flow. Persisted alongside the built-in DESIGN_SKILLS so
-// the agent can `view_design_skill` either kind on the next generation.
+// in-app authoring flow. Persisted alongside the built-in skills so
+// the agent can view either kind on the next generation.
 // ---------------------------------------------------------------------------
 
 export const UserSkillV1 = z.object({
   schemaVersion: z.literal(1).default(1),
   id: z.string().min(1),
-  /** Slug-form label the agent matches against. Must be a valid jsx file
+  /** Slug-form label the agent matches against. Must be a valid file
    *  stem (e.g. `mobile-tab-bar`, `lesson-row`) so it round-trips through
-   *  the existing `view_design_skill name` parameter. */
+   *  the skill-lookup name parameter. */
   name: z.string().min(1).max(80),
-  /** One-sentence "when to use" hint shown in `list_design_skills`. The
+  /** One-sentence "when to use" hint shown in the skill catalogue. The
    *  agent reads this to decide whether to pull the source. */
   whenToUse: z.string().min(1).max(500),
   /** JSX/HTML body of the skill — already parameterised (placeholders for

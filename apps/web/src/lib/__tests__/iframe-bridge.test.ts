@@ -44,6 +44,8 @@ describe('parseInboundBridgeMessage', () => {
   });
 
   it('accepts a well-formed message from the trusted origin', () => {
-    expect(parseInboundBridgeMessage(evt(PREVIEW_IFRAME_ORIGIN, { type: 'ack' }))).toEqual({ type: 'ack' });
+    expect(parseInboundBridgeMessage(evt(PREVIEW_IFRAME_ORIGIN, { type: 'ack' }))).toEqual({
+      type: 'ack',
+    });
   });
 });

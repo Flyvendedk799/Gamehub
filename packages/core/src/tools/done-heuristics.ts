@@ -81,7 +81,7 @@ const INTERACTIVITY_TOKENS = [
   /\baddEventListener\s*\(/g,
   /\buseState\s*\(/g,
   /\bsetState\s*\(/g,
-  /\busePopover\s*\(/g, // common in design-skills
+  /\busePopover\s*\(/g, // common in UI snippets
 ];
 
 export function scanInteractivity(src: string): DoneError[] {

@@ -1,10 +1,10 @@
 'use client';
 
+import { login } from '@/lib/api';
+import { setToken } from '@/lib/auth';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
-import { login } from '@/lib/api';
-import { setToken } from '@/lib/auth';
 
 function LoginForm() {
   const router = useRouter();
@@ -90,7 +90,7 @@ export default function LoginPage() {
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 mb-6 group">
             <div className="w-8 h-8 rounded-lg bg-[#6366f1] flex items-center justify-center">
-              <svg width="16" height="16" viewBox="0 0 22 22" fill="none">
+              <svg width="16" height="16" viewBox="0 0 22 22" fill="none" aria-hidden="true">
                 <polygon points="4,3 18,11 4,19" fill="white" />
               </svg>
             </div>
@@ -110,7 +110,10 @@ export default function LoginPage() {
 
         <p className="mt-4 text-center text-sm text-[#52525b]">
           Don&apos;t have an account?{' '}
-          <Link href="/auth/register" className="text-[#6366f1] hover:text-[#818cf8] transition-colors">
+          <Link
+            href="/auth/register"
+            className="text-[#6366f1] hover:text-[#818cf8] transition-colors"
+          >
             Sign up
           </Link>
         </p>

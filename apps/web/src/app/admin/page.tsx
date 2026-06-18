@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { API_BASE } from '@/lib/config';
+import { useEffect, useState } from 'react';
 
 const BASE = API_BASE;
 
@@ -50,7 +50,10 @@ function Bar({ value, max, color }: { value: number; max: number; color: string 
   return (
     <div className="flex items-center gap-3">
       <div className="flex-1 h-2 bg-[#1a1a1a] rounded-full overflow-hidden">
-        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: color }} />
+        <div
+          className="h-full rounded-full transition-all duration-500"
+          style={{ width: `${pct}%`, background: color }}
+        />
       </div>
       <span className="text-xs text-[#71717a] w-8 text-right">{pct}%</span>
     </div>
@@ -72,10 +75,10 @@ export default function AdminDashboard() {
         headers: t ? { 'x-admin-token': t } : {},
       });
       if (!res.ok) {
-        const j = await res.json() as { error?: string };
+        const j = (await res.json()) as { error?: string };
         throw new Error(j.error ?? `HTTP ${res.status}`);
       }
-      const data = await res.json() as Metrics;
+      const data = (await res.json()) as Metrics;
       setMetrics(data);
       setLastRefresh(new Date());
     } catch (err) {
@@ -86,6 +89,7 @@ export default function AdminDashboard() {
   }
 
   // Auto-refresh every 15s when metrics are loaded.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally excludes fetchMetrics (recreated each render) to avoid tearing down and rebuilding the interval on every render
   useEffect(() => {
     if (!metrics) return;
     const id = setInterval(() => void fetchMetrics(token), 15_000);
@@ -117,11 +121,14 @@ export default function AdminDashboard() {
           type="password"
           value={token}
           onChange={(e) => setToken(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') void fetchMetrics(token); }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void fetchMetrics(token);
+          }}
           placeholder="Admin token (leave blank if none configured)"
           className="flex-1 bg-[#111111] border border-[#222222] rounded-lg px-4 py-2 text-sm text-[#f4f4f5] placeholder-[#3f3f46] outline-none focus:border-[#6366f1] transition-colors"
         />
         <button
+          type="button"
           onClick={() => void fetchMetrics(token)}
           disabled={loading}
           className="px-4 py-2 rounded-lg bg-[#6366f1] hover:bg-[#4f46e5] text-white text-sm font-medium transition-colors disabled:opacity-50"
@@ -140,7 +147,9 @@ export default function AdminDashboard() {
         <div className="space-y-8">
           {/* Generation runs */}
           <section>
-            <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wide mb-4">Generation Runs</h2>
+            <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wide mb-4">
+              Generation Runs
+            </h2>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
               <StatCard label="Total" value={runs?.total ?? 0} />
               <StatCard label="Completed" value={runs?.completed ?? 0} />
@@ -152,14 +161,18 @@ export default function AdminDashboard() {
                 <div>
                   <div className="flex justify-between text-xs mb-1.5">
                     <span className="text-[#71717a]">Success rate</span>
-                    <span className="text-emerald-400 font-medium">{Math.round(runs.successRate * 100)}%</span>
+                    <span className="text-emerald-400 font-medium">
+                      {Math.round(runs.successRate * 100)}%
+                    </span>
                   </div>
                   <Bar value={runs.completed} max={runs.total} color="#10b981" />
                 </div>
                 <div>
                   <div className="flex justify-between text-xs mb-1.5">
                     <span className="text-[#71717a]">Failure rate</span>
-                    <span className="text-rose-400 font-medium">{Math.round((runs.failed / runs.total) * 100)}%</span>
+                    <span className="text-rose-400 font-medium">
+                      {Math.round((runs.failed / runs.total) * 100)}%
+                    </span>
                   </div>
                   <Bar value={runs.failed} max={runs.total} color="#f43f5e" />
                 </div>
@@ -170,7 +183,9 @@ export default function AdminDashboard() {
           {/* Community Hub */}
           {hub && (
             <section>
-              <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wide mb-4">Community Hub</h2>
+              <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wide mb-4">
+                Community Hub
+              </h2>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <StatCard label="Published" value={hub.totalPublished} />
                 <StatCard label="Total Plays" value={hub.totalPlays.toLocaleString()} />
@@ -183,7 +198,9 @@ export default function AdminDashboard() {
           {/* BullMQ queue depth */}
           {metrics.queue && (
             <section>
-              <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wide mb-4">Generation Queue (BullMQ)</h2>
+              <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wide mb-4">
+                Generation Queue (BullMQ)
+              </h2>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <StatCard label="Waiting" value={metrics.queue.waiting} />
                 <StatCard label="Active" value={metrics.queue.active} />
@@ -195,7 +212,9 @@ export default function AdminDashboard() {
 
           {/* Presence */}
           <section>
-            <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wide mb-4">Realtime Presence</h2>
+            <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wide mb-4">
+              Realtime Presence
+            </h2>
             <div className="grid grid-cols-2 gap-3">
               <StatCard label="Projects with viewers" value={metrics.presenceProjects} />
               <StatCard label="Connected sockets" value={metrics.connectedSockets} />

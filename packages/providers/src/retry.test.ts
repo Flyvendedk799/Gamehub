@@ -1,4 +1,4 @@
-import { type ChatMessage, PlayforgeError, type ModelRef } from '@playforge/shared';
+import { type ChatMessage, type ModelRef, PlayforgeError } from '@playforge/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GenerateOptions, GenerateResult } from './index';
 import {

@@ -29,6 +29,14 @@ const REJECTED: Array<[string, string]> = [
   ['newline control char', `a${String.fromCharCode(10)}b.txt`],
   ['empty', ''],
   ['whitespace only', '   '],
+  // Aligned with the storage-layer guard so the two layers accept the same set
+  // (no surprise late failure at persist time).
+  ['single-dot segment', 'a/./b.html'],
+  ['leading dot segment', './index.html'],
+  ['trailing slash (empty last segment)', 'assets/'],
+  ['double slash (empty middle segment)', 'assets//hero.png'],
+  // Non-NFC (decomposed) form of "é" — storage rejects non-NFC paths.
+  ['non-NFC decomposed unicode', `cafe${String.fromCharCode(0x301)}.html`],
 ];
 
 const ACCEPTED = ['index.html', 'src/main.ts', 'assets/sprites/hero.png', '_starters/frame.jsx'];
@@ -93,7 +101,12 @@ describe('text_editor path-traversal guard (#49)', () => {
     await expect(
       tool.execute(
         'id',
-        { command: 'str_replace', path: `index${String.fromCharCode(0)}.html`, old_str: 'a', new_str: 'b' },
+        {
+          command: 'str_replace',
+          path: `index${String.fromCharCode(0)}.html`,
+          old_str: 'a',
+          new_str: 'b',
+        },
         undefined,
       ),
     ).rejects.toThrow(/control character/);

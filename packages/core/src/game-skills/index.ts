@@ -12,13 +12,13 @@
  *      camera-kick, knockback — one per engine (Phaser 3 + Three.js).
  *
  * Each file is a self-contained ES module with a leading `// when_to_use:`
- * hint comment (same convention as design-skills) so the agent can pick the
+ * hint comment so the agent can pick the
  * matching snippet before writing code. The `engine` + `category` fields let
  * `list_game_feel` filter to the relevant engine and surface the feel set.
  *
  * Loaded via `readFileSync(new URL(...))` — Vite's `?raw` suffix is
- * unavailable outside the bundler (the cloud agent runs under plain Node/tsx),
- * matching how `../design-skills/index.ts` loads its `.jsx` payloads. The
+ * unavailable outside the bundler (the cloud agent runs under plain Node/tsx).
+ * The
  * package is consumed straight from `./src`, so the sibling `.js`/`.jsx`
  * payloads resolve relative to this module at runtime.
  */

@@ -36,7 +36,9 @@ export interface RunRepo {
   /** Count queued/running runs for a user (for concurrent run cap). */
   countActiveByUser(userId: string): Promise<number>;
   /** Load the continuation payload (jsonb) from a paused run, if any. */
-  getPausedContinuation(projectId: string): Promise<{ continuation: unknown; snapshotManifestKey: string | null } | null>;
+  getPausedContinuation(
+    projectId: string,
+  ): Promise<{ continuation: unknown; snapshotManifestKey: string | null } | null>;
   /** Aggregate run stats for build-health dashboard. */
   getStats(): Promise<RunStats>;
   /** Mark a run as paused with a continuation payload (used in tests and Drizzle impl). */
@@ -87,10 +89,14 @@ export class InMemoryRunRepo implements RunRepo {
     ).length;
   }
 
-  async getPausedContinuation(projectId: string): Promise<{ continuation: unknown; snapshotManifestKey: string | null } | null> {
+  async getPausedContinuation(
+    projectId: string,
+  ): Promise<{ continuation: unknown; snapshotManifestKey: string | null } | null> {
     // Find the most recently created paused run for this project.
     const paused = [...this.byId.values()]
-      .filter((r) => r.projectId === projectId && r.status === 'paused' && r.continuation !== undefined)
+      .filter(
+        (r) => r.projectId === projectId && r.status === 'paused' && r.continuation !== undefined,
+      )
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0];
     if (!paused) return null;
     return {

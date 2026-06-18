@@ -17,14 +17,14 @@ import {
   type AgentEvent,
   type AttemptObservation,
   type DoneError,
+  type RuntimeVerifyObservation as EvalRuntimeVerify,
   type GenerateInput,
   type GenerateOutput,
   type GenerateViaAgentDeps,
+  type PlaytestStep,
   type PlaytesterInput,
   type PlaytesterOutput,
-  type PlaytestStep,
   type RepairVerdict,
-  type RuntimeVerifyObservation as EvalRuntimeVerify,
   type ShipReason,
   buildRepairVerdict,
   decideRepairAction,
@@ -33,14 +33,14 @@ import {
   selectGamePlaytestPlan,
   traceFromPlaytestResult,
 } from '@playforge/agent-core';
-import type { ChatMessage } from '@playforge/shared';
-// Import from the engines subpath, NOT the package root — the root re-exports the
-// desktop React/Babel design-canvas vendor (?raw) which has no business in the
+// Import from the engines subpath, NOT the package root — the root pulls in
+// browser/Vite-only vendor assets (?raw) that have no business in the
 // game-gen worker and won't resolve under its tsconfig.
 import { GAME_ENGINE_ADAPTERS } from '@playforge/runtime/engines';
-import { makeAssetGenerator } from './asset-generator';
+import type { ChatMessage } from '@playforge/shared';
 import type { GameSpec, ModelRef } from '@playforge/shared';
 import type { SnapshotStore, WriteResult } from '@playforge/storage';
+import { makeAssetGenerator } from './asset-generator';
 import { WorkingTree } from './working-tree';
 
 export type WebEngine = 'three' | 'phaser';
@@ -93,7 +93,10 @@ export interface BrowserJobsPort {
   runtimeVerify(htmlContent: string): Promise<RuntimeVerifyVerdict | null>;
   /** Boot the artifact, drive the synthetic-input plan, return the snapshot
    *  trace. `null` when no verdict could be obtained. */
-  playtest(htmlContent: string, steps: ReadonlyArray<PlaytestStep>): Promise<PlaytestVerdict | null>;
+  playtest(
+    htmlContent: string,
+    steps: ReadonlyArray<PlaytestStep>,
+  ): Promise<PlaytestVerdict | null>;
 }
 
 /** Minimal runtime-verify verdict the worker consumes from the browser-jobs
@@ -150,7 +153,11 @@ export interface PlaytestVerdict {
   hasGameContract: boolean;
   hasDebugContract: boolean;
   baselineSnapshot: unknown;
-  steps: ReadonlyArray<{ step: PlaytestStep; snapshotAfter: unknown; errors: ReadonlyArray<string> }>;
+  steps: ReadonlyArray<{
+    step: PlaytestStep;
+    snapshotAfter: unknown;
+    errors: ReadonlyArray<string>;
+  }>;
   bootErrors: ReadonlyArray<string>;
 }
 
@@ -265,9 +272,8 @@ export async function runGeneration(
   // validate → playtest → done tail; a stingy floor aborts a build before it can
   // validate, shipping an unvalidated game. (The token CEILING above is the real
   // cost guard; this is just the soft tool-call cap's floor.)
-  const maxToolCalls = ports.maxTokens !== undefined
-    ? Math.max(40, Math.floor(ports.maxTokens / 3000))
-    : 120;
+  const maxToolCalls =
+    ports.maxTokens !== undefined ? Math.max(40, Math.floor(ports.maxTokens / 3000)) : 120;
   const maxWallClockMs = 20 * 60 * 1000; // 20 minutes hard wall
 
   // In-run mutable state the agent reads/writes via the gameMode callbacks and
@@ -280,6 +286,13 @@ export async function runGeneration(
   // Wrap the caller's event sink so we can meter token usage from `turn_end`
   // events and trip the abort signal once the budget is exceeded. When no token
   // ceiling is set, this is a transparent pass-through.
+  //
+  // Each `turn_end` carries that ONE turn's usage (the codebase's own
+  // `aggregateRunUsage` sums per-turn usage to get a run total — proof the value
+  // is per-turn, not cumulative). So we accumulate across turns and compare the
+  // RUN total to the ceiling; comparing a single turn against the whole-run
+  // budget let a many-turn run spend a large multiple of the ceiling unchecked. (H1)
+  let usedTotalTokens = 0;
   const wrappedOnEvent: ((event: AgentEvent) => void) | undefined =
     ports.onEvent === undefined && tokenAbortController === undefined
       ? undefined
@@ -287,8 +300,8 @@ export async function runGeneration(
           if (tokenAbortController && !aborted && event.type === 'turn_end') {
             const usage = (event.message as { usage?: { input?: number; output?: number } }).usage;
             if (usage) {
-              const used = (usage.input ?? 0) + (usage.output ?? 0);
-              if (used > ports.maxTokens!) {
+              usedTotalTokens += (usage.input ?? 0) + (usage.output ?? 0);
+              if (usedTotalTokens > ports.maxTokens!) {
                 aborted = true;
                 tokenAbortController.abort();
               }
@@ -346,7 +359,9 @@ export async function runGeneration(
 
   // `playtest_game`'s host playtester: drive the agent's synthetic-input plan
   // in the browser-worker and map the trace back to the agent PlaytesterOutput.
-  const playtester: NonNullable<NonNullable<GenerateViaAgentDeps['gameMode']>['playtester']> | undefined =
+  const playtester:
+    | NonNullable<NonNullable<GenerateViaAgentDeps['gameMode']>['playtester']>
+    | undefined =
     browserJobs === undefined
       ? undefined
       : async (pInput: PlaytesterInput): Promise<PlaytesterOutput> => {
@@ -448,9 +463,7 @@ export async function runGeneration(
     }
     const fatalErrors: string[] = rvVerdict === null ? [] : [...rvVerdict.fatalErrors];
     if (rvVerdict !== null && !rvVerdict.hasGameContract) {
-      fatalErrors.push(
-        'Runtime load: window.__game never appeared — the game did not boot.',
-      );
+      fatalErrors.push('Runtime load: window.__game never appeared — the game did not boot.');
     }
     const observation: AttemptObservation = {
       trace: playVerdict === null ? null : traceFromPlaytestResult(playVerdict),
@@ -512,7 +525,8 @@ export async function runGeneration(
   const encoder = new TextEncoder();
   const fsState = tree.toSnapshotInput().map((f) => ({
     path: f.path,
-    bytes: f.bytes instanceof Uint8Array ? f.bytes.length : encoder.encode(f.bytes as string).length,
+    bytes:
+      f.bytes instanceof Uint8Array ? f.bytes.length : encoder.encode(f.bytes as string).length,
   }));
 
   // ── #5.6 — per-run quality telemetry (best-effort, NON-FATAL) ─────────────

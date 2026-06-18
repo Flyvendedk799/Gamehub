@@ -7,7 +7,7 @@
  */
 
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
-import { PlayforgeError, ERROR_CODES, assertSafeUrl } from '@playforge/shared';
+import { ERROR_CODES, PlayforgeError, assertSafeUrl } from '@playforge/shared';
 import { Type } from '@sinclair/typebox';
 
 const ReadUrlParams = Type.Object({
@@ -28,6 +28,72 @@ export const READ_URL_NETWORK_TIMEOUT_MS = 15_000;
 /** Hard cap on time spent draining the response body once headers are in.
  *  Pathological chunked responses still need an upper bound. */
 export const READ_URL_BODY_TIMEOUT_MS = 5_000;
+/** Hard cap on BYTES read from the response body. The `maxChars` cap only trims
+ *  the already-decoded string; without a byte cap a multi-GB response — or a
+ *  small gzip that undici transparently inflates to gigabytes (a decompression
+ *  bomb) — would be fully buffered into worker memory before truncation, an OOM
+ *  DoS on a shared multi-tenant worker. We stop reading from the socket once this
+ *  many bytes have arrived. (SSRF H1) */
+export const READ_URL_MAX_BYTES = 5_000_000;
+
+/**
+ * Drain a response body into a string, but never read more than `byteCap` bytes
+ * off the wire and abort promptly if `bodyTimeout` fires. Reads incrementally
+ * via the stream reader rather than `res.text()` (which buffers the entire
+ * decoded body first), so a hostile/huge origin cannot OOM the worker.
+ */
+async function readBodyCapped(
+  res: Response,
+  byteCap: number,
+  bodyTimeout: AbortSignal,
+): Promise<{ text: string; bytesTruncated: boolean }> {
+  const reader = res.body?.getReader();
+  if (!reader) return { text: '', bytesTruncated: false };
+
+  const onAbort = () => {
+    void reader.cancel().catch(() => {});
+  };
+  if (bodyTimeout.aborted) {
+    onAbort();
+    throw new DOMException('Body read aborted', 'AbortError');
+  }
+  bodyTimeout.addEventListener('abort', onAbort, { once: true });
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let bytesTruncated = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      const remaining = byteCap - total;
+      if (value.byteLength >= remaining) {
+        chunks.push(value.subarray(0, Math.max(0, remaining)));
+        total = byteCap;
+        bytesTruncated = true;
+        await reader.cancel().catch(() => {});
+        break;
+      }
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } finally {
+    bodyTimeout.removeEventListener('abort', onAbort);
+  }
+
+  // If the timeout fired (cancel() may make the pending read() resolve done
+  // rather than reject), surface it as the timeout error path.
+  if (bodyTimeout.aborted) throw new DOMException('Body read aborted', 'AbortError');
+
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    merged.set(c, offset);
+    offset += c.byteLength;
+  }
+  return { text: new TextDecoder('utf-8', { fatal: false }).decode(merged), bytesTruncated };
+}
 
 /**
  * Escape XML-significant chars so fetched remote content cannot break out of
@@ -150,7 +216,9 @@ export function makeReadUrlTool(): AgentTool<typeof ReadUrlParams, ReadUrlDetail
           const location = res.headers.get('location');
           if (!location) break; // malformed redirect — fall through to the !res.ok check
           if (hop >= MAX_REDIRECTS) {
-            throw new Error(`read_url refused: too many redirects (>${MAX_REDIRECTS}) for ${params.url}`);
+            throw new Error(
+              `read_url refused: too many redirects (>${MAX_REDIRECTS}) for ${params.url}`,
+            );
           }
           await res.body?.cancel().catch(() => {}); // release the socket before the next hop
           currentUrl = new URL(location, currentUrl).toString();
@@ -162,36 +230,15 @@ export function makeReadUrlTool(): AgentTool<typeof ReadUrlParams, ReadUrlDetail
         throw new Error(`HTTP ${res.status} from ${params.url}`);
       }
       const bodyTimeout = AbortSignal.timeout(READ_URL_BODY_TIMEOUT_MS);
-      // Race res.text() against the body timeout. If the body signal fires we
-      // proactively cancel the underlying stream so the socket releases — `res`
-      // itself does not honour the original signal once headers are in.
+      // Stream the body with a hard byte cap and the body-drain timeout. We do
+      // NOT use res.text() (which buffers the whole decoded body first) so a
+      // huge or decompression-bomb response cannot OOM the worker. (SSRF H1)
       let body: string;
+      let bytesTruncated: boolean;
       try {
-        body = await new Promise<string>((resolve, reject) => {
-          const onAbort = () => {
-            try {
-              res.body?.cancel().catch(() => {});
-            } catch {
-              // ignore — best-effort cancel; promise rejects below
-            }
-            reject(new DOMException('Body read aborted', 'AbortError'));
-          };
-          if (bodyTimeout.aborted) {
-            onAbort();
-            return;
-          }
-          bodyTimeout.addEventListener('abort', onAbort, { once: true });
-          res
-            .text()
-            .then((txt) => {
-              bodyTimeout.removeEventListener('abort', onAbort);
-              resolve(txt);
-            })
-            .catch((err) => {
-              bodyTimeout.removeEventListener('abort', onAbort);
-              reject(err);
-            });
-        });
+        const result = await readBodyCapped(res, READ_URL_MAX_BYTES, bodyTimeout);
+        body = result.text;
+        bytesTruncated = result.bytesTruncated;
       } catch (err) {
         if (isAbortFromTimeout(err, bodyTimeout)) {
           throw new PlayforgeError(
@@ -203,7 +250,7 @@ export function makeReadUrlTool(): AgentTool<typeof ReadUrlParams, ReadUrlDetail
         throw err;
       }
       const text = stripHtmlToText(body);
-      const truncated = text.length > max;
+      const truncated = bytesTruncated || text.length > max;
       const out = truncated ? `${text.slice(0, max)}\n\n[…truncated at ${max} chars]` : text;
       // Wrap the fetched, stripped text in an explicit untrusted-content
       // envelope before returning it to the model — remote content is

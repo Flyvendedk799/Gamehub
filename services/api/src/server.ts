@@ -1,3 +1,5 @@
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { rm } from 'node:fs/promises';
 /**
  * Control-plane API (Fastify). Phase 0 scope: health + authenticated projects
  * CRUD + generation enqueue + SSE event relay.
@@ -14,22 +16,26 @@
  */
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { rm } from 'node:fs/promises';
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import websocketPlugin from '@fastify/websocket';
 import type { EventBus } from '@playforge/bus';
 import { runChannel } from '@playforge/bus';
-import { buildGameHtml, type ExportGameHtmlOptions } from '@playforge/exporters';
+import { type ExportGameHtmlOptions, buildGameHtml } from '@playforge/exporters';
 import { exportGameZip } from '@playforge/exporters/game-zip';
 import { type SnapshotStore, contentTypeFor } from '@playforge/storage';
-import type { Authenticator, AuthedUser } from './auth';
+import {
+  and as drizzleAnd,
+  eq as drizzleEq,
+  isNull as drizzleIsNull,
+  or as drizzleOr,
+  sql as drizzleSql,
+} from 'drizzle-orm';
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import type { AuthedUser, Authenticator } from './auth';
 import { generateSessionToken, hashPassword, sessionExpiresAt, verifyPassword } from './auth';
-import type { CreditPurchaseProvider } from './credit-purchase';
-import { buildPasswordResetEmail, type EmailPort } from './email';
-import { and as drizzleAnd, eq as drizzleEq, isNull as drizzleIsNull, or as drizzleOr, sql as drizzleSql } from 'drizzle-orm';
 import type { BrowserJobQueue, RuntimeVerifyResult, ThumbnailResult } from './browser-queue';
 import type { ChatRepo } from './chat-repo';
+import type { CreditPurchaseProvider } from './credit-purchase';
+import { type EmailPort, buildPasswordResetEmail } from './email';
 import type { HubRepo } from './hub-repo';
 import type { PublishRepo } from './publish-repo';
 import type { Engine, ProjectRepo, Visibility } from './repo';
@@ -47,11 +53,19 @@ function autoMod(title: string, html: string): string[] {
   const combined = `${title} ${html}`.toLowerCase();
 
   // Phishing / social-engineering patterns
-  if (/\b(enter your password|your account has been|verify your identity|click here to claim)\b/.test(combined)) {
+  if (
+    /\b(enter your password|your account has been|verify your identity|click here to claim)\b/.test(
+      combined,
+    )
+  ) {
     flags.push('phishing_language');
   }
   // Exfil attempt — tries to load external scripts or phone home despite CSP
-  if (/\bfetch\s*\(\s*['"]https?:\/\/(?!cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com|unpkg\.com|cdn\.skypack\.dev)/.test(html)) {
+  if (
+    /\bfetch\s*\(\s*['"]https?:\/\/(?!cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com|unpkg\.com|cdn\.skypack\.dev)/.test(
+      html,
+    )
+  ) {
     flags.push('external_fetch');
   }
   // Crypto miners
@@ -88,8 +102,8 @@ function gameContentCsp(frameAncestors: string): string {
     "style-src 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "media-src 'self' data: blob:",
-    "font-src data:",
-    "worker-src blob:",
+    'font-src data:',
+    'worker-src blob:',
     "connect-src 'none'",
     `frame-ancestors ${frameAncestors}`,
   ].join('; ');
@@ -181,7 +195,7 @@ const VISIBILITIES: Visibility[] = ['private', 'unlisted', 'public'];
 const presenceSockets = new Map<string, Set<(msg: string) => void>>();
 
 /** Per-project CRDT collab rooms: projectId → Set of raw WebSocket objects for binary relay. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: raw ws WebSocket objects relayed as opaque binary; no shared type at this boundary.
 const collabRooms = new Map<string, Set<any>>();
 
 const FREE_TIER_CREDITS = 100;
@@ -207,7 +221,10 @@ function hashResetToken(raw: string): string {
  * distinguish "insufficient credits" from a genuine DB/transaction failure.
  */
 export class InsufficientCreditsError extends Error {
-  constructor(readonly balance: number, readonly required: number) {
+  constructor(
+    readonly balance: number,
+    readonly required: number,
+  ) {
     super('insufficient_credits');
     this.name = 'InsufficientCreditsError';
   }
@@ -279,7 +296,17 @@ export function attachSseHeartbeat(
 export function buildServer(deps: ServerDeps): FastifyInstance {
   // bodyLimit caps total request size (#31) — a 1 MiB ceiling is ample for prompts,
   // chat, and auth payloads while refusing memory-exhaustion bodies (413).
-  const app = Fastify({ logger: false, bodyLimit: 1_048_576 });
+  // trustProxy: behind Cloudflare/edge, req.ip must reflect the client (via
+  // X-Forwarded-For), not the proxy socket — otherwise every per-IP control
+  // (auth throttle, play-count dedup) sees one shared proxy IP and either
+  // throttles all users together or can't distinguish them. (auth H2)
+  const app = Fastify({ logger: false, bodyLimit: 1_048_576, trustProxy: true });
+
+  // Project name = published title, rendered into <head>/OG tags + every feed
+  // card. Cap it to bound stored content and OG payloads. (content MEDIUM)
+  const MAX_PROJECT_NAME_LEN = 120;
+  // Hub comment body cap — uncapped, the only limit was the 1 MiB bodyLimit. (content MEDIUM)
+  const MAX_COMMENT_LEN = 2000;
   void app.register(websocketPlugin);
 
   // ── Auth rate limiting (in-memory, per-server-instance) ──────────────────
@@ -301,6 +328,68 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   function clearAuthRateLimit(key: string): void {
     authAttempts.delete(key);
+  }
+
+  // Handles that must not be registrable — they back routes (/u/:handle vs
+  // /hub, /api, …), imply staff/system identity (admin, support, moderator), or
+  // are the brand itself. Registering them enables impersonation/phishing. (content HIGH)
+  const RESERVED_HANDLES = new Set([
+    'admin',
+    'administrator',
+    'root',
+    'sysadmin',
+    'system',
+    'staff',
+    'moderator',
+    'mod',
+    'support',
+    'help',
+    'helpdesk',
+    'official',
+    'team',
+    'security',
+    'abuse',
+    'billing',
+    'api',
+    'app',
+    'auth',
+    'login',
+    'logout',
+    'register',
+    'signup',
+    'signin',
+    'me',
+    'settings',
+    'account',
+    'profile',
+    'user',
+    'users',
+    'u',
+    'p',
+    'hub',
+    'home',
+    'about',
+    'contact',
+    'legal',
+    'terms',
+    'privacy',
+    'playforge',
+    'null',
+    'undefined',
+    'anonymous',
+    'guest',
+    'everyone',
+  ]);
+
+  /**
+   * A handle is reserved if it matches the denylist directly OR collapses to a
+   * reserved name once separators are removed — so `ad_min`, `a-d-m-i-n`, and
+   * `admin` are all rejected, closing separator-homoglyph impersonation. (content HIGH)
+   */
+  function isReservedHandle(handle: string): boolean {
+    if (RESERVED_HANDLES.has(handle)) return true;
+    const collapsed = handle.replace(/[_-]/g, '');
+    return RESERVED_HANDLES.has(collapsed);
   }
 
   // Play-count dedup (#35a, in-memory per-instance): a given client (slug+ip)
@@ -332,7 +421,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   }
 
   async function getUserBalance(userId: string): Promise<number> {
-    if (!deps.authDb) return Infinity;
+    if (!deps.authDb) return Number.POSITIVE_INFINITY;
     const { schema: s } = await import('@playforge/db');
     const [row] = await deps.authDb
       .select({ bal: drizzleSql<number>`COALESCE(SUM(${s.creditLedger.delta}), 0)` })
@@ -445,22 +534,43 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   app.post('/v1/auth/register', async (req, reply) => {
     if (!deps.authDb) return reply.code(503).send({ error: 'auth_unavailable' });
     const { schema: s } = await import('@playforge/db');
-    const body = (req.body ?? {}) as { email?: unknown; password?: unknown; handle?: unknown; displayName?: unknown };
+    const body = (req.body ?? {}) as {
+      email?: unknown;
+      password?: unknown;
+      handle?: unknown;
+      displayName?: unknown;
+    };
     const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : null;
     const password = typeof body.password === 'string' ? body.password : null;
-    const handle = typeof body.handle === 'string' ? body.handle.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') : null;
+    // NFKC-fold BEFORE stripping so confusables collapse consistently (e.g.
+    // fullwidth/compatibility chars) rather than being silently dropped to a
+    // different ASCII handle. (content HIGH)
+    const handle =
+      typeof body.handle === 'string'
+        ? body.handle
+            .normalize('NFKC')
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9_-]/g, '')
+        : null;
     const displayName = typeof body.displayName === 'string' ? body.displayName.trim() : handle;
 
     if (!email || !email.includes('@')) return reply.code(400).send({ error: 'invalid_email' });
-    if (!password || password.length < 8) return reply.code(400).send({ error: 'password_too_short', min: 8 });
+    if (!password || password.length < 8)
+      return reply.code(400).send({ error: 'password_too_short', min: 8 });
     if (!handle || handle.length < 2) return reply.code(400).send({ error: 'invalid_handle' });
+    // Disallow leading/trailing separators and reserved/impersonation handles.
+    if (/^[_-]|[_-]$/.test(handle)) return reply.code(400).send({ error: 'invalid_handle' });
+    if (isReservedHandle(handle)) return reply.code(409).send({ error: 'handle_reserved' });
     // Ingress length caps (#31) — bound unbounded fields (scrypt input is a CPU/DoS
     // sink, and oversized rows are pointless). The bodyLimit guards total size; these
     // guard individual fields.
     if (email.length > 320) return reply.code(400).send({ error: 'email_too_long', max: 320 });
-    if (password.length > 200) return reply.code(400).send({ error: 'password_too_long', max: 200 });
+    if (password.length > 200)
+      return reply.code(400).send({ error: 'password_too_long', max: 200 });
     if (handle.length > 32) return reply.code(400).send({ error: 'handle_too_long', max: 32 });
-    if (displayName && displayName.length > 80) return reply.code(400).send({ error: 'display_name_too_long', max: 80 });
+    if (displayName && displayName.length > 80)
+      return reply.code(400).send({ error: 'display_name_too_long', max: 80 });
 
     // Rate-limit registrations per IP to prevent bulk account creation.
     if (!checkAuthRateLimit(`register:${req.ip ?? 'unknown'}`)) {
@@ -468,7 +578,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
 
     // Check uniqueness
-    const existing = await deps.authDb.select({ id: s.users.id })
+    const existing = await deps.authDb
+      .select({ id: s.users.id })
       .from(s.users)
       .where(drizzleOr(drizzleEq(s.users.email, email), drizzleEq(s.users.handle, handle)))
       .catch(() => []);
@@ -483,12 +594,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     let user: { id: string; handle: string; displayName: string };
     try {
       user = await deps.authDb.transaction(async (tx) => {
-        const [u] = await tx.insert(s.users)
+        const [u] = await tx
+          .insert(s.users)
           .values({ email, passwordHash, handle, displayName: displayName ?? handle })
           .returning({ id: s.users.id, handle: s.users.handle, displayName: s.users.displayName });
         if (!u) throw new Error('user insert returned no row');
         await tx.insert(s.sessions).values({ token, userId: u.id, expiresAt: sessionExpiresAt() });
-        await tx.insert(s.creditLedger).values({ userId: u.id, delta: FREE_TIER_CREDITS, reason: 'welcome_grant' });
+        await tx
+          .insert(s.creditLedger)
+          .values({ userId: u.id, delta: FREE_TIER_CREDITS, reason: 'welcome_grant' });
         return u;
       });
     } catch (err) {
@@ -496,7 +610,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(500).send({ error: 'registration_failed' });
     }
 
-    return reply.code(201).send({ token, user: { id: user.id, handle: user.handle, displayName: user.displayName } });
+    return reply
+      .code(201)
+      .send({ token, user: { id: user.id, handle: user.handle, displayName: user.displayName } });
   });
 
   app.post('/v1/auth/login', async (req, reply) => {
@@ -517,9 +633,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(429).send({ error: 'too_many_attempts', retryAfterMs: AUTH_WINDOW_MS });
     }
 
-    const [user] = await deps.authDb.select({
-      id: s.users.id, handle: s.users.handle, displayName: s.users.displayName, passwordHash: s.users.passwordHash,
-    }).from(s.users).where(drizzleEq(s.users.email, email));
+    const [user] = await deps.authDb
+      .select({
+        id: s.users.id,
+        handle: s.users.handle,
+        displayName: s.users.displayName,
+        passwordHash: s.users.passwordHash,
+      })
+      .from(s.users)
+      .where(drizzleEq(s.users.email, email));
 
     const ok = user ? await verifyPassword(password, user.passwordHash) : false;
     if (!user || !ok) {
@@ -528,11 +650,16 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
 
     const token = generateSessionToken();
-    await deps.authDb.insert(s.sessions).values({ token, userId: user.id, expiresAt: sessionExpiresAt() });
+    await deps.authDb
+      .insert(s.sessions)
+      .values({ token, userId: user.id, expiresAt: sessionExpiresAt() });
 
     clearAuthRateLimit(`login:${email}:${ip}`);
 
-    return reply.send({ token, user: { id: user.id, handle: user.handle, displayName: user.displayName } });
+    return reply.send({
+      token,
+      user: { id: user.id, handle: user.handle, displayName: user.displayName },
+    });
   });
 
   app.post('/v1/auth/logout', async (req, reply) => {
@@ -542,7 +669,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const raw = Array.isArray(authHeader) ? authHeader[0] : authHeader;
     const token = raw?.startsWith('Bearer ') ? raw.slice(7).trim() : null;
     if (token) {
-      await deps.authDb.delete(s.sessions).where(drizzleEq(s.sessions.token, token)).catch(() => {});
+      await deps.authDb
+        .delete(s.sessions)
+        .where(drizzleEq(s.sessions.token, token))
+        .catch(() => {});
     }
     return reply.send({ ok: true });
   });
@@ -551,7 +681,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const user = await requireUser(req, reply);
     if (!user) return;
     const balance = await getUserBalance(user.userId);
-    return reply.send({ userId: user.userId, handle: user.handle, ...(balance !== Infinity ? { balance } : {}) });
+    return reply.send({
+      userId: user.userId,
+      handle: user.handle,
+      ...(balance !== Number.POSITIVE_INFINITY ? { balance } : {}),
+    });
   });
 
   // ── password reset (6.2) ────────────────────────────────────────────────────
@@ -684,7 +818,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const user = await requireUser(req, reply);
     if (!user) return;
     const balance = await getUserBalance(user.userId);
-    return reply.send({ balance: balance === Infinity ? null : balance });
+    return reply.send({ balance: balance === Number.POSITIVE_INFINITY ? null : balance });
   });
 
   app.post('/v1/credits/purchase', async (req, reply) => {
@@ -696,7 +830,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const { schema: s } = await import('@playforge/db');
     const body = (req.body ?? {}) as { pack?: unknown; packId?: unknown };
     const packId =
-      typeof body.pack === 'string' ? body.pack : typeof body.packId === 'string' ? body.packId : null;
+      typeof body.pack === 'string'
+        ? body.pack
+        : typeof body.packId === 'string'
+          ? body.packId
+          : null;
     if (!packId) return reply.code(400).send({ error: 'pack_required' });
 
     const confirmation = await deps.creditProvider.createPurchase({ userId: user.userId, packId });
@@ -726,11 +864,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const balance = await getUserBalance(user.userId);
     return reply.send({
       ok: true,
-      pack: { id: confirmation.pack.id, credits: confirmation.pack.credits, priceUsd: confirmation.pack.priceUsd },
+      pack: {
+        id: confirmation.pack.id,
+        credits: confirmation.pack.credits,
+        priceUsd: confirmation.pack.priceUsd,
+      },
       eventId: confirmation.externalEventId,
       checkoutUrl: confirmation.checkoutUrl,
       confirmed: confirmation.confirmed,
-      ...(balance !== Infinity ? { balance } : {}),
+      ...(balance !== Number.POSITIVE_INFINITY ? { balance } : {}),
     });
   });
 
@@ -750,6 +892,21 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
     if (body.visibility !== undefined && !VISIBILITIES.includes(body.visibility as Visibility)) {
       return reply.code(400).send({ error: 'invalid_visibility', allowed: VISIBILITIES });
+    }
+    // The project name becomes the published title rendered into <head>/OG tags
+    // and every Hub/profile card. Cap it so it can't bloat feeds or fill an OG
+    // payload with megabytes of attacker-chosen text. (content MEDIUM)
+    if (typeof body.name === 'string' && body.name.length > MAX_PROJECT_NAME_LEN) {
+      return reply.code(400).send({ error: 'name_too_long', max: MAX_PROJECT_NAME_LEN });
+    }
+    // Validate any claimed remix lineage rather than storing it verbatim — an
+    // unvalidated remixOfProjectId lets a user forge "Remix of <popular game>"
+    // attribution. Must reference an existing, non-private project. (auth M3)
+    if (typeof body.remixOfProjectId === 'string') {
+      const parent = await deps.repo.get(body.remixOfProjectId);
+      if (!parent || (parent.ownerId !== user.userId && parent.visibility === 'private')) {
+        return reply.code(400).send({ error: 'invalid_remix_parent' });
+      }
     }
     const project = await deps.repo.create({
       ownerId: user.userId,
@@ -789,6 +946,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (typeof body.name !== 'string' || body.name.trim() === '') {
       return reply.code(400).send({ error: 'name_required' });
     }
+    if (body.name.length > MAX_PROJECT_NAME_LEN) {
+      return reply.code(400).send({ error: 'name_too_long', max: MAX_PROJECT_NAME_LEN });
+    }
     const updated = await deps.repo.rename(id, user.userId, body.name);
     if (!updated) return reply.code(404).send({ error: 'not_found' });
     return reply.send(updated);
@@ -824,7 +984,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (deps.maxConcurrentRunsPerUser !== undefined) {
       const active = await deps.runRepo.countActiveByUser(user.userId);
       if (active >= deps.maxConcurrentRunsPerUser) {
-        return reply.code(429).send({ error: 'concurrent_run_limit', active, limit: deps.maxConcurrentRunsPerUser });
+        return reply
+          .code(429)
+          .send({ error: 'concurrent_run_limit', active, limit: deps.maxConcurrentRunsPerUser });
       }
     }
 
@@ -851,7 +1013,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           }
           await tx
             .insert(s.creditLedger)
-            .values({ userId: user.userId, delta: -CREDITS_PER_RUN, reason: 'reservation', runId: run.id })
+            .values({
+              userId: user.userId,
+              delta: -CREDITS_PER_RUN,
+              reason: 'reservation',
+              runId: run.id,
+            })
             .onConflictDoNothing();
         });
       } catch (err) {
@@ -860,7 +1027,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         // failure: also fail the run and surface a 500.
         await deps.runRepo.updateStatus(run.id, 'failed').catch(() => {});
         if (err instanceof InsufficientCreditsError) {
-          return reply.code(402).send({ error: 'insufficient_credits', balance: err.balance, required: err.required });
+          return reply
+            .code(402)
+            .send({ error: 'insufficient_credits', balance: err.balance, required: err.required });
         }
         console.error(`[generate] credit reservation failed for run ${run.id}:`, err);
         return reply.code(500).send({ error: 'reservation_failed' });
@@ -924,12 +1093,20 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       // EventSource), and a hard SSE_MAX_STREAM_MS cap closes any stream that runs
       // absurdly long so the connection + its bus subscription can't leak forever.
       // stopHeartbeat() clears BOTH timers; finish() calls it on every close path.
+      // Must be `let`: finish() (defined below) captures it before its single assignment.
+      // biome-ignore lint/style/useConst: deferred assignment after the capturing closure.
       let stopHeartbeat: (() => void) | undefined;
+      // Captured from bus.subscribe() below. MUST be called on every close path
+      // or the RedisEventBus reader (a dedicated blocking-XREAD connection per
+      // subscription) leaks forever — one stranded Redis connection per ended
+      // stream, climbing until Redis refuses connections. (correctness C1)
+      let unsubscribe: (() => void) | undefined;
 
       const finish = () => {
         if (done) return;
         done = true;
         stopHeartbeat?.();
+        unsubscribe?.();
         reply.raw.end();
         resolve();
       };
@@ -951,39 +1128,77 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       // Subscribe with replay: InMemoryEventBus calls the handler synchronously
       // for all history before resolving, so inject() tests complete without
       // needing to await a separate enqueue step.
-      void deps.bus.subscribe(runChannel(id), (message) => {
-        if (done) return;
-        const m = message as { type?: string };
-        const previewUrl = `/v1/runs/${id}/preview/`;
-        // Attach the preview URL to run_complete so the browser knows where to load the game.
-        const payload =
-          m.type === 'run_complete'
-            ? { ...m, previewUrl }
-            : message;
-        reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
-        if (m.type === 'run_complete') {
-          // Push a preview_updated notification to all presence sockets for this project
-          // so other collaborators' previews auto-reload without polling.
-          void deps.runRepo.get(id).then((r) => {
-            if (!r) return;
-            const msg = JSON.stringify({ type: 'preview_updated', projectId: r.projectId, previewUrl });
-            for (const fn of presenceSockets.get(r.projectId) ?? []) fn(msg);
-          }).catch(() => {});
+      deps.bus
+        .subscribe(runChannel(id), (message) => {
+          if (done) return;
+          const m = message as { type?: string };
+          const previewUrl = `/v1/runs/${id}/preview/`;
+          // Attach the preview URL to run_complete so the browser knows where to load the game.
+          const payload = m.type === 'run_complete' ? { ...m, previewUrl } : message;
+          // An unserializable bus event (circular ref, BigInt, throwing getter)
+          // must not throw out of this handler — that would strand the stream with
+          // its timers armed and (pre-C1) its subscription leaked. Skip the bad
+          // frame instead. (correctness H3)
+          try {
+            reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+          } catch (err) {
+            console.error(
+              `[sse] dropping unserializable event on run ${id}:`,
+              err instanceof Error ? err.message : err,
+            );
+          }
+          if (m.type === 'run_complete') {
+            // Push a preview_updated notification to all presence sockets for this project
+            // so other collaborators' previews auto-reload without polling.
+            void deps.runRepo
+              .get(id)
+              .then((r) => {
+                if (!r) return;
+                const msg = JSON.stringify({
+                  type: 'preview_updated',
+                  projectId: r.projectId,
+                  previewUrl,
+                });
+                for (const fn of presenceSockets.get(r.projectId) ?? []) fn(msg);
+              })
+              .catch((err) => {
+                console.error(
+                  `[sse] preview_updated broadcast failed for run ${id}:`,
+                  err instanceof Error ? err.message : err,
+                );
+              });
+            finish();
+          }
+          if (m.type === 'run_error') {
+            finish();
+          }
+          // A paused or canceled run is terminal for THIS stream: the worker won't
+          // emit further events on this run channel. Without finishing here a
+          // `run_paused` (worker pause) or `run_canceled` (cancel endpoint) frame
+          // would be written but the stream would hang open until the client/HTTP
+          // timeout. The frontend keys its Resume button on the {type:'run_paused'}
+          // frame, so the shape must stay exactly that.
+          if (m.type === 'run_paused' || m.type === 'run_canceled') {
+            finish();
+          }
+        })
+        .then((unsub) => {
+          // If the handler already drove the stream to completion during the
+          // synchronous in-memory replay, `done` is set before we get here —
+          // unsubscribe immediately so nothing leaks. Otherwise hand the
+          // unsubscribe to finish().
+          if (done) unsub();
+          else unsubscribe = unsub;
+        })
+        .catch((err) => {
+          // subscribe() rejected (e.g. Redis unavailable / replay failure):
+          // close the stream rather than leave it hanging open.
+          console.error(
+            `[sse] bus.subscribe failed for run ${id}:`,
+            err instanceof Error ? err.message : err,
+          );
           finish();
-        }
-        if (m.type === 'run_error') {
-          finish();
-        }
-        // A paused or canceled run is terminal for THIS stream: the worker won't
-        // emit further events on this run channel. Without finishing here a
-        // `run_paused` (worker pause) or `run_canceled` (cancel endpoint) frame
-        // would be written but the stream would hang open until the client/HTTP
-        // timeout. The frontend keys its Resume button on the {type:'run_paused'}
-        // frame, so the shape must stay exactly that.
-        if (m.type === 'run_paused' || m.type === 'run_canceled') {
-          finish();
-        }
-      });
+        });
     });
   });
 
@@ -1072,7 +1287,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!user) return;
     const { id } = req.params as { id: string };
     const project = await deps.repo.get(id);
-    if (!project || (project.ownerId !== user.userId && project.visibility === 'private')) {
+    // Chat history is the build conversation — it contains every prompt the
+    // owner typed, which can be private. Only the owner may read it, regardless
+    // of the *game's* visibility (playing a published game uses /v1/play/:slug,
+    // not this route). (auth M1)
+    if (!project || project.ownerId !== user.userId) {
       return reply.code(404).send({ error: 'not_found' });
     }
     const messages = deps.chatRepo ? await deps.chatRepo.list(id) : [];
@@ -1094,7 +1313,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const user = await requireUser(req, reply, { allowQueryToken: true });
     if (!user) return;
     const { id } = req.params as { id: string };
-    const filePath = ((req.params as Record<string, string>)['*'] || '') || 'index.html';
+    const filePath = (req.params as Record<string, string>)['*'] || '' || 'index.html';
 
     const run = await deps.runRepo.get(id);
     if (!run?.snapshotManifestKey || run.userId !== user.userId) {
@@ -1106,14 +1325,21 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       const bytes = await deps.store.readFile(manifest, filePath);
       const ct = contentTypeFor(filePath);
       const isHtml = ct.startsWith('text/html');
-      return reply
-        .header('Content-Type', ct)
-        .header('Cache-Control', 'no-cache')
-        // Apply game CSP to HTML preview files to match the published play route security model.
-        .header('Content-Security-Policy', isHtml ? gameContentCsp('*') : "default-src 'none'")
-        .header('X-Content-Type-Options', 'nosniff')
-        .header('Referrer-Policy', 'no-referrer')
-        .send(Buffer.from(bytes));
+      return (
+        reply
+          .header('Content-Type', ct)
+          .header('Cache-Control', 'no-cache')
+          // Apply game CSP to HTML preview files to match the published play route
+          // security model. Use the SAME configured frame-ancestors as the play
+          // route rather than a hardcoded '*', so prod can lock embedding here too. (CSP M2)
+          .header(
+            'Content-Security-Policy',
+            isHtml ? gameContentCsp(deps.allowedFrameOrigins ?? '*') : "default-src 'none'",
+          )
+          .header('X-Content-Type-Options', 'nosniff')
+          .header('Referrer-Policy', 'no-referrer')
+          .send(Buffer.from(bytes))
+      );
     } catch {
       return reply.code(404).send({ error: 'file_not_found', path: filePath });
     }
@@ -1160,7 +1386,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const html = await buildGameHtml({
       files,
       engine,
-      ...(deps.appBaseUrl !== undefined ? { appBaseUrl: deps.appBaseUrl, publishSlug: project.slug } : {}),
+      ...(deps.appBaseUrl !== undefined
+        ? { appBaseUrl: deps.appBaseUrl, publishSlug: project.slug }
+        : {}),
     });
     const htmlBytes = Buffer.from(html, 'utf8');
     const bundleKey = await deps.store.putBlob(htmlBytes);
@@ -1192,12 +1420,16 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     // Auto-moderation: scan title + bundle for flagged patterns.
     const autoModFlags = autoMod(project.name, html);
     if (autoModFlags.length > 0) {
-      console.warn(`[publish:automod] game ${publishedGame.publishSlug} flagged: ${autoModFlags.join(', ')}`);
-      void deps.hubRepo?.addReport({
-        targetType: 'published_game',
-        targetId: publishedGame.id,
-        reason: `auto-mod: ${autoModFlags.join(', ')}`,
-      }).catch(() => {});
+      console.warn(
+        `[publish:automod] game ${publishedGame.publishSlug} flagged: ${autoModFlags.join(', ')}`,
+      );
+      void deps.hubRepo
+        ?.addReport({
+          targetType: 'published_game',
+          targetId: publishedGame.id,
+          reason: `auto-mod: ${autoModFlags.join(', ')}`,
+        })
+        .catch(() => {});
 
       // GATE on high-confidence flags (#19): phishing / crypto-mining content must
       // NOT go live automatically — hold it as 'unpublished' (pending review) and
@@ -1208,7 +1440,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         await deps.publishRepo.setStatus(publishedGame.id, 'unpublished');
         return reply.code(202).send({
           status: 'pending_review',
-          message: 'Your game was flagged by automated moderation and is pending review before it goes live.',
+          message:
+            'Your game was flagged by automated moderation and is pending review before it goes live.',
           flags: autoModFlags,
         });
       }
@@ -1220,7 +1453,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (deps.browserQueue) {
       try {
         const verifyJobId = await deps.browserQueue.enqueueRuntimeVerify(html);
-        const verifyResult = await deps.browserQueue.waitForResult<RuntimeVerifyResult>(verifyJobId, 15_000);
+        const verifyResult = await deps.browserQueue.waitForResult<RuntimeVerifyResult>(
+          verifyJobId,
+          15_000,
+        );
         if (verifyResult && !verifyResult.hasGameContract) {
           await deps.publishRepo.setStatus(publishedGame.id, 'unpublished');
           return reply.code(422).send({
@@ -1230,7 +1466,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           });
         }
         if (verifyResult?.fatalErrors.length) {
-          console.warn(`[publish:smoke] ${publishedGame.publishSlug} has fatal errors:`, verifyResult.fatalErrors);
+          console.warn(
+            `[publish:smoke] ${publishedGame.publishSlug} has fatal errors:`,
+            verifyResult.fatalErrors,
+          );
         }
       } catch (err) {
         // Smoke-test infrastructure error — don't block publish, just log.
@@ -1251,7 +1490,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
             // takes a single bare-hash segment, so strip the prefix for the URL.
             const bareThumbKey = thumbKey.replace(/^blobs\//, '');
             await deps.publishRepo?.setThumbnailUrl(publishedGame.id, `/v1/blobs/${bareThumbKey}`);
-            console.log(`[publish] thumbnail captured for ${publishedGame.publishSlug} → ${bareThumbKey}`);
+            console.log(
+              `[publish] thumbnail captured for ${publishedGame.publishSlug} → ${bareThumbKey}`,
+            );
           }
         } catch (err) {
           console.warn(`[publish] thumbnail failed for ${publishedGame.publishSlug}:`, err);
@@ -1262,7 +1503,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     // Async: index embedding for Hub semantic search (best-effort, non-blocking).
     if (deps.embedText && deps.hubRepo) {
       const textToEmbed = `${project.name}`;
-      void deps.embedText(textToEmbed)
+      void deps
+        .embedText(textToEmbed)
         .then((embedding) => deps.hubRepo!.setEmbedding(publishedGame.id, embedding))
         .catch(() => {});
     }
@@ -1307,7 +1549,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         engine: (project.engine as 'three' | 'phaser') ?? 'phaser',
       });
       const zipBytes = await readFile(dest);
-      const safeName = project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 40) || 'game';
+      const safeName =
+        project.name
+          .replace(/[^a-z0-9]+/gi, '-')
+          .toLowerCase()
+          .slice(0, 40) || 'game';
       return reply
         .header('Content-Type', 'application/zip')
         .header('Content-Disposition', `attachment; filename="${safeName}.zip"`)
@@ -1402,7 +1648,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     // Scores are integers; reject NaN/Infinity/floats and absurd magnitudes so a
     // bad client can't poison the board. A 32-bit-ish ceiling is ample.
     if (!Number.isInteger(score) || score < 0 || score > 2_000_000_000) {
-      return reply.code(400).send({ error: 'invalid_score', message: 'score must be a non-negative integer' });
+      return reply
+        .code(400)
+        .send({ error: 'invalid_score', message: 'score must be a non-negative integer' });
     }
 
     // Per-session cap (#3.8): one accepted submission per window per salted-IP
@@ -1456,7 +1704,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       if (buf[0] === 0x89 && buf[1] === 0x50) ct = 'image/png';
       else if (buf[0] === 0xff && buf[1] === 0xd8) ct = 'image/jpeg';
       else if (buf.slice(0, 4).toString() === 'RIFF') ct = 'image/webp';
-      else if (buf.slice(0, 6).toString() === 'GIF87a' || buf.slice(0, 6).toString() === 'GIF89a') ct = 'image/gif';
+      else if (buf.slice(0, 6).toString() === 'GIF87a' || buf.slice(0, 6).toString() === 'GIF89a')
+        ct = 'image/gif';
       // IMAGES ONLY (#35b): this public, unauthenticated route serves thumbnails.
       // Refuse anything that isn't a recognized image so a removed/unpublished
       // game's HTML bundle can never be fetched out-of-band here — only the
@@ -1513,7 +1762,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       });
       const { readFile } = await import('node:fs/promises');
       const zipBytes = await readFile(tmpPath);
-      const safeName = project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40) || 'game';
+      const safeName =
+        project.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .slice(0, 40) || 'game';
       return reply
         .header('Content-Type', 'application/zip')
         .header('Content-Disposition', `attachment; filename="${safeName}.zip"`)
@@ -1554,7 +1807,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(404).send({ error: 'snapshot_not_found' });
     }
     await deps.repo.setCurrentSnapshot(id, snapshot.id, snapshot.filesManifestKey);
-    return reply.send({ ok: true, manifestKey: snapshot.filesManifestKey, snapshotId: snapshot.id });
+    return reply.send({
+      ok: true,
+      manifestKey: snapshot.filesManifestKey,
+      snapshotId: snapshot.id,
+    });
   });
 
   // ── community hub ─────────────────────────────────────────────────────────
@@ -1667,8 +1924,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const offset = Math.max(Number(q['offset'] ?? '0'), 0);
     // Discovery filters (#3.4): ?genre= matches the published GameSpec genre,
     // ?tag= matches a persisted discovery tag.
-    const genre = typeof q['genre'] === 'string' && q['genre'].trim() !== '' ? q['genre'].trim() : undefined;
-    const tag = typeof q['tag'] === 'string' && q['tag'].trim() !== '' ? q['tag'].trim() : undefined;
+    const genre =
+      typeof q['genre'] === 'string' && q['genre'].trim() !== '' ? q['genre'].trim() : undefined;
+    const tag =
+      typeof q['tag'] === 'string' && q['tag'].trim() !== '' ? q['tag'].trim() : undefined;
     const games = await deps.hubRepo.feed({
       limit,
       offset,
@@ -1722,6 +1981,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!published || published.status !== 'live') {
       return reply.code(404).send({ error: 'not_found' });
     }
+    // No self-likes: likes are weighted heavily in the trending score, so a
+    // creator liking their own game is vote-stuffing. (content MEDIUM)
+    const likeOwner = await deps.repo.get(published.projectId);
+    if (likeOwner && likeOwner.ownerId === user.userId) {
+      return reply.code(400).send({ error: 'cannot_like_own' });
+    }
     const liked = await deps.hubRepo.toggleLike(user.userId, published.id);
     return reply.send({ liked });
   });
@@ -1740,7 +2005,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const body = (req.body ?? {}) as { stars?: unknown };
     const stars = Number(body.stars);
     if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
-      return reply.code(400).send({ error: 'invalid_stars', message: 'stars must be an integer 1–5' });
+      return reply
+        .code(400)
+        .send({ error: 'invalid_stars', message: 'stars must be an integer 1–5' });
+    }
+    // No self-ratings: a creator 5★-ing their own game inflates ratingAvg, which
+    // drives Hub ranking. Self-follow is already blocked the same way. (content MEDIUM)
+    const rateOwner = await deps.repo.get(published.projectId);
+    if (rateOwner && rateOwner.ownerId === user.userId) {
+      return reply.code(400).send({ error: 'cannot_rate_own' });
     }
     const result = await deps.hubRepo.setRating(user.userId, published.id, stars);
     return reply.send(result);
@@ -1774,8 +2047,19 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (typeof body.body !== 'string' || body.body.trim() === '') {
       return reply.code(400).send({ error: 'body_required' });
     }
+    if (body.body.length > MAX_COMMENT_LEN) {
+      return reply.code(400).send({ error: 'comment_too_long', max: MAX_COMMENT_LEN });
+    }
     const parentCommentId =
       typeof body.parentCommentId === 'string' ? body.parentCommentId : undefined;
+    // A reply's parent must belong to THIS game — otherwise a client can thread
+    // a reply under a foreign game's comment (orphan/cross-game threading). (content LOW)
+    if (parentCommentId !== undefined) {
+      const existing = await deps.hubRepo.listComments(published.id);
+      if (!existing.some((c) => c.id === parentCommentId)) {
+        return reply.code(400).send({ error: 'invalid_parent_comment' });
+      }
+    }
     const comment = await deps.hubRepo.addComment(
       published.id,
       user.userId,
@@ -1913,7 +2197,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
 
     const send = (msg: string) => {
-      try { socket.send(msg); } catch { /* disconnected */ }
+      try {
+        socket.send(msg);
+      } catch {
+        /* disconnected */
+      }
     };
     sockets.add(send);
 
@@ -1954,7 +2242,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       const buf: Buffer = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
       for (const peer of collabRooms.get(id) ?? []) {
         if (peer !== socket && (peer.readyState as number) === 1 /* OPEN */) {
-          try { (peer as { send(d: Buffer): void }).send(buf); } catch { /* disconnected */ }
+          try {
+            (peer as { send(d: Buffer): void }).send(buf);
+          } catch {
+            /* disconnected */
+          }
         }
       }
     });
@@ -2016,9 +2308,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     });
   });
 
-  // GET /v1/admin/queue-depth — lightweight autoscaling probe (no auth needed for HPA scrapers).
-  // Returns the number of waiting + active jobs so KEDA or Fly.io autoscaling can read it.
-  app.get('/v1/admin/queue-depth', async (_req, reply) => {
+  // GET /v1/admin/queue-depth — lightweight autoscaling probe. Gated behind the
+  // admin token (fails closed when unset): live queue backlog is an operational
+  // signal that shouldn't be world-readable under an /admin/ path. The scraper
+  // (KEDA / Fly.io) carries the ADMIN_TOKEN like any other admin caller. (auth H3)
+  app.get('/v1/admin/queue-depth', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
     if (!deps.generateQueue) {
       return reply.send({ waiting: 0, active: 0, depth: 0 });
     }
@@ -2043,7 +2338,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(404).send({ error: 'not_found' });
     }
     const VALID_STATUSES = ['live', 'unpublished', 'removed_by_mod'] as const;
-    type Status = typeof VALID_STATUSES[number];
+    type Status = (typeof VALID_STATUSES)[number];
     const body = (req.body ?? {}) as { status?: unknown };
     if (!VALID_STATUSES.includes(body.status as Status)) {
       return reply.code(400).send({ error: 'invalid_status', valid: VALID_STATUSES });

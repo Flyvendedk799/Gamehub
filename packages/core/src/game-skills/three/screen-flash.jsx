@@ -39,11 +39,12 @@ export function makeScreenFlash(mount = document.body) {
       }, 30);
     },
     /** Fade to opaque black (death / scene exit). Calls onDone after. */
-    fade(ms = 600, onDone) {
+    fade(ms, onDone) {
+      const dur = ms ?? 600;
       el.style.background = '#000';
-      el.style.transition = `opacity ${ms}ms ease-in`;
+      el.style.transition = `opacity ${dur}ms ease-in`;
       el.style.opacity = '1';
-      if (onDone) window.setTimeout(onDone, ms);
+      if (onDone) window.setTimeout(onDone, dur);
     },
     dispose() {
       el.remove();

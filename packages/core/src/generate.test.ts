@@ -15,9 +15,8 @@ const completeMock = vi.fn();
 const loadBuiltinSkillsMock = vi.fn(async (): Promise<LoadedSkill[]> => []);
 
 vi.mock('@playforge/providers', async () => {
-  const actual = await vi.importActual<typeof import('@playforge/providers')>(
-    '@playforge/providers',
-  );
+  const actual =
+    await vi.importActual<typeof import('@playforge/providers')>('@playforge/providers');
   return {
     ...actual,
     complete: (...args: unknown[]) => completeMock(...args),

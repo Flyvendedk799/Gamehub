@@ -13,10 +13,7 @@
  * explicitly.
  */
 import { describe, expect, it } from 'vitest';
-import {
-  evaluateCompletabilityFloor,
-  isCompletableSpec,
-} from './assert-game-invariants.js';
+import { evaluateCompletabilityFloor, isCompletableSpec } from './assert-game-invariants.js';
 import { type GetDoneGameSpecFn, makeDoneTool } from './done.js';
 import type { TextEditorFsCallbacks } from './text-editor.js';
 
@@ -100,7 +97,11 @@ describe('done — Phase-1.5 completability floor', () => {
       'make pong',
       () => 1, // validate_game_scene called (pre-gate satisfied)
       () => 1, // playtest_game called
-      specFn({ genre: 'topdown_arcade', winCondition: 'Reach 11 points', loseCondition: 'Opponent reaches 11' }),
+      specFn({
+        genre: 'topdown_arcade',
+        winCondition: 'Reach 11 points',
+        loseCondition: 'Opponent reaches 11',
+      }),
     );
     const res = await tool.execute('pong-block', { path: 'index.html' });
     expect(res.details.status).toBe('has_errors');
@@ -124,13 +125,17 @@ describe('done — Phase-1.5 completability floor', () => {
       'make pong',
       () => 1,
       () => 1,
-      specFn({ genre: 'topdown_arcade', winCondition: 'Reach 11 points', loseCondition: 'Opponent reaches 11' }),
+      specFn({
+        genre: 'topdown_arcade',
+        winCondition: 'Reach 11 points',
+        loseCondition: 'Opponent reaches 11',
+      }),
     );
     const res = await tool.execute('pong-ok', { path: 'index.html' });
     expect(res.details.status).toBe('ok');
-    expect(
-      res.details.errors.some((e) => e.source?.startsWith('game.invariant.fatal.')),
-    ).toBe(false);
+    expect(res.details.errors.some((e) => e.source?.startsWith('game.invariant.fatal.'))).toBe(
+      false,
+    );
   });
 
   it('ESCAPE HATCH: an idle game with winCondition "—" is accepted despite no lose state', async () => {
@@ -150,12 +155,12 @@ describe('done — Phase-1.5 completability floor', () => {
     expect(res.details.status).toBe('ok');
     // The floor downgrades — no fatal invariant rows, but the missing
     // invariants still ride along as advisory for transparency.
-    expect(
-      res.details.errors.some((e) => e.source?.startsWith('game.invariant.fatal.')),
-    ).toBe(false);
-    expect(
-      res.details.errors.some((e) => e.source?.startsWith('game.invariant.advisory.')),
-    ).toBe(true);
+    expect(res.details.errors.some((e) => e.source?.startsWith('game.invariant.fatal.'))).toBe(
+      false,
+    );
+    expect(res.details.errors.some((e) => e.source?.startsWith('game.invariant.advisory.'))).toBe(
+      true,
+    );
   });
 
   it('ESCAPE HATCH: a sandbox game is accepted even with a real winCondition', async () => {
@@ -173,9 +178,9 @@ describe('done — Phase-1.5 completability floor', () => {
     );
     const res = await tool.execute('sandbox-ok', { path: 'index.html' });
     expect(res.details.status).toBe('ok');
-    expect(
-      res.details.errors.some((e) => e.source?.startsWith('game.invariant.fatal.')),
-    ).toBe(false);
+    expect(res.details.errors.some((e) => e.source?.startsWith('game.invariant.fatal.'))).toBe(
+      false,
+    );
   });
 
   it('ENDLESS-but-LOSABLE arcade game is held to the floor (declared loseCondition pins it completable)', async () => {
@@ -194,9 +199,9 @@ describe('done — Phase-1.5 completability floor', () => {
     );
     const res = await tool.execute('runner-block', { path: 'index.html' });
     expect(res.details.status).toBe('has_errors');
-    expect(
-      res.details.errors.some((e) => e.source?.startsWith('game.invariant.fatal.')),
-    ).toBe(true);
+    expect(res.details.errors.some((e) => e.source?.startsWith('game.invariant.fatal.'))).toBe(
+      true,
+    );
   });
 
   it('is INERT when getGameSpec is not wired (preserves existing call-counter behavior)', async () => {
@@ -218,9 +223,7 @@ describe('done — Phase-1.5 completability floor', () => {
     );
     const res = await tool.execute('inert', { path: 'index.html' });
     expect(res.details.status).toBe('ok');
-    expect(
-      res.details.errors.some((e) => e.source?.startsWith('game.invariant.')),
-    ).toBe(false);
+    expect(res.details.errors.some((e) => e.source?.startsWith('game.invariant.'))).toBe(false);
   });
 
   it('pre-done call-counter gate still fires BEFORE the floor (validate/playtest missing)', async () => {
@@ -244,9 +247,7 @@ describe('done — Phase-1.5 completability floor', () => {
     expect(res.details.status).toBe('has_errors');
     expect(text).toContain('validate_game_scene');
     // No floor rows — the pre-gate returned early.
-    expect(
-      res.details.errors.some((e) => e.source?.startsWith('game.invariant.')),
-    ).toBe(false);
+    expect(res.details.errors.some((e) => e.source?.startsWith('game.invariant.'))).toBe(false);
   });
 
   it('floor walks SIBLING js modules, not just index.html', async () => {
@@ -277,9 +278,9 @@ describe('done — Phase-1.5 completability floor', () => {
     );
     const res = await tool.execute('sibling-ok', { path: 'index.html' });
     expect(res.details.status).toBe('ok');
-    expect(
-      res.details.errors.some((e) => e.source?.startsWith('game.invariant.fatal.')),
-    ).toBe(false);
+    expect(res.details.errors.some((e) => e.source?.startsWith('game.invariant.fatal.'))).toBe(
+      false,
+    );
   });
 });
 
@@ -292,20 +293,24 @@ describe('isCompletableSpec / evaluateCompletabilityFloor (pure)', () => {
   });
 
   it('classifies a declared lose condition as completable regardless of genre/win', () => {
-    expect(
-      isCompletableSpec({ genre: 'runner', winCondition: '—', loseCondition: 'Crash' }),
-    ).toBe(true);
+    expect(isCompletableSpec({ genre: 'runner', winCondition: '—', loseCondition: 'Crash' })).toBe(
+      true,
+    );
   });
 
   it('treats endless-with-no-lose as non-completable (creative toy)', () => {
-    expect(
-      isCompletableSpec({ genre: 'other', winCondition: '—', loseCondition: '—' }),
-    ).toBe(false);
+    expect(isCompletableSpec({ genre: 'other', winCondition: '—', loseCondition: '—' })).toBe(
+      false,
+    );
   });
 
   it('holds win-but-no-lose to the floor (the toy-not-a-game case)', () => {
     expect(
-      isCompletableSpec({ genre: 'platformer', winCondition: 'Reach the flag', loseCondition: '—' }),
+      isCompletableSpec({
+        genre: 'platformer',
+        winCondition: 'Reach the flag',
+        loseCondition: '—',
+      }),
     ).toBe(true);
   });
 

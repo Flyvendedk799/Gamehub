@@ -497,7 +497,7 @@ export function makeTextEditorTool(
     label: 'Text editor',
     description:
       'Read and edit files in the current design via view/create/str_replace/insert commands. ' +
-      'Paths are relative to the design root (e.g. "index.html", "_starters/ios-frame.jsx"). ' +
+      'Paths are relative to the project root (e.g. "index.html", "assets/sprite.png"). ' +
       'Use create for new files; str_replace requires an exact match of old_str; ' +
       'view returns file content or directory listing. ' +
       'IMPORTANT: pass `view_range: [startLine, endLine]` (1-indexed, inclusive; either bound may be -1 for EOF) ' +

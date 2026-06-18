@@ -10,7 +10,7 @@
  * layer, so an untrusted agent (or a remixed project) can't write outside the
  * bundle root.
  */
-import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
+import { ERROR_CODES, PlayforgeError } from '@playforge/shared';
 import {
   type SnapshotInputFile,
   type SnapshotStore,
@@ -52,6 +52,7 @@ export class WorkingTree {
 
   /** TextEditorFsCallbacks.view */
   view(path: string): { content: string; numLines: number } | null {
+    assertSafeBundlePath(path);
     const content = this.files.get(path);
     if (content === undefined) return null;
     return { content, numLines: countLines(content) };
@@ -179,6 +180,11 @@ export class WorkingTree {
   }
 
   private requireFile(path: string): string {
+    // Self-enforce the class's documented containment invariant rather than
+    // trusting every caller: strReplace/insert/patch all flow through here, so
+    // an unsafe path is rejected before any mutation regardless of how it was
+    // supplied. (path-traversal defense-in-depth)
+    assertSafeBundlePath(path);
     const content = this.files.get(path);
     if (content === undefined) {
       throw new PlayforgeError(`file not found: ${path}`, ERROR_CODES.IPC_NOT_FOUND);

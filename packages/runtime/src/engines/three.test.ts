@@ -204,9 +204,9 @@ describe('threeAdapter.validate (gameplan §7.6)', () => {
     const warn = result.issues.find((i) => i.message.includes('anti_exfil'));
     expect(warn?.severity).toBe('warn');
     // anti-exfil is advisory, not a hard failure: no error issue is added by it.
-    expect(result.issues.some((i) => i.severity === 'error' && i.message.includes('anti_exfil'))).toBe(
-      false,
-    );
+    expect(
+      result.issues.some((i) => i.severity === 'error' && i.message.includes('anti_exfil')),
+    ).toBe(false);
   });
 
   it('warns when no input or resize listener is present', () => {

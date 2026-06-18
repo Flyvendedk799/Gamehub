@@ -4,9 +4,9 @@ import { createProject, generateGame } from '@/lib/api';
 import { isAuthenticated } from '@/lib/auth';
 import {
   GAME_EXAMPLE_BRIEFS,
+  type GameExampleBrief,
   briefEngineToApiEngine,
   briefToPrompt,
-  type GameExampleBrief,
 } from '@/lib/example-briefs';
 import { deriveProjectName, setPendingPrompt } from '@/lib/pending-prompt';
 import type { Engine } from '@/lib/types';
@@ -82,6 +82,7 @@ export default function HomePage() {
               viewBox="0 0 22 22"
               fill="none"
               xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
             >
               <polygon points="4,3 18,11 4,19" fill="white" />
             </svg>
@@ -160,6 +161,7 @@ export default function HomePage() {
           {GAME_EXAMPLE_BRIEFS.map((brief) => (
             <button
               key={brief.slug}
+              type="button"
               onClick={() => useExample(brief)}
               disabled={isLoading}
               title={brief.brief}
@@ -202,6 +204,7 @@ function Spinner() {
       xmlns="http://www.w3.org/2000/svg"
       fill="none"
       viewBox="0 0 24 24"
+      aria-hidden="true"
     >
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
       <path

@@ -1,6 +1,6 @@
 import type { AgentEvent, AgentMessage, AgentOptions } from '@mariozechner/pi-agent-core';
 import type { LoadedSkill, ModelRef } from '@playforge/shared';
-import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
+import { ERROR_CODES, PlayforgeError } from '@playforge/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const loadBuiltinSkillsMock = vi.fn(async (): Promise<LoadedSkill[]> => []);
@@ -930,37 +930,6 @@ describe('generateViaAgent() — zero-output guard', () => {
   });
 });
 
-describe('FRAME_TEMPLATES — device frame starter assets', () => {
-  it('exposes iphone, ipad, watch, android, and macos-safari frames as JSX modules with EDITMODE markers', async () => {
-    const { FRAME_TEMPLATES } = await import('./frames/index.js');
-    const names = FRAME_TEMPLATES.map(([n]) => n);
-    expect(names).toEqual([
-      'iphone.jsx',
-      'ipad.jsx',
-      'watch.jsx',
-      'android.jsx',
-      'macos-safari.jsx',
-    ]);
-    for (const [name, jsx] of FRAME_TEMPLATES) {
-      expect(jsx.length, `${name} should be non-empty`).toBeGreaterThan(200);
-      expect(jsx, `${name} must declare an EDITMODE block`).toMatch(/EDITMODE-BEGIN/);
-      expect(jsx, `${name} must declare an EDITMODE block`).toMatch(/EDITMODE-END/);
-      expect(jsx, `${name} must call ReactDOM.createRoot`).toMatch(/ReactDOM\.createRoot/);
-    }
-  });
-
-  it('seeds an agent-host fsMap so the agent can `view` frames/<name>', async () => {
-    const { FRAME_TEMPLATES } = await import('./frames/index.js');
-    const fsMap = new Map<string, string>();
-    for (const [name, content] of FRAME_TEMPLATES) {
-      fsMap.set(`frames/${name}`, content);
-    }
-    expect(fsMap.get('frames/iphone.jsx')).toMatch(/IOSDevice/);
-    expect(fsMap.get('frames/ipad.jsx')).toMatch(/ReactDOM\.createRoot/);
-    expect(fsMap.get('frames/watch.jsx')).toMatch(/ReactDOM\.createRoot/);
-  });
-});
-
 describe('chatMessageToAgentMessage — Gameimprove §1 tool transcript persistence', () => {
   const piModel = {
     id: 'claude-sonnet-4-6',
@@ -1655,7 +1624,5 @@ describe('Phase-1.7 game-feel library registration', () => {
     const names = registeredToolNames();
     expect(names.has('list_game_feel')).toBe(false);
     expect(names.has('view_game_feel')).toBe(false);
-    // Sanity: design mode still wires the design-library tools.
-    expect(names.has('list_design_skills')).toBe(true);
   });
 });

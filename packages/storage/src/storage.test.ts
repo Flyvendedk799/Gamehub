@@ -11,7 +11,7 @@ import {
   sha256,
 } from './blob-store';
 import { isSafeBundlePath } from './paths';
-import { SnapshotStore, type SnapshotInputFile } from './snapshot-store';
+import { type SnapshotInputFile, SnapshotStore } from './snapshot-store';
 
 const enc = (s: string) => new TextEncoder().encode(s);
 
@@ -159,7 +159,7 @@ describe('readManifest strict key parsing (#42b)', () => {
       'snapshots//manifest.json',
       'snapshots/NOTHEX/manifest.json',
       'snapshots/deadbeef/manifest.json', // too short
-      'snapshots/' + 'a'.repeat(64) + '/evil.json',
+      `snapshots/${'a'.repeat(64)}/evil.json`,
       'evil',
     ]) {
       await expect(snaps.readManifest(bad)).rejects.toThrow(/invalid manifestKey/);

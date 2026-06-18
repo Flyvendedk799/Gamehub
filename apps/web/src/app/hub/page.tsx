@@ -1,11 +1,11 @@
 'use client';
 
-import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
 import { GameCard } from '@/components/GameCard';
 import type { GameCardData } from '@/components/GameCard';
 import { getHubFeed, searchHub } from '@/lib/api';
 import type { HubGame, HubSort } from '@/lib/api';
+import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
 
 const SORTS: ReadonlyArray<{ id: HubSort; label: string }> = [
   { id: 'recent', label: 'Recent' },
@@ -103,7 +103,7 @@ export default function HubPage() {
       <header className="flex-shrink-0 h-12 border-b border-[#222222] bg-[#111111] flex items-center px-4 gap-4 z-10">
         <Link href="/" className="flex items-center gap-2 group flex-shrink-0">
           <div className="w-6 h-6 rounded-md bg-[#6366f1] flex items-center justify-center">
-            <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
               <polygon points="2,1 9,5.5 2,10" fill="white" />
             </svg>
           </div>
@@ -143,6 +143,7 @@ export default function HubPage() {
             {SORTS.map((s) => (
               <button
                 key={s.id}
+                type="button"
                 onClick={() => setSort(s.id)}
                 disabled={isSearching}
                 className={`text-xs px-3 py-1.5 rounded-md transition-colors font-medium disabled:opacity-40 ${
@@ -158,7 +159,15 @@ export default function HubPage() {
         {/* Search box (#26) */}
         <div className="mb-4 relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#52525b] pointer-events-none">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
               <circle cx="11" cy="11" r="7" />
               <path strokeLinecap="round" d="M21 21l-4.3-4.3" />
             </svg>
@@ -173,6 +182,7 @@ export default function HubPage() {
           />
           {query && (
             <button
+              type="button"
               onClick={() => setQuery('')}
               aria-label="Clear search"
               className="absolute right-3 top-1/2 -translate-y-1/2 text-[#52525b] hover:text-[#a1a1aa] text-sm"
@@ -187,6 +197,7 @@ export default function HubPage() {
         {!isSearching && (genreChips.length > 0 || tag !== '') && (
           <div className="mb-8 flex items-center gap-2 flex-wrap">
             <button
+              type="button"
               onClick={() => setGenre('')}
               className={`text-xs px-3 py-1.5 rounded-full border transition-colors font-medium ${
                 genre === ''
@@ -199,6 +210,7 @@ export default function HubPage() {
             {genreChips.map((g) => (
               <button
                 key={g}
+                type="button"
                 onClick={() => setGenre(genre === g ? '' : g)}
                 className={`text-xs px-3 py-1.5 rounded-full border transition-colors font-medium ${
                   genre === g
@@ -213,6 +225,7 @@ export default function HubPage() {
             {/* Active tag filter (set by clicking a tag on a card) */}
             {tag !== '' && (
               <button
+                type="button"
                 onClick={() => setTag('')}
                 className="text-xs px-3 py-1.5 rounded-full border bg-[#6366f1]/10 text-[#6366f1] border-[#6366f1]/30 font-medium inline-flex items-center gap-1.5"
                 aria-label={`Remove tag filter ${tag}`}
@@ -228,6 +241,7 @@ export default function HubPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {Array.from({ length: 6 }).map((_, i) => (
               <div
+                // biome-ignore lint/suspicious/noArrayIndexKey: static skeleton list, never reordered
                 key={i}
                 className="bg-[#111111] border border-[#222222] rounded-xl overflow-hidden animate-pulse"
               >
@@ -245,15 +259,18 @@ export default function HubPage() {
         {!loading && games.length === 0 && (
           <div className="flex flex-col items-center justify-center py-24 text-center">
             <div className="w-12 h-12 rounded-xl bg-[#111111] border border-[#222222] flex items-center justify-center mb-4">
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                 <polygon points="4,2.5 16,10 4,17.5" fill="#3f3f46" />
               </svg>
             </div>
             {isSearching ? (
               <>
-                <p className="text-sm font-medium text-[#71717a]">No games match “{debouncedQuery.trim()}”</p>
+                <p className="text-sm font-medium text-[#71717a]">
+                  No games match “{debouncedQuery.trim()}”
+                </p>
                 <p className="text-xs text-[#52525b] mt-1">Try a different search.</p>
                 <button
+                  type="button"
                   onClick={() => setQuery('')}
                   className="mt-6 text-xs px-4 py-2 rounded-lg bg-[#1a1a1a] hover:bg-[#222222] text-[#a1a1aa] border border-[#222222] font-medium transition-colors"
                 >
@@ -263,8 +280,11 @@ export default function HubPage() {
             ) : filtersActive ? (
               <>
                 <p className="text-sm font-medium text-[#71717a]">No games match this filter</p>
-                <p className="text-xs text-[#52525b] mt-1">Try a different genre or clear the filter.</p>
+                <p className="text-xs text-[#52525b] mt-1">
+                  Try a different genre or clear the filter.
+                </p>
                 <button
+                  type="button"
                   onClick={() => {
                     setGenre('');
                     setTag('');

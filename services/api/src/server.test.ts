@@ -1,18 +1,18 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InMemoryEventBus, runChannel } from '@playforge/bus';
 import { InMemoryBlobStore, SnapshotStore } from '@playforge/storage';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HeaderAuthenticator } from './auth';
 import { InMemoryHubRepo } from './hub-repo';
 import { InMemoryPublishRepo } from './publish-repo';
 import { InMemoryProjectRepo } from './repo';
 import { InMemoryRunRepo } from './run-repo';
 import {
+  type EnqueueFn,
+  SSE_HEARTBEAT_FRAME,
+  type ServerDeps,
   attachSseHeartbeat,
   buildServer,
   decideAffordability,
-  SSE_HEARTBEAT_FRAME,
-  type EnqueueFn,
-  type ServerDeps,
 } from './server';
 
 function makeApp(overrides?: {
@@ -287,6 +287,44 @@ describe('SSE event relay', () => {
     expect(lines).toHaveLength(3);
   });
 
+  it('unsubscribes from the bus when the stream ends (no leaked subscription) (C1)', async () => {
+    // Wrap a real InMemoryEventBus and count how many of the unsubscribe handles
+    // it hands out are actually invoked. The production RedisEventBus leaks a
+    // dedicated blocking-XREAD Redis connection per un-invoked unsubscribe, so a
+    // completed stream MUST call it.
+    const inner = new InMemoryEventBus();
+    let subscribeCount = 0;
+    let unsubscribeCount = 0;
+    const trackingBus = {
+      publish: (c: string, m: unknown) => inner.publish(c, m),
+      close: () => inner.close(),
+      subscribe: async (c: string, h: (m: unknown) => void) => {
+        subscribeCount += 1;
+        const unsub = await inner.subscribe(c, h);
+        return () => {
+          unsubscribeCount += 1;
+          unsub();
+        };
+      },
+    } as unknown as InstanceType<typeof InMemoryEventBus>;
+
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+    await inner.publish(runChannel(run.id), { type: 'run_complete' });
+
+    const app = makeApp({ bus: trackingBus, runRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/runs/${run.id}/stream`,
+      headers: AS_ALICE,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(subscribeCount).toBe(1);
+    // The stream finished (run_complete replayed synchronously) → unsubscribe ran.
+    expect(unsubscribeCount).toBe(1);
+  });
+
   it('also ends the stream on run_error', async () => {
     const bus = new InMemoryEventBus();
     const runRepo = new InMemoryRunRepo();
@@ -333,7 +371,10 @@ describe('SSE event relay', () => {
 
     expect(res.statusCode).toBe(200);
     const dataLine = res.body.split('\n').find((l) => l.startsWith('data:')) ?? '';
-    const event = JSON.parse(dataLine.replace('data: ', '')) as { type: string; previewUrl?: string };
+    const event = JSON.parse(dataLine.replace('data: ', '')) as {
+      type: string;
+      previewUrl?: string;
+    };
     expect(event.type).toBe('run_complete');
     expect(event.previewUrl).toBe(`/v1/runs/${run.id}/preview/`);
   });
@@ -378,10 +419,14 @@ describe('SSE heartbeat + max-duration cap (4.2)', () => {
 
   it('writes a `: ping` comment frame every heartbeat interval', () => {
     const writes: string[] = [];
-    const stop = attachSseHeartbeat((c) => writes.push(c), () => {}, {
-      heartbeatMs: 1_000,
-      maxMs: 60_000,
-    });
+    const stop = attachSseHeartbeat(
+      (c) => writes.push(c),
+      () => {},
+      {
+        heartbeatMs: 1_000,
+        maxMs: 60_000,
+      },
+    );
 
     expect(writes).toHaveLength(0); // nothing yet
     vi.advanceTimersByTime(1_000);
@@ -393,10 +438,14 @@ describe('SSE heartbeat + max-duration cap (4.2)', () => {
 
   it('stop() clears the interval — no further frames after close', () => {
     const writes: string[] = [];
-    const stop = attachSseHeartbeat((c) => writes.push(c), () => {}, {
-      heartbeatMs: 1_000,
-      maxMs: 60_000,
-    });
+    const stop = attachSseHeartbeat(
+      (c) => writes.push(c),
+      () => {},
+      {
+        heartbeatMs: 1_000,
+        maxMs: 60_000,
+      },
+    );
     vi.advanceTimersByTime(1_000);
     expect(writes).toHaveLength(1);
 
@@ -407,10 +456,16 @@ describe('SSE heartbeat + max-duration cap (4.2)', () => {
 
   it('fires onCap exactly once after the max-duration cap, then stop() prevents leak', () => {
     let capCount = 0;
-    const stop = attachSseHeartbeat(() => {}, () => { capCount += 1; }, {
-      heartbeatMs: 10_000,
-      maxMs: 25_000,
-    });
+    const stop = attachSseHeartbeat(
+      () => {},
+      () => {
+        capCount += 1;
+      },
+      {
+        heartbeatMs: 10_000,
+        maxMs: 25_000,
+      },
+    );
 
     vi.advanceTimersByTime(24_999);
     expect(capCount).toBe(0); // not yet
@@ -423,10 +478,16 @@ describe('SSE heartbeat + max-duration cap (4.2)', () => {
 
   it('stop() also clears the cap timer (no cap after a normal close)', () => {
     let capCount = 0;
-    const stop = attachSseHeartbeat(() => {}, () => { capCount += 1; }, {
-      heartbeatMs: 10_000,
-      maxMs: 25_000,
-    });
+    const stop = attachSseHeartbeat(
+      () => {},
+      () => {
+        capCount += 1;
+      },
+      {
+        heartbeatMs: 10_000,
+        maxMs: 25_000,
+      },
+    );
     stop(); // run completed before the cap
     vi.advanceTimersByTime(30_000);
     expect(capCount).toBe(0);
@@ -514,7 +575,12 @@ describe('hub routes', () => {
     const hubRepo = new InMemoryHubRepo();
     const publishRepo = new InMemoryPublishRepo();
     // Seed a published game so the route can find it
-    await publishRepo.upsert({ projectId: 'p1', publishSlug: 'my-game', title: 'My Game', bundleKey: 'k' });
+    await publishRepo.upsert({
+      projectId: 'p1',
+      publishSlug: 'my-game',
+      title: 'My Game',
+      bundleKey: 'k',
+    });
 
     const app = makeApp({ hubRepo, publishRepo });
     const res = await app.inject({ method: 'GET', url: '/v1/hub/games/my-game/comments' });
@@ -544,6 +610,158 @@ describe('hub routes', () => {
       headers: AS_ALICE,
     });
     expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('content / identity hardening (pre-launch audit)', () => {
+  it('rejects self-rating and self-like, but allows another user (content MEDIUM)', async () => {
+    const repo = new InMemoryProjectRepo();
+    const hubRepo = new InMemoryHubRepo();
+    const publishRepo = new InMemoryPublishRepo();
+    // Alice owns the project behind the published game.
+    const proj = await repo.create({ ownerId: 'alice', name: 'Alice Game' });
+    await publishRepo.upsert({
+      projectId: proj.id,
+      publishSlug: 'alice-game',
+      title: 'Alice Game',
+      bundleKey: 'k',
+    });
+
+    const app = makeApp({ repo, hubRepo, publishRepo });
+
+    const selfRate = await app.inject({
+      method: 'POST',
+      url: '/v1/hub/games/alice-game/rate',
+      headers: AS_ALICE,
+      payload: { stars: 5 },
+    });
+    expect(selfRate.statusCode).toBe(400);
+    expect(selfRate.json()).toMatchObject({ error: 'cannot_rate_own' });
+
+    const selfLike = await app.inject({
+      method: 'POST',
+      url: '/v1/hub/games/alice-game/like',
+      headers: AS_ALICE,
+    });
+    expect(selfLike.statusCode).toBe(400);
+    expect(selfLike.json()).toMatchObject({ error: 'cannot_like_own' });
+
+    // Bob (not the owner) can rate and like.
+    const bobRate = await app.inject({
+      method: 'POST',
+      url: '/v1/hub/games/alice-game/rate',
+      headers: AS_BOB,
+      payload: { stars: 4 },
+    });
+    expect(bobRate.statusCode).toBe(200);
+    const bobLike = await app.inject({
+      method: 'POST',
+      url: '/v1/hub/games/alice-game/like',
+      headers: AS_BOB,
+    });
+    expect(bobLike.statusCode).toBe(200);
+  });
+
+  it('caps project name length on create and rename (content MEDIUM)', async () => {
+    const app = makeApp();
+    const long = 'x'.repeat(121);
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: AS_ALICE,
+      payload: { name: long },
+    });
+    expect(create.statusCode).toBe(400);
+    expect(create.json()).toMatchObject({ error: 'name_too_long' });
+
+    // A valid create then an over-long rename.
+    const ok = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: AS_ALICE,
+      payload: { name: 'fine' },
+    });
+    const id = (ok.json() as { id: string }).id;
+    const rename = await app.inject({
+      method: 'PATCH',
+      url: `/v1/projects/${id}`,
+      headers: AS_ALICE,
+      payload: { name: long },
+    });
+    expect(rename.statusCode).toBe(400);
+    expect(rename.json()).toMatchObject({ error: 'name_too_long' });
+  });
+
+  it('rejects a forged remixOfProjectId pointing at a non-existent project (auth M3)', async () => {
+    const app = makeApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: AS_ALICE,
+      payload: { name: 'fake remix', remixOfProjectId: 'does-not-exist' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'invalid_remix_parent' });
+  });
+
+  it('allows a remix of a real non-private project', async () => {
+    const repo = new InMemoryProjectRepo();
+    const parent = await repo.create({ ownerId: 'bob', name: 'Parent', visibility: 'public' });
+    const app = makeApp({ repo });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: AS_ALICE,
+      payload: { name: 'real remix', remixOfProjectId: parent.id },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  it('caps hub comment body length (content MEDIUM)', async () => {
+    const hubRepo = new InMemoryHubRepo();
+    const publishRepo = new InMemoryPublishRepo();
+    await publishRepo.upsert({ projectId: 'p1', publishSlug: 'g', title: 'G', bundleKey: 'k' });
+    const app = makeApp({ hubRepo, publishRepo });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/hub/games/g/comments',
+      headers: AS_BOB,
+      payload: { body: 'x'.repeat(2001) },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'comment_too_long' });
+  });
+
+  it('chat history is owner-only even for a public project (auth M1)', async () => {
+    const repo = new InMemoryProjectRepo();
+    const proj = await repo.create({ ownerId: 'alice', name: 'Pub', visibility: 'public' });
+    const app = makeApp({ repo });
+    // Owner can read.
+    const owner = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${proj.id}/chat`,
+      headers: AS_ALICE,
+    });
+    expect(owner.statusCode).toBe(200);
+    // A non-owner gets 404 even though the project is public.
+    const other = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${proj.id}/chat`,
+      headers: AS_BOB,
+    });
+    expect(other.statusCode).toBe(404);
+  });
+
+  it('admin queue-depth requires the admin token (auth H3)', async () => {
+    const app = makeApp({ adminToken: 'sekret' });
+    const noAuth = await app.inject({ method: 'GET', url: '/v1/admin/queue-depth' });
+    expect(noAuth.statusCode).toBe(403);
+    const withAuth = await app.inject({
+      method: 'GET',
+      url: '/v1/admin/queue-depth',
+      headers: { 'x-admin-token': 'sekret' },
+    });
+    expect(withAuth.statusCode).toBe(200);
   });
 });
 
@@ -615,12 +833,19 @@ describe('hub discovery + virality (Phase 3)', () => {
 
     // Sanity: ?sort=popular still ranks by raw playCount (stale wins there).
     const popular = await app.inject({ method: 'GET', url: '/v1/hub?sort=popular' });
-    expect((popular.json() as { games: Array<{ publishSlug: string }> }).games[0]?.publishSlug).toBe('stale');
+    expect(
+      (popular.json() as { games: Array<{ publishSlug: string }> }).games[0]?.publishSlug,
+    ).toBe('stale');
   });
 
   it('?genre= and ?tag= filter the feed (#3.4)', async () => {
     const hubRepo = new InMemoryHubRepo();
-    seed(hubRepo, { id: 'p', publishSlug: 'plat', genre: 'platformer', tags: ['platformer', 'retro'] });
+    seed(hubRepo, {
+      id: 'p',
+      publishSlug: 'plat',
+      genre: 'platformer',
+      tags: ['platformer', 'retro'],
+    });
     seed(hubRepo, { id: 'f', publishSlug: 'fps', genre: 'fps', tags: ['fps', 'showcase'] });
     const app = makeApp({ hubRepo });
 
@@ -654,7 +879,10 @@ describe('hub discovery + virality (Phase 3)', () => {
 
     // Before remix: remixCount is 0.
     const before = await app.inject({ method: 'GET', url: '/v1/hub/games/original' });
-    expect((before.json() as { game: { remixCount: number; parentSlug: string | null } }).game.remixCount).toBe(0);
+    expect(
+      (before.json() as { game: { remixCount: number; parentSlug: string | null } }).game
+        .remixCount,
+    ).toBe(0);
 
     // Remix it.
     const remix = await app.inject({
@@ -680,14 +908,23 @@ describe('hub discovery + virality (Phase 3)', () => {
 
 describe('leaderboards (Phase 3.8)', () => {
   async function seedGame(publishRepo: InMemoryPublishRepo, slug: string): Promise<void> {
-    await publishRepo.upsert({ projectId: `proj-${slug}`, publishSlug: slug, title: slug, bundleKey: 'k' });
+    await publishRepo.upsert({
+      projectId: `proj-${slug}`,
+      publishSlug: slug,
+      title: slug,
+      bundleKey: 'k',
+    });
   }
 
   it('POST /score returns 404 for an unknown slug', async () => {
     const hubRepo = new InMemoryHubRepo();
     const publishRepo = new InMemoryPublishRepo();
     const app = makeApp({ hubRepo, publishRepo });
-    const res = await app.inject({ method: 'POST', url: '/v1/play/nope/score', payload: { score: 5 } });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/play/nope/score',
+      payload: { score: 5 },
+    });
     expect(res.statusCode).toBe(404);
   });
 
@@ -697,9 +934,17 @@ describe('leaderboards (Phase 3.8)', () => {
     await seedGame(publishRepo, 'game');
     const app = makeApp({ hubRepo, publishRepo });
 
-    const bad = await app.inject({ method: 'POST', url: '/v1/play/game/score', payload: { score: 1.5 } });
+    const bad = await app.inject({
+      method: 'POST',
+      url: '/v1/play/game/score',
+      payload: { score: 1.5 },
+    });
     expect(bad.statusCode).toBe(400);
-    const neg = await app.inject({ method: 'POST', url: '/v1/play/game/score', payload: { score: -1 } });
+    const neg = await app.inject({
+      method: 'POST',
+      url: '/v1/play/game/score',
+      payload: { score: -1 },
+    });
     expect(neg.statusCode).toBe(400);
   });
 
@@ -715,12 +960,21 @@ describe('leaderboards (Phase 3.8)', () => {
     // alice submits 100, bob submits 250 (different sessions via different IP isn't
     // testable through inject, so submit directly through the repo for ordering and
     // use the route for the happy-path acceptance below).
-    await hubRepo.addScore({ publishedGameId: (await publishRepo.getBySlug('game'))!.id, userId: 'alice', score: 100 });
-    await hubRepo.addScore({ publishedGameId: (await publishRepo.getBySlug('game'))!.id, userId: 'bob', score: 250 });
+    await hubRepo.addScore({
+      publishedGameId: (await publishRepo.getBySlug('game'))!.id,
+      userId: 'alice',
+      score: 100,
+    });
+    await hubRepo.addScore({
+      publishedGameId: (await publishRepo.getBySlug('game'))!.id,
+      userId: 'bob',
+      score: 250,
+    });
 
     const res = await app.inject({ method: 'GET', url: '/v1/play/game/leaderboard' });
     expect(res.statusCode).toBe(200);
-    const entries = (res.json() as { entries: Array<{ score: number; handle: string | null }> }).entries;
+    const entries = (res.json() as { entries: Array<{ score: number; handle: string | null }> })
+      .entries;
     expect(entries).toHaveLength(2);
     // Highest score first.
     expect(entries[0]).toMatchObject({ score: 250, handle: 'bob' });
@@ -751,10 +1005,18 @@ describe('leaderboards (Phase 3.8)', () => {
     const app = makeApp({ hubRepo, publishRepo });
 
     // First submission from this session is accepted.
-    const first = await app.inject({ method: 'POST', url: '/v1/play/game/score', payload: { score: 10 } });
+    const first = await app.inject({
+      method: 'POST',
+      url: '/v1/play/game/score',
+      payload: { score: 10 },
+    });
     expect(first.statusCode).toBe(201);
     // Second from the same session (same ip) is rate-limited.
-    const second = await app.inject({ method: 'POST', url: '/v1/play/game/score', payload: { score: 999 } });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/v1/play/game/score',
+      payload: { score: 999 },
+    });
     expect(second.statusCode).toBe(429);
 
     // Only the first score landed on the board.
@@ -782,22 +1044,38 @@ describe('creator follow + profile (Phase 3.9)', () => {
     const app = makeApp({ repo, hubRepo });
 
     // alice follows creator.
-    const follow = await app.inject({ method: 'POST', url: '/v1/users/creator/follow', headers: AS_ALICE });
+    const follow = await app.inject({
+      method: 'POST',
+      url: '/v1/users/creator/follow',
+      headers: AS_ALICE,
+    });
     expect(follow.statusCode).toBe(200);
     expect(follow.json()).toMatchObject({ following: true, followerCount: 1 });
 
     // Following again is a no-op — count stays 1 (idempotent via the unique edge).
-    const again = await app.inject({ method: 'POST', url: '/v1/users/creator/follow', headers: AS_ALICE });
+    const again = await app.inject({
+      method: 'POST',
+      url: '/v1/users/creator/follow',
+      headers: AS_ALICE,
+    });
     expect((again.json() as { followerCount: number }).followerCount).toBe(1);
 
     // The profile now reports isFollowing=true for alice, false for bob.
-    const asAlice = await app.inject({ method: 'GET', url: '/v1/users/creator', headers: AS_ALICE });
+    const asAlice = await app.inject({
+      method: 'GET',
+      url: '/v1/users/creator',
+      headers: AS_ALICE,
+    });
     expect(asAlice.json()).toMatchObject({ followerCount: 1, isFollowing: true });
     const asBob = await app.inject({ method: 'GET', url: '/v1/users/creator', headers: AS_BOB });
     expect(asBob.json()).toMatchObject({ followerCount: 1, isFollowing: false });
 
     // Unfollow drops the count back to 0.
-    const unfollow = await app.inject({ method: 'DELETE', url: '/v1/users/creator/follow', headers: AS_ALICE });
+    const unfollow = await app.inject({
+      method: 'DELETE',
+      url: '/v1/users/creator/follow',
+      headers: AS_ALICE,
+    });
     expect(unfollow.json()).toMatchObject({ following: false, followerCount: 0 });
   });
 
@@ -806,7 +1084,11 @@ describe('creator follow + profile (Phase 3.9)', () => {
     const hubRepo = new InMemoryHubRepo();
     const app = makeApp({ repo, hubRepo });
     // alice's userId == the URL handle "alice" → self-follow.
-    const res = await app.inject({ method: 'POST', url: '/v1/users/alice/follow', headers: AS_ALICE });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/users/alice/follow',
+      headers: AS_ALICE,
+    });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ error: 'cannot_follow_self' });
   });
@@ -821,7 +1103,12 @@ describe('creator follow + profile (Phase 3.9)', () => {
   it('listComments author-resolves a handle for the web to link to /u/:handle', async () => {
     const hubRepo = new InMemoryHubRepo();
     const publishRepo = new InMemoryPublishRepo();
-    await publishRepo.upsert({ projectId: 'p1', publishSlug: 'my-game', title: 'My Game', bundleKey: 'k' });
+    await publishRepo.upsert({
+      projectId: 'p1',
+      publishSlug: 'my-game',
+      title: 'My Game',
+      bundleKey: 'k',
+    });
     hubRepo.seedUser('alice', { handle: 'alice', displayName: 'Alice A' });
     const app = makeApp({ hubRepo, publishRepo });
 
@@ -833,11 +1120,17 @@ describe('creator follow + profile (Phase 3.9)', () => {
       payload: { body: 'nice game' },
     });
     expect(post.statusCode).toBe(201);
-    expect((post.json() as { comment: { authorHandle: string | null } }).comment.authorHandle).toBe('alice');
+    expect((post.json() as { comment: { authorHandle: string | null } }).comment.authorHandle).toBe(
+      'alice',
+    );
 
     // The list carries the resolved author handle + displayName.
     const list = await app.inject({ method: 'GET', url: '/v1/hub/games/my-game/comments' });
-    const comments = (list.json() as { comments: Array<{ authorHandle: string | null; authorDisplayName: string | null }> }).comments;
+    const comments = (
+      list.json() as {
+        comments: Array<{ authorHandle: string | null; authorDisplayName: string | null }>;
+      }
+    ).comments;
     expect(comments).toHaveLength(1);
     expect(comments[0]).toMatchObject({ authorHandle: 'alice', authorDisplayName: 'Alice A' });
   });
@@ -851,13 +1144,15 @@ describe('preview route', () => {
     const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
 
     const html = '<html>game</html>';
-    const { manifestKey } = await store.write([
-      { path: 'index.html', bytes: Buffer.from(html) },
-    ]);
+    const { manifestKey } = await store.write([{ path: 'index.html', bytes: Buffer.from(html) }]);
     await runRepo.setSnapshot(run.id, manifestKey);
 
     const app = makeApp({ store, runRepo });
-    const res = await app.inject({ method: 'GET', url: `/v1/runs/${run.id}/preview/`, headers: AS_ALICE });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/runs/${run.id}/preview/`,
+      headers: AS_ALICE,
+    });
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toBe('text/html; charset=utf-8');
     expect(res.body).toBe(html);
@@ -895,7 +1190,11 @@ describe('preview route', () => {
     await runRepo.setSnapshot(run.id, manifestKey);
 
     const app = makeApp({ store, runRepo });
-    const res = await app.inject({ method: 'GET', url: `/v1/runs/${run.id}/preview/`, headers: AS_BOB });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/runs/${run.id}/preview/`,
+      headers: AS_BOB,
+    });
     expect(res.statusCode).toBe(404);
   });
 
@@ -905,7 +1204,11 @@ describe('preview route', () => {
     const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
 
     const app = makeApp({ store, runRepo });
-    const res = await app.inject({ method: 'GET', url: `/v1/runs/${run.id}/preview/`, headers: AS_ALICE });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/runs/${run.id}/preview/`,
+      headers: AS_ALICE,
+    });
     expect(res.statusCode).toBe(404);
     expect((res.json() as { error: string }).error).toBe('not_found');
   });
@@ -992,7 +1295,12 @@ describe('resume / continuation', () => {
 
     // Simulate a prior run that was paused with a continuation payload.
     const priorRun = await runRepo.create({ projectId: project.id, userId: 'alice' });
-    const pausedContinuation = { todos: null, decisionRecap: 'half built', fsState: {}, originalUserPrompt: 'build a platformer' };
+    const pausedContinuation = {
+      todos: null,
+      decisionRecap: 'half built',
+      fsState: {},
+      originalUserPrompt: 'build a platformer',
+    };
     await runRepo.setPaused(priorRun.id, pausedContinuation, 'manifest-key-abc');
 
     // Capture what is passed to enqueue on the second generate call.
@@ -1156,7 +1464,9 @@ describe('credit reservation (#6)', () => {
       auth: new HeaderAuthenticator(),
       bus: new InMemoryEventBus(),
       runRepo,
-      enqueue: async (input) => { enqueued.push(input.runId); },
+      enqueue: async (input) => {
+        enqueued.push(input.runId);
+      },
       ...(authDb !== undefined ? { authDb } : {}),
     });
     const res = await app.inject({
@@ -1200,9 +1510,11 @@ describe('credit reservation (#6)', () => {
     expect(firstRunId).toBeDefined();
     // Re-running onConflictDoNothing with the same runId must not add a second row.
     await authDb!.transaction(async (tx) => {
-      await (tx as unknown as {
-        insert: () => { values: (r: unknown) => { onConflictDoNothing: () => Promise<void> } };
-      })
+      await (
+        tx as unknown as {
+          insert: () => { values: (r: unknown) => { onConflictDoNothing: () => Promise<void> } };
+        }
+      )
         .insert()
         .values({ reason: 'reservation', delta: -10, runId: firstRunId })
         .onConflictDoNothing();
@@ -1330,11 +1642,19 @@ describe('run cancellation (2.7)', () => {
     const { authDb, inserted } = makeFakeRefundDb();
 
     const app = makeCancelApp({ runRepo, queue, authDb });
-    const first = await app.inject({ method: 'POST', url: `/v1/runs/${run.id}/cancel`, headers: AS_ALICE });
+    const first = await app.inject({
+      method: 'POST',
+      url: `/v1/runs/${run.id}/cancel`,
+      headers: AS_ALICE,
+    });
     expect(first.statusCode).toBe(200);
 
     // Second cancel: run is already 'canceled' → terminal no-op, no second refund.
-    const second = await app.inject({ method: 'POST', url: `/v1/runs/${run.id}/cancel`, headers: AS_ALICE });
+    const second = await app.inject({
+      method: 'POST',
+      url: `/v1/runs/${run.id}/cancel`,
+      headers: AS_ALICE,
+    });
     expect(second.statusCode).toBe(200);
     expect(second.json()).toMatchObject({ status: 'canceled', canceled: true });
     expect(inserted.filter((r) => r.reason === 'refund')).toHaveLength(1);
@@ -1347,7 +1667,11 @@ describe('run cancellation (2.7)', () => {
     const { queue, removed } = makeFakeGenerateQueue({ jobId: run.id, state: 'active' });
 
     const app = makeCancelApp({ runRepo, queue });
-    const res = await app.inject({ method: 'POST', url: `/v1/runs/${run.id}/cancel`, headers: AS_ALICE });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/runs/${run.id}/cancel`,
+      headers: AS_ALICE,
+    });
     expect(res.statusCode).toBe(409);
     expect(res.json()).toMatchObject({ error: 'active_run_cancel_unsupported' });
     // No job removal, status unchanged.
@@ -1362,7 +1686,11 @@ describe('run cancellation (2.7)', () => {
     const { queue } = makeFakeGenerateQueue({ jobId: run.id });
 
     const app = makeCancelApp({ runRepo, queue });
-    const res = await app.inject({ method: 'POST', url: `/v1/runs/${run.id}/cancel`, headers: AS_ALICE });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/runs/${run.id}/cancel`,
+      headers: AS_ALICE,
+    });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ status: 'completed', canceled: false });
   });
@@ -1371,7 +1699,11 @@ describe('run cancellation (2.7)', () => {
     const runRepo = new InMemoryRunRepo();
     const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
     const app = makeCancelApp({ runRepo }); // no queue
-    const res = await app.inject({ method: 'POST', url: `/v1/runs/${run.id}/cancel`, headers: AS_ALICE });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/runs/${run.id}/cancel`,
+      headers: AS_ALICE,
+    });
     expect(res.statusCode).toBe(503);
     expect(res.json()).toMatchObject({ error: 'cancel_unavailable' });
   });
@@ -1381,7 +1713,11 @@ describe('run cancellation (2.7)', () => {
     const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
     const { queue } = makeFakeGenerateQueue({ jobId: run.id });
     const app = makeCancelApp({ runRepo, queue });
-    const res = await app.inject({ method: 'POST', url: `/v1/runs/${run.id}/cancel`, headers: AS_BOB });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/runs/${run.id}/cancel`,
+      headers: AS_BOB,
+    });
     expect(res.statusCode).toBe(404);
   });
 
@@ -1396,7 +1732,11 @@ describe('run cancellation (2.7)', () => {
     await bus.subscribe(runChannel(run.id), (m) => events.push(m as { type?: string }));
 
     const app = makeCancelApp({ runRepo, bus, queue, authDb });
-    const res = await app.inject({ method: 'POST', url: `/v1/runs/${run.id}/cancel`, headers: AS_ALICE });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/runs/${run.id}/cancel`,
+      headers: AS_ALICE,
+    });
     expect(res.statusCode).toBe(200);
     expect((await runRepo.get(run.id))?.status).toBe('canceled');
     expect(events.some((e) => e.type === 'run_canceled')).toBe(true);
@@ -1413,7 +1753,11 @@ describe('SSE relay terminal-event set (2.5b)', () => {
     await bus.publish(runChannel(run.id), { type: 'run_paused' });
 
     const app = makeApp({ bus, runRepo });
-    const res = await app.inject({ method: 'GET', url: `/v1/runs/${run.id}/stream`, headers: AS_ALICE });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/runs/${run.id}/stream`,
+      headers: AS_ALICE,
+    });
 
     // If run_paused weren't terminal, inject() would hang until timeout; getting
     // a completed 200 response proves finish() fired on the paused frame.
@@ -1432,7 +1776,11 @@ describe('SSE relay terminal-event set (2.5b)', () => {
     await bus.publish(runChannel(run.id), { type: 'run_canceled' });
 
     const app = makeApp({ bus, runRepo });
-    const res = await app.inject({ method: 'GET', url: `/v1/runs/${run.id}/stream`, headers: AS_ALICE });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/runs/${run.id}/stream`,
+      headers: AS_ALICE,
+    });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('"type":"run_canceled"');
   });
@@ -1452,19 +1800,45 @@ import { schema as dbSchema } from '@playforge/db';
 import { hashPassword as hashPasswordReal, verifyPassword as verifyPasswordReal } from './auth';
 import { CapturingEmailTransport, MockCreditProvider } from './index';
 
-interface FakeUser { id: string; email: string; passwordHash: string; handle: string; deletedAt: Date | null }
-interface FakeLedger { userId: string; delta: number; reason: string; stripeEventId?: string | null; runId?: string | null }
-interface FakeResetToken { id: string; userId: string; tokenHash: string; expiresAt: Date; usedAt: Date | null }
-interface FakeSession { token: string; userId: string }
+interface FakeUser {
+  id: string;
+  email: string;
+  passwordHash: string;
+  handle: string;
+  deletedAt: Date | null;
+}
+interface FakeLedger {
+  userId: string;
+  delta: number;
+  reason: string;
+  stripeEventId?: string | null;
+  runId?: string | null;
+}
+interface FakeResetToken {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  expiresAt: Date;
+  usedAt: Date | null;
+}
+interface FakeSession {
+  token: string;
+  userId: string;
+}
 
-function makePhase6Db(seed?: { users?: FakeUser[]; ledger?: FakeLedger[]; sessions?: FakeSession[] }) {
+function makePhase6Db(seed?: {
+  users?: FakeUser[];
+  ledger?: FakeLedger[];
+  sessions?: FakeSession[];
+}) {
   const users: FakeUser[] = seed?.users ?? [];
   const ledger: FakeLedger[] = seed?.ledger ?? [];
   const resetTokens: FakeResetToken[] = [];
   const sessions: FakeSession[] = seed?.sessions ?? [];
   let tokenSeq = 0;
 
-  const balanceOf = (userId: string) => ledger.filter((r) => r.userId === userId).reduce((n, r) => n + r.delta, 0);
+  const balanceOf = (userId: string) =>
+    ledger.filter((r) => r.userId === userId).reduce((n, r) => n + r.delta, 0);
 
   // A query builder whose terminal `where`/result resolves against the stores.
   // The select handlers are keyed by the table passed to from().
@@ -1508,21 +1882,35 @@ function makePhase6Db(seed?: { users?: FakeUser[]; ledger?: FakeLedger[]; sessio
           const r = row as unknown as FakeLedger;
           // Honour the partial unique on (user_id, stripe_event_id).
           if (r.stripeEventId != null) {
-            const dup = ledger.some((x) => x.userId === r.userId && x.stripeEventId === r.stripeEventId);
+            const dup = ledger.some(
+              (x) => x.userId === r.userId && x.stripeEventId === r.stripeEventId,
+            );
             if (dup) return;
           }
           ledger.push({ ...r });
         } else if (table === dbSchema.passwordResetTokens) {
           const r = row as { userId: string; tokenHash: string; expiresAt: Date };
-          resetTokens.push({ id: `tok_${++tokenSeq}`, userId: r.userId, tokenHash: r.tokenHash, expiresAt: r.expiresAt, usedAt: null });
+          resetTokens.push({
+            id: `tok_${++tokenSeq}`,
+            userId: r.userId,
+            tokenHash: r.tokenHash,
+            expiresAt: r.expiresAt,
+            usedAt: null,
+          });
         }
       };
       return {
         // purchase grant awaits onConflictDoNothing() directly.
-        onConflictDoNothing: async () => { apply(); },
+        onConflictDoNothing: async () => {
+          apply();
+        },
         // token mint awaits values() result directly (no onConflict) — make the
         // returned object thenable so `await db.insert().values(...)` applies it.
-        then: (resolve: (v: unknown) => void) => { apply(); resolve(undefined); },
+        // biome-ignore lint/suspicious/noThenProperty: intentional awaitable mock of the Drizzle insert chain.
+        then: (resolve: (v: unknown) => void) => {
+          apply();
+          resolve(undefined);
+        },
       };
     },
   });
@@ -1557,7 +1945,11 @@ function makePhase6Db(seed?: { users?: FakeUser[]; ledger?: FakeLedger[]; sessio
           };
           return {
             // Awaited directly (users password update path).
-            then: (resolve: (v: unknown) => void) => { applyUsers(); resolve(undefined); },
+            // biome-ignore lint/suspicious/noThenProperty: intentional awaitable mock of the Drizzle update chain.
+            then: (resolve: (v: unknown) => void) => {
+              applyUsers();
+              resolve(undefined);
+            },
             // Chained for the token-burn path.
             returning: async () => burnToken(),
           };
@@ -1568,7 +1960,8 @@ function makePhase6Db(seed?: { users?: FakeUser[]; ledger?: FakeLedger[]; sessio
       where: async () => {
         if (table === dbSchema.sessions) {
           const uid = users[0]?.id;
-          for (let i = sessions.length - 1; i >= 0; i--) if (sessions[i]?.userId === uid) sessions.splice(i, 1);
+          for (let i = sessions.length - 1; i >= 0; i--)
+            if (sessions[i]?.userId === uid) sessions.splice(i, 1);
         }
         return undefined;
       },
@@ -1578,7 +1971,9 @@ function makePhase6Db(seed?: { users?: FakeUser[]; ledger?: FakeLedger[]; sessio
   const db = {
     select: () => makeBuilder(),
     insert: (table: unknown) => insertChain(table),
-    transaction: async (fn: (tx: typeof txApi) => Promise<void>) => { await fn(txApi); },
+    transaction: async (fn: (tx: typeof txApi) => Promise<void>) => {
+      await fn(txApi);
+    },
   } as unknown as NonNullable<ServerDeps['authDb']>;
 
   return { db, users, ledger, resetTokens, sessions, balanceOf };
@@ -1601,45 +1996,100 @@ describe('credit purchase (6.1)', () => {
   }
 
   it('grants the pack credits and returns the new balance', async () => {
-    const { db, ledger } = makePhase6Db({ users: [{ id: 'alice', email: 'a@x.io', passwordHash: 'h', handle: 'alice', deletedAt: null }] });
+    const { db, ledger } = makePhase6Db({
+      users: [
+        { id: 'alice', email: 'a@x.io', passwordHash: 'h', handle: 'alice', deletedAt: null },
+      ],
+    });
     const app = makePurchaseApp({ authDb: db });
-    const res = await app.inject({ method: 'POST', url: '/v1/credits/purchase', headers: AS_ALICE, payload: { pack: 'starter' } });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/credits/purchase',
+      headers: AS_ALICE,
+      payload: { pack: 'starter' },
+    });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ ok: true, pack: { id: 'starter', credits: 100 }, balance: 100, confirmed: true });
+    expect(res.json()).toMatchObject({
+      ok: true,
+      pack: { id: 'starter', credits: 100 },
+      balance: 100,
+      confirmed: true,
+    });
     expect(ledger.filter((r) => r.reason === 'purchase')).toHaveLength(1);
   });
 
   it('is idempotent on the external event id — a re-fired webhook grants once', async () => {
-    const { db, balanceOf } = makePhase6Db({ users: [{ id: 'alice', email: 'a@x.io', passwordHash: 'h', handle: 'alice', deletedAt: null }] });
+    const { db, balanceOf } = makePhase6Db({
+      users: [
+        { id: 'alice', email: 'a@x.io', passwordHash: 'h', handle: 'alice', deletedAt: null },
+      ],
+    });
     const app = makePurchaseApp({ authDb: db, eventId: 'evt_dup' });
-    await app.inject({ method: 'POST', url: '/v1/credits/purchase', headers: AS_ALICE, payload: { pack: 'starter' } });
-    await app.inject({ method: 'POST', url: '/v1/credits/purchase', headers: AS_ALICE, payload: { pack: 'starter' } });
+    await app.inject({
+      method: 'POST',
+      url: '/v1/credits/purchase',
+      headers: AS_ALICE,
+      payload: { pack: 'starter' },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/v1/credits/purchase',
+      headers: AS_ALICE,
+      payload: { pack: 'starter' },
+    });
     // Same event id both times → exactly one +100 grant.
     expect(balanceOf('alice')).toBe(100);
   });
 
   it('rejects an unknown pack with 400', async () => {
-    const { db } = makePhase6Db({ users: [{ id: 'alice', email: 'a@x.io', passwordHash: 'h', handle: 'alice', deletedAt: null }] });
+    const { db } = makePhase6Db({
+      users: [
+        { id: 'alice', email: 'a@x.io', passwordHash: 'h', handle: 'alice', deletedAt: null },
+      ],
+    });
     const app = makePurchaseApp({ authDb: db });
-    const res = await app.inject({ method: 'POST', url: '/v1/credits/purchase', headers: AS_ALICE, payload: { pack: 'nope' } });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/credits/purchase',
+      headers: AS_ALICE,
+      payload: { pack: 'nope' },
+    });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ error: 'unknown_pack' });
   });
 
   it('503 when no credit provider is configured', async () => {
-    const { db } = makePhase6Db({ users: [{ id: 'alice', email: 'a@x.io', passwordHash: 'h', handle: 'alice', deletedAt: null }] });
-    const app = buildServer({
-      repo: new InMemoryProjectRepo(), auth: new HeaderAuthenticator(), bus: new InMemoryEventBus(),
-      runRepo: new InMemoryRunRepo(), enqueue: async () => {}, authDb: db,
+    const { db } = makePhase6Db({
+      users: [
+        { id: 'alice', email: 'a@x.io', passwordHash: 'h', handle: 'alice', deletedAt: null },
+      ],
     });
-    const res = await app.inject({ method: 'POST', url: '/v1/credits/purchase', headers: AS_ALICE, payload: { pack: 'starter' } });
+    const app = buildServer({
+      repo: new InMemoryProjectRepo(),
+      auth: new HeaderAuthenticator(),
+      bus: new InMemoryEventBus(),
+      runRepo: new InMemoryRunRepo(),
+      enqueue: async () => {},
+      authDb: db,
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/credits/purchase',
+      headers: AS_ALICE,
+      payload: { pack: 'starter' },
+    });
     expect(res.statusCode).toBe(503);
   });
 
   it('GET /v1/credits/balance returns SUM(delta)', async () => {
     const { db } = makePhase6Db({
-      users: [{ id: 'alice', email: 'a@x.io', passwordHash: 'h', handle: 'alice', deletedAt: null }],
-      ledger: [{ userId: 'alice', delta: 100, reason: 'welcome_grant' }, { userId: 'alice', delta: -10, reason: 'reservation' }],
+      users: [
+        { id: 'alice', email: 'a@x.io', passwordHash: 'h', handle: 'alice', deletedAt: null },
+      ],
+      ledger: [
+        { userId: 'alice', delta: 100, reason: 'welcome_grant' },
+        { userId: 'alice', delta: -10, reason: 'reservation' },
+      ],
     });
     const app = makePurchaseApp({ authDb: db });
     const res = await app.inject({ method: 'GET', url: '/v1/credits/balance', headers: AS_ALICE });
@@ -1650,7 +2100,9 @@ describe('credit purchase (6.1)', () => {
   it('a balance<10 user can purchase and then /generate (was 402)', async () => {
     // Seed alice with 5 credits — below the 10-credit run cost.
     const { db, balanceOf } = makePhase6Db({
-      users: [{ id: 'alice', email: 'a@x.io', passwordHash: 'h', handle: 'alice', deletedAt: null }],
+      users: [
+        { id: 'alice', email: 'a@x.io', passwordHash: 'h', handle: 'alice', deletedAt: null },
+      ],
       ledger: [{ userId: 'alice', delta: 5, reason: 'welcome_grant' }],
     });
     const repo = new InMemoryProjectRepo();
@@ -1658,41 +2110,75 @@ describe('credit purchase (6.1)', () => {
     const project = await repo.create({ ownerId: 'alice', name: 'Unlock', engine: 'phaser' });
     const enqueued: string[] = [];
     const app = buildServer({
-      repo, auth: new HeaderAuthenticator(), bus: new InMemoryEventBus(), runRepo,
-      enqueue: async (i) => { enqueued.push(i.runId); },
+      repo,
+      auth: new HeaderAuthenticator(),
+      bus: new InMemoryEventBus(),
+      runRepo,
+      enqueue: async (i) => {
+        enqueued.push(i.runId);
+      },
       authDb: db,
       creditProvider: new MockCreditProvider({ eventIdFactory: () => 'evt_unlock' }),
     });
 
     // Pre-purchase: generate is blocked with 402.
-    const before = await app.inject({ method: 'POST', url: `/v1/projects/${project.id}/generate`, headers: AS_ALICE, payload: { prompt: 'go' } });
+    const before = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${project.id}/generate`,
+      headers: AS_ALICE,
+      payload: { prompt: 'go' },
+    });
     expect(before.statusCode).toBe(402);
     expect(enqueued).toHaveLength(0);
 
     // Purchase a pack → balance jumps well above the run cost.
-    const buy = await app.inject({ method: 'POST', url: '/v1/credits/purchase', headers: AS_ALICE, payload: { pack: 'starter' } });
+    const buy = await app.inject({
+      method: 'POST',
+      url: '/v1/credits/purchase',
+      headers: AS_ALICE,
+      payload: { pack: 'starter' },
+    });
     expect(buy.statusCode).toBe(200);
     expect(balanceOf('alice')).toBe(105);
 
     // Post-purchase: generate now succeeds (202) and enqueues.
-    const after = await app.inject({ method: 'POST', url: `/v1/projects/${project.id}/generate`, headers: AS_ALICE, payload: { prompt: 'go' } });
+    const after = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${project.id}/generate`,
+      headers: AS_ALICE,
+      payload: { prompt: 'go' },
+    });
     expect(after.statusCode).toBe(202);
     expect(enqueued).toHaveLength(1);
   });
 });
 
 describe('password reset (6.2)', () => {
-  const ALICE: FakeUser = { id: 'alice', email: 'alice@example.com', passwordHash: '', handle: 'alice', deletedAt: null };
+  const ALICE: FakeUser = {
+    id: 'alice',
+    email: 'alice@example.com',
+    passwordHash: '',
+    handle: 'alice',
+    deletedAt: null,
+  };
 
   async function seededAlice(oldPassword: string) {
     const user = { ...ALICE, passwordHash: await hashPasswordReal(oldPassword) };
     return user;
   }
 
-  function makeResetApp(authDb: NonNullable<ServerDeps['authDb']>, email = new CapturingEmailTransport()) {
+  function makeResetApp(
+    authDb: NonNullable<ServerDeps['authDb']>,
+    email = new CapturingEmailTransport(),
+  ) {
     const app = buildServer({
-      repo: new InMemoryProjectRepo(), auth: new HeaderAuthenticator(), bus: new InMemoryEventBus(),
-      runRepo: new InMemoryRunRepo(), enqueue: async () => {}, authDb, email,
+      repo: new InMemoryProjectRepo(),
+      auth: new HeaderAuthenticator(),
+      bus: new InMemoryEventBus(),
+      runRepo: new InMemoryRunRepo(),
+      enqueue: async () => {},
+      authDb,
+      email,
     });
     return { app, email };
   }
@@ -1700,7 +2186,11 @@ describe('password reset (6.2)', () => {
   it('forgot-password is 202 for an UNKNOWN email and mints no token (no enumeration)', async () => {
     const { db, resetTokens } = makePhase6Db({ users: [] });
     const { app, email } = makeResetApp(db);
-    const res = await app.inject({ method: 'POST', url: '/v1/auth/forgot-password', payload: { email: 'ghost@nowhere.io' } });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/forgot-password',
+      payload: { email: 'ghost@nowhere.io' },
+    });
     expect(res.statusCode).toBe(202);
     expect(resetTokens).toHaveLength(0);
     expect(email.sent).toHaveLength(0);
@@ -1710,7 +2200,11 @@ describe('password reset (6.2)', () => {
     const user = await seededAlice('oldpass123');
     const { db, resetTokens } = makePhase6Db({ users: [user] });
     const { app, email } = makeResetApp(db);
-    const res = await app.inject({ method: 'POST', url: '/v1/auth/forgot-password', payload: { email: user.email } });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/forgot-password',
+      payload: { email: user.email },
+    });
     expect(res.statusCode).toBe(202);
     expect(resetTokens).toHaveLength(1);
     expect(email.sent).toHaveLength(1);
@@ -1721,7 +2215,9 @@ describe('password reset (6.2)', () => {
     expect(stored).not.toBe('');
     // The body actually contains a token that hashes to the stored value (proves
     // the raw token is mailed but never persisted).
-    const matches = body.split(/\s+/).some((w) => createHash('sha256').update(w).digest('hex') === stored);
+    const matches = body
+      .split(/\s+/)
+      .some((w) => createHash('sha256').update(w).digest('hex') === stored);
     expect(matches).toBe(true);
   });
 
@@ -1729,22 +2225,35 @@ describe('password reset (6.2)', () => {
     const user = await seededAlice('oldpass123');
     const { db, resetTokens, sessions } = makePhase6Db({
       users: [user],
-      sessions: [{ token: 'sess1', userId: 'alice' }, { token: 'sess2', userId: 'alice' }],
+      sessions: [
+        { token: 'sess1', userId: 'alice' },
+        { token: 'sess2', userId: 'alice' },
+      ],
     });
     const { app, email } = makeResetApp(db);
 
     // Mint a token via forgot-password and recover the raw token from the email body.
-    await app.inject({ method: 'POST', url: '/v1/auth/forgot-password', payload: { email: user.email } });
+    await app.inject({
+      method: 'POST',
+      url: '/v1/auth/forgot-password',
+      payload: { email: user.email },
+    });
     const body = email.sent[0]?.text ?? '';
     // The raw token is the base64url string in the body; recover it by hashing
     // candidate tokens. Simpler: re-derive from the stored hash isn't possible, so
     // pull the token out of the body. It's the last whitespace-delimited token
     // that hashes to the stored value.
     const stored = resetTokens[0]?.tokenHash;
-    const candidate = body.split(/\s+/).find((w) => createHash('sha256').update(w).digest('hex') === stored);
+    const candidate = body
+      .split(/\s+/)
+      .find((w) => createHash('sha256').update(w).digest('hex') === stored);
     expect(candidate).toBeDefined();
 
-    const res = await app.inject({ method: 'POST', url: '/v1/auth/reset-password', payload: { token: candidate, newPassword: 'brandnew456' } });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/reset-password',
+      payload: { token: candidate, newPassword: 'brandnew456' },
+    });
     expect(res.statusCode).toBe(200);
 
     // Password actually changed: new verifies, old does not.
@@ -1760,7 +2269,11 @@ describe('password reset (6.2)', () => {
     const user = await seededAlice('oldpass123');
     const { db } = makePhase6Db({ users: [user] });
     const { app } = makeResetApp(db);
-    const res = await app.inject({ method: 'POST', url: '/v1/auth/reset-password', payload: { token: 'not-a-real-token', newPassword: 'brandnew456' } });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/reset-password',
+      payload: { token: 'not-a-real-token', newPassword: 'brandnew456' },
+    });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ error: 'invalid_or_expired_token' });
   });
@@ -1769,14 +2282,28 @@ describe('password reset (6.2)', () => {
     const user = await seededAlice('oldpass123');
     const { db, resetTokens } = makePhase6Db({ users: [user] });
     const { app, email } = makeResetApp(db);
-    await app.inject({ method: 'POST', url: '/v1/auth/forgot-password', payload: { email: user.email } });
+    await app.inject({
+      method: 'POST',
+      url: '/v1/auth/forgot-password',
+      payload: { email: user.email },
+    });
     const body = email.sent[0]?.text ?? '';
     const stored = resetTokens[0]?.tokenHash;
-    const candidate = body.split(/\s+/).find((w) => createHash('sha256').update(w).digest('hex') === stored);
+    const candidate = body
+      .split(/\s+/)
+      .find((w) => createHash('sha256').update(w).digest('hex') === stored);
 
-    const first = await app.inject({ method: 'POST', url: '/v1/auth/reset-password', payload: { token: candidate, newPassword: 'brandnew456' } });
+    const first = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/reset-password',
+      payload: { token: candidate, newPassword: 'brandnew456' },
+    });
     expect(first.statusCode).toBe(200);
-    const second = await app.inject({ method: 'POST', url: '/v1/auth/reset-password', payload: { token: candidate, newPassword: 'another789' } });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/reset-password',
+      payload: { token: candidate, newPassword: 'another789' },
+    });
     expect(second.statusCode).toBe(400);
   });
 
@@ -1786,8 +2313,18 @@ describe('password reset (6.2)', () => {
     const { app } = makeResetApp(db);
     // Seed an expired token directly.
     const raw = 'expired-raw-token-value';
-    resetTokens.push({ id: 'tok_exp', userId: 'alice', tokenHash: createHash('sha256').update(raw).digest('hex'), expiresAt: new Date(Date.now() - 1000), usedAt: null });
-    const res = await app.inject({ method: 'POST', url: '/v1/auth/reset-password', payload: { token: raw, newPassword: 'brandnew456' } });
+    resetTokens.push({
+      id: 'tok_exp',
+      userId: 'alice',
+      tokenHash: createHash('sha256').update(raw).digest('hex'),
+      expiresAt: new Date(Date.now() - 1000),
+      usedAt: null,
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/reset-password',
+      payload: { token: raw, newPassword: 'brandnew456' },
+    });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ error: 'invalid_or_expired_token' });
   });
@@ -1795,13 +2332,21 @@ describe('password reset (6.2)', () => {
   it('reset rejects a too-short new password with 400', async () => {
     const { db } = makePhase6Db({ users: [] });
     const { app } = makeResetApp(db);
-    const res = await app.inject({ method: 'POST', url: '/v1/auth/reset-password', payload: { token: 'x', newPassword: 'short' } });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/reset-password',
+      payload: { token: 'x', newPassword: 'short' },
+    });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ error: 'password_too_short', min: 8 });
   });
 
   it('503 when authDb/email are not configured', async () => {
-    const res = await makeApp().inject({ method: 'POST', url: '/v1/auth/forgot-password', payload: { email: 'a@b.io' } });
+    const res = await makeApp().inject({
+      method: 'POST',
+      url: '/v1/auth/forgot-password',
+      payload: { email: 'a@b.io' },
+    });
     expect(res.statusCode).toBe(503);
   });
 });

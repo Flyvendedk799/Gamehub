@@ -16,22 +16,24 @@
 // entrypoint's autostart is guarded on VITEST (set by the test runner) and on
 // WORKER_NO_AUTOSTART for any other importer.
 import { describe, expect, it } from 'vitest';
-import {
-  selectRunsToReap,
-  shouldReapStaleRun,
-  type ReapCandidate,
-} from './main';
+import { type ReapCandidate, selectRunsToReap, shouldReapStaleRun } from './main';
 
 const STUCK_AFTER_MS = 30 * 60 * 1000;
 const NOW = 1_000_000_000_000;
 
-function run(partial: Partial<ReapCandidate> & Pick<ReapCandidate, 'id' | 'status' | 'lastTouchedMs'>): ReapCandidate {
+function run(
+  partial: Partial<ReapCandidate> & Pick<ReapCandidate, 'id' | 'status' | 'lastTouchedMs'>,
+): ReapCandidate {
   return { userId: 'user_1', ...partial };
 }
 
 describe('selectRunsToReap (pure)', () => {
   it('selects a queued/running run not touched within the staleness window', () => {
-    const stale = run({ id: 'r_stale', status: 'running', lastTouchedMs: NOW - STUCK_AFTER_MS - 1 });
+    const stale = run({
+      id: 'r_stale',
+      status: 'running',
+      lastTouchedMs: NOW - STUCK_AFTER_MS - 1,
+    });
     const selected = selectRunsToReap([stale], { nowMs: NOW, stuckAfterMs: STUCK_AFTER_MS });
     expect(selected.map((r) => r.id)).toEqual(['r_stale']);
   });
@@ -59,10 +61,9 @@ describe('selectRunsToReap (pure)', () => {
       run({ id: 'running_stale', status: 'running', lastTouchedMs: old }),
       run({ id: 'running_fresh', status: 'running', lastTouchedMs: NOW - 5_000 }),
     ];
-    expect(selectRunsToReap(batch, { nowMs: NOW, stuckAfterMs: STUCK_AFTER_MS }).map((r) => r.id)).toEqual([
-      'queued_stale',
-      'running_stale',
-    ]);
+    expect(
+      selectRunsToReap(batch, { nowMs: NOW, stuckAfterMs: STUCK_AFTER_MS }).map((r) => r.id),
+    ).toEqual(['queued_stale', 'running_stale']);
   });
 });
 
@@ -123,12 +124,19 @@ describe('reap end-to-end decision: stale + dead job ⇒ reap + refund once', ()
   it('a recent run, or a stale run with a live job, is NOT reaped or refunded', () => {
     const ledger = makeLedger();
     const recent = run({ id: 'r_recent', status: 'running', lastTouchedMs: NOW - 1_000 });
-    const staleButAlive = run({ id: 'r_alive', status: 'running', lastTouchedMs: NOW - STUCK_AFTER_MS - 1 });
+    const staleButAlive = run({
+      id: 'r_alive',
+      status: 'running',
+      lastTouchedMs: NOW - STUCK_AFTER_MS - 1,
+    });
 
     for (const c of selectRunsToReap([recent], { nowMs: NOW, stuckAfterMs: STUCK_AFTER_MS })) {
       ledger.refundOnce(c.id, 10);
     }
-    for (const c of selectRunsToReap([staleButAlive], { nowMs: NOW, stuckAfterMs: STUCK_AFTER_MS })) {
+    for (const c of selectRunsToReap([staleButAlive], {
+      nowMs: NOW,
+      stuckAfterMs: STUCK_AFTER_MS,
+    })) {
       if (shouldReapStaleRun('active')) ledger.refundOnce(c.id, 10);
     }
     expect(ledger.total).toBe(0);

@@ -3,7 +3,7 @@
  *
  * Routes a `generate()`-shaped request through `@mariozechner/pi-agent-core`
  * with the full tool set wired (str_replace_based_edit_tool, set_todos,
- * list_files, read_design_system, read_url, generate_image_asset,
+ * list_files, read_url, generate_image_asset,
  * declare_tweak_schema, done). The legacy single-turn `generate()` path stays
  * available as `USE_AGENT_RUNTIME=0` opt-out for one minor version.
  *
@@ -50,9 +50,9 @@ import {
 import {
   type Artifact,
   type ChatMessage,
-  PlayforgeError,
   ERROR_CODES,
   type ModelRef,
+  PlayforgeError,
   type StoredDesignSystem,
   type WireApi,
   canonicalBaseUrl,
@@ -86,15 +86,6 @@ import {
 import { type SetGameSpecFn, makeDeclareGameSpecTool } from './tools/declare-game-spec.js';
 import { makeDeclareTweakSchemaTool } from './tools/declare-tweak-schema.js';
 import {
-  makeListDesignSkillsTool,
-  makeViewDesignSkillTool,
-  makeViewFrameTool,
-} from './tools/design-library.js';
-import {
-  makeListGameFeelTool,
-  makeViewGameFeelTool,
-} from './tools/game-feel-library.js';
-import {
   type DoneRuntimeVerifier,
   makeDoneTool,
   makeVerifyArtifactTool,
@@ -113,6 +104,7 @@ import {
   makeUpdateGameArtifactTool,
   makeValidateGameArtifactsTool,
 } from './tools/game-artifacts.js';
+import { makeListGameFeelTool, makeViewGameFeelTool } from './tools/game-feel-library.js';
 import { type Generate3dAssetFn, makeGenerate3dAssetTool } from './tools/generate-3d-asset.js';
 import { makeGenerateAudioAssetTool } from './tools/generate-audio-asset.js';
 import {
@@ -127,7 +119,6 @@ import {
   makeRegisterCompositionTool,
 } from './tools/motion-compositions.js';
 import { type Playtester, makePlaytestGameTool } from './tools/playtest-game.js';
-import { makeReadDesignSystemTool } from './tools/read-design-system.js';
 import { makeReadUrlTool } from './tools/read-url.js';
 import {
   type MotionRenderStillFn,
@@ -499,11 +490,7 @@ const AGENTIC_TOOL_GUIDANCE = [
   'The host wraps this in an iframe that pre-loads:',
   '  - React 18 + ReactDOM (window.React, window.ReactDOM)',
   '  - @babel/standalone (transpiles your script at runtime)',
-  '  - ios-frame.jsx → window.{IOSDevice, IOSStatusBar, IOSGlassPill, IOSNavBar, IOSList, IOSListRow, IOSKeyboard}',
-  '  - design-canvas.jsx → window.{DesignCanvas, DCSection, DCArtboard, DCPostIt}',
   '  - Google Fonts: Fraunces, DM Serif Display, DM Sans, JetBrains Mono',
-  '',
-  'So you can write `<IOSDevice>...</IOSDevice>` directly without imports.',
   '',
   '### EDITMODE rules',
   '- Always include the EDITMODE-BEGIN/END block, even if empty `{}`.',
@@ -553,25 +540,6 @@ const AGENTIC_TOOL_GUIDANCE = [
   '- **`set_todos` quality bar:** keep one stable checklist thread. Never reset to a brand-new unrelated plan mid-run unless the user explicitly changes direction. Todo labels must map to concrete sections/files so progress feels cumulative instead of random.',
   '- **A11y baseline (FATAL — `done` will reject):** every `<button>` needs visible text or `aria-label`; every `<input>` (text/email/password/etc.) needs a `<label>` or `aria-label`; every `<a href>` needs link text, `aria-label`, or an `<img alt="…">` child. Bake these into your scaffold — fixing post-hoc costs an extra `done` round.',
   '- **Preview-load baseline (FATAL):** before `done`, verify every referenced local asset/file exists, every JSX component tag is defined (or runtime-provided), and every handler references in-scope state/functions. A preview that does not boot is never acceptable as "good enough".',
-  '',
-  '## Design library (use these — discover via tools)',
-  '',
-  '12 bundled **design-skill** starter snippets and 5 **device frame** shells are available as tools, NOT static prose. Reach for them BEFORE scaffolding `index.html` — they encode dozens of design decisions you would otherwise rederive.',
-  '',
-  '**Skills (call `list_design_skills` first to see the catalogue + when_to_use hints, then `view_design_skill({name})` on the best match):**',
-  '  slide-deck · dashboard · landing-page · chart-svg · glassmorphism · editorial-typography · heroes · pricing · footers · chat-ui · data-table · calendar',
-  '',
-  '**Frames (call `view_frame({name})` directly when the brief implies a device shell):**',
-  '  iphone · ipad · watch · android · macos-safari',
-  '',
-  'Frame files export their device components onto window (`IOSDevice`, `AppleWatchUltra`, `AndroidPhone`, `MacOSSafari`) so you can drop them straight into your `App` after viewing.',
-  '',
-  '**Workflow:**',
-  '  1. `list_design_skills` — single call, returns name + when_to_use + size for all 12.',
-  '  2. `view_design_skill({name})` on the best match (or `view_frame({name})` for a device shell).',
-  '  3. Adapt — never paste verbatim. The skill is the starting structure; the brief decides the content.',
-  '',
-  'Skipping the library means rewriting things the bundle already does well. Use it.',
   '',
   '## Multi-view designs — when the brief implies navigation',
   '',
@@ -624,10 +592,8 @@ const AGENTIC_TOOL_GUIDANCE = [
   '**Before every `done` call, audit your own file:**',
   '- For every `<PascalCase/>` or `<PascalCase>...</PascalCase>` tag in the JSX,',
   '  confirm a matching `function PascalCase` or `const PascalCase = ...` exists',
-  '  in the same file (or is provided by the runtime: React, ReactDOM, IOSDevice,',
-  '  IOSStatusBar, IOSGlassPill, IOSNavBar, IOSList, IOSListRow, IOSKeyboard,',
-  '  DesignCanvas, DCSection, DCArtboard, DCPostIt, AppleWatchUltra, AndroidPhone,',
-  '  MacOSSafari — that is the complete window-scope list).',
+  '  in the same file (or is provided by the runtime: React, ReactDOM',
+  '  — that is the complete window-scope list).',
   '- Strategy: do a final `str_replace` pass that alphabetises a comment header',
   '  listing all components you define (e.g. `// Components: App, Nav, Hero,',
   '  Inbox, InputBar, MessageList, Sidebar`) so the list is grep-findable.',
@@ -954,13 +920,6 @@ export interface GenerateViaAgentDeps {
    *  Optional; vitest + headless paths leave it undefined. */
   getParentArtifactBytes?: (() => Promise<number | null> | number | null) | undefined;
   /**
-   * User-authored design skills loaded from the host's local DB. Surfaced
-   * to the agent through `list_design_skills` and `view_design_skill`
-   * alongside the bundled set. Empty / undefined means no user skills
-   * are available for this run. See backlog-2 #7.
-   */
-  userSkills?: ReadonlyArray<readonly [name: string, source: string]> | undefined;
-  /**
    * motion-graphics-plan §0.3 — fully-loaded skills (built-in + user +
    * project) so folder-format skills can expose their `rules/*.md`
    * subpages via `view_skill_rule`. The tool is registered globally
@@ -975,8 +934,7 @@ export interface GenerateViaAgentDeps {
    * mode. The default toolset gains `choose_remotion_style`,
    * `validate_motion_composition`, `render_motion_preview` (when `fs` is
    * also set), plus the optional registry tools when `compositionRegistry`
-   * is wired. `read_design_system` and `view_frame` are dropped (they
-   * don't apply to Remotion compositions).
+   * is wired.
    */
   motionMode?:
     | {
@@ -997,8 +955,7 @@ export interface GenerateViaAgentDeps {
   /**
    * gameplan §A5 — when present, the run is in game-builder mode. The
    * default toolset gains `choose_engine` (always) and `validate_game_scene`
-   * (when `fs` is also set). `read_design_system` and `view_frame` are
-   * dropped from the game toolset because their guidance does not apply.
+   * (when `fs` is also set).
    */
   gameMode?:
     | {
@@ -1040,7 +997,7 @@ export interface GenerateViaAgentDeps {
 
 /**
  * Route a generate() request through pi-agent-core's Agent with the full
- * tool set wired in (text_editor, set_todos, list_files, read_design_system,
+ * tool set wired in (text_editor, set_todos, list_files,
  * read_url, generate_image_asset, declare_tweak_schema, done).
  *
  * Default IPC entry point as of the prompt-cache + agent-runtime work; the
@@ -1121,7 +1078,6 @@ export async function generateViaAgent(
   // override the default. Defaults:
   //   - set_todos       (always — no deps)
   //   - read_url        (always — uses global fetch)
-  //   - read_design_system (always — closes over the caller's designSystem)
   //   - text_editor + list_files + done (when fs callbacks are provided)
   const defaultTools: AgentTool<TSchema, unknown>[] = [];
   const isGameMode = deps.gameMode !== undefined;
@@ -1130,40 +1086,18 @@ export async function generateViaAgent(
     makeSetTodosTool(deps.setTodosCounter) as unknown as AgentTool<TSchema, unknown>,
   );
   defaultTools.push(makeReadUrlTool() as unknown as AgentTool<TSchema, unknown>);
-  // Design library — both `list_design_skills` + `view_*` lookup tools.
-  // No fs deps; available even when `deps.fs` is absent (read-only path).
-  defaultTools.push(
-    makeListDesignSkillsTool(deps.userSkills) as unknown as AgentTool<TSchema, unknown>,
-  );
-  defaultTools.push(
-    makeViewDesignSkillTool(deps.userSkills) as unknown as AgentTool<TSchema, unknown>,
-  );
-  // Phase-1.7 — game-feel (JUICE) library. The game-mode analogue of the
-  // design library above: surfaces the bundled `game-skills/*` snippets
+  // Phase-1.7 — game-feel (JUICE) library. Surfaces the bundled `game-skills/*` snippets
   // (previously DEAD) — both the authored feel primitives (screen-shake /
   // hitstop / particle-burst / squash-&-stretch / score-pop / screen-flash /
   // camera-kick / knockback, one per engine) and the pre-existing engine
-  // scaffolding. Pure registry lookups, no fs/host deps (same as the design
-  // library), so they sit OUTSIDE the `deps.fs` block and register on every
-  // game-mode run regardless of headless/no-fs paths. The workflow's polish
-  // step (game-workflow.v1.txt §6) directs the agent here so generated games
-  // stop feeling flat. NOT registered in design / motion mode.
+  // scaffolding. Pure registry lookups, no fs/host deps, so they sit OUTSIDE
+  // the `deps.fs` block and register on every game-mode run regardless of
+  // headless/no-fs paths. The workflow's polish step (game-workflow.v1.txt §6)
+  // directs the agent here so generated games stop feeling flat. NOT registered
+  // in motion mode.
   if (isGameMode) {
     defaultTools.push(makeListGameFeelTool() as unknown as AgentTool<TSchema, unknown>);
     defaultTools.push(makeViewGameFeelTool() as unknown as AgentTool<TSchema, unknown>);
-  }
-  // gameplan §A5 / motion-graphics-plan §3 — view_frame and
-  // read_design_system are design-mode-only. The game- and motion-mode
-  // toolsets omit them (their guidance does not apply to canvas/WebGL/
-  // Python/.gd projects or to Remotion compositions). Keep on design.
-  if (!isGameMode && !isMotionMode) {
-    defaultTools.push(makeViewFrameTool() as unknown as AgentTool<TSchema, unknown>);
-    defaultTools.push(
-      makeReadDesignSystemTool(() => input.designSystem ?? null) as unknown as AgentTool<
-        TSchema,
-        unknown
-      >,
-    );
   }
   // view_skill_rule is registered globally so flat-skill runs see a
   // harmless no-op tool definition (the executor returns "no rules" when

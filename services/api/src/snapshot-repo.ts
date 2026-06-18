@@ -25,7 +25,9 @@ export interface SnapshotRepo {
 export class InMemorySnapshotRepo implements SnapshotRepo {
   private readonly byProject = new Map<string, SnapshotEntry[]>();
 
-  push(entry: Omit<SnapshotEntry, 'tweakSchema'> & { tweakSchema?: Record<string, unknown> | null }): void {
+  push(
+    entry: Omit<SnapshotEntry, 'tweakSchema'> & { tweakSchema?: Record<string, unknown> | null },
+  ): void {
     const list = this.byProject.get(entry.projectId) ?? [];
     list.push({ ...entry, tweakSchema: entry.tweakSchema ?? null });
     this.byProject.set(entry.projectId, list);

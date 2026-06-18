@@ -13,7 +13,7 @@
  * only ships Three.js + Phaser web games.
  */
 
-import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
+import { ERROR_CODES, PlayforgeError } from '@playforge/shared';
 
 export const GAME_EXPORTER_FORMATS = ['game-html', 'game-zip', 'markdown'] as const;
 export type GameExporterFormat = (typeof GAME_EXPORTER_FORMATS)[number];

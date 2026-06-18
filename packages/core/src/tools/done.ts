@@ -293,7 +293,7 @@ const ADVISORY_SOURCES = new Set<string>([
  *  fatal tier intentionally falls through to the default fatal path so
  *  it flips status to has_errors. */
 function isAdvisoryGameInvariantSource(source: string | undefined): boolean {
-  return source !== undefined && source.startsWith(`${GAME_INVARIANT_SOURCE_PREFIX}advisory.`);
+  return source?.startsWith(`${GAME_INVARIANT_SOURCE_PREFIX}advisory.`) ?? false;
 }
 
 /** Predicate covering BOTH the static ADVISORY_SOURCES set and the

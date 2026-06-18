@@ -10,7 +10,7 @@
  *   - Unicode NFC-normalized (reject decomposed/look-alike forms)
  *   - non-empty, normalized segments
  */
-import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
+import { ERROR_CODES, PlayforgeError } from '@playforge/shared';
 
 // Any C0 control char (0x00-0x1F) or DEL (0x7F). NUL is a subset but it's also
 // checked explicitly below for clarity. Catches CR/LF/TAB/etc. used to smuggle

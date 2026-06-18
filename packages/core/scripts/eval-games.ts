@@ -54,7 +54,7 @@ function parseArgs(argv: ReadonlyArray<string>, defaultEvalsDir: string): CliOpt
       if (next === undefined) throw new Error('--evals requires a directory argument');
       evalsDir = path.resolve(next);
       i++;
-    } else if (arg !== undefined && arg.startsWith('--evals=')) {
+    } else if (arg?.startsWith('--evals=')) {
       evalsDir = path.resolve(arg.slice('--evals='.length));
     } else {
       throw new Error(`Unknown argument: ${String(arg)}`);

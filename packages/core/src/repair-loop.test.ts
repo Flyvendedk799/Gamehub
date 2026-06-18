@@ -11,14 +11,13 @@
  * injected agent + stub browser-jobs port.
  */
 import { describe, expect, it } from 'vitest';
-import type { CompletabilitySpec } from './tools/assert-game-invariants.js';
 import type { PlaytestPredicate, PlaytestTrace } from './eval/playtest-score.js';
-import { getPlaytestPlaybook } from './playtest-playbooks.js';
 import { selectGamePlaytestPlan } from './playtest-planner.js';
+import { getPlaytestPlaybook } from './playtest-playbooks.js';
 import {
+  type AttemptObservation,
   DEFAULT_MAX_REPAIR_ROUNDS,
   MAX_REPAIR_ROUNDS_CEILING,
-  type AttemptObservation,
   type RepairLoopState,
   type RepairVerdict,
   buildRepairInstruction,
@@ -27,6 +26,7 @@ import {
   resolveMaxRepairRounds,
   traceFromPlaytestResult,
 } from './repair-loop.js';
+import type { CompletabilitySpec } from './tools/assert-game-invariants.js';
 
 /** All machine-checkable predicates a genre playbook ships, flattened. */
 function predicatesFor(genre: 'topdown_arcade' | 'fighting'): PlaytestPredicate[] {

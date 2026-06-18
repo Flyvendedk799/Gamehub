@@ -10,7 +10,7 @@
  * === 'claude-code-imported').
  */
 
-import { PlayforgeError, ERROR_CODES } from '@playforge/shared';
+import { ERROR_CODES, PlayforgeError } from '@playforge/shared';
 
 /** Default Anthropic OAuth token endpoint. Override via env for test
  *  environments or alternative gateways. */

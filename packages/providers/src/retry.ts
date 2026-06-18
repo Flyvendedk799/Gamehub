@@ -15,9 +15,9 @@
 
 import {
   type ChatMessage,
-  PlayforgeError,
   ERROR_CODES,
   type ModelRef,
+  PlayforgeError,
   type WireApi,
 } from '@playforge/shared';
 import { extractHttpStatus, normalizeProviderError } from './errors';
@@ -279,8 +279,7 @@ let syntheticOverloadArmed: boolean | undefined;
 function shouldFireSyntheticOverload(): boolean {
   if (syntheticOverloadArmed === undefined) {
     syntheticOverloadArmed =
-      typeof process !== 'undefined' &&
-      process.env?.['PLAYFORGE_DEV_FORCE_OVERLOAD_ONCE'] === '1';
+      typeof process !== 'undefined' && process.env?.['PLAYFORGE_DEV_FORCE_OVERLOAD_ONCE'] === '1';
   }
   if (!syntheticOverloadArmed) return false;
   syntheticOverloadArmed = false;

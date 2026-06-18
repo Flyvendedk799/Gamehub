@@ -1,6 +1,6 @@
 /**
  * Game-feel library tools — surface the bundled `game-skills/*` registry to
- * the agent as discoverable tools, mirroring `design-library.ts`.
+ * the agent as discoverable tools.
  *
  * Why this exists: the game-skills snippets ship in the bundle but were DEAD
  * — zero references anywhere, so the agent never saw them and re-derived game
@@ -16,14 +16,14 @@
  *      engine + category + size for each snippet, filterable by engine.
  *   - `view_game_feel({ name })` — full source of one snippet.
  *
- * No fs / state / I/O — pure registry lookups, same shape as design-library.
+ * No fs / state / I/O — pure registry lookups.
  * The snippet source is then adapted by the model into its
  * `text_editor.create(...)` / `str_replace(...)` calls.
  */
 
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
-import { type GameEngine, type GameSkillCategory, GAME_SKILLS } from '../game-skills/index.js';
+import { GAME_SKILLS, type GameEngine, type GameSkillCategory } from '../game-skills/index.js';
 
 /** Parse the leading `// when_to_use: ...` block (one or more contiguous
  *  comment lines) out of a game-skill file. Same convention as the design

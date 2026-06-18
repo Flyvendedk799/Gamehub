@@ -20,9 +20,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const completeMock = vi.fn();
 
 vi.mock('@playforge/providers', async () => {
-  const actual = await vi.importActual<typeof import('@playforge/providers')>(
-    '@playforge/providers',
-  );
+  const actual =
+    await vi.importActual<typeof import('@playforge/providers')>('@playforge/providers');
   return {
     ...actual,
     complete: (...args: unknown[]) => completeMock(...args),

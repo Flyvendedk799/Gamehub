@@ -29,8 +29,9 @@ export function screenFlash(scene, event = 'hitConfirm', override = {}) {
 
 /** Fade the camera to black (death / scene exit). Listen via the camera's
  *  `camerafadeoutcomplete` event to trigger a restart or scene swap. */
-export function fadeOut(scene, ms = 500, onDone) {
-  scene.cameras.main.fadeOut(ms, 0, 0, 0);
+export function fadeOut(scene, ms, onDone) {
+  const dur = ms ?? 500;
+  scene.cameras.main.fadeOut(dur, 0, 0, 0);
   if (onDone) {
     scene.cameras.main.once('camerafadeoutcomplete', onDone);
   }

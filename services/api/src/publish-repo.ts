@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq } from 'drizzle-orm';
-import type { GameSpec } from '@playforge/shared';
 import { type Db, schema } from '@playforge/db';
+import type { GameSpec } from '@playforge/shared';
+import { and, desc, eq } from 'drizzle-orm';
 
 export interface PublishedGame {
   id: string;
@@ -132,7 +132,10 @@ export class InMemoryPublishRepo implements PublishRepo {
     if (game) this.byId.set(id, { ...game, thumbnailUrl, updatedAt: new Date().toISOString() });
   }
 
-  async listByOwner(_ownerId: string, opts: { limit: number; offset: number }): Promise<PublishedGame[]> {
+  async listByOwner(
+    _ownerId: string,
+    opts: { limit: number; offset: number },
+  ): Promise<PublishedGame[]> {
     return [...this.byId.values()]
       .filter((g) => g.status === 'live')
       .slice(opts.offset, opts.offset + opts.limit);
@@ -213,17 +216,15 @@ export class DrizzlePublishRepo implements PublishRepo {
       .where(eq(schema.publishedGames.id, id));
   }
 
-  async listByOwner(ownerId: string, opts: { limit: number; offset: number }): Promise<PublishedGame[]> {
+  async listByOwner(
+    ownerId: string,
+    opts: { limit: number; offset: number },
+  ): Promise<PublishedGame[]> {
     const rows = await this.db
       .select({ pg: schema.publishedGames })
       .from(schema.publishedGames)
       .innerJoin(schema.projects, eq(schema.projects.id, schema.publishedGames.projectId))
-      .where(
-        and(
-          eq(schema.projects.ownerId, ownerId),
-          eq(schema.publishedGames.status, 'live'),
-        ),
-      )
+      .where(and(eq(schema.projects.ownerId, ownerId), eq(schema.publishedGames.status, 'live')))
       .orderBy(desc(schema.publishedGames.publishedAt))
       .limit(opts.limit)
       .offset(opts.offset);
