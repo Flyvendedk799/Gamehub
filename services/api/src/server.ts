@@ -375,18 +375,25 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   const hasExplicitCorsAllowlist =
     deps.allowedCorsOrigins !== undefined && deps.allowedCorsOrigins.trim().length > 0;
 
-  app.addHook('onRequest', async (req, reply) => {
+  const applyCorsHeaders = (
+    req: FastifyRequest,
+    setHeader: (name: string, value: string) => void,
+  ): boolean => {
     const rawOrigin = req.headers.origin;
     const origin = Array.isArray(rawOrigin) ? rawOrigin[0] : rawOrigin;
-    if (origin && isCorsOriginAllowed(origin, corsAllowlist, hasExplicitCorsAllowlist)) {
-      reply.header('Access-Control-Allow-Origin', origin);
-      reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      reply.header(
-        'Access-Control-Allow-Headers',
-        'Authorization,Content-Type,X-Admin-Token,X-User-Id',
-      );
-      reply.header('Access-Control-Max-Age', '600');
-      reply.header('Vary', 'Origin');
+    if (!origin || !isCorsOriginAllowed(origin, corsAllowlist, hasExplicitCorsAllowlist)) {
+      return false;
+    }
+    setHeader('Access-Control-Allow-Origin', origin);
+    setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+    setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type,X-Admin-Token,X-User-Id');
+    setHeader('Access-Control-Max-Age', '600');
+    setHeader('Vary', 'Origin');
+    return true;
+  };
+
+  app.addHook('onRequest', async (req, reply) => {
+    if (applyCorsHeaders(req, (name, value) => reply.header(name, value))) {
       if (req.method === 'OPTIONS') {
         return reply.code(204).send();
       }
@@ -1491,9 +1498,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
     // Hand off to raw Node response; Fastify must not touch it after this.
     reply.hijack();
+    applyCorsHeaders(req, (name, value) => reply.raw.setHeader(name, value));
     reply.raw.setHeader('Content-Type', 'text/event-stream');
     reply.raw.setHeader('Cache-Control', 'no-cache');
     reply.raw.setHeader('Connection', 'keep-alive');
+    reply.raw.flushHeaders();
 
     let done = false;
 

@@ -27,6 +27,7 @@ function makeApp(overrides?: {
   adminToken?: string;
   accountRepo?: InMemoryAccountRepo;
   allowedCorsOrigins?: string;
+  sseMaxStreamMs?: number;
 }) {
   return buildServer({
     repo: overrides?.repo ?? new InMemoryProjectRepo(),
@@ -41,6 +42,7 @@ function makeApp(overrides?: {
     ...(overrides?.allowedCorsOrigins !== undefined
       ? { allowedCorsOrigins: overrides.allowedCorsOrigins }
       : {}),
+    ...(overrides?.sseMaxStreamMs !== undefined ? { sseMaxStreamMs: overrides.sseMaxStreamMs } : {}),
     ...(overrides?.accountRepo !== undefined
       ? {
           accountRepo: overrides.accountRepo,
@@ -445,6 +447,55 @@ describe('SSE event relay', () => {
     // Each event is a separate SSE data line
     const lines = res.body.split('\n').filter((l) => l.startsWith('data:'));
     expect(lines).toHaveLength(3);
+  });
+
+  it('adds CORS headers to hijacked SSE responses', async () => {
+    const bus = new InMemoryEventBus();
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+    await bus.publish(runChannel(run.id), { type: 'run_complete' });
+    const app = makeApp({
+      bus,
+      runRepo,
+      allowedCorsOrigins: 'http://localhost:3004 http://127.0.0.1:3004',
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/runs/${run.id}/stream`,
+      headers: {
+        ...AS_ALICE,
+        origin: 'http://localhost:3004',
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('text/event-stream');
+    expect(res.headers['access-control-allow-origin']).toBe('http://localhost:3004');
+    expect(res.headers.vary).toBe('Origin');
+  });
+
+  it('flushes CORS headers before a quiet SSE stream emits events', async () => {
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+    const app = makeApp({
+      runRepo,
+      allowedCorsOrigins: 'http://localhost:3004',
+      sseMaxStreamMs: 5,
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/runs/${run.id}/stream`,
+      headers: {
+        ...AS_ALICE,
+        origin: 'http://localhost:3004',
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['access-control-allow-origin']).toBe('http://localhost:3004');
+    expect(res.headers['content-type']).toBe('text/event-stream');
   });
 
   it('unsubscribes from the bus when the stream ends (no leaked subscription) (C1)', async () => {
