@@ -32,6 +32,9 @@ export const users = pgTable(
     displayName: text('display_name').notNull(),
     avatarUrl: text('avatar_url'),
     bio: text('bio'),
+    defaultProvider: text('default_provider').notNull().default('platform'),
+    defaultModelId: text('default_model_id'),
+    onboardingCompletedAt: timestamp('onboarding_completed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
@@ -162,13 +165,21 @@ export const passwordResetTokens = pgTable(
 );
 
 /** BYOK provider keys, envelope-encrypted at rest (KMS). */
-export const apiKeys = pgTable('api_keys', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id')
-    .notNull()
-    .references(() => users.id, { onDelete: 'cascade' }),
-  provider: text('provider').notNull(),
-  ciphertext: text('ciphertext').notNull(),
-  last4: text('last4'),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const apiKeys = pgTable(
+  'api_keys',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(),
+    ciphertext: text('ciphertext').notNull(),
+    last4: text('last4'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userProviderIdx: uniqueIndex('api_keys_user_provider_key').on(t.userId, t.provider),
+    userIdx: index('api_keys_user_idx').on(t.userId),
+  }),
+);

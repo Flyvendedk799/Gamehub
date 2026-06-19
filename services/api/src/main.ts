@@ -20,9 +20,11 @@ import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
  *   PLATFORM_PROVIDER   e.g. openai (default)
  *   PORT                HTTP listen port (default 3100)
  *   BLOB_DIR            local blob-store root (default: .playforge-blobs)
+ *   API_KEY_ENCRYPTION_SECRET  Secret for BYOK key encryption (falls back to PLATFORM_API_KEY)
  */
 import { Queue } from 'bullmq';
 import { enqueueRun } from '../../worker/src/queue';
+import { DrizzleAccountRepo } from './account-repo';
 import { SessionAuthenticator } from './auth';
 import { BrowserJobQueue } from './browser-queue';
 import { type CreditPurchaseProvider, MockCreditProvider } from './credit-purchase';
@@ -75,9 +77,11 @@ export function parsePositiveIntEnv(raw: string | undefined, fallback: number): 
 
 async function main() {
   const databaseUrl = requireEnv('DATABASE_URL');
-  const apiKey = requireEnv('PLATFORM_API_KEY');
+  const platformApiKey = requireEnv('PLATFORM_API_KEY');
   const modelId = process.env['PLATFORM_MODEL_ID'] ?? 'o4-mini';
   const modelProvider = process.env['PLATFORM_PROVIDER'] ?? 'openai';
+  const platformModel = { provider: modelProvider, modelId };
+  const apiKeyEncryptionSecret = process.env['API_KEY_ENCRYPTION_SECRET'] ?? platformApiKey;
   const port = parsePositiveIntEnv(process.env['PORT'], 3100);
   const redisUrl = process.env['REDIS_URL'];
   const blobDir = process.env['BLOB_DIR'] ?? '.playforge-blobs';
@@ -126,6 +130,7 @@ async function main() {
   const runRepo = new DrizzleRunRepo(db);
   const chatRepo = new DrizzleChatRepo(db);
   const snapshotRepo = new DrizzleSnapshotRepo(db);
+  const accountRepo = new DrizzleAccountRepo(db);
   const publishRepo = new DrizzlePublishRepo(db);
   const hubRepo = new DrizzleHubRepo(db);
 
@@ -148,6 +153,8 @@ async function main() {
     maxTokens,
     continuation,
     isRemix,
+    model,
+    apiKey,
   }) => {
     if (queue) {
       try {
@@ -158,7 +165,8 @@ async function main() {
             projectId,
             userId,
             prompt,
-            model: { provider: modelProvider, modelId },
+            model: model ?? platformModel,
+            ...(apiKey !== undefined ? { apiKey } : {}),
             ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
             ...(maxTokens !== undefined ? { maxTokens } : {}),
             ...(continuation !== undefined ? { continuation } : {}),
@@ -191,8 +199,8 @@ async function main() {
         runId,
         projectId,
         prompt,
-        model: { provider: modelProvider, modelId },
-        apiKey,
+        model: model ?? platformModel,
+        apiKey: apiKey ?? platformApiKey,
         ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
         ...(isRemix === true ? { isRemix } : {}),
       },
@@ -234,7 +242,10 @@ async function main() {
       ? async (text: string): Promise<number[]> => {
           const res = await fetch('https://api.openai.com/v1/embeddings', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${platformApiKey}`,
+            },
             body: JSON.stringify({ input: text, model: 'text-embedding-3-small' }),
           });
           const json = (await res.json()) as { data?: Array<{ embedding: number[] }> };
@@ -256,6 +267,9 @@ async function main() {
     store,
     snapshotRepo,
     authDb: db,
+    accountRepo,
+    platformModel,
+    apiKeyEncryptionSecret,
     ...(adminToken !== undefined ? { adminToken } : {}),
     maxConcurrentRunsPerUser,
     ...(embedText !== undefined ? { embedText } : {}),

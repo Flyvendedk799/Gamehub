@@ -21,6 +21,7 @@ import type { EventBus } from '@playforge/bus';
 import { runChannel } from '@playforge/bus';
 import { type ExportGameHtmlOptions, buildGameHtml } from '@playforge/exporters';
 import { exportGameZip } from '@playforge/exporters/game-zip';
+import { type ModelRef, PROVIDER_SHORTLIST } from '@playforge/shared';
 import { type SnapshotStore, contentTypeFor } from '@playforge/storage';
 import {
   and as drizzleAnd,
@@ -30,6 +31,15 @@ import {
   sql as drizzleSql,
 } from 'drizzle-orm';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import {
+  type AccountProvider,
+  type AccountRepo,
+  type AccountSettings,
+  type ByokProvider,
+  isAccountProvider,
+  isByokProvider,
+} from './account-repo';
+import { decryptApiKey, encryptApiKey, last4OfApiKey } from './api-key-crypto';
 import type { AuthedUser, Authenticator } from './auth';
 import { generateSessionToken, hashPassword, sessionExpiresAt, verifyPassword } from './auth';
 import type { BrowserJobQueue, RuntimeVerifyResult, ThumbnailResult } from './browser-queue';
@@ -115,6 +125,10 @@ export type EnqueueFn = (input: {
   projectId: string;
   userId: string;
   prompt: string;
+  /** Per-run provider/model override. Undefined means platform defaults. */
+  model?: ModelRef;
+  /** Decrypted BYOK API key override. Undefined means platform key. */
+  apiKey?: string;
   /** Manifest key of the project's current snapshot — seeds the new generation with existing files. */
   parentManifestKey?: string;
   /** Hard token ceiling for this run — worker aborts if exceeded. */
@@ -164,6 +178,12 @@ export interface ServerDeps {
   snapshotRepo?: SnapshotRepo;
   /** Optional: enables /v1/auth/* routes (register, login, logout, me). */
   authDb?: import('@playforge/db').Db;
+  /** Optional: enables /v1/account/* routes and per-user provider resolution. */
+  accountRepo?: AccountRepo;
+  /** Optional: platform default model used when a user has not selected BYOK. */
+  platformModel?: ModelRef;
+  /** Optional: server-side envelope secret for encrypted BYOK keys. */
+  apiKeyEncryptionSecret?: string;
   /**
    * Optional: public app base URL (e.g. "https://playforge.app") used to build
    * the exported game's "Made with Playforge — Remix this" CTA deep link (#3.2).
@@ -190,6 +210,12 @@ export interface ServerDeps {
 
 const ENGINES: Engine[] = ['three', 'phaser'];
 const VISIBILITIES: Visibility[] = ['private', 'unlisted', 'public'];
+const ACCOUNT_PROVIDERS: AccountProvider[] = ['platform', 'anthropic', 'openai'];
+const DEFAULT_PLATFORM_MODEL: ModelRef = { provider: 'openai', modelId: 'o4-mini' };
+const DEFAULT_BYOK_MODELS: Record<ByokProvider, string> = {
+  anthropic: PROVIDER_SHORTLIST.anthropic.defaultPrimary,
+  openai: PROVIDER_SHORTLIST.openai.defaultPrimary,
+};
 
 /** Per-project WebSocket presence: projectId → Set of connected socket send functions. */
 const presenceSockets = new Map<string, Set<(msg: string) => void>>();
@@ -521,6 +547,122 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     return true;
   }
 
+  function defaultModelForProvider(provider: AccountProvider): string {
+    if (provider === 'platform') {
+      return (deps.platformModel ?? DEFAULT_PLATFORM_MODEL).modelId;
+    }
+    return DEFAULT_BYOK_MODELS[provider];
+  }
+
+  function accountSettingsResponse(settings: AccountSettings) {
+    const keyByProvider = new Map(settings.keys.map((key) => [key.provider, key]));
+    const defaultModelId =
+      settings.defaultModelId?.trim() || defaultModelForProvider(settings.defaultProvider);
+    return {
+      user: {
+        id: settings.userId,
+        email: settings.email,
+        handle: settings.handle,
+        displayName: settings.displayName,
+        avatarUrl: settings.avatarUrl,
+        bio: settings.bio,
+      },
+      defaultProvider: settings.defaultProvider,
+      defaultModelId,
+      onboardingComplete: settings.onboardingCompletedAt !== null,
+      providers: ACCOUNT_PROVIDERS.map((provider) => {
+        if (provider === 'platform') {
+          const platformModel = deps.platformModel ?? DEFAULT_PLATFORM_MODEL;
+          return {
+            provider,
+            label: 'Playforge credits',
+            configured: true,
+            last4: null,
+            defaultModelId: platformModel.modelId,
+            active: settings.defaultProvider === provider,
+          };
+        }
+        const key = keyByProvider.get(provider);
+        return {
+          provider,
+          label: PROVIDER_SHORTLIST[provider].label,
+          configured: key !== undefined,
+          last4: key?.last4 ?? null,
+          defaultModelId:
+            settings.defaultProvider === provider
+              ? defaultModelId
+              : defaultModelForProvider(provider),
+          active: settings.defaultProvider === provider,
+          keyHelpUrl: PROVIDER_SHORTLIST[provider].keyHelpUrl,
+        };
+      }),
+    };
+  }
+
+  function apiKeyShapeError(provider: ByokProvider, apiKey: string): string | null {
+    const trimmed = apiKey.trim();
+    if (provider === 'anthropic' && !trimmed.startsWith('sk-ant-')) {
+      return 'invalid_anthropic_key';
+    }
+    if (provider === 'openai' && !trimmed.startsWith('sk-')) {
+      return 'invalid_openai_key';
+    }
+    return null;
+  }
+
+  async function resolveGenerationCredentials(
+    userId: string,
+  ): Promise<
+    | { ok: true; model?: ModelRef; apiKey?: string }
+    | { ok: false; status: number; body: Record<string, unknown> }
+  > {
+    if (!deps.accountRepo) {
+      return { ok: true };
+    }
+    const settings = await deps.accountRepo.getSettings(userId);
+    if (!settings || settings.defaultProvider === 'platform') {
+      return { ok: true, model: deps.platformModel ?? DEFAULT_PLATFORM_MODEL };
+    }
+
+    const provider = settings.defaultProvider;
+    const savedKey = settings.keys.find((key) => key.provider === provider);
+    if (!savedKey) {
+      return {
+        ok: false,
+        status: 409,
+        body: { error: 'provider_key_required', provider },
+      };
+    }
+    if (!deps.apiKeyEncryptionSecret) {
+      return {
+        ok: false,
+        status: 503,
+        body: { error: 'api_key_encryption_unavailable' },
+      };
+    }
+
+    try {
+      return {
+        ok: true,
+        model: {
+          provider,
+          modelId: settings.defaultModelId?.trim() || defaultModelForProvider(provider),
+        },
+        apiKey: decryptApiKey(savedKey.ciphertext, deps.apiKeyEncryptionSecret),
+      };
+    } catch (err) {
+      console.error(
+        `[account] failed to decrypt BYOK key for user=${userId} provider=${provider}`,
+        err,
+      );
+      return {
+        ok: false,
+        status: 500,
+        body: { error: 'api_key_decrypt_failed' },
+      };
+    }
+  }
+
   // ── health ────────────────────────────────────────────────────────────────
 
   app.get('/health', async () => ({ ok: true, service: 'playforge-api' }));
@@ -681,11 +823,160 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const user = await requireUser(req, reply);
     if (!user) return;
     const balance = await getUserBalance(user.userId);
+    const settings = deps.accountRepo ? await deps.accountRepo.getSettings(user.userId) : null;
     return reply.send({
       userId: user.userId,
       handle: user.handle,
+      ...(settings
+        ? {
+            onboardingComplete: settings.onboardingCompletedAt !== null,
+            defaultProvider: settings.defaultProvider,
+          }
+        : {}),
       ...(balance !== Number.POSITIVE_INFINITY ? { balance } : {}),
     });
+  });
+
+  // ── account settings ──────────────────────────────────────────────────────
+  // GET    /v1/account/settings
+  // PATCH  /v1/account/profile
+  // PUT    /v1/account/provider
+  // DELETE /v1/account/provider/:provider
+
+  app.get('/v1/account/settings', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    if (!deps.accountRepo) return reply.code(503).send({ error: 'account_unavailable' });
+    const settings = await deps.accountRepo.getSettings(user.userId);
+    if (!settings) return reply.code(404).send({ error: 'not_found' });
+    return reply.send(accountSettingsResponse(settings));
+  });
+
+  app.patch('/v1/account/profile', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    if (!deps.accountRepo) return reply.code(503).send({ error: 'account_unavailable' });
+    const body = (req.body ?? {}) as {
+      displayName?: unknown;
+      bio?: unknown;
+      avatarUrl?: unknown;
+    };
+
+    const patch: {
+      displayName?: string;
+      bio?: string | null;
+      avatarUrl?: string | null;
+    } = {};
+    if (body.displayName !== undefined) {
+      if (typeof body.displayName !== 'string') {
+        return reply.code(400).send({ error: 'invalid_display_name' });
+      }
+      const displayName = body.displayName.trim();
+      if (displayName.length < 1 || displayName.length > 80) {
+        return reply.code(400).send({ error: 'invalid_display_name', max: 80 });
+      }
+      patch.displayName = displayName;
+    }
+    if (body.bio !== undefined) {
+      if (typeof body.bio !== 'string') return reply.code(400).send({ error: 'invalid_bio' });
+      const bio = body.bio.trim();
+      if (bio.length > 280) return reply.code(400).send({ error: 'bio_too_long', max: 280 });
+      patch.bio = bio.length > 0 ? bio : null;
+    }
+    if (body.avatarUrl !== undefined) {
+      if (typeof body.avatarUrl !== 'string') {
+        return reply.code(400).send({ error: 'invalid_avatar_url' });
+      }
+      const avatarUrl = body.avatarUrl.trim();
+      if (avatarUrl.length === 0) {
+        patch.avatarUrl = null;
+      } else {
+        try {
+          const parsed = new URL(avatarUrl);
+          if (parsed.protocol !== 'https:') throw new Error('https_required');
+          patch.avatarUrl = parsed.toString();
+        } catch {
+          return reply.code(400).send({ error: 'invalid_avatar_url' });
+        }
+      }
+    }
+
+    const settings = await deps.accountRepo.updateProfile(user.userId, patch);
+    if (!settings) return reply.code(404).send({ error: 'not_found' });
+    return reply.send(accountSettingsResponse(settings));
+  });
+
+  app.put('/v1/account/provider', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    if (!deps.accountRepo) return reply.code(503).send({ error: 'account_unavailable' });
+    const body = (req.body ?? {}) as {
+      provider?: unknown;
+      modelId?: unknown;
+      apiKey?: unknown;
+      completeOnboarding?: unknown;
+    };
+    const provider = typeof body.provider === 'string' ? body.provider.trim() : '';
+    if (!isAccountProvider(provider)) {
+      return reply.code(400).send({ error: 'invalid_provider' });
+    }
+
+    const modelId =
+      typeof body.modelId === 'string' && body.modelId.trim().length > 0
+        ? body.modelId.trim()
+        : defaultModelForProvider(provider);
+    const markOnboardingComplete = body.completeOnboarding !== false;
+
+    if (isByokProvider(provider)) {
+      const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
+      if (apiKey.length > 0) {
+        const shapeError = apiKeyShapeError(provider, apiKey);
+        if (shapeError) return reply.code(400).send({ error: shapeError });
+        if (!deps.apiKeyEncryptionSecret) {
+          return reply.code(503).send({ error: 'api_key_encryption_unavailable' });
+        }
+        await deps.accountRepo.saveApiKey(user.userId, {
+          provider,
+          ciphertext: encryptApiKey(apiKey, deps.apiKeyEncryptionSecret),
+          last4: last4OfApiKey(apiKey),
+        });
+      } else {
+        const current = await deps.accountRepo.getSettings(user.userId);
+        const hasExisting = current?.keys.some((key) => key.provider === provider) ?? false;
+        if (!hasExisting) {
+          return reply.code(400).send({ error: 'api_key_required', provider });
+        }
+      }
+    }
+
+    const settings = await deps.accountRepo.saveProvider(user.userId, {
+      provider,
+      modelId: provider === 'platform' ? null : modelId,
+      markOnboardingComplete,
+    });
+    if (!settings) return reply.code(404).send({ error: 'not_found' });
+    return reply.send(accountSettingsResponse(settings));
+  });
+
+  app.delete('/v1/account/provider/:provider', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    if (!deps.accountRepo) return reply.code(503).send({ error: 'account_unavailable' });
+    const { provider } = req.params as { provider: string };
+    if (!isByokProvider(provider)) return reply.code(400).send({ error: 'invalid_provider' });
+
+    const before = await deps.accountRepo.getSettings(user.userId);
+    await deps.accountRepo.deleteApiKey(user.userId, provider);
+    const settings =
+      before?.defaultProvider === provider
+        ? await deps.accountRepo.saveProvider(user.userId, {
+            provider: 'platform',
+            modelId: null,
+            markOnboardingComplete: false,
+          })
+        : await deps.accountRepo.getSettings(user.userId);
+    if (!settings) return reply.code(404).send({ error: 'not_found' });
+    return reply.send(accountSettingsResponse(settings));
   });
 
   // ── password reset (6.2) ────────────────────────────────────────────────────
@@ -990,6 +1281,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       }
     }
 
+    const generationCredentials = await resolveGenerationCredentials(user.userId);
+    if (!generationCredentials.ok) {
+      return reply.code(generationCredentials.status).send(generationCredentials.body);
+    }
+
     const run = await deps.runRepo.create({ projectId: project.id, userId: user.userId });
 
     // Atomic credit RESERVATION (replaces the old non-atomic balance pre-check).
@@ -1050,6 +1346,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       projectId: project.id,
       userId: user.userId,
       prompt: body.prompt.trim(),
+      ...(generationCredentials.model !== undefined ? { model: generationCredentials.model } : {}),
+      ...(generationCredentials.apiKey !== undefined
+        ? { apiKey: generationCredentials.apiKey }
+        : {}),
       ...(paused?.snapshotManifestKey !== null && paused?.snapshotManifestKey !== undefined
         ? { parentManifestKey: paused.snapshotManifestKey }
         : project.currentManifestKey !== null
@@ -1846,6 +2146,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (ownerId === null) return reply.code(404).send({ error: 'user_not_found' });
     const projects = await deps.repo.listByOwner(ownerId);
     const publicProjects = projects.filter((p) => p.visibility === 'public');
+    const accountSettings = deps.accountRepo ? await deps.accountRepo.getSettings(ownerId) : null;
     // Follow stats (Phase 3.9): follower count + whether the (optional) viewer
     // follows this creator. isFollowing is false when unauthenticated.
     const viewer = await authenticateRequest(req);
@@ -1857,6 +2158,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     ]);
     return reply.send({
       handle,
+      displayName: accountSettings?.displayName ?? handle,
+      bio: accountSettings?.bio ?? null,
+      avatarUrl: accountSettings?.avatarUrl ?? null,
       projectCount: publicProjects.length,
       followerCount,
       isFollowing,

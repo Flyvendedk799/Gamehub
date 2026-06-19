@@ -1,8 +1,8 @@
 'use client';
 
-import { createProject, generateGame, register } from '@/lib/api';
+import { register } from '@/lib/api';
 import { setToken } from '@/lib/auth';
-import { deriveProjectName, takePendingPrompt } from '@/lib/pending-prompt';
+import { hasPendingPrompt } from '@/lib/pending-prompt';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
@@ -25,22 +25,7 @@ export default function RegisterPage() {
       const { token } = await register(email, password, handle, displayName || undefined);
       setToken(token);
 
-      // Phase 2.4 — replay a prompt captured on the homepage before the auth
-      // wall: now that we hold a token, create the project + start the build
-      // and route straight into the builder so the prompt is never lost.
-      const pending = takePendingPrompt();
-      if (pending) {
-        try {
-          const { project } = await createProject(deriveProjectName(pending), 'phaser');
-          const { runId } = await generateGame(project.id, pending);
-          router.push(`/projects/${project.id}?runId=${runId}`);
-          return;
-        } catch {
-          // The account exists; if the build kick-off failed (e.g. transient),
-          // fall through to the home page rather than stranding the user.
-        }
-      }
-      router.push('/');
+      router.push(hasPendingPrompt() ? '/onboarding?next=build' : '/onboarding');
     } catch (err) {
       setStatus('error');
       const msg = err instanceof Error ? err.message : 'Registration failed';
