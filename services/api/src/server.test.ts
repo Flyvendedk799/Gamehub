@@ -2,7 +2,7 @@ import { InMemoryEventBus, runChannel } from '@playforge/bus';
 import { InMemoryBlobStore, SnapshotStore } from '@playforge/storage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InMemoryAccountRepo } from './account-repo';
-import { HeaderAuthenticator } from './auth';
+import { type Authenticator, HeaderAuthenticator } from './auth';
 import { InMemoryHubRepo } from './hub-repo';
 import { InMemoryPublishRepo } from './publish-repo';
 import { InMemoryProjectRepo } from './repo';
@@ -28,10 +28,11 @@ function makeApp(overrides?: {
   accountRepo?: InMemoryAccountRepo;
   allowedCorsOrigins?: string;
   sseMaxStreamMs?: number;
+  auth?: Authenticator;
 }) {
   return buildServer({
     repo: overrides?.repo ?? new InMemoryProjectRepo(),
-    auth: new HeaderAuthenticator(),
+    auth: overrides?.auth ?? new HeaderAuthenticator(),
     bus: overrides?.bus ?? new InMemoryEventBus(),
     runRepo: overrides?.runRepo ?? new InMemoryRunRepo(),
     enqueue: overrides?.enqueue ?? (async () => {}),
@@ -42,7 +43,9 @@ function makeApp(overrides?: {
     ...(overrides?.allowedCorsOrigins !== undefined
       ? { allowedCorsOrigins: overrides.allowedCorsOrigins }
       : {}),
-    ...(overrides?.sseMaxStreamMs !== undefined ? { sseMaxStreamMs: overrides.sseMaxStreamMs } : {}),
+    ...(overrides?.sseMaxStreamMs !== undefined
+      ? { sseMaxStreamMs: overrides.sseMaxStreamMs }
+      : {}),
     ...(overrides?.accountRepo !== undefined
       ? {
           accountRepo: overrides.accountRepo,
@@ -1354,7 +1357,7 @@ describe('preview route', () => {
     const runRepo = new InMemoryRunRepo();
     const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
 
-    const html = '<html>game</html>';
+    const html = '<html><body><script type="module" src="src/main.js"></script></body></html>';
     const { manifestKey } = await store.write([{ path: 'index.html', bytes: Buffer.from(html) }]);
     await runRepo.setSnapshot(run.id, manifestKey);
 
@@ -1366,7 +1369,61 @@ describe('preview route', () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toBe('text/html; charset=utf-8');
+    expect(res.headers['content-security-policy']).toEqual(
+      expect.stringContaining("script-src 'self'"),
+    );
+    expect(res.headers['content-security-policy']).toEqual(
+      expect.stringContaining('https://cdn.jsdelivr.net'),
+    );
+    expect(res.headers['content-security-policy']).toEqual(
+      expect.stringContaining("connect-src 'self'"),
+    );
     expect(res.body).toBe(html);
+  });
+
+  it('uses a scoped preview auth cookie for generated subresources', async () => {
+    const blobStore = new InMemoryBlobStore();
+    const store = new SnapshotStore(blobStore);
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+    const auth: Authenticator = {
+      async authenticate(headers) {
+        const raw = headers['authorization'];
+        const authHeader = Array.isArray(raw) ? raw[0] : raw;
+        return authHeader === 'Bearer session-alice' ? { userId: 'alice', handle: 'alice' } : null;
+      },
+    };
+
+    const { manifestKey } = await store.write([
+      {
+        path: 'index.html',
+        bytes: Buffer.from('<script type="module" src="src/main.js"></script>'),
+      },
+      { path: 'src/main.js', bytes: Buffer.from('console.log("ok");') },
+    ]);
+    await runRepo.setSnapshot(run.id, manifestKey);
+
+    const app = makeApp({ store, runRepo, auth });
+    const html = await app.inject({
+      method: 'GET',
+      url: `/v1/runs/${run.id}/preview/?token=session-alice`,
+    });
+    expect(html.statusCode).toBe(200);
+    const setCookie = html.headers['set-cookie'];
+    const cookieHeader = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+    expect(cookieHeader).toEqual(expect.stringContaining('pf_preview_auth='));
+    expect(cookieHeader).toEqual(expect.stringContaining(`Path=/v1/runs/${run.id}/preview/`));
+    const cookiePair = cookieHeader?.split(';')[0];
+    expect(cookiePair).toBeDefined();
+
+    const script = await app.inject({
+      method: 'GET',
+      url: `/v1/runs/${run.id}/preview/src/main.js`,
+      headers: { cookie: cookiePair ?? '' },
+    });
+    expect(script.statusCode).toBe(200);
+    expect(script.headers['content-type']).toBe('text/javascript; charset=utf-8');
+    expect(script.body).toBe('console.log("ok");');
   });
 
   it('serves sub-assets from a run snapshot', async () => {

