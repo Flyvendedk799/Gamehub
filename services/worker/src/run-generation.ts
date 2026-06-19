@@ -231,6 +231,10 @@ export interface GenerationResult {
   /** Run-total token usage, summed from every `turn_end`. Persisted to the
    *  `runs` row for cost attribution. Zero when the provider streams no usage. */
   usage: { inputTokens: number; outputTokens: number; totalTokens: number };
+  /** WS-D — set when the run paused because the agent called `ask_user`. The
+   *  caller persists it on the continuation_pending row so the builder can show
+   *  the question + collect an answer. Null for a normal/complete run. */
+  pendingQuestion?: string | null;
 }
 
 /**
@@ -444,10 +448,20 @@ export async function runGeneration(
           };
         };
 
+  // WS-D — when the agent calls ask_user, record the question; buildInput's
+  // getContinuationHint then pauses the run cleanly at the next safe boundary
+  // (output.interrupted=true), and the caller (queue.ts → finalizeRun) persists
+  // the question on the continuation_pending row so the builder can collect an
+  // answer and resume.
+  let pendingQuestion: string | null = null;
+
   const deps: GenerateViaAgentDeps = {
     fs: tree,
     generateImageAsset,
     onEvent: wrappedOnEvent,
+    onAskUser: (question) => {
+      pendingQuestion = question;
+    },
     ...(runtimeVerify !== undefined ? { runtimeVerify } : {}),
     gameMode: {
       setEngine: (engine) => {
@@ -486,6 +500,11 @@ export async function runGeneration(
     history,
     artifactType: 'game',
     agentBudget: { maxToolCalls, maxWallClockMs },
+    // WS-D — pause the agent at the next safe boundary once it has asked a
+    // question (the existing continuation seam: agent.ts aborts cleanly when
+    // this returns non-null, yielding output.interrupted=true). 'model_requested'
+    // is the canonical reason for an agent-initiated pause.
+    getContinuationHint: () => (pendingQuestion !== null ? 'model_requested' : null),
     ...(req.engine ? { engine: req.engine } : {}),
     ...(tokenAbortController ? { signal: tokenAbortController.signal } : {}),
   });
@@ -639,6 +658,7 @@ export async function runGeneration(
       outputTokens: usedOutputTokens,
       totalTokens: usedInputTokens + usedOutputTokens,
     },
+    pendingQuestion,
     ...(lastRuntimeVerify !== undefined ? { runtimeVerify: lastRuntimeVerify } : {}),
   };
 }

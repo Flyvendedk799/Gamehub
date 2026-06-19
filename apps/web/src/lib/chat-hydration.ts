@@ -38,12 +38,13 @@ export function chatMessageToEvents(msg: ChatHistoryMessage): SseEvent[] {
   // reappear after a reload; resuming re-fires generateGame (the server
   // auto-applies the stored continuation).
   if (msg.kind === 'continuation_pending') {
-    const p = msg.payload as { runId?: string } | null;
+    const p = msg.payload as { runId?: string; question?: string } | null;
     return [
       {
         type: 'run_paused',
         runId: p?.runId ?? '',
         timestamp: msg.createdAt,
+        ...(p?.question ? { question: p.question } : {}),
       },
     ];
   }

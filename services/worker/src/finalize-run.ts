@@ -83,7 +83,13 @@ export async function finalizeRun(db: Db, args: FinalizeRunArgs): Promise<Finali
         projectId,
         seq: nextSeq,
         kind: 'continuation_pending',
-        payload: { runId, manifestKey },
+        // WS-D — carry the agent's clarifying question (when the pause came from
+        // ask_user) so the builder shows it + collects an answer to resume with.
+        payload: {
+          runId,
+          manifestKey,
+          ...(result.pendingQuestion ? { question: result.pendingQuestion } : {}),
+        },
       }),
     ]);
 

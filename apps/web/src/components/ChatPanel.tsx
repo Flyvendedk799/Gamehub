@@ -113,6 +113,9 @@ export function ChatPanel({
               {...(item.event.type === 'run_paused' && onResume
                 ? { onResume, isLatest: idx === renderItems.length - 1 }
                 : {})}
+              {...(item.event.type === 'run_paused' && item.event.question
+                ? { onAnswer: onSend, isLatest: idx === renderItems.length - 1 }
+                : {})}
             />
           ),
         )}
@@ -185,12 +188,15 @@ function EventRow({
   changedFiles,
   onFixError,
   onResume,
+  onAnswer,
   isLatest = false,
 }: {
   event: SseEvent;
   changedFiles?: string[];
   onFixError?: (error: string) => void;
   onResume?: () => void;
+  /** WS-D — submit an answer to an ask_user question (resumes the run). */
+  onAnswer?: (text: string) => void;
   isLatest?: boolean;
 }) {
   switch (event.type) {
@@ -240,6 +246,16 @@ function EventRow({
       );
 
     case 'run_paused':
+      // WS-D — an ask_user pause carries a question: show it with an answer box.
+      // A plain checkpoint pause keeps the Resume button.
+      if (event.question) {
+        return (
+          <AskQuestionCard
+            question={event.question}
+            {...(onAnswer && isLatest ? { onAnswer } : {})}
+          />
+        );
+      }
       return (
         <div className="space-y-2">
           <StatusChip label="Paused — long build checkpointed" color="indigo" />
@@ -419,6 +435,54 @@ function PlanCard({ event }: { event: Extract<SseEvent, { type: 'plan' }> }) {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+// ─── Ask-user question card (WS-D) ────────────────────────────────────────────
+
+function AskQuestionCard({
+  question,
+  onAnswer,
+}: {
+  question: string;
+  onAnswer?: (text: string) => void;
+}) {
+  const [answer, setAnswer] = useState('');
+  const submit = () => {
+    const a = answer.trim();
+    if (!a || !onAnswer) return;
+    onAnswer(`In answer to your question "${question}": ${a}`);
+    setAnswer('');
+  };
+  return (
+    <div className="rounded-xl border border-[#f59e0b]/30 bg-[#f59e0b]/5 px-3.5 py-3 space-y-2">
+      <span className="text-[10px] font-mono uppercase tracking-widest text-[#fbbf24]">
+        Question for you
+      </span>
+      <p className="text-sm text-[#f4f4f5] leading-relaxed">{question}</p>
+      {onAnswer && (
+        <div className="flex gap-2 items-end">
+          <textarea
+            value={answer}
+            onChange={(e) => setAnswer(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit();
+            }}
+            placeholder="Type your answer…"
+            rows={2}
+            className="flex-1 bg-[#0a0a0a] border border-[#222222] rounded-lg px-3 py-2 text-sm text-[#f4f4f5] placeholder-[#52525b] resize-none outline-none focus:border-[#f59e0b] transition-colors"
+          />
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!answer.trim()}
+            className="flex-shrink-0 px-3 py-2 rounded-lg bg-[#f59e0b] hover:bg-[#d97706] text-[#1a1a1a] text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Send
+          </button>
+        </div>
+      )}
     </div>
   );
 }

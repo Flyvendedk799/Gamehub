@@ -72,6 +72,7 @@ import { type CoreLogger, NOOP_LOGGER } from './logger.js';
 import { createNarrationDetector } from './narration-detector.js';
 import { composeSystemPrompt } from './prompts/index.js';
 import { type GetGameSpecFn, makeAmendGameSpecTool } from './tools/amend-game-spec.js';
+import { makeAskUserTool } from './tools/ask-user.js';
 import { makeAssertGameInvariantsTool } from './tools/assert-game-invariants.js';
 import { createCameraGuard } from './tools/camera-pin.js';
 // gameplan §A5 — game-builder tools (registered when deps.gameMode is set).
@@ -912,6 +913,10 @@ export interface GenerateViaAgentDeps {
    *  Production wires this from apps/desktop/src/main so 93-set_todos
    *  storms (FPS Wave Defense baseline) get gated at 3/turn / 12/design. */
   setTodosCounter?: (() => { turnCount: number; designCount: number }) | undefined;
+  /** WS-D — invoked when the agent calls `ask_user`. The host records the
+   *  question and pauses the run for a human answer (via getContinuationHint).
+   *  Undefined → the ask_user tool is inert (tests / non-pausing hosts). */
+  onAskUser?: ((question: string) => void) | undefined;
   /** may9 Phase 8b — host-supplied callback returning the parent
    *  snapshot's artifact_source byte length, or null when no parent
    *  exists (initial run). Forwarded into makeDoneTool so a 40%+
@@ -1098,6 +1103,11 @@ export async function generateViaAgent(
   if (isGameMode) {
     defaultTools.push(makeListGameFeelTool() as unknown as AgentTool<TSchema, unknown>);
     defaultTools.push(makeViewGameFeelTool() as unknown as AgentTool<TSchema, unknown>);
+    // WS-D — ask_user lets the agent pause for ONE clarifying question when the
+    // brief is genuinely underspecified. The host (run-generation) records the
+    // question via deps.onAskUser and pauses the run at the next safe boundary
+    // through getContinuationHint; the builder collects the answer and resumes.
+    defaultTools.push(makeAskUserTool(deps.onAskUser) as unknown as AgentTool<TSchema, unknown>);
   }
   // view_skill_rule is registered globally so flat-skill runs see a
   // harmless no-op tool definition (the executor returns "no rules" when

@@ -164,6 +164,9 @@ export interface GameSpecEvent {
 export interface RunPausedEvent {
   type: 'run_paused';
   runId: string;
+  /** WS-D — set when the agent paused to ask a clarifying question (ask_user).
+   *  The builder shows it with an answer box that resumes the run. */
+  question?: string;
   timestamp: string;
 }
 

@@ -319,7 +319,8 @@ export function normalizeAgentFrame(
     }
 
     case 'run_paused': {
-      return [{ type: 'run_paused', runId, timestamp }];
+      const question = str(frame['question']);
+      return [{ type: 'run_paused', runId, timestamp, ...(question ? { question } : {}) }];
     }
 
     default:
