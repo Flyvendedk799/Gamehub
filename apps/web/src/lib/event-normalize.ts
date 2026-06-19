@@ -87,29 +87,82 @@ export function toolActivityLabel(toolName: string, args: Record<string, unknown
     case EDIT_TOOL: {
       // Non-write edit command (e.g. `view`).
       const path = str(args['path']);
-      return path ? `reading ${path}` : 'reading files';
+      return path ? `reading ${path}` : 'reading the project files';
     }
     case 'validate_game_scene':
-      return 'validating scene';
+      return 'checking the scene for errors';
     case 'playtest_game':
-      return 'playtesting';
+      return 'playtesting the game in a browser';
     case 'choose_engine': {
       const engine = str(args['engine']);
-      return engine ? `choosing engine — ${engine}` : 'choosing engine';
+      return engine ? `choosing engine — ${engine}` : 'choosing the game engine';
     }
     case 'declare_game_spec':
-      return 'declaring game spec';
+      return 'defining the game design';
     case 'amend_game_spec':
-      return 'amending game spec';
+      return 'revising the game design';
     case 'verify_artifact':
-      return 'verifying artifact';
+      return 'verifying the build';
     case 'set_todos':
-      return 'planning';
+      return 'planning the build steps';
     case 'read_url':
-      return 'reading reference';
+      return 'reading a reference';
+    case 'generate_image_asset': {
+      const purpose = str(args['purpose']);
+      return purpose ? `generating art — ${purpose}` : 'generating game art';
+    }
+    case 'done':
+      return 'finalizing the build';
     default:
       // Fall back to a readable form of the raw name: snake_case → words.
       return toolName.replace(/_/g, ' ');
+  }
+}
+
+/**
+ * Outcome label for a FINISHED tool call. The build log previously reused the
+ * start label for the result chip too, so a single step rendered as the same
+ * text twice ("playtesting" then "playtesting") — which reads as confusing
+ * repetition rather than progress. This gives the result chip its own concise,
+ * past-tense outcome ("playtest passed" / "playtest found problems"), so each
+ * step narrates start → result.
+ */
+export function toolResultLabel(
+  toolName: string,
+  args: Record<string, unknown>,
+  success: boolean,
+): string {
+  const writePath = writePathFromTool(toolName, args);
+  if (writePath) return success ? `wrote ${writePath}` : `couldn't write ${writePath}`;
+
+  switch (toolName) {
+    case EDIT_TOOL:
+      return success ? 'read the files' : "couldn't read the files";
+    case 'validate_game_scene':
+      return success ? 'scene looks good' : 'scene has issues to fix';
+    case 'playtest_game':
+      return success ? 'playtest passed' : 'playtest found problems';
+    case 'choose_engine': {
+      const engine = str(args['engine']);
+      return engine ? `engine ready — ${engine}` : 'engine selected';
+    }
+    case 'declare_game_spec':
+    case 'amend_game_spec':
+      return success ? 'game design set' : "couldn't set the game design";
+    case 'verify_artifact':
+      return success ? 'build verified' : 'build needs fixes';
+    case 'set_todos':
+      return 'plan updated';
+    case 'read_url':
+      return success ? 'reference read' : "couldn't read the reference";
+    case 'generate_image_asset':
+      return success ? 'art ready' : 'art unavailable — using a placeholder';
+    case 'done':
+      return success ? 'build finalized' : 'build still has errors';
+    default: {
+      const words = toolName.replace(/_/g, ' ');
+      return success ? `${words} done` : `${words} failed`;
+    }
   }
 }
 
@@ -189,7 +242,7 @@ export function normalizeAgentFrame(
       const success = frame['isError'] !== true;
       const args = asRecord(frame['args']);
       const path = writePathFromTool(toolName, args);
-      const label = toolActivityLabel(toolName, args);
+      const label = toolResultLabel(toolName, args, success);
       return [
         {
           type: 'tool_result',

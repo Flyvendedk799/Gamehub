@@ -93,10 +93,26 @@ export default function BuilderPage() {
 
         const syntheticEvents: SseEvent[] = [];
         for (const msg of messages) {
+          // The current run (initialRunId) is replayed in full, in order, by the
+          // durable SSE stream below — including its terminal. Skip the
+          // chat-derived terminal for THAT run so the build log doesn't render
+          // "Build complete" before the steps that produced it (or twice). Other
+          // runs' terminals stay (no stream replays them).
+          if (
+            initialRunId &&
+            (msg.kind === 'artifact_delivered' || msg.kind === 'continuation_pending') &&
+            (msg.payload as { runId?: string } | null)?.runId === initialRunId
+          ) {
+            continue;
+          }
           syntheticEvents.push(...chatMessageToEvents(msg));
         }
 
-        setEvents(syntheticEvents);
+        // Prepend, don't replace: the durable SSE stream (started in parallel on
+        // mount) may already have appended the current run's events by the time
+        // this resolves. Prepending keeps prior history ahead of the live feed
+        // regardless of which network call wins the race.
+        setEvents((prev) => [...syntheticEvents, ...prev]);
         const lastPreviewUrl = lastPreviewUrlFromHistory(messages);
         if (lastPreviewUrl) {
           const url = lastPreviewUrl.startsWith('http')
@@ -107,7 +123,7 @@ export default function BuilderPage() {
       })
       .catch((err) => setLoadError(describeApiError(err)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, refreshSnapshots]);
+  }, [projectId, refreshSnapshots, initialRunId]);
 
   // ─── Start streaming when runId changes ───────────────────────────────────
   const startStream = useCallback(

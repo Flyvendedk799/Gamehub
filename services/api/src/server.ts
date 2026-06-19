@@ -293,6 +293,15 @@ export interface ServerDeps {
   /** Optional: hard cap on a single SSE stream (ms). Defaults to SSE_MAX_STREAM_MS. */
   sseMaxStreamMs?: number;
   /**
+   * Optional: durable build-feed backfill. Returns a run's persisted events
+   * (from `run_events`, seq order) as raw frames. When provided, the SSE relay
+   * REPLAYS these first, then tails the bus live-only — so the build log
+   * survives a refresh / API restart. When omitted (tests / no-DB dev), the
+   * relay falls back to bus replay-on-subscribe. main.ts wires the Postgres
+   * reader.
+   */
+  loadRunEvents?: (runId: string) => Promise<unknown[]>;
+  /**
    * Optional (Phase 6.1): credit-purchase provider. When set, enables
    * POST /v1/credits/purchase. Flag/env-gated — mock by default in dev, a real
    * provider swaps in later behind the same port. Requires authDb to grant.
@@ -1647,80 +1656,137 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       // `req.raw` is the underlying Node IncomingMessage.
       req.raw.on('close', finish);
 
-      // Subscribe with replay: InMemoryEventBus calls the handler synchronously
-      // for all history before resolving, so inject() tests complete without
-      // needing to await a separate enqueue step.
-      deps.bus
-        .subscribe(runChannel(id), (message) => {
-          if (done) return;
-          const m = message as { type?: string };
-          const previewUrl = `/v1/runs/${id}/preview/`;
-          // Attach the preview URL to run_complete so the browser knows where to load the game.
-          const payload = m.type === 'run_complete' ? { ...m, previewUrl } : message;
-          // An unserializable bus event (circular ref, BigInt, throwing getter)
-          // must not throw out of this handler — that would strand the stream with
-          // its timers armed and (pre-C1) its subscription leaked. Skip the bad
-          // frame instead. (correctness H3)
-          try {
-            reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
-          } catch (err) {
-            console.error(
-              `[sse] dropping unserializable event on run ${id}:`,
-              err instanceof Error ? err.message : err,
-            );
-          }
-          if (m.type === 'run_complete') {
-            // Push a preview_updated notification to all presence sockets for this project
-            // so other collaborators' previews auto-reload without polling.
-            void deps.runRepo
-              .get(id)
-              .then((r) => {
-                if (!r) return;
-                const msg = JSON.stringify({
-                  type: 'preview_updated',
-                  projectId: r.projectId,
-                  previewUrl,
-                });
-                for (const fn of presenceSockets.get(r.projectId) ?? []) fn(msg);
-              })
-              .catch((err) => {
-                console.error(
-                  `[sse] preview_updated broadcast failed for run ${id}:`,
-                  err instanceof Error ? err.message : err,
-                );
-              });
-            finish();
-          }
-          if (m.type === 'run_error') {
-            finish();
-          }
-          // A paused or canceled run is terminal for THIS stream: the worker won't
-          // emit further events on this run channel. Without finishing here a
-          // `run_paused` (worker pause) or `run_canceled` (cancel endpoint) frame
-          // would be written but the stream would hang open until the client/HTTP
-          // timeout. The frontend keys its Resume button on the {type:'run_paused'}
-          // frame, so the shape must stay exactly that.
-          if (m.type === 'run_paused' || m.type === 'run_canceled') {
-            finish();
-          }
-        })
-        .then((unsub) => {
-          // If the handler already drove the stream to completion during the
-          // synchronous in-memory replay, `done` is set before we get here —
-          // unsubscribe immediately so nothing leaks. Otherwise hand the
-          // unsubscribe to finish().
-          if (done) unsub();
-          else unsubscribe = unsub;
-        })
-        .catch((err) => {
-          // subscribe() rejected (e.g. Redis unavailable / replay failure):
-          // close the stream rather than leave it hanging open.
+      const previewUrl = `/v1/runs/${id}/preview/`;
+      const TERMINAL_FRAMES = new Set(['run_complete', 'run_error', 'run_paused', 'run_canceled']);
+
+      // Write one frame to the SSE response. An unserializable event (circular
+      // ref, BigInt, throwing getter) must not throw out of here — that would
+      // strand the stream with its timers armed and its subscription leaked. We
+      // skip the bad frame. (correctness H3) Returns the frame's `type`.
+      const writeFrame = (message: unknown): string => {
+        const m = message as { type?: string };
+        const payload = m.type === 'run_complete' ? { ...m, previewUrl } : message;
+        try {
+          reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+        } catch (err) {
           console.error(
-            `[sse] bus.subscribe failed for run ${id}:`,
+            `[sse] dropping unserializable event on run ${id}:`,
             err instanceof Error ? err.message : err,
           );
-          finish();
-        });
+        }
+        return typeof m.type === 'string' ? m.type : '';
+      };
+
+      // Live tail: subscribe to the run channel and relay each frame, closing on
+      // a terminal frame. `replay` controls whether the BUS replays its own
+      // history — production passes false because the durable backfill below has
+      // already covered history; tests pass true (no durable store wired).
+      const attachLive = (replay: boolean) => {
+        deps.bus
+          .subscribe(
+            runChannel(id),
+            (message) => {
+              if (done) return;
+              const type = writeFrame(message);
+              if (type === 'run_complete') {
+                // Notify presence sockets so collaborators' previews auto-reload.
+                void deps.runRepo
+                  .get(id)
+                  .then((r) => {
+                    if (!r) return;
+                    const msg = JSON.stringify({
+                      type: 'preview_updated',
+                      projectId: r.projectId,
+                      previewUrl,
+                    });
+                    for (const fn of presenceSockets.get(r.projectId) ?? []) fn(msg);
+                  })
+                  .catch((err) => {
+                    console.error(
+                      `[sse] preview_updated broadcast failed for run ${id}:`,
+                      err instanceof Error ? err.message : err,
+                    );
+                  });
+              }
+              // A terminal frame ends THIS stream — the worker emits nothing more
+              // on this channel. The frontend keys Resume on {type:'run_paused'}.
+              if (TERMINAL_FRAMES.has(type)) finish();
+            },
+            { replay },
+          )
+          .then((unsub) => {
+            // If the handler already drove the stream to completion during the
+            // synchronous in-memory replay, `done` is set before we get here —
+            // unsubscribe immediately so nothing leaks.
+            if (done) unsub();
+            else unsubscribe = unsub;
+          })
+          .catch((err) => {
+            console.error(
+              `[sse] bus.subscribe failed for run ${id}:`,
+              err instanceof Error ? err.message : err,
+            );
+            finish();
+          });
+      };
+
+      // Durable-backfill path (production): replay the run's persisted events
+      // from `run_events`, then either close (the run already finished) or tail
+      // the bus live (replay:false — history already covered). This is what makes
+      // the build log survive a refresh + API restart. The bus is in-memory on
+      // ServerHoster, so without this a reload after a restart shows nothing.
+      const relayWithBackfill = async () => {
+        let replayedTerminal = false;
+        try {
+          const history = (await deps.loadRunEvents?.(id)) ?? [];
+          for (const ev of history) {
+            if (done) break;
+            if (TERMINAL_FRAMES.has(writeFrame(ev))) replayedTerminal = true;
+          }
+        } catch (err) {
+          console.error(
+            `[sse] run-events backfill failed for run ${id}:`,
+            err instanceof Error ? err.message : err,
+          );
+        }
+        if (done) return;
+        const runFinished =
+          run.status === 'completed' ||
+          run.status === 'failed' ||
+          run.status === 'canceled' ||
+          run.status === 'paused';
+        // Legacy runs (finished before run_events existed, or whose persistence
+        // failed) have no terminal frame to replay. Synthesize one from the run's
+        // status so the client always receives an authoritative terminal for the
+        // current run over the stream — this lets the browser treat the stream as
+        // the single source of truth for the run feed and drop the chat-derived
+        // duplicate, with no special-casing on the client.
+        if (runFinished && !replayedTerminal) {
+          const terminalType =
+            run.status === 'completed'
+              ? 'run_complete'
+              : run.status === 'paused'
+                ? 'run_paused'
+                : run.status === 'canceled'
+                  ? 'run_canceled'
+                  : 'run_error';
+          if (terminalType === 'run_error') {
+            writeFrame({ type: 'run_error', error: 'Run failed.' });
+          } else {
+            writeFrame({ type: terminalType });
+          }
+        }
+        // A finished run needs no live tail — close after replaying its history.
+        if (replayedTerminal || runFinished) finish();
+        else attachLive(false);
+      };
+
+      if (deps.loadRunEvents !== undefined) {
+        void relayWithBackfill();
+      } else {
+        // No durable store (tests / no-DB dev): original bus replay-on-subscribe.
+        attachLive(true);
+      }
     });
   });
 

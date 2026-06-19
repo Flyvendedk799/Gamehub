@@ -24,7 +24,10 @@ import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
  *   API_KEY_ENCRYPTION_SECRET  Secret for BYOK key encryption (falls back to PLATFORM_API_KEY)
  */
 import { Queue } from 'bullmq';
+import { asc, eq } from 'drizzle-orm';
+import { finalizeRun } from '../../worker/src/finalize-run';
 import { enqueueRun } from '../../worker/src/queue';
+import type { RunQualityMetrics } from '../../worker/src/run-generation';
 import { DrizzleAccountRepo } from './account-repo';
 import { SessionAuthenticator } from './auth';
 import { BrowserJobQueue } from './browser-queue';
@@ -37,6 +40,7 @@ import {
 } from './drizzle-repos';
 import { ConsoleEmailTransport, type EmailPort } from './email';
 import { DrizzleHubRepo } from './hub-repo';
+import { type InProcessBrowserJobs, makeInProcessBrowserJobs } from './in-process-browser';
 import { DrizzlePublishRepo } from './publish-repo';
 import { type EnqueueFn, buildServer } from './server';
 
@@ -139,13 +143,62 @@ async function main() {
 
   let queue: Queue | undefined;
   let browserQueue: BrowserJobQueue | undefined;
+  // In-process mode only: a local Playwright pool so the agent's runtime-verify +
+  // playtest_game gates (and Phase 1.6's boot-and-repair loop) actually run.
+  // Untrusted game code still executes in a hardened, egress-locked Chromium
+  // child process — same isolation as the dedicated browser-worker. Degrades to
+  // null (static-lint-only) if Chromium isn't installed. Disable with
+  // DISABLE_BROWSER_JOBS=1.
+  let inProcessBrowserJobs: InProcessBrowserJobs | undefined;
   if (redisUrl) {
     queue = new Queue('generate', { connection: parseRedisUrl(redisUrl) });
     browserQueue = new BrowserJobQueue(redisUrl);
     console.log('[playforge-api] BullMQ queue connected to Redis');
   } else {
-    console.log('[playforge-api] no REDIS_URL — running generation in-process');
+    if (process.env['DISABLE_BROWSER_JOBS'] !== '1') {
+      inProcessBrowserJobs = makeInProcessBrowserJobs();
+    }
+    console.log(
+      `[playforge-api] no REDIS_URL — running generation in-process (playtest/repair: ${
+        inProcessBrowserJobs ? 'in-process Chromium' : 'disabled'
+      })`,
+    );
   }
+
+  // #5.6 — per-run quality telemetry writer (mirrors the BullMQ worker). Wiring
+  // it into the in-process path means ServerHoster runs also populate
+  // run_quality_metrics (genre, repairRounds, shipReason, juice, runtimeBooted)
+  // instead of leaving the table empty. Best-effort: never fails a run.
+  const recordRunQuality = async (qRunId: string, m: RunQualityMetrics): Promise<void> => {
+    const juiceScore = m.juiceScore === null ? null : String(m.juiceScore);
+    const row = {
+      runId: qRunId,
+      genre: m.genre,
+      forceAccept: m.forceAccept,
+      repairRounds: m.repairRounds,
+      shipReason: m.shipReason,
+      playbookPass: m.playbookPass,
+      playbookTotal: m.playbookTotal,
+      juiceScore,
+      runtimeBooted: m.runtimeBooted,
+    };
+    await db
+      .insert(schema.runQualityMetrics)
+      .values(row)
+      .onConflictDoUpdate({
+        target: schema.runQualityMetrics.runId,
+        set: {
+          genre: row.genre,
+          forceAccept: row.forceAccept,
+          repairRounds: row.repairRounds,
+          shipReason: row.shipReason,
+          playbookPass: row.playbookPass,
+          playbookTotal: row.playbookTotal,
+          juiceScore: row.juiceScore,
+          runtimeBooted: row.runtimeBooted,
+        },
+      });
+  };
 
   const enqueue: EnqueueFn = async ({
     runId,
@@ -196,7 +249,19 @@ async function main() {
       return;
     }
 
-    // In-process fallback (dev without Redis).
+    // In-process fallback (no Redis): run generation inline, then settle through
+    // the SAME finalizeRun path the worker uses. Previously this path wrote only
+    // a manifest pointer + chat row — no snapshot row, no quality metrics, no
+    // token usage — so on ServerHoster History/Restore/Remix silently broke and
+    // run_quality_metrics stayed empty. finalizeRun fixes all three.
+    const startedAt = Date.now();
+    console.log(
+      `[run:${runId}] in-process generation started — project=${projectId} user=${userId}` +
+        `${model ? ` model=${model.provider}/${model.modelId}` : ''}${isRemix ? ' (remix)' : ''}`,
+    );
+    await runRepo.updateStatus(runId, 'running').catch((err: unknown) => {
+      console.error(`[run:${runId}] could not mark running:`, err);
+    });
     void enqueueRun(
       {
         runId,
@@ -205,26 +270,48 @@ async function main() {
         model: model ?? platformModel,
         apiKey: apiKey ?? platformApiKey,
         ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
+        ...(maxTokens !== undefined ? { maxTokens } : {}),
         ...(isRemix === true ? { isRemix } : {}),
       },
-      { bus, store },
+      {
+        bus,
+        store,
+        recordRunQuality,
+        // Real runtime-verify + playtest gates in-process (Chromium permitting).
+        ...(inProcessBrowserJobs !== undefined ? { browserJobs: inProcessBrowserJobs } : {}),
+        // Durable build-feed log so the feed survives refresh + API restart.
+        persistEvent: async (rec) => {
+          await db
+            .insert(schema.runEvents)
+            .values({
+              runId: rec.runId,
+              projectId: rec.projectId,
+              seq: rec.seq,
+              event: rec.event,
+            })
+            .onConflictDoNothing();
+        },
+      },
     )
       .then(async (result) => {
-        const manifestKey = result.snapshot.manifestKey;
-        await Promise.all([
-          runRepo.setSnapshot(runId, manifestKey),
-          projectRepo.setCurrentManifestKey(projectId, manifestKey),
-          chatRepo.add(projectId, 'artifact_delivered', {
+        try {
+          await finalizeRun(db, {
             runId,
-            previewUrl: `/v1/runs/${runId}/preview/`,
-            engine: result.engine,
-          }),
-        ]).catch((err: unknown) => {
-          console.error(`[run:${runId}] post-completion update failed:`, err);
-        });
+            projectId,
+            userId,
+            prompt,
+            result,
+            creditsPerRun: CREDITS_PER_RUN,
+            log: (msg) => console.log(`${msg} (${Date.now() - startedAt}ms)`),
+          });
+        } catch (err: unknown) {
+          // Generation succeeded but persistence failed — do NOT refund or mark
+          // failed (the artifact exists); surface loudly so it can be repaired.
+          console.error(`[run:${runId}] post-completion persistence failed:`, err);
+        }
       })
       .catch(async (err: unknown) => {
-        console.error(`[run:${runId}] generation failed:`, err);
+        console.error(`[run:${runId}] generation failed after ${Date.now() - startedAt}ms:`, err);
         await runRepo.updateStatus(runId, 'failed').catch(() => {});
         // Refund the enqueue-time reservation so a failed run costs nothing. This
         // mirrors the worker.on('failed') refund for the no-Redis in-process path.
@@ -269,6 +356,16 @@ async function main() {
     enqueue,
     store,
     snapshotRepo,
+    // Durable build-feed backfill — the SSE relay replays these on (re)connect
+    // so the log survives a refresh / API restart.
+    loadRunEvents: async (runId: string) => {
+      const rows = await db
+        .select({ event: schema.runEvents.event })
+        .from(schema.runEvents)
+        .where(eq(schema.runEvents.runId, runId))
+        .orderBy(asc(schema.runEvents.seq));
+      return rows.map((r) => r.event);
+    },
     authDb: db,
     accountRepo,
     platformModel,
@@ -318,6 +415,13 @@ async function main() {
           await queue
             .close()
             .catch((err: unknown) => console.error('[playforge-api] queue close failed:', err));
+        }
+        if (inProcessBrowserJobs) {
+          await inProcessBrowserJobs
+            .close()
+            .catch((err: unknown) =>
+              console.error('[playforge-api] in-process browser close failed:', err),
+            );
         }
         process.exit(0);
       })();

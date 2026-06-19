@@ -57,6 +57,15 @@ describe('InMemoryEventBus', () => {
     expect(seen).toEqual(['first', 'second', 'third']);
   });
 
+  it('skips history with { replay: false } and delivers only live messages', async () => {
+    const bus = new InMemoryEventBus();
+    await bus.publish('c', 'old');
+    const seen: unknown[] = [];
+    await bus.subscribe('c', (m) => seen.push(m), { replay: false });
+    await bus.publish('c', 'new');
+    expect(seen).toEqual(['new']);
+  });
+
   it('isolates channels and stops after unsubscribe', async () => {
     const bus = new InMemoryEventBus();
     const seen: unknown[] = [];
