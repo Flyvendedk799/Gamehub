@@ -263,6 +263,9 @@ function EventRow({
     case 'game_spec':
       return <GameSpecCard event={event} />;
 
+    case 'plan':
+      return <PlanCard event={event} />;
+
     case 'user_message':
       return (
         <div className="flex justify-end py-1">
@@ -288,6 +291,15 @@ function EventRow({
         </span>
       );
 
+    case 'assistant_text':
+      // Usually folded into the coalesced narration block by buildRenderItems;
+      // render standalone snapshots too so the AI's prose never vanishes.
+      return (
+        <p className="text-sm text-[#d4d4d8] leading-relaxed py-0.5 whitespace-pre-wrap">
+          {event.text}
+        </p>
+      );
+
     case 'thinking_delta':
       return <span className="text-xs text-[#52525b] italic leading-relaxed">{event.delta}</span>;
 
@@ -299,7 +311,12 @@ function EventRow({
       // chip ("writing index.html") + the per-iteration "Changed N files"
       // summary, so they don't also emit a redundant — and, since the end frame
       // carries no args, mislabeled — result chip. Failures still surface.
-      if (event.success && (event.path || event.toolName === EDIT_TOOL)) return null;
+      if (
+        event.success &&
+        (event.path || event.toolName === EDIT_TOOL || event.toolName === 'set_todos')
+      ) {
+        return null; // set_todos shows as the plan card; edits fold into the summary
+      }
       return (
         <ToolChip
           label={event.label ?? event.toolName}
@@ -366,6 +383,39 @@ function ChangedFilesSummary({ paths }: { paths: string[] }) {
           >
             <span className="text-[#22c55e]">+</span>
             {p}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// ─── Plan checklist (set_todos) ───────────────────────────────────────────────
+
+function PlanCard({ event }: { event: Extract<SseEvent, { type: 'plan' }> }) {
+  const done = event.items.filter((i) => i.checked).length;
+  return (
+    <div className="rounded-xl border border-[#6366f1]/25 bg-[#6366f1]/5 px-3.5 py-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-mono uppercase tracking-widest text-[#818cf8]">Plan</span>
+        <span className="text-[10px] font-mono text-[#52525b]">
+          {done}/{event.items.length}
+        </span>
+      </div>
+      <ul className="space-y-1">
+        {event.items.map((item, i) => (
+          <li
+            key={`${i}-${item.text}`}
+            className={`flex items-start gap-2 text-sm leading-relaxed ${
+              item.checked ? 'text-[#52525b] line-through' : 'text-[#e4e4e7]'
+            }`}
+          >
+            <span
+              className={`mt-0.5 flex-shrink-0 ${item.checked ? 'text-[#22c55e]' : 'text-[#3f3f46]'}`}
+            >
+              {item.checked ? '✓' : '○'}
+            </span>
+            <span>{item.text}</span>
           </li>
         ))}
       </ul>

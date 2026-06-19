@@ -108,6 +108,27 @@ describe('RunEventRecorder', () => {
     expect(persisted[0]?.seq).toBe(0);
   });
 
+  it('persists completions-style narration snapshots as one coalesced block per turn', async () => {
+    const published: unknown[] = [];
+    const persisted: PersistRunEventInput[] = [];
+    const rec = new RunEventRecorder('r5', 'p5', fakeBus(published), (i) => {
+      persisted.push(i);
+    });
+
+    // Growing full-message snapshots (replace), then the turn ends.
+    const snap = (text: string) =>
+      ({ type: 'message_update', message: { content: [{ type: 'text', text }] } }) as AgentEvent;
+    rec.onAgentEvent(snap('Setting'));
+    rec.onAgentEvent(snap('Setting up the'));
+    rec.onAgentEvent(snap('Setting up the car physics'));
+    rec.onAgentEvent({ type: 'turn_end' } as AgentEvent);
+    await flush();
+
+    // One narration row carrying the FINAL snapshot text (not three).
+    expect(persisted).toHaveLength(1);
+    expect(textDeltaOf(persisted[0]?.event)).toBe('Setting up the car physics');
+  });
+
   it('still streams live when no persist sink is wired (no-DB dev)', async () => {
     const published: unknown[] = [];
     const rec = new RunEventRecorder('r3', 'p3', fakeBus(published));

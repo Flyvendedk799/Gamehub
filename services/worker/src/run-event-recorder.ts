@@ -42,6 +42,39 @@ export function textDeltaOf(event: unknown): string | null {
   return typeof delta === 'string' && delta.length > 0 ? delta : null;
 }
 
+/** Join the `{type:'text'}` parts of a completions-style message snapshot's
+ *  `content[]`, ignoring toolCall items. Returns null when there's no prose. */
+function snapshotTextOf(event: unknown): string | null {
+  if (!event || typeof event !== 'object') return null;
+  const e = event as Record<string, unknown>;
+  if (e['type'] !== 'message_update') return null;
+  const msg = e['message'];
+  if (!msg || typeof msg !== 'object') return null;
+  const content = (msg as Record<string, unknown>)['content'];
+  if (!Array.isArray(content)) return null;
+  const parts: string[] = [];
+  for (const item of content) {
+    if (item && typeof item === 'object') {
+      const c = item as Record<string, unknown>;
+      if (c['type'] === 'text' && typeof c['text'] === 'string' && c['text'].length > 0) {
+        parts.push(c['text']);
+      }
+    }
+  }
+  const joined = parts.join('').trim();
+  return joined.length > 0 ? joined : null;
+}
+
+/** The assistant narration carried by an event, with how to fold it: append-only
+ *  text deltas (Anthropic) vs. full-snapshot replaces (openai-completions). */
+function narrationOf(event: unknown): { mode: 'append' | 'replace'; text: string } | null {
+  const delta = textDeltaOf(event);
+  if (delta !== null) return { mode: 'append', text: delta };
+  const snapshot = snapshotTextOf(event);
+  if (snapshot !== null) return { mode: 'replace', text: snapshot };
+  return null;
+}
+
 function coalescedTextFrame(text: string): unknown {
   return { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: text } };
 }
@@ -90,14 +123,25 @@ export class RunEventRecorder {
       );
     });
 
-    const text = textDeltaOf(event);
-    if (text !== null) {
-      this.textBuffer += text;
+    // Accumulate the assistant's narration (append deltas / replace snapshots)
+    // for durable persistence — one coalesced block per turn, not per token.
+    const narration = narrationOf(event);
+    if (narration !== null) {
+      if (narration.mode === 'append') this.textBuffer += narration.text;
+      else this.textBuffer = narration.text;
       return;
     }
-    // Drop streaming/loop internals from the durable log (still streamed live).
-    // Any `message_update` reaching here is a non-text snapshot — noise.
-    if (NON_PERSISTED_TYPES.has((event as { type?: string }).type ?? '')) return;
+    const type = (event as { type?: string }).type ?? '';
+    // A turn boundary finalizes the current narration block.
+    if (type === 'turn_end') {
+      this.flushTextPersist();
+      return;
+    }
+    // Drop the remaining streaming/loop internals from the durable log (still
+    // streamed live). A tool-only `message_update` snapshot reaches here too.
+    if (NON_PERSISTED_TYPES.has(type)) return;
+    // Persist the narration BEFORE this meaningful event (e.g. a tool call) so
+    // the feed reads "said what it's doing → did it", in order.
     this.flushTextPersist();
     this.persistEvent(event);
   }

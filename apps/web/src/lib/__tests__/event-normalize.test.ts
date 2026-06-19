@@ -169,6 +169,75 @@ describe('normalizeAgentFrame — message_update text_delta (2.1)', () => {
   });
 });
 
+describe('normalizeAgentFrame — assistant narration (WS-B)', () => {
+  it('extracts assistant text from a completions-style message.content snapshot', () => {
+    const out = normalizeAgentFrame(
+      {
+        type: 'message_update',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: "I'll set up the car physics" },
+            { type: 'toolCall', name: 'set_todos', arguments: {} },
+          ],
+        },
+      },
+      ctx,
+    );
+    expect(out).toHaveLength(1);
+    const ev = out[0]!;
+    expect(ev.type).toBe('assistant_text');
+    if (ev.type === 'assistant_text') expect(ev.text).toBe("I'll set up the car physics");
+  });
+
+  it('emits nothing for a tool-only snapshot (no text)', () => {
+    const out = normalizeAgentFrame(
+      {
+        type: 'message_update',
+        message: { role: 'assistant', content: [{ type: 'toolCall', name: 'done' }] },
+      },
+      ctx,
+    );
+    expect(out).toEqual([]);
+  });
+
+  it('still handles the Anthropic-style text_delta shape', () => {
+    const out = normalizeAgentFrame(
+      { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hi' } },
+      ctx,
+    );
+    expect(out[0]?.type).toBe('text_delta');
+  });
+});
+
+describe('normalizeAgentFrame — set_todos plan card (WS-B)', () => {
+  it('maps a set_todos call to a plan event (not a generic tool chip)', () => {
+    const out = normalizeAgentFrame(
+      {
+        type: 'tool_execution_start',
+        toolName: 'set_todos',
+        args: {
+          items: [
+            { text: 'Declare game spec', checked: true },
+            { text: 'Build the car', checked: false },
+          ],
+        },
+        toolCallId: 'c',
+      },
+      ctx,
+    );
+    expect(out).toHaveLength(1);
+    const ev = out[0]!;
+    expect(ev.type).toBe('plan');
+    if (ev.type === 'plan') {
+      expect(ev.items).toEqual([
+        { text: 'Declare game spec', checked: true },
+        { text: 'Build the car', checked: false },
+      ]);
+    }
+  });
+});
+
 describe('normalizeAgentFrame — run_paused (2.5)', () => {
   it('maps the bare run_paused frame to a run_paused event stamped with runId', () => {
     const out = normalizeAgentFrame({ type: 'run_paused' }, ctx);

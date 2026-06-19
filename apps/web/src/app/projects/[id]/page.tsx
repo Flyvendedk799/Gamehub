@@ -140,7 +140,17 @@ export default function BuilderPage() {
         (event) => {
           // A frame arrived → the connection is healthy again.
           setReconnecting(false);
-          setEvents((prev) => [...prev, event]);
+          setEvents((prev) => {
+            // `assistant_text` is a FULL narration snapshot — completions models
+            // emit one per token. Replace the in-progress snapshot instead of
+            // appending so the event array stays bounded (and the prose block
+            // just grows in place).
+            const last = prev[prev.length - 1];
+            if (event.type === 'assistant_text' && last?.type === 'assistant_text') {
+              return [...prev.slice(0, -1), event];
+            }
+            return [...prev, event];
+          });
 
           if (event.type === 'run_complete') {
             const completeEvent = event as RunCompleteEvent;

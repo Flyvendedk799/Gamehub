@@ -90,6 +90,21 @@ export interface TextDeltaEvent {
   timestamp: string;
 }
 
+/**
+ * The assistant's narration as a FULL snapshot of the current message text.
+ * Providers that stream completions (openai-completions, e.g. o4-mini) emit a
+ * growing `message.content[]` rather than append-only `text_delta`s, so each
+ * frame carries the whole text so far. The render layer REPLACES the in-progress
+ * narration block with the latest snapshot (vs. appending text_delta). This is
+ * what surfaces the AI's "thoughts / what it's doing" prose in the build feed.
+ */
+export interface AssistantTextEvent {
+  type: 'assistant_text';
+  runId: string;
+  text: string;
+  timestamp: string;
+}
+
 export interface ToolUseEvent {
   type: 'tool_use';
   runId: string;
@@ -152,6 +167,19 @@ export interface RunPausedEvent {
   timestamp: string;
 }
 
+/**
+ * The agent's live build plan, synthesized from a `set_todos` tool call. Shown
+ * as an updating checklist ("here's my plan / what I'm doing") so the feed reads
+ * as a narrative instead of raw tool chips. The latest plan replaces the prior
+ * one in the render layer.
+ */
+export interface PlanEvent {
+  type: 'plan';
+  runId: string;
+  items: Array<{ text: string; checked: boolean }>;
+  timestamp: string;
+}
+
 export type SseEvent =
   | AgentStartEvent
   | TurnStartEvent
@@ -162,10 +190,12 @@ export type SseEvent =
   | MessageUpdateEvent
   | UserMessageEvent
   | TextDeltaEvent
+  | AssistantTextEvent
   | ToolUseEvent
   | ToolResultEvent
   | ThinkingDeltaEvent
   | GameSpecEvent
+  | PlanEvent
   | RunPausedEvent;
 
 // ─── Chat history ─────────────────────────────────────────────────────────────
