@@ -1,7 +1,7 @@
 import type { TextEditorFsCallbacks } from '@playforge/agent-core';
 import { InMemoryBlobStore, SnapshotStore } from '@playforge/storage';
 import { describe, expect, it } from 'vitest';
-import { WorkingTree } from './working-tree';
+import { WorkingTree, decodeMaybeDataUrl } from './working-tree';
 
 describe('WorkingTree satisfies the agent fs contract', () => {
   it('is assignable to TextEditorFsCallbacks', () => {
@@ -75,6 +75,37 @@ describe('WorkingTree edits', () => {
   it('rejects unsafe paths on create', () => {
     const t = new WorkingTree();
     expect(() => t.create('../escape.js', 'x')).toThrow();
+  });
+});
+
+describe('decodeMaybeDataUrl — binary asset sentinels become real bytes', () => {
+  const wavBytes = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x00, 0x01]); // "RIFF.."
+
+  it('decodes a MIME-typed base64 data URL (image tool form)', () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]); // PNG magic
+    const out = decodeMaybeDataUrl(`data:image/png;base64,${png.toString('base64')}`);
+    expect(Buffer.from(out)).toEqual(png);
+  });
+
+  it('decodes a MIME-less base64 data URL (legacy audio tool form)', () => {
+    const out = decodeMaybeDataUrl(`data:base64,${wavBytes.toString('base64')}`);
+    expect(Buffer.from(out)).toEqual(wavBytes);
+  });
+
+  it('UTF-8 encodes ordinary file content unchanged', () => {
+    const html = '<!doctype html><body>data: not a url</body>';
+    expect(Buffer.from(decodeMaybeDataUrl(html)).toString('utf8')).toBe(html);
+  });
+
+  it('toSnapshotInput decodes an audio sentinel to the real WAV bytes', async () => {
+    const tree = new WorkingTree();
+    tree.create('assets/audio/drift.wav', `data:audio/wav;base64,${wavBytes.toString('base64')}`);
+    tree.create('index.html', '<!doctype html>');
+    const snap = tree.toSnapshotInput();
+    const audio = snap.find((f) => f.path === 'assets/audio/drift.wav');
+    expect(Buffer.from(audio!.bytes)).toEqual(wavBytes); // real bytes, not the data-URL text
+    const html = snap.find((f) => f.path === 'index.html');
+    expect(Buffer.from(html!.bytes).toString('utf8')).toBe('<!doctype html>');
   });
 });
 

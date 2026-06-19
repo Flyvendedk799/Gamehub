@@ -57,7 +57,7 @@ function fakeFs(): { fs: TextEditorFsCallbacks; created: Map<string, string> } {
 }
 
 describe('generate_audio_asset', () => {
-  it('writes the matched audio bytes into the design as a data:base64 sentinel', async () => {
+  it('writes the matched audio bytes as a MIME-typed base64 data URL', async () => {
     const { fs, created } = fakeFs();
     const tool = makeGenerateAudioAssetTool(fs, undefined, {
       loadManifest: async () => FIXTURE,
@@ -67,7 +67,7 @@ describe('generate_audio_asset', () => {
     expect(result.details?.entryId).toBe('coin');
     expect(result.details?.path).toBe('assets/audio/coin.wav');
     const written = created.get('assets/audio/coin.wav');
-    expect(written).toBe(`data:base64,${FAKE_BYTES.toString('base64')}`);
+    expect(written).toBe(`data:audio/wav;base64,${FAKE_BYTES.toString('base64')}`);
   });
 
   it('honours filenameHint and sanitises unsafe characters', async () => {
