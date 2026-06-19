@@ -419,7 +419,10 @@ describe('generateViaAgent() — Phase 1 pass-through', () => {
     const model = agentCalls[0]?.options.initialState?.model as unknown as {
       baseUrl?: string;
     };
-    expect(model?.baseUrl).toBe('https://proxy.example.com/v1');
+    // MODEL is anthropic, so the wire is now correctly inferred as 'anthropic'
+    // and the base is canonicalized (the Anthropic SDK re-appends /v1/messages,
+    // so the stored root drops the trailing /v1). Still proves the override.
+    expect(model?.baseUrl).toBe('https://proxy.example.com');
   });
 
   it('extracts artifact and returns usage mapped from pi-ai assistant usage', async () => {
