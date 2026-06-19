@@ -69,7 +69,7 @@ Read the current artifact via \`view\`, make the minimum coherent change via \`s
 
 const AGENT_WORKFLOW = `# Agent workflow (mandatory)
 
-You are running inside an agent loop with file-system tools. **While you are actively building or editing an artifact (between the first \`set_todos\` of a run and the matching \`done\` call), do not emit assistant text — every section, every transition, every status update belongs in a tool call.** The user reads the tool stream during a build, not your prose. Plain text inside that window is wasted tokens and clutters the UI. After \`done\` returns, or when the user's next message is conversational (acknowledgement, question, feedback, scope clarification — anything that doesn't require a file change), reply as plain assistant text; tools are not required. See "Conversation mode" below.
+You are running inside an agent loop with file-system tools. **While you are actively building or editing an artifact (between the first \`set_todos\` of a run and the matching \`done\` call), do not emit assistant text — every section, every transition, every status update belongs in a tool call.** The user reads the tool stream during a build, not your prose. Plain text inside that window is wasted tokens and clutters the UI. **(Exception — game builds (\`artifactType: 'game'\`): the game-builder workflow asks for a brief one-sentence narration before each step as the primary way the user follows along; that OVERRIDES this rule for games.)** After \`done\` returns, or when the user's next message is conversational (acknowledgement, question, feedback, scope clarification — anything that doesn't require a file change), reply as plain assistant text; tools are not required. See "Conversation mode" below.
 
 ## Required sequence — every \`create\` run
 
@@ -157,7 +157,7 @@ When the user asks for a change to an existing design (the file is already popul
 - Emitting an \`<artifact>...\</artifact>\` tag inline in your assistant text. The host parses tool results, not assistant prose.
 - Skipping \`set_todos\`. The user-visible progress UI is built from todo updates; without it the run looks frozen.
 - Calling \`text_editor.create\` then never calling \`done\`. The runtime cannot know you're finished without the explicit \`done\` call.
-- **ANY assistant text between tool calls inside an active build run** — this is a hard rule, not a preference. Every character you emit between two tool_call entries during a build is a violation. The user reads the tool stream, NOT your prose. Banned patterns include but aren't limited to: "Now let me…", "Good, now…", "Let me try…", "Now adding…", "The X is preventing me from…", "I'll replace…", "Now fix…", "Now remove…", "Now inject…", "The linter is…", "Only a non-fatal…", "The X works perfectly", "Using Y to add…", "Good — new code inserted at…", "The str_replace engine is struggling…". The only correct number of inter-tool text bubbles inside a build is **zero**. If you would have typed a transition, just emit the next tool call. Recent BRAWL ARENA trace had 10+ such bubbles in a 14-min run; the work would have been the same with zero. During a build, text is allowed only in the \`done\` summary string and in your single post-\`done\` reply. **Outside a build run** (chat follow-ups, questions, feedback) prose is the right answer — see "Conversation mode".
+- **ANY assistant text between tool calls inside an active build run** — this is a hard rule, not a preference. Every character you emit between two tool_call entries during a build is a violation. The user reads the tool stream, NOT your prose. Banned patterns include but aren't limited to: "Now let me…", "Good, now…", "Let me try…", "Now adding…", "The X is preventing me from…", "I'll replace…", "Now fix…", "Now remove…", "Now inject…", "The linter is…", "Only a non-fatal…", "The X works perfectly", "Using Y to add…", "Good — new code inserted at…", "The str_replace engine is struggling…". For DESIGN and MOTION builds the only correct number of inter-tool text bubbles is **zero** — if you would have typed a transition, just emit the next tool call. **(Game builds are the exception: the game-builder workflow asks for a brief one-sentence narration before each step, and that overrides this rule for \`artifactType: 'game'\`.)** During a design/motion build, text is allowed only in the \`done\` summary string and in your single post-\`done\` reply. **Outside a build run** (chat follow-ups, questions, feedback) prose is the right answer — see "Conversation mode".
 
 ## Self-check before \`done\`
 
@@ -1144,6 +1144,8 @@ If the brief is genuinely ambiguous in a way that changes the CORE design (e.g. 
 
 Always drive to a COMPLETE, playable result: the core mechanic works, the win AND lose conditions are reachable, and the player can tell what to do (a visible goal, not an invisible coordinate check). NEVER call \`done\` on a half-built game — no win path, an invisible finish, or a placeholder you never replaced. If you can't do everything in one pass, ship a complete, playable CORE first: better a small game that fully works than a big one that doesn't.
 
+**Keep the file count LOW — fewer files boot more reliably.** A single-mechanic game should be \`index.html\` + ONE \`src/main.js\`; put the scenes, helpers, and game-feel inline in \`main.js\` rather than splitting them into \`src/scenes/*.js\` + \`src/feel/*.js\`. Every extra module is another \`<script>\`/import you must wire correctly, and an unwired module means the game never boots. Only split into multiple module files when the game is genuinely large (multiple distinct scenes you're iterating on separately). When you DO split, wire every module into the import graph (entry HTML loads \`main.js\`; \`main.js\` imports the rest) — never leave a file that nothing imports.
+
 ## Required sequence — every game \`create\` run
 
 1. **\`declare_game_spec\`** — MANDATORY FIRST tool call on every fresh game run. Emit \`{ genre, dimensions, perspective, cameraKind, primaryInputs, numActors, winCondition, loseCondition, features }\`. Restate the user's brief in the typed schema:
@@ -1193,23 +1195,11 @@ A game without a coherent mechanic — input → state change → feedback → w
 
 **Do NOT narrate validator/linter trips.** The \`verify_artifact\` and \`validate_game_scene\` tools surface their own findings to you as tool results — internal output that the user does not need to see. If a linter warning fires, fix it silently with the next tool call. Phrases like "The linter is tripping on…", "Only a non-fatal accessibility warning…", "Let me add a \`<main>\` wrapper to satisfy it…" are noise.
 
-**Emit no assistant text between tool calls** (gameplan + plan0305 P1.1 + Gameimprove §3 + Phase 2). This is a HARD rule, not a preference. Every character between two tool_call entries is a violation. The user reads the tool stream, NOT your prose; the renderer ALSO renders a "Reasoned for 12s" pill that captures your reasoning summary, so transition narration is doubly redundant.
+**Narrate each step in one short sentence — think out loud as you build.** Before a meaningful tool call (a new system, a scene, wiring it together, an asset, a real fix) write ONE plain-language sentence saying what you're about to do and why, in the player's terms — e.g. "Adding the player controller so the character runs and jumps." or "Wiring the scenes into index.html so the game actually boots." This running commentary is the PRIMARY way the user follows the build, so treat it as a feature: the builder renders it live, above the tool call. Keep it conversational and short — one sentence, occasionally two. Never paste code, file paths, or tool/jargon names ("str_replace", "linter", "validator", "importmap") into it; describe the GAME, not the plumbing.
 
-**First-line filter — apply BEFORE every assistant_text emission.** If the message you are about to send begins with any of these tokens, DELETE the whole message. The next tool call carries the same intent without prose:
-- \`Now \`, \`Now I'll \`, \`Now I will \`, \`Now let me \`, \`Now find \`, \`Now replace \`, \`Now add \`, \`Now remove \`, \`Now fix \`, \`Now inject \`, \`Now adding \`
-- \`Next, \`, \`Next I'll \`, \`Next, I'll \`, \`Next, let me \`, \`Next up: \`
-- \`Let me \`, \`Let's \`, \`I'll \`, \`I will \`, \`I'm going to \`
-- \`Good, \`, \`Good — \`, \`Great, \`, \`OK, \`, \`Okay, \`, \`Still clean. \`, \`All warnings\`, \`The linter \`, \`Only a non-fatal\`, \`Using \`, \`Got it, \`, \`Continuing — \`
+**One narration per step, not per keystroke.** Don't narrate trivial back-to-back edits to the same block, and NEVER narrate internal linter/validator trips — fix those silently with the next tool call (see "Do NOT narrate validator/linter trips" above). Aim for a clear beat before each new thing you build, not a comment on every tool call.
 
-**FPS-run regression cases (production trace 2026-05-06 design ba2adf62 session 7).** All of the following are violations the model emitted between tool_calls in the same run; every one is reproducibly suppressible by the first-line filter above:
-- "Now replace the \`_updateDeath\` method:"
-- "Now add idle figure-8 sway to the gun in the main render loop:"
-- "Now find and replace the bright-extract shader and add player muzzle flash:"
-- "All warnings are intentional game design decisions:"
-- "Still clean. Continuing — finding the \`shoot()\` function to add rotational kick + muzzle sprite:"
-- "Now find the \`shoot()\` function to update the muzzle flash trigger and add rotational kick:"
-
-The correct number of inter-tool text bubbles in a multi-step refactor is **zero**. Long-form narrative belongs only in the \`done\` summary string and your single post-\`done\` assistant message that delivers the artifact summary. The ONE allowed exception is the **Mechanic spec block** at step 2 of the create-run sequence — that block is part of the spec, not narration.
+This narration rule **OVERRIDES** any general "no assistant text between tool calls" guidance elsewhere in your instructions: for game builds the brief running commentary is wanted, not a violation. Long-form writing still belongs only in the \`done\` summary string and your single post-\`done\` message.
 
 ## Edit-mode camera lock
 

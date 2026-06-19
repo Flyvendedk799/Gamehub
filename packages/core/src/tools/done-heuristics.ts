@@ -392,7 +392,10 @@ export function scanDarkModeSupport(src: string): DoneError[] {
 export function runHeuristics(
   src: string,
   knownFiles: Set<string> = new Set(),
-  options: { artifactType?: HeuristicArtifactType } = {},
+  options: {
+    artifactType?: HeuristicArtifactType;
+    fileContents?: ReadonlyMap<string, string>;
+  } = {},
 ): DoneError[] {
   const isGame = options.artifactType === 'game';
   const isMotion = options.artifactType === 'motion';
@@ -416,7 +419,7 @@ export function runHeuristics(
     // bundler enforces reachability statically). Game + design HTML
     // both load JS via plain <script> tags, so the orphan-module heuristic
     // applies uniformly.
-    ...(isMotion ? [] : scanOrphanedJsModules(src, knownFiles)),
+    ...(isMotion ? [] : scanOrphanedJsModules(src, knownFiles, options.fileContents)),
   ];
 }
 
@@ -445,37 +448,95 @@ export function runHeuristics(
  *   - Skips when the project is single-file (no siblings) — JSX / vanilla
  *     React patterns don't have separate JS modules
  *
- * Limited intentionally: only checks top-level reachability from the
- * rendered HTML. A `.js` file imported only from another `.js` file is
- * still flagged because the heuristic doesn't follow transitive imports
- * (would need fs read access). In practice the agent's first fix is
- * almost always at the entrypoint, and the next verify pass catches
- * any remaining orphans.
+ * Reachability — NOT just top-level. When `fileContents` is supplied (done.ts
+ * reads every sibling JS file), we follow the module import graph transitively:
+ * a file `import`ed from an already-reachable module (e.g. `src/main.js` ->
+ * `src/scenes/PlayScene.js`) is reachable and NOT an orphan. Without it (legacy
+ * callers / tests), we fall back to top-level reachability from the HTML.
+ *
+ * This is the fix for the multi-file thrash loop: previously a scene/feel module
+ * imported only from main.js was FALSE-flagged as orphaned every verify, so the
+ * agent kept rewriting index.html to add redundant <script> tags, broke the
+ * boot, and never converged.
  */
-export function scanOrphanedJsModules(src: string, knownFiles: Set<string>): DoneError[] {
+function relativeImportSpecs(content: string): string[] {
+  const specs: string[] = [];
+  const re =
+    /(?:import|export)\b[^'";]*\bfrom\s*['"]([^'"]+)['"]|import\s*['"]([^'"]+)['"]|import\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+  let m: RegExpExecArray | null = re.exec(content);
+  while (m !== null) {
+    const spec = m[1] ?? m[2] ?? m[3];
+    if (spec && (spec.startsWith('./') || spec.startsWith('../'))) specs.push(spec);
+    m = re.exec(content);
+  }
+  return specs;
+}
+
+/** Resolve a relative import spec from `fromPath` to a real path in the project,
+ *  trying the bare path then `.js`/`.mjs`/`.cjs`/`/index.js`. Null when none match. */
+function resolveImportTarget(
+  fromPath: string,
+  spec: string,
+  knownFiles: Set<string>,
+): string | null {
+  const fromDir = fromPath.includes('/') ? fromPath.slice(0, fromPath.lastIndexOf('/')) : '';
+  const parts = fromDir ? fromDir.split('/') : [];
+  for (const seg of spec.split('/')) {
+    if (seg === '.' || seg === '') continue;
+    if (seg === '..') parts.pop();
+    else parts.push(seg);
+  }
+  const base = parts.join('/');
+  for (const cand of [base, `${base}.js`, `${base}.mjs`, `${base}.cjs`, `${base}/index.js`]) {
+    if (knownFiles.has(cand)) return cand;
+  }
+  return null;
+}
+
+export function scanOrphanedJsModules(
+  src: string,
+  knownFiles: Set<string>,
+  fileContents?: ReadonlyMap<string, string>,
+): DoneError[] {
   if (knownFiles.size === 0) return [];
-  const orphaned: string[] = [];
-  for (const path of knownFiles) {
-    if (!/\.(m?js|cjs)$/i.test(path)) continue;
-    if (path.startsWith('assets/')) continue;
-    // Reference forms we tolerate as "wired up":
-    //   <script src="src/main.js"></script>
-    //   <script type="module" src="src/main.js"></script>
-    //   importmap: { "main": "./src/main.js" }
-    //   inline: import './main.js'
-    //   inline: import { ... } from './src/main.js'
-    // The basename catches the `import './entities.js'` form when the
-    // agent puts entities.js next to main.js and uses a bare relative
-    // path. We don't want false positives for files whose names happen
-    // to appear in user-visible text ("main.js" mentioned in a tutorial),
-    // so the basename check is gated on the path NOT being mentioned —
-    // i.e. the basename match is the fallback, not the primary signal.
-    if (src.includes(path)) continue;
+  const jsFiles = [...knownFiles].filter(
+    (p) => /\.(m?js|cjs)$/i.test(p) && !p.startsWith('assets/'),
+  );
+  if (jsFiles.length === 0) return [];
+
+  // Seed reachability with files the HTML references directly (path or basename).
+  const directlyReferenced = (path: string): boolean => {
+    if (src.includes(path)) return true;
     const slashIdx = path.lastIndexOf('/');
     const basename = slashIdx >= 0 ? path.slice(slashIdx + 1) : path;
-    if (basename !== path && src.includes(basename)) continue;
-    orphaned.push(path);
+    return basename !== path && src.includes(basename);
+  };
+  const reachable = new Set<string>();
+  const queue: string[] = [];
+  for (const p of jsFiles) {
+    if (directlyReferenced(p)) {
+      reachable.add(p);
+      queue.push(p);
+    }
   }
+
+  // Follow the import graph transitively from the seeds (needs file contents).
+  if (fileContents) {
+    while (queue.length > 0) {
+      const cur = queue.shift() as string;
+      const content = fileContents.get(cur);
+      if (content === undefined) continue;
+      for (const spec of relativeImportSpecs(content)) {
+        const target = resolveImportTarget(cur, spec, knownFiles);
+        if (target !== null && !reachable.has(target)) {
+          reachable.add(target);
+          queue.push(target);
+        }
+      }
+    }
+  }
+
+  const orphaned = jsFiles.filter((p) => !reachable.has(p));
   return orphaned.map((path) => ({
     message:
       // Single template literal — Biome's noUnusedTemplateLiteral lint

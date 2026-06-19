@@ -376,10 +376,19 @@ export async function runArtifactChecks(
     };
   }
   const knownFiles = new Set<string>();
+  // JS module contents so the orphan-module check can follow the import graph
+  // transitively (a scene imported only from main.js is reachable, not orphaned).
+  const fileContents = new Map<string, string>();
   try {
     for (const f of fs.listDir('.')) {
-      if (f !== path) knownFiles.add(f);
+      if (f === path) continue;
+      knownFiles.add(f);
+      if (/\.(m?js|cjs)$/i.test(f)) {
+        const v = fs.view(f);
+        if (v !== null) fileContents.set(f, v.content);
+      }
     }
+    fileContents.set(path, file.content); // the entry can import modules too
   } catch {
     /* single-file pattern, no siblings */
   }
@@ -389,7 +398,10 @@ export async function runArtifactChecks(
     ...(isJsxArtifact ? [] : findUnclosedTags(file.content)),
     ...findDuplicateIds(file.content),
     ...(isJsxArtifact ? [] : findMissingAlt(file.content)),
-    ...runHeuristics(file.content, knownFiles, artifactType === undefined ? {} : { artifactType }),
+    ...runHeuristics(file.content, knownFiles, {
+      ...(artifactType === undefined ? {} : { artifactType }),
+      fileContents,
+    }),
   ];
   // Phase 6 backport — silent theme-token swap detection. Only runs in
   // design mode (game / motion artifacts have their own theme stories);
@@ -708,10 +720,17 @@ export function makeDoneTool(
       // validate cross-file references. Best-effort: if listDir throws or
       // returns nothing, we just skip the multi-file checks.
       const knownFiles = new Set<string>();
+      const fileContents = new Map<string, string>();
       try {
         for (const f of fs.listDir('.')) {
-          if (f !== path) knownFiles.add(f);
+          if (f === path) continue;
+          knownFiles.add(f);
+          if (/\.(m?js|cjs)$/i.test(f)) {
+            const v = fs.view(f);
+            if (v !== null) fileContents.set(f, v.content);
+          }
         }
+        fileContents.set(path, file.content);
       } catch {
         /* no-op — single-file pattern, no sibling files to validate. */
       }
@@ -731,11 +750,10 @@ export function makeDoneTool(
         // Advisory ones show up but don't trip has_errors. Fatal ones
         // (WCAG A failures, missing local refs) DO trip has_errors so the
         // agent fixes them before `done` accepts.
-        ...runHeuristics(
-          file.content,
-          knownFiles,
-          artifactType === undefined ? {} : { artifactType },
-        ),
+        ...runHeuristics(file.content, knownFiles, {
+          ...(artifactType === undefined ? {} : { artifactType }),
+          fileContents,
+        }),
       ];
       if (runtimeVerify) {
         try {

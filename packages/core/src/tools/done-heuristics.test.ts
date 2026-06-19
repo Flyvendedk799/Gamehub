@@ -296,6 +296,41 @@ describe('scanOrphanedJsModules', () => {
     expect(r).toHaveLength(0);
   });
 
+  it('follows transitive imports — a scene imported from main.js is NOT orphaned', () => {
+    // The multi-file-loop bug: main.js (loaded by index.html) imports the scenes;
+    // without graph-following they were false-flagged every verify.
+    const html =
+      '<!doctype html><html><body><script type="module" src="src/main.js"></script></body></html>';
+    const files = new Map<string, string>([
+      [
+        'src/main.js',
+        "import { PlayScene } from './scenes/PlayScene.js';\nimport './feel/shake.js';",
+      ],
+      [
+        'src/scenes/PlayScene.js',
+        "import { Boot } from './BootScene.js';\nexport class PlayScene {}",
+      ],
+      ['src/scenes/BootScene.js', 'export class Boot {}'],
+      ['src/feel/shake.js', 'export function shake() {}'],
+    ]);
+    const known = new Set([...files.keys()]);
+    const r = scanOrphanedJsModules(html, known, files);
+    expect(r).toHaveLength(0); // all reachable via main.js → scenes → BootScene + feel
+  });
+
+  it('still flags a genuinely unreachable module even with contents', () => {
+    const html =
+      '<!doctype html><html><body><script type="module" src="src/main.js"></script></body></html>';
+    const files = new Map<string, string>([
+      ['src/main.js', "import './used.js';"],
+      ['src/used.js', 'export const a = 1;'],
+      ['src/dead.js', 'export const b = 2;'], // imported by nobody
+    ]);
+    const r = scanOrphanedJsModules(html, new Set([...files.keys()]), files);
+    expect(r).toHaveLength(1);
+    expect(r[0]?.message).toMatch(/src\/dead\.js/);
+  });
+
   it('skips non-JS extensions', () => {
     const html = '<!doctype html><html><body></body></html>';
     const r = scanOrphanedJsModules(

@@ -1607,23 +1607,18 @@ export async function generateViaAgent(
   // honoured for the common case. The Mechanic spec block (Sequence 1)
   // is emitted BEFORE the first tool_use, so it falls outside the
   // "inter-tool" classification by construction.
-  const NARRATION_OFFENSE_THRESHOLD = 2;
   const isGameModeRun = isGameMode;
-  let narrationSteerEmitted = false;
-  let narrationTurnIndex = -1;
-  // may9 Phase 3 follow-up #20 — bubble the running narration offense
-  // count out via GenerateOutput.narrationsTotal so the host populates
-  // run_usage.narration_dropped (Phase 0 column). Captured here as a
-  // closure, snapshotted into the final return at the bottom of the
-  // generateViaAgent function.
+  // may9 Phase 3 follow-up #20 — bubble the running narration count out via
+  // GenerateOutput.narrationsTotal so the host populates run_usage. We now WANT
+  // brief per-step narration (the game-workflow asks for it as the primary way
+  // the user follows the build), so the detector only MEASURES inter-tool text
+  // for telemetry; it no longer STEERS the model away from it. The old "emit
+  // ZERO text between tool calls" steer is intentionally removed — narration is
+  // a feature, not a violation.
   let runNarrationsTotal = 0;
   if (isGameModeRun) {
     const detector = createNarrationDetector();
     agent.subscribe((event) => {
-      if (event.type === 'turn_start') {
-        narrationTurnIndex += 1;
-        return;
-      }
       if (event.type === 'message_update') {
         const ame = event.assistantMessageEvent as
           | { type: 'text_delta'; delta?: string; text?: string }
@@ -1642,24 +1637,7 @@ export async function generateViaAgent(
         return;
       }
       if (event.type === 'turn_end') {
-        const result = detector.endTurn();
-        runNarrationsTotal = result.totalOffenses;
-        if (result.narrations.length === 0) return;
-        log.warn('[generate] step=narration_violation', {
-          ...ctx,
-          turn: narrationTurnIndex,
-          offensesThisTurn: result.narrations.length,
-          offensesThisRun: result.totalOffenses,
-          sample: result.narrations[0]?.slice(0, 120) ?? '',
-        });
-        if (!narrationSteerEmitted && result.totalOffenses >= NARRATION_OFFENSE_THRESHOLD) {
-          narrationSteerEmitted = true;
-          agent.steer({
-            role: 'user',
-            content: `[system-reminder] Inter-tool assistant text detected (${result.totalOffenses} offenses this run). Per game-workflow §"Cadence", emit ZERO text between tool_use blocks. The Mechanic spec block at step 2 is the only allowed inter-tool text for the whole run. Resume with the next tool call directly.`,
-            timestamp: Date.now(),
-          });
-        }
+        runNarrationsTotal = detector.endTurn().totalOffenses;
       }
     });
   }
