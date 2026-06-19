@@ -862,11 +862,19 @@ export function makeTextEditorTool(
               !Number.isInteger(h.endLine) ||
               h.startLine < 1 ||
               h.endLine < h.startLine - 1 ||
-              h.endLine > totalLinesBefore
+              h.startLine > totalLinesBefore + 1
             ) {
               throw new Error(
                 `patch hunk has invalid line range [${h.startLine}, ${h.endLine}] (file has ${totalLinesBefore} lines, 1-indexed inclusive endLine).`,
               );
+            }
+            // Models routinely over-estimate endLine ("replace lines 1..200" of
+            // a 145-line file) — they mean "to the end of the file". Clamp to EOF
+            // instead of rejecting; the expectedOriginal check below still guards
+            // a genuinely wrong range. This was the dominant cause of the patch
+            // death-spiral (file degrades, then a SyntaxError fails the run).
+            if (h.endLine > totalLinesBefore) {
+              h.endLine = totalLinesBefore;
             }
           }
           // Improver1 §8 — per-target retry budget on patch. Use the

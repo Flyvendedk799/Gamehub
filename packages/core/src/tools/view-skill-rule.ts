@@ -17,8 +17,9 @@ const Params = Type.Object({
   /** The skill id (folder/file slug, e.g. `remotion-best-practices`).
    *  Listed in the system prompt's "Available Skills" header. */
   skillId: Type.String(),
-  /** The rule subpage path. Always `rules/<filename>.md`. */
-  rulePath: Type.String(),
+  /** The rule subpage path (`rules/<filename>.md`). OPTIONAL — omit it to list
+   *  the skill's available rules instead of failing tool validation. */
+  rulePath: Type.Optional(Type.String()),
 });
 
 export interface ViewSkillRuleDetails {
@@ -59,7 +60,7 @@ export function makeViewSkillRuleTool(
           ],
           details: {
             skillId: params.skillId,
-            rulePath: params.rulePath,
+            rulePath: params.rulePath ?? '',
             byteLen: 0,
             ok: false,
           },
@@ -76,26 +77,27 @@ export function makeViewSkillRuleTool(
           ],
           details: {
             skillId: params.skillId,
-            rulePath: params.rulePath,
+            rulePath: params.rulePath ?? '',
             byteLen: 0,
             ok: false,
           },
         };
       }
-      const rule = rules.find((r) => r.path === params.rulePath);
+      const rule = params.rulePath ? rules.find((r) => r.path === params.rulePath) : undefined;
       if (rule === undefined) {
+        const known = rules.map((r) => r.path).join(', ');
         return {
           content: [
             {
               type: 'text',
-              text: `view_skill_rule: no rule "${params.rulePath}" in skill "${params.skillId}". Known rules: ${rules
-                .map((r) => r.path)
-                .join(', ')}`,
+              text: params.rulePath
+                ? `view_skill_rule: no rule "${params.rulePath}" in skill "${params.skillId}". Known rules: ${known}`
+                : `view_skill_rule: skill "${params.skillId}" has these rules — call again with one as rulePath: ${known}`,
             },
           ],
           details: {
             skillId: params.skillId,
-            rulePath: params.rulePath,
+            rulePath: params.rulePath ?? '',
             byteLen: 0,
             ok: false,
           },
@@ -105,7 +107,7 @@ export function makeViewSkillRuleTool(
         content: [{ type: 'text', text: rule.content }],
         details: {
           skillId: params.skillId,
-          rulePath: params.rulePath,
+          rulePath: params.rulePath ?? '',
           byteLen: rule.content.length,
           ok: true,
         },

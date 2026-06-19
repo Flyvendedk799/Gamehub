@@ -806,6 +806,20 @@ describe('text-editor patch protocol — Backlog-3 §2', () => {
     expect(msg).toMatch(/invalid line range|exceeds/i);
   });
 
+  it('clamps an over-reaching endLine to EOF instead of rejecting (patch death-spiral fix)', async () => {
+    const fs = makeFs({ 'index.html': 'one\ntwo\nthree' });
+    const tool = makeTextEditorTool(fs);
+    // The model means "replace lines 1..end" but over-estimates endLine as 200.
+    // Previously this threw and the agent thrashed into a corrupted file; now it
+    // clamps endLine to EOF and the whole-file replace succeeds.
+    await tool.execute('p-clamp', {
+      command: 'patch',
+      path: 'index.html',
+      hunks: [{ startLine: 1, endLine: 200, replacement: 'REWRITTEN' }],
+    });
+    expect(fs.view('index.html')?.content).toBe('REWRITTEN');
+  });
+
   it('total replacement byte count is capped (sidecar limit)', async () => {
     const fs = makeFs({ 'styles.css': 'a\nb\nc' });
     const tool = makeTextEditorTool(fs);

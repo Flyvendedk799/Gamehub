@@ -20,15 +20,10 @@ const GenerateImageAssetParams = Type.Object({
     Type.Literal('other'),
   ]),
   filenameHint: Type.Optional(Type.String()),
-  aspectRatio: Type.Optional(
-    Type.Union([
-      Type.Literal('1:1'),
-      Type.Literal('16:9'),
-      Type.Literal('9:16'),
-      Type.Literal('4:3'),
-      Type.Literal('3:4'),
-    ]),
-  ),
+  // Accept any string so a model guessing "32:32" / "square" / a number can't
+  // FAIL tool validation (which wasted ~6 turns/run); the executor normalizes
+  // to a supported ratio or drops it. Supported: 1:1, 16:9, 9:16, 4:3, 3:4.
+  aspectRatio: Type.Optional(Type.String()),
   alt: Type.Optional(Type.String()),
 });
 
@@ -151,17 +146,23 @@ export function makeGenerateImageAssetTool(
       const rawPrompt = params.prompt.trim();
       if (rawPrompt.length === 0) throw new Error('Image asset prompt cannot be empty');
       const enrichedPrompt = enrichImagePromptForPurpose(rawPrompt, params.purpose);
+      // Normalize the (now free-form) aspectRatio string to a supported ratio,
+      // dropping anything we don't recognize (e.g. "32:32", "square").
+      const SUPPORTED_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4'] as const;
+      const aspectRatio = (SUPPORTED_RATIOS as readonly string[]).includes(params.aspectRatio ?? '')
+        ? (params.aspectRatio as GenerateImageAssetRequest['aspectRatio'])
+        : undefined;
       const request: GenerateImageAssetRequest = {
         prompt: enrichedPrompt,
         purpose: params.purpose,
         ...(params.filenameHint !== undefined ? { filenameHint: params.filenameHint } : {}),
-        ...(params.aspectRatio !== undefined ? { aspectRatio: params.aspectRatio } : {}),
+        ...(aspectRatio !== undefined ? { aspectRatio } : {}),
         ...(params.alt !== undefined ? { alt: params.alt } : {}),
       };
       const started = Date.now();
       logger.info('[image_asset] step=start', {
         purpose: params.purpose,
-        aspectRatio: params.aspectRatio ?? 'default',
+        aspectRatio: aspectRatio ?? 'default',
         promptChars: enrichedPrompt.length,
         promptPreview: enrichedPrompt.slice(0, 160),
         enriched: enrichedPrompt.length !== rawPrompt.length,
