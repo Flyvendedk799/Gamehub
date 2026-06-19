@@ -80,6 +80,20 @@ export function PreviewPane({
     return () => window.removeEventListener('message', onMessage);
   }, []);
 
+  // Give the game keyboard focus the moment it loads. An iframe only receives
+  // keydown while it (not the host page) holds focus, so without this the
+  // arrow/WASD keys go to the builder and the car/player never moves — the #1
+  // "I can't control it" complaint, even though the game's input works. Skip if
+  // the user is typing (e.g. mid-prompt in the chat) so we never steal focus
+  // from an input. Clicking the game re-focuses it natively after that.
+  const focusGame = useCallback(() => {
+    const active = document.activeElement as HTMLElement | null;
+    const typing =
+      active != null &&
+      (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
+    if (!typing) iframeRef.current?.focus();
+  }, []);
+
   const hasTweaks = tweakSchema && Object.keys(tweakSchema).length > 0;
 
   const sendTweaks = useCallback((values: Record<string, string | number | boolean>) => {
@@ -164,6 +178,7 @@ export function PreviewPane({
               ref={iframeRef}
               src={iframeSrc}
               title="Game preview"
+              onLoad={focusGame}
               sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-downloads"
               className="absolute inset-0 w-full h-full border-0"
             />
