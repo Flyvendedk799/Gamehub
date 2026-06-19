@@ -2,7 +2,7 @@
 // tileset image into a Phaser scene, including collision layers. Ships
 // with a fallback inline JSON shape when no Tiled file is available.
 
-import Phaser from 'phaser';
+import * as Phaser from 'phaser';
 
 /** Inside preload(): load the tileset PNG + map JSON. */
 export function preloadTilemap(scene, { mapKey, mapPath, tilesetKey, tilesetPath }) {

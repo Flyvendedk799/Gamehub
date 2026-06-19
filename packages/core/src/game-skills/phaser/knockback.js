@@ -5,7 +5,7 @@
 // can't instantly cancel their own knockback (key for brawler weight) and a
 // hit-flash tint so the struck sprite blinks white on contact.
 
-import Phaser from 'phaser';
+import * as Phaser from 'phaser';
 
 /** Apply an impulse to `target` directed away from `source` (or along an
  *  explicit angle). Requires arcade physics. `power` is px/sec. */

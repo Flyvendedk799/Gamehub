@@ -124,6 +124,15 @@ function phaserValidate(files: ReadonlyArray<InputFile>): ValidationResult {
       severity: 'error',
     });
   } else {
+    if (/\bimport\s+Phaser\s+from\s+['"]phaser['"]\s*;?/.test(allJs)) {
+      issues.push({
+        path: jsFiles[0]?.path ?? 'src/',
+        message:
+          'Use `import * as Phaser from "phaser"` with the pinned Phaser ESM importmap. `import Phaser from "phaser"` fails at runtime because phaser.esm.js does not provide a default export.',
+        severity: 'error',
+      });
+    }
+
     const hasGame = /\bnew\s+Phaser\.Game\b/.test(allJs);
     const hasScene =
       /\bextends\s+Phaser\.Scene\b/.test(allJs) || /\bclass\s+\w+Scene\b/.test(allJs);

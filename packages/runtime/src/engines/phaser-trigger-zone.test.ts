@@ -13,13 +13,13 @@ describe('phaserValidate — trigger-zone reachability (Phase 8 #27)', () => {
   const baseIndexHtml = `<!doctype html><html><body><div id="game"></div>
 <script type="importmap">{"imports":{"phaser":"https://cdn.jsdelivr.net/npm/phaser@3.88.2/dist/phaser.esm.js"}}</script>
 <script type="module">
-import Phaser from 'phaser';
+import * as Phaser from 'phaser';
 class PlayScene extends Phaser.Scene { create() {} update() {} }
 new Phaser.Game({ type: Phaser.AUTO, scene: [PlayScene] });
 </script></body></html>`;
 
   const baseSrc =
-    "import Phaser from 'phaser'; class PlayScene extends Phaser.Scene { create(){} update(){} }";
+    "import * as Phaser from 'phaser'; class PlayScene extends Phaser.Scene { create(){} update(){} }";
 
   it('FLAGS a trigger object whose centroid is outside the map bounds', () => {
     const tilemapJson = JSON.stringify({

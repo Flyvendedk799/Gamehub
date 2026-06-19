@@ -12,7 +12,7 @@
 //     input: { gamepad: true },
 //   });
 
-import Phaser from 'phaser';
+import * as Phaser from 'phaser';
 
 const STANDARD_BUTTONS = [
   'a',

@@ -47,7 +47,7 @@ describe('exportGameZip', () => {
     const result = await exportGameZip(dest, {
       files: [
         { path: 'index.html', content: '<!doctype html><body><div id="game"></div></body>' },
-        { path: 'src/main.js', content: "import Phaser from 'phaser';" },
+        { path: 'src/main.js', content: "import * as Phaser from 'phaser';" },
         { path: 'assets/paddle.png', content: Buffer.from([0x89, 0x50, 0x4e, 0x47]) },
       ],
       designName: 'Pong',

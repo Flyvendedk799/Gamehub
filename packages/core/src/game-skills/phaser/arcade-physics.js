@@ -2,7 +2,7 @@
 // brick-breaker. Shows the four foot-guns the validator catches:
 // physics block in config, world bounds, collide groups, gravity.
 
-import Phaser from 'phaser';
+import * as Phaser from 'phaser';
 
 /** Recommended Phaser.Game config block for arcade physics. Spread into
  *  your `new Phaser.Game({...})` call. */

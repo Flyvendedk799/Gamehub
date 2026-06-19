@@ -5,7 +5,7 @@
 // rigid sprite and one with weight. Anchor matters: set the sprite origin to
 // (0.5, 1) so a landing squash plants its feet instead of floating.
 
-import Phaser from 'phaser';
+import * as Phaser from 'phaser';
 
 /** Squash (wide + short) then spring back. Call on landing / hard hit. */
 export function squash(scene, sprite, amount = 0.25, ms = 130) {

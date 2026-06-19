@@ -5,7 +5,7 @@
 // `makePixelTexture` helper bakes a 1x1 white pixel you can tint per-burst,
 // so a burst works with ZERO art assets.
 
-import Phaser from 'phaser';
+import * as Phaser from 'phaser';
 
 /** Bake a tiny white square texture once, reuse for every tinted burst.
  *  Call in create() before the first burst. Safe to call repeatedly. */

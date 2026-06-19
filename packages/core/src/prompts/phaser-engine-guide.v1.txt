@@ -1,6 +1,6 @@
 # Phaser engine guide (pinned to phaser@3.88.0)
 
-Phaser 3.88 is loaded as ESM from a pinned `cdn.jsdelivr.net` URL via `<script type="importmap">`. The starter `index.html` wires this — do **not** swap to Phaser 4.x alpha; the scene/physics APIs differ and break first-shot generation.
+Phaser 3.88 is loaded as ESM from a pinned `cdn.jsdelivr.net` URL via `<script type="importmap">`. The starter `index.html` wires this — do **not** swap to Phaser 4.x alpha; the scene/physics APIs differ and break first-shot generation. Use `import * as Phaser from 'phaser'` in every module; the pinned ESM build has no default export, so `import Phaser from 'phaser'` fails at runtime.
 
 ## File layout (one mechanic / single scene)
 
@@ -27,7 +27,7 @@ assets/audio/
 ## Skeleton
 
 ```js
-import Phaser from 'phaser';
+import * as Phaser from 'phaser';
 
 class PlayScene extends Phaser.Scene {
   constructor() { super('Play'); }

@@ -174,6 +174,11 @@ export class WorkingTree {
     }));
   }
 
+  /** Current text files, preserving source content for validation passes. */
+  toTextFiles(): Array<{ path: string; content: string }> {
+    return [...this.files.entries()].map(([path, content]) => ({ path, content }));
+  }
+
   /** Persist the current tree to the content-addressed store. */
   async persist(store: SnapshotStore): Promise<WriteResult> {
     return store.write(this.toSnapshotInput());

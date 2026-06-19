@@ -129,6 +129,34 @@ describe('runGeneration (offline E2E)', () => {
   });
 });
 
+describe('runGeneration generated JavaScript syntax gate', () => {
+  it('rejects duplicate top-level declarations before persisting a completed snapshot', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const brokenAgent: GenerateFn = async (_input, deps) => {
+      await deps.fs?.create(
+        'index.html',
+        '<!doctype html><script type="module" src="src/main.js"></script>',
+      );
+      await deps.fs?.create(
+        'src/main.js',
+        "import * as Phaser from 'phaser';\nlet timer;\nlet timer;",
+      );
+      return emptyOutput('broken');
+    };
+
+    await expect(
+      runGeneration(
+        {
+          prompt: 'make a timer game',
+          model: { provider: 'openai', modelId: 'o4-mini' },
+          apiKey: 'sk-test',
+        },
+        { store, generate: brokenAgent },
+      ),
+    ).rejects.toThrow(/Generated JavaScript syntax check failed[\s\S]*src\/main\.js[\s\S]*timer/);
+  });
+});
+
 describe('runGeneration token ceiling (#18)', () => {
   /** Builds a turn_end AgentEvent carrying a usage block (the real assistant
    *  message shape the agent emits after each model turn). */

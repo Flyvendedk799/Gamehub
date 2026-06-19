@@ -5,7 +5,7 @@
 // `camera.shake()` natively, so this is a thin tuned wrapper with sane
 // duration/intensity presets per event type.
 
-import Phaser from 'phaser';
+import * as Phaser from 'phaser';
 
 /** Preset intensities keyed by event. `intensity` is Phaser's normalized
  *  shake amount (fraction of viewport), NOT pixels. 0.004 ≈ 3px on a 720p

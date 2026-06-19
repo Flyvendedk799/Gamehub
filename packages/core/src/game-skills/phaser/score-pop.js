@@ -4,7 +4,7 @@
 // HUD score-counter "pop" (scale bump) when the running total changes, so the
 // score readout itself reacts instead of silently ticking.
 
-import Phaser from 'phaser';
+import * as Phaser from 'phaser';
 
 /** Spawn a floating text that drifts up and fades, then auto-destroys.
  *  Place at the world position of the event (enemy.x/y, coin.x/y). */

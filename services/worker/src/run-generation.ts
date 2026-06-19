@@ -41,6 +41,7 @@ import type { ChatMessage } from '@playforge/shared';
 import type { GameSpec, ModelRef } from '@playforge/shared';
 import type { SnapshotStore, WriteResult } from '@playforge/storage';
 import { makeAssetGenerator } from './asset-generator';
+import { assertGeneratedJavaScriptSyntax } from './syntax-check';
 import { WorkingTree } from './working-tree';
 
 export type WebEngine = 'three' | 'phaser';
@@ -520,6 +521,7 @@ export async function runGeneration(
     output = await generate(buildInput(nextPrompt, history), deps);
   }
 
+  await assertGeneratedJavaScriptSyntax(tree.toTextFiles());
   const snapshot = await tree.persist(ports.store);
 
   const encoder = new TextEncoder();

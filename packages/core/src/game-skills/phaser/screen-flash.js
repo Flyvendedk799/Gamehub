@@ -6,7 +6,7 @@
 // SPARINGLY and BRIEFLY — a 120ms red vignette on player-hit is great; a
 // flash on every minor tick is nauseating.
 
-import Phaser from 'phaser';
+import * as Phaser from 'phaser';
 
 const FLASH_PRESETS = {
   damage: { r: 255, g: 40, b: 40, duration: 160 }, // player took a hit

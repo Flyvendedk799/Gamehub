@@ -90,7 +90,7 @@ describe('phaserAdapter.validate (gameplan §7.6)', () => {
     <script type="importmap">{"imports":{"phaser":"https://cdn.jsdelivr.net/npm/phaser@3.88.0/dist/phaser.esm.js"}}</script>
     </head><body><div id="game"></div></body></html>`;
   const goodMain = `
-    import Phaser from 'phaser';
+    import * as Phaser from 'phaser';
     class PlayScene extends Phaser.Scene {
       preload() { this.load.image('paddle', 'assets/paddle.png'); }
       create() { this.add.image(100, 100, 'paddle'); }
@@ -148,9 +148,25 @@ describe('phaserAdapter.validate (gameplan §7.6)', () => {
     expect(result.issues.some((i) => i.message.includes('Phaser.Scene'))).toBe(true);
   });
 
+  it('flags the default Phaser ESM import as a runtime-breaking error', () => {
+    const defaultImport = goodMain.replace(
+      "import * as Phaser from 'phaser';",
+      "import Phaser from 'phaser';",
+    );
+    const result = phaserAdapter.validate([
+      { path: 'index.html', content: goodIndex },
+      { path: 'src/main.js', content: defaultImport },
+    ]);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues.some((i) => i.message.includes('does not provide a default export'))).toBe(
+      true,
+    );
+  });
+
   it('warns when a scene declares no lifecycle methods', () => {
     const noLifecycle = `
-      import Phaser from 'phaser';
+      import * as Phaser from 'phaser';
       class HollowScene extends Phaser.Scene { constructor() { super(); } }
       const game = new Phaser.Game({
         type: Phaser.AUTO,
@@ -170,7 +186,7 @@ describe('phaserAdapter.validate (gameplan §7.6)', () => {
 
   it('flags this.physics.add.* without a physics block in the game config', () => {
     const physicsMissing = `
-      import Phaser from 'phaser';
+      import * as Phaser from 'phaser';
       class PlayScene extends Phaser.Scene {
         create() { this.physics.add.sprite(100, 100, 'player'); }
         update() {}
@@ -191,7 +207,7 @@ describe('phaserAdapter.validate (gameplan §7.6)', () => {
 
   it('flags this.add.image with an unloaded asset key', () => {
     const orphanKey = `
-      import Phaser from 'phaser';
+      import * as Phaser from 'phaser';
       class PlayScene extends Phaser.Scene {
         preload() { this.load.image('paddle', 'assets/paddle.png'); }
         create() {

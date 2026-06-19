@@ -3,7 +3,7 @@
 // + start; Play runs the mechanic; GameOver displays score + restart.
 // Pass score data via scene.start's second arg.
 
-import Phaser from 'phaser';
+import * as Phaser from 'phaser';
 
 export class BootScene extends Phaser.Scene {
   constructor() {

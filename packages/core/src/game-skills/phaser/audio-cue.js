@@ -3,7 +3,7 @@
 // `this.sound.add(key)` so volume tweens, ducking, and the
 // no-audio-on-iframe-mount case all work consistently.
 
-import Phaser from 'phaser';
+import * as Phaser from 'phaser';
 
 /** Inside preload(): register every audio asset key the scene needs.
  *  Validator catches `this.sound.add('key')` calls where `key` was never

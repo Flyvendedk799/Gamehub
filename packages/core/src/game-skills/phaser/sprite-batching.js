@@ -2,7 +2,7 @@
 // pre-load → atlas frames → AnimatedSprite chain that prevents the
 // orphan-asset-key validator hit.
 
-import Phaser from 'phaser';
+import * as Phaser from 'phaser';
 
 /** Preload helper — call inside your scene's preload(). Loads a Phaser
  *  multi-atlas (PNG + JSON sidecar) plus a flat spritesheet for simple

@@ -37,7 +37,7 @@ describe('makeValidateGameSceneTool', () => {
     const tool = makeValidateGameSceneTool({
       fs: makeFs({
         'index.html': '<!doctype html><body><div id="game"></div></body>',
-        'src/main.js': "import Phaser from 'phaser';",
+        'src/main.js': "import * as Phaser from 'phaser';",
       }),
       getCurrentEngine: () => 'phaser',
       validate,
