@@ -370,16 +370,25 @@ function buildPiModel(
       ERROR_CODES.PROVIDER_BASE_URL_MISSING,
     );
   }
+  // Infer the wire from the provider when the caller didn't pin one. Without
+  // this, a platform model {provider:'anthropic'} with no explicit wire falls
+  // through apiForWire() to 'openai-completions' and POSTs an OpenAI-shaped
+  // request to api.anthropic.com/chat/completions → 404. (openai/openrouter
+  // correctly stay on the openai-completions default.)
+  const effectiveWire: WireApi | undefined =
+    wire ?? (model.provider === 'anthropic' ? 'anthropic' : undefined);
   // Defensive: canonicalize stored baseUrl before handing to pi-ai. Rescues
   // legacy configs that persisted pre-normalization (e.g. raw `/v1/chat/completions`
   // pasted in an older build). No-op for configs saved post-fix.
   // For openai-codex-responses, canonicalBaseUrl only strips trailing slashes
   // — pi-ai's codex wire appends `/codex/responses` from the bare base itself.
-  const canonicalBase = wire ? canonicalBaseUrl(resolvedBaseUrl, wire) : resolvedBaseUrl;
+  const canonicalBase = effectiveWire
+    ? canonicalBaseUrl(resolvedBaseUrl, effectiveWire)
+    : resolvedBaseUrl;
   const out: PiModel = {
     id: model.modelId,
     name: model.modelId,
-    api: apiForWire(wire),
+    api: apiForWire(effectiveWire),
     provider: model.provider,
     baseUrl: canonicalBase,
     reasoning: true,
