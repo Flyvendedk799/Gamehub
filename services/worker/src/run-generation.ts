@@ -41,6 +41,9 @@ import { normalizeEngineCdnUrls } from '@playforge/shared';
 import type { ChatMessage } from '@playforge/shared';
 import type { GameSpec, ModelRef } from '@playforge/shared';
 import type { SnapshotStore, WriteResult } from '@playforge/storage';
+// Relative import into the exporters package src (same pattern the API uses for
+// the worker) — reuses the proven single-file game bundler for the verify gate.
+import { buildGameHtml } from '../../../packages/exporters/src/index';
 import { makeAssetGenerator } from './asset-generator';
 import { assertGeneratedJavaScriptSyntax } from './syntax-check';
 import { WorkingTree } from './working-tree';
@@ -240,6 +243,18 @@ export interface GenerationResult {
  * this, the cloud worker handed the agent a permissive pass, so the headline
  * "win/lose-validated, anti-slop" guarantee ran on nothing server-side.
  */
+/**
+ * True for verify-only asset/XHR-load failures introduced by inlining a
+ * multi-file game for the boot gate (relative asset paths can't resolve under
+ * setContent). These are harness artifacts, not game bugs — the real preview
+ * serves those files — so they must not count toward the runtime-verify verdict.
+ */
+export function isVerifyInlineAssetNoise(message: string): boolean {
+  return /Failed to execute 'open' on 'XMLHttpRequest'|XMLHttpRequest.*Invalid URL|Invalid URL.*XMLHttpRequest|Failed to load resource/i.test(
+    message,
+  );
+}
+
 export const ENGINE_SCENE_VALIDATOR: SceneValidator = (engine, files) => {
   const adapter = GAME_ENGINE_ADAPTERS.get(engine);
   if (!adapter) return { ok: true, engine, issues: [] };
@@ -330,6 +345,31 @@ export async function runGeneration(
   // gen worker itself never boots untrusted game code.
   const browserJobs = ports.browserJobs;
 
+  // WS-C — the agent's runtime-verify + playtest gates boot the artifact in the
+  // browser-worker via setContent(html), which only has the ENTRY file. A
+  // multi-file game (index.html + src/main.js + assets) therefore can't load its
+  // modules/assets → window.__game never appears → a FALSE "did not boot",
+  // so the boot-and-repair loop couldn't catch (or fix) incomplete games. Inline
+  // the whole project into one self-contained HTML first (the same proven
+  // single-file bundler the publish path uses — engine + modules + assets all
+  // inlined, no network), so the gate boots the REAL game. Falls back to the raw
+  // entry if inlining isn't possible (no engine chosen / no index.html / error).
+  const inlineForVerify = async (fallbackHtml: string): Promise<string> => {
+    const engine = state.engine;
+    if (engine !== 'three' && engine !== 'phaser') return fallbackHtml;
+    try {
+      const files = tree.toSnapshotInput().map((f) => ({
+        path: f.path,
+        content: Buffer.from(f.bytes),
+      }));
+      if (!files.some((f) => f.path === 'index.html')) return fallbackHtml;
+      return await buildGameHtml({ files, engine });
+    } catch (err) {
+      console.warn(`[run-generation] verify inline failed, using raw entry: ${String(err)}`);
+      return fallbackHtml;
+    }
+  };
+
   // `done`'s runtime-load gate: boot the artifact in the browser-worker, return
   // any fatal console errors so `done` reports status='has_errors' (instead of
   // force-accepting on static lint alone). A `null` verdict (queue down) yields
@@ -345,14 +385,19 @@ export async function runGeneration(
     browserJobs === undefined
       ? undefined
       : async (artifactSource: string): Promise<DoneError[]> => {
-          const verdict = await browserJobs.runtimeVerify(artifactSource);
+          const verdict = await browserJobs.runtimeVerify(await inlineForVerify(artifactSource));
           if (verdict === null) return [];
+          // Inlining a multi-file game leaves JS-loaded asset paths relative, so
+          // they 404/XHR-fail under setContent — a verify-harness artifact, NOT a
+          // game bug (the real preview serves those assets fine). Drop that noise
+          // so it doesn't read as fatal and trigger a phantom repair round.
+          const fatalErrors = verdict.fatalErrors.filter((e) => !isVerifyInlineAssetNoise(e));
           lastRuntimeVerify = {
             booted: verdict.hasGameContract,
-            fatalErrors: [...verdict.fatalErrors],
+            fatalErrors,
             ...(verdict.juiceScore !== undefined ? { juiceScore: verdict.juiceScore } : {}),
           };
-          const errors: DoneError[] = verdict.fatalErrors.map((message) => ({
+          const errors: DoneError[] = fatalErrors.map((message) => ({
             message,
             source: 'runtime',
           }));
@@ -375,7 +420,8 @@ export async function runGeneration(
     browserJobs === undefined
       ? undefined
       : async (pInput: PlaytesterInput): Promise<PlaytesterOutput> => {
-          const verdict = await browserJobs.playtest(pInput.artifactSource, pInput.steps);
+          const html = await inlineForVerify(pInput.artifactSource);
+          const verdict = await browserJobs.playtest(html, pInput.steps);
           if (verdict === null) {
             return {
               hasDebugContract: false,
@@ -392,9 +438,9 @@ export async function runGeneration(
             steps: verdict.steps.map((s) => ({
               step: s.step,
               snapshotAfter: s.snapshotAfter,
-              errors: s.errors,
+              errors: s.errors.filter((e) => !isVerifyInlineAssetNoise(e)),
             })),
-            bootErrors: verdict.bootErrors,
+            bootErrors: verdict.bootErrors.filter((e) => !isVerifyInlineAssetNoise(e)),
           };
         };
 

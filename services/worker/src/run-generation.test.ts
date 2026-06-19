@@ -15,8 +15,22 @@ import {
   type GenerateFn,
   type PlaytestVerdict,
   type RuntimeVerifyVerdict,
+  isVerifyInlineAssetNoise,
   runGeneration,
 } from './run-generation';
+
+describe('isVerifyInlineAssetNoise (WS-C — drop inlining harness artifacts)', () => {
+  it('matches the XHR/asset-load failures inlining produces, not real game errors', () => {
+    expect(
+      isVerifyInlineAssetNoise("Failed to execute 'open' on 'XMLHttpRequest': Invalid URL"),
+    ).toBe(true);
+    expect(isVerifyInlineAssetNoise('Failed to load resource: 404')).toBe(true);
+    expect(isVerifyInlineAssetNoise("TypeError: Cannot read property 'x' of undefined")).toBe(
+      false,
+    );
+    expect(isVerifyInlineAssetNoise('window.__game never appeared')).toBe(false);
+  });
+});
 
 describe('ENGINE_SCENE_VALIDATOR (#1.1 — the worker now runs a REAL engine lint, not the old no-op)', () => {
   it('flags a Phaser add.image with no matching load.image as ok:false (was always ok:true)', () => {
