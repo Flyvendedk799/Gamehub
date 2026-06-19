@@ -16,6 +16,7 @@
     "@playforge/bus": "workspace:*",
     "@playforge/db": "workspace:*",
     "@playforge/exporters": "workspace:*",
+    "@playforge/providers": "workspace:*",
     "@playforge/shared": "workspace:*",
     "@playforge/storage": "workspace:*",
     "bullmq": "^5.78.1",

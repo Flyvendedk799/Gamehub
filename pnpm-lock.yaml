@@ -300,6 +300,9 @@ importers:
       '@playforge/exporters':
         specifier: workspace:*
         version: link:../../packages/exporters
+      '@playforge/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
       '@playforge/shared':
         specifier: workspace:*
         version: link:../../packages/shared

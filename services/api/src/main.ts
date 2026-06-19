@@ -1,6 +1,5 @@
 import { type EventBus, InMemoryEventBus, RedisEventBus } from '@playforge/bus';
 import { createDb, schema } from '@playforge/db';
-import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
 /**
  * Live API entry point.
  *
@@ -23,6 +22,9 @@ import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
  *   BLOB_DIR            local blob-store root (default: .playforge-blobs)
  *   API_KEY_ENCRYPTION_SECRET  Secret for BYOK key encryption (falls back to PLATFORM_API_KEY)
  */
+import { ClaudeTokenStore, readClaudeCodeKeychainCredentials } from '@playforge/providers';
+import { ERROR_CODES, PlayforgeError } from '@playforge/shared';
+import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
 import { Queue } from 'bullmq';
 import { asc, eq } from 'drizzle-orm';
 import { finalizeRun } from '../../worker/src/finalize-run';
@@ -132,6 +134,35 @@ async function main() {
 
   const bus: EventBus = redisUrl ? new RedisEventBus(redisUrl) : new InMemoryEventBus();
   const store = new SnapshotStore(new LocalFsBlobStore(blobDir));
+
+  // Claude subscription credential (OAuth, harvested from local Claude Code).
+  // When connected, generation runs on the subscription against the REAL
+  // Anthropic API. File-based (single local subscription) — mirrors the Codex
+  // token-store pattern. CLAUDE_SUBSCRIPTION_MODEL picks the Claude model used.
+  //
+  // "Refresh" RE-HARVESTS the current token from the Claude Code keychain rather
+  // than doing the OAuth exchange ourselves. Claude Code rotates + refreshes its
+  // own token; re-reading it (a) needs no client_id (absent from the blob) and
+  // (b) never rotates the refresh token out from under the `claude` CLI, so the
+  // user's Claude Code session is never broken by Gamehub.
+  const claudeAuthStore = new ClaudeTokenStore({
+    filePath: process.env['CLAUDE_AUTH_FILE'] ?? `${blobDir}/claude-auth.json`,
+    refreshFn: async () => {
+      const creds = await readClaudeCodeKeychainCredentials();
+      if (!creds) {
+        throw new PlayforgeError(
+          'Claude Code is not logged in on this machine — reconnect required.',
+          ERROR_CODES.CLAUDE_CODE_REIMPORT_REQUIRED,
+        );
+      }
+      return {
+        accessToken: creds.accessToken,
+        refreshToken: creds.refreshToken ?? '',
+        expiresAt: creds.expiresAt ?? Date.now() + 60 * 60 * 1000,
+      };
+    },
+  });
+  const claudeSubscriptionModel = process.env['CLAUDE_SUBSCRIPTION_MODEL'] ?? 'claude-sonnet-4-6';
 
   const projectRepo = new DrizzleProjectRepo(db);
   const runRepo = new DrizzleRunRepo(db);
@@ -369,6 +400,8 @@ async function main() {
     authDb: db,
     accountRepo,
     platformModel,
+    claudeAuthStore,
+    claudeSubscriptionModel,
     apiKeyEncryptionSecret,
     ...(adminToken !== undefined ? { adminToken } : {}),
     maxConcurrentRunsPerUser,

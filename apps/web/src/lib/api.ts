@@ -733,6 +733,34 @@ export async function deleteAccountProvider(provider: Exclude<AccountProvider, '
   });
 }
 
+// ─── Claude subscription (OAuth) ──────────────────────────────────────────────
+
+export interface ClaudeSubscriptionStatus {
+  connected: boolean;
+  email?: string | null;
+  /** Unix-ms expiry of the current access token. */
+  expiresAt?: number;
+  scopes?: string | null;
+  /** Whether the stored identity can auto-refresh (else re-auth re-harvests). */
+  canRefresh?: boolean;
+}
+
+export async function getClaudeAuthStatus(): Promise<ClaudeSubscriptionStatus> {
+  return apiFetch<ClaudeSubscriptionStatus>('/v1/auth/claude/status');
+}
+
+/** Connect (or, with reauth=true, re-harvest in place) the local Claude Code
+ *  OAuth identity — no disconnect needed for re-auth. */
+export async function connectClaude(reauth = false): Promise<ClaudeSubscriptionStatus> {
+  return apiFetch<ClaudeSubscriptionStatus>(`/v1/auth/claude/${reauth ? 'reauth' : 'connect'}`, {
+    method: 'POST',
+  });
+}
+
+export async function disconnectClaude(): Promise<ClaudeSubscriptionStatus> {
+  return apiFetch<ClaudeSubscriptionStatus>('/v1/auth/claude', { method: 'DELETE' });
+}
+
 // ─── Hub search ────────────────────────────────────────────────────────────────
 
 export async function searchHub(
