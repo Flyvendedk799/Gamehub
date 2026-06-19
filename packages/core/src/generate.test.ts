@@ -1658,10 +1658,10 @@ describe('AGENT_WORKFLOW anti-narration directives (plan0305 P1.1)', () => {
     expect(agentPrompt).toContain('ANY assistant text between tool calls');
     expect(agentPrompt).toContain('Now let me');
     expect(agentPrompt).toContain('Let me try');
-    // 2026-05-08: phrasing scoped to "inside a build" — same intent (zero
-    // mid-build text bubbles), but no longer asserts the rule unconditionally.
+    // 2026-06-19: the zero-text rule now scopes to design/motion explicitly —
+    // game builds carve out per-step narration (see phase2-narration.test.ts).
     expect(agentPrompt).toContain(
-      'correct number of inter-tool text bubbles inside a build is **zero**',
+      'DESIGN and MOTION builds the only correct number of inter-tool text bubbles is **zero**',
     );
   });
 });
@@ -1855,8 +1855,9 @@ describe('GAME_WORKFLOW mechanic spec / camera-lock / edit-budget directives', (
     expect(prompt).toContain('Jab vs Cross');
   });
 
-  it('exempts the Mechanic spec block from the no-inter-tool-text rule', () => {
-    expect(prompt).toContain('ONE allowed exception is the **Mechanic spec block**');
+  it('asks for brief per-step narration (reverses the old no-inter-tool-text rule for games)', () => {
+    expect(prompt).toContain('Narrate each step');
+    expect(prompt).toContain('OVERRIDES');
   });
 
   it('locks the camera type in edit mode unless the user names it', () => {

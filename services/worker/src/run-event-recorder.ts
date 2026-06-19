@@ -96,8 +96,66 @@ const NON_PERSISTED_TYPES: ReadonlySet<string> = new Set([
   'message_update',
 ]);
 
+/** Per-turn debug trace to the API/worker stdout (→ survhub logs). On by
+ *  default so a run is fully inspectable; set GEN_DEBUG=0 to silence. */
+const GEN_DEBUG = process.env['GEN_DEBUG'] !== '0';
+
+function summarizeToolArgs(toolName: string, args: unknown): string {
+  if (!args || typeof args !== 'object') return '';
+  const a = args as Record<string, unknown>;
+  const s = (k: string): string | undefined =>
+    typeof a[k] === 'string' ? (a[k] as string) : undefined;
+  switch (toolName) {
+    case 'str_replace_based_edit_tool':
+      return `${s('command') ?? '?'} ${s('path') ?? '?'}`;
+    case 'declare_game_spec':
+    case 'amend_game_spec':
+      return `genre=${s('genre') ?? '?'}`;
+    case 'choose_engine':
+      return s('engine') ?? '';
+    case 'generate_image_asset':
+    case 'generate_audio_asset':
+      return s('purpose') ?? '';
+    case 'ask_user':
+      return `"${s('question') ?? ''}"`;
+    case 'set_todos': {
+      const items = a['items'];
+      return Array.isArray(items) ? `${items.length} items` : '';
+    }
+    default:
+      return s('path') ?? '';
+  }
+}
+
+/** Pull a short failure/verdict summary out of a tool result (verify/done carry
+ *  their issues in details.errors; others put a message in content[].text). */
+function summarizeToolResult(result: unknown): string {
+  if (!result || typeof result !== 'object') return '';
+  const r = result as Record<string, unknown>;
+  const details = r['details'] as Record<string, unknown> | undefined;
+  const errs = details?.['errors'];
+  if (Array.isArray(errs) && errs.length > 0) {
+    return errs
+      .map((e) => (e as { message?: string })?.message ?? '')
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(' | ')
+      .slice(0, 260);
+  }
+  const content = r['content'];
+  if (Array.isArray(content)) {
+    const txt = content
+      .map((c) => (c as { text?: string })?.text ?? '')
+      .filter(Boolean)
+      .join(' ');
+    if (txt) return txt.slice(0, 200);
+  }
+  return '';
+}
+
 export class RunEventRecorder {
   private seq = 0;
+  private turnNo = 0;
   private textBuffer = '';
   private readonly channel: string;
 
@@ -116,6 +174,7 @@ export class RunEventRecorder {
    * agent loop.
    */
   onAgentEvent(event: AgentEvent): void {
+    this.debugLog(event);
     void this.bus.publish(this.channel, event).catch((err: unknown) => {
       console.error(
         `[run:${this.runId}] live publish failed:`,
@@ -152,6 +211,15 @@ export class RunEventRecorder {
    */
   async control(event: { type: string; [k: string]: unknown }): Promise<void> {
     this.flushTextPersist();
+    if (GEN_DEBUG) {
+      const extra =
+        typeof event['error'] === 'string'
+          ? `: ${event['error'].slice(0, 200)}`
+          : typeof event['question'] === 'string'
+            ? `: "${event['question']}"`
+            : '';
+      console.log(`[gen:${this.runId.slice(0, 8)}] ■ ${event.type}${extra}`);
+    }
     await this.bus.publish(this.channel, event);
     this.persistEvent(event);
   }
@@ -159,9 +227,51 @@ export class RunEventRecorder {
   /** Persist any buffered assistant text as one coalesced row, then reset. */
   private flushTextPersist(): void {
     if (this.textBuffer.length === 0) return;
+    if (GEN_DEBUG) {
+      console.log(
+        `[gen:${this.runId.slice(0, 8)}]   💭 ${this.textBuffer.replace(/\s+/g, ' ').trim().slice(0, 300)}`,
+      );
+    }
     const frame = coalescedTextFrame(this.textBuffer);
     this.textBuffer = '';
     this.persistEvent(frame);
+  }
+
+  /**
+   * Per-turn debug trace (GEN_DEBUG): turn boundaries, every tool call with a
+   * concise arg summary, and tool failures / verify+done verdicts with their
+   * reasons — so a run is fully inspectable in the API logs without replaying
+   * the raw 9k-frame stream. Thoughts are logged in flushTextPersist; terminal
+   * frames in control().
+   */
+  private debugLog(event: unknown): void {
+    if (!GEN_DEBUG) return;
+    const e = event as Record<string, unknown>;
+    const type = e['type'];
+    const tag = `[gen:${this.runId.slice(0, 8)}]`;
+    if (type === 'turn_start') {
+      this.turnNo += 1;
+      console.log(`${tag} ┌─ turn ${this.turnNo}`);
+      return;
+    }
+    if (type === 'tool_execution_start') {
+      const name = String(e['toolName'] ?? '?');
+      const args = summarizeToolArgs(name, e['args']);
+      console.log(`${tag}   ▶ ${name}${args ? ` (${args})` : ''}`);
+      return;
+    }
+    if (type === 'tool_execution_end') {
+      const name = String(e['toolName'] ?? '?');
+      const isError = e['isError'] === true;
+      // Always surface the verdict tools (their has_errors lives in details even
+      // when isError=false) plus any genuine tool error; stay quiet otherwise.
+      const isVerdictTool =
+        name === 'verify_artifact' || name === 'done' || name === 'validate_game_scene';
+      if (isError || isVerdictTool) {
+        const summary = summarizeToolResult(e['result']);
+        console.log(`${tag}   ${isError ? '✗' : '✓'} ${name}${summary ? `: ${summary}` : ''}`);
+      }
+    }
   }
 
   private persistEvent(event: unknown): void {
