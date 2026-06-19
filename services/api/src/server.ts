@@ -21,6 +21,7 @@ import type { EventBus } from '@playforge/bus';
 import { runChannel } from '@playforge/bus';
 import { type ExportGameHtmlOptions, buildGameHtml } from '@playforge/exporters';
 import { exportGameZip } from '@playforge/exporters/game-zip';
+import { type StoredClaudeAuth, readClaudeCodeKeychainCredentials } from '@playforge/providers';
 import { type ModelRef, PROVIDER_SHORTLIST, normalizeEngineCdnUrls } from '@playforge/shared';
 import { type SnapshotStore, contentTypeFor } from '@playforge/storage';
 import {
@@ -280,6 +281,12 @@ export interface ServerDeps {
   accountRepo?: AccountRepo;
   /** Optional: platform default model used when a user has not selected BYOK. */
   platformModel?: ModelRef;
+  /** Optional: Claude subscription credential store. When connected, generation
+   *  runs on the subscription (OAuth over the real Anthropic API) and the
+   *  /v1/auth/claude/* routes are enabled. */
+  claudeAuthStore?: import('@playforge/providers').ClaudeTokenStore;
+  /** Claude model used when the subscription is the active credential. */
+  claudeSubscriptionModel?: string;
   /** Optional: server-side envelope secret for encrypted BYOK keys. */
   apiKeyEncryptionSecret?: string;
   /**
@@ -845,6 +852,32 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     | { ok: true; model?: ModelRef; apiKey?: string }
     | { ok: false; status: number; body: Record<string, unknown> }
   > {
+    // Claude subscription takes precedence when connected — generation runs on
+    // the subscription (a fresh OAuth access token over the REAL Anthropic API,
+    // same prompt + model as a metered key, only the billing differs). Resolved
+    // ONCE here: getValidAccessToken auto-refreshes inside its buffer and the
+    // token is valid for hours, far longer than a single run, so no per-turn
+    // refresh threading is needed. On a revoked/failed token we fall through to
+    // the configured credential so generation still works; the user reconnects.
+    if (deps.claudeAuthStore) {
+      try {
+        if (await deps.claudeAuthStore.isConnected()) {
+          const apiKey = await deps.claudeAuthStore.getValidAccessToken();
+          return {
+            ok: true,
+            model: {
+              provider: 'anthropic',
+              modelId: deps.claudeSubscriptionModel ?? 'claude-sonnet-4-6',
+            },
+            apiKey,
+          };
+        }
+      } catch (err) {
+        console.warn(
+          `[claude-sub] token unavailable, falling back to configured credential: ${String(err)}`,
+        );
+      }
+    }
     if (!deps.accountRepo) {
       return { ok: true };
     }
@@ -1206,6 +1239,75 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         : await deps.accountRepo.getSettings(user.userId);
     if (!settings) return reply.code(404).send({ error: 'not_found' });
     return reply.send(accountSettingsResponse(settings));
+  });
+
+  // ── Claude subscription (OAuth) ──────────────────────────────────────────────
+  // Connect / Re-auth harvest the local Claude Code OAuth identity from the
+  // macOS Keychain (no browser redirect — Gamehub runs on the same Mac where
+  // `claude` is logged in). When connected, resolveGenerationCredentials runs
+  // generation on the subscription. Re-auth simply re-harvests the now-fresh
+  // keychain token IN PLACE — no disconnect→reconnect dance.
+  function claudeStatusBody(auth: StoredClaudeAuth | null): Record<string, unknown> {
+    if (!auth) return { connected: false };
+    return {
+      connected: true,
+      email: auth.email,
+      expiresAt: auth.expiresAt,
+      scopes: auth.scopes,
+      canRefresh: auth.refreshToken.length > 0 && auth.clientId.length > 0,
+    };
+  }
+
+  async function connectClaudeFromKeychain(reply: FastifyReply): Promise<void> {
+    const store = deps.claudeAuthStore;
+    if (!store) {
+      await reply.code(503).send({ error: 'claude_auth_unavailable' });
+      return;
+    }
+    const creds = await readClaudeCodeKeychainCredentials();
+    if (!creds) {
+      await reply.code(400).send({ error: 'claude_code_not_logged_in' });
+      return;
+    }
+    const now = Date.now();
+    await store.write({
+      schemaVersion: 1,
+      accessToken: creds.accessToken,
+      refreshToken: creds.refreshToken ?? '',
+      clientId: creds.oauthClientId ?? '',
+      expiresAt: creds.expiresAt ?? now + 60 * 60 * 1000,
+      email: null,
+      scopes: creds.scopes ?? null,
+      updatedAt: now,
+    });
+    await reply.send(claudeStatusBody(await store.peek()));
+  }
+
+  app.get('/v1/auth/claude/status', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    if (!deps.claudeAuthStore) return reply.code(503).send({ error: 'claude_auth_unavailable' });
+    return reply.send(claudeStatusBody(await deps.claudeAuthStore.peek()));
+  });
+
+  app.post('/v1/auth/claude/connect', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    return connectClaudeFromKeychain(reply);
+  });
+
+  app.post('/v1/auth/claude/reauth', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    return connectClaudeFromKeychain(reply);
+  });
+
+  app.delete('/v1/auth/claude', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    if (!deps.claudeAuthStore) return reply.code(503).send({ error: 'claude_auth_unavailable' });
+    await deps.claudeAuthStore.clear();
+    return reply.send({ connected: false });
   });
 
   // ── password reset (6.2) ────────────────────────────────────────────────────

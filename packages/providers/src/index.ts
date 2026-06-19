@@ -637,6 +637,17 @@ export type {
 export { looksLikeGatewayMissingMessagesApi } from './gateway-compat';
 
 export { refreshClaudeCodeToken, shouldRefresh, parseRefreshResponse } from './oauth-refresh';
+export {
+  ClaudeTokenStore,
+  type StoredClaudeAuth,
+  type ClaudeTokenStoreOptions,
+  type ClaudeRefreshFn,
+} from './claude/token-store';
+export {
+  readClaudeCodeKeychainCredentials,
+  parseKeychainBlob,
+  type ClaudeKeychainCredentials,
+} from './claude/keychain';
 export type {
   RefreshClaudeCodeTokenInput,
   RefreshClaudeCodeTokenResult,

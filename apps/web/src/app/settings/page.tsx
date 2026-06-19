@@ -3,8 +3,12 @@
 import {
   type AccountProvider,
   type AccountSettingsResponse,
+  type ClaudeSubscriptionStatus,
+  connectClaude,
   deleteAccountProvider,
+  disconnectClaude,
   getAccountSettings,
+  getClaudeAuthStatus,
   saveAccountProvider,
   updateAccountProfile,
 } from '@/lib/api';
@@ -384,6 +388,8 @@ export default function SettingsPage() {
           </div>
         )}
 
+        <ClaudeSubscriptionCard />
+
         {notice && (
           <div className="rounded-lg border border-[#22c55e]/20 bg-[#22c55e]/10 px-4 py-3 text-sm text-[#86efac]">
             {notice}
@@ -396,5 +402,100 @@ export default function SettingsPage() {
         )}
       </div>
     </main>
+  );
+}
+
+function ClaudeSubscriptionCard() {
+  const [status, setStatus] = useState<ClaudeSubscriptionStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    void getClaudeAuthStatus()
+      .then((s) => {
+        if (!cancelled) setStatus(s);
+      })
+      .catch(() => {
+        /* status is best-effort */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const run = async (fn: () => Promise<ClaudeSubscriptionStatus>) => {
+    setBusy(true);
+    setErr('');
+    try {
+      setStatus(await fn());
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Action failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const connected = status?.connected ?? false;
+  const expires = status?.expiresAt ? new Date(status.expiresAt).toLocaleString() : null;
+
+  return (
+    <section className="space-y-4 rounded-lg border border-[#222222] bg-[#111111] p-6">
+      <div>
+        <h2 className="text-lg font-semibold text-[#f4f4f5]">Claude subscription</h2>
+        <p className="text-sm text-[#a1a1aa]">
+          Generate on your Claude Code subscription — the real Anthropic API, your prompt, billed to
+          the subscription instead of a metered key. Reads the local Claude Code login on this
+          machine.
+        </p>
+      </div>
+      <div className="flex items-center gap-2 text-sm">
+        <span
+          className={`inline-block h-2 w-2 rounded-full ${connected ? 'bg-[#22c55e]' : 'bg-[#52525b]'}`}
+        />
+        {connected ? (
+          <span className="text-[#86efac]">
+            Connected
+            {expires ? ` · token valid until ${expires}` : ''}
+            {status?.canRefresh === false ? ' · re-auth to refresh' : ''}
+          </span>
+        ) : (
+          <span className="text-[#a1a1aa]">Not connected</span>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {!connected && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => run(() => connectClaude(false))}
+            className="rounded-lg bg-[#f59e0b] px-4 py-2 text-sm font-medium text-[#1a1a1a] transition-colors hover:bg-[#d97706] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {busy ? 'Connecting…' : 'Connect'}
+          </button>
+        )}
+        {connected && (
+          <>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(() => connectClaude(true))}
+              className="rounded-lg border border-[#f59e0b]/40 bg-[#f59e0b]/10 px-4 py-2 text-sm font-medium text-[#fbbf24] transition-colors hover:bg-[#f59e0b]/20 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {busy ? 'Re-authing…' : 'Re-auth'}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(disconnectClaude)}
+              className="rounded-lg border border-[#222222] px-4 py-2 text-sm text-[#a1a1aa] transition-colors hover:bg-[#1a1a1a] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Disconnect
+            </button>
+          </>
+        )}
+      </div>
+      {err && <p className="text-sm text-[#fca5a5]">{err}</p>}
+    </section>
   );
 }
