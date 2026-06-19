@@ -21,7 +21,7 @@ import type { EventBus } from '@playforge/bus';
 import { runChannel } from '@playforge/bus';
 import { type ExportGameHtmlOptions, buildGameHtml } from '@playforge/exporters';
 import { exportGameZip } from '@playforge/exporters/game-zip';
-import { type ModelRef, PROVIDER_SHORTLIST } from '@playforge/shared';
+import { type ModelRef, PROVIDER_SHORTLIST, normalizeEngineCdnUrls } from '@playforge/shared';
 import { type SnapshotStore, contentTypeFor } from '@playforge/storage';
 import {
   and as drizzleAnd,
@@ -1920,6 +1920,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       const bytes = await deps.store.readFile(manifest, filePath);
       const ct = contentTypeFor(filePath);
       const isHtml = ct.startsWith('text/html');
+      // Correct near-miss engine CDN URLs (e.g. phaser-esm.js → phaser.esm.js) on
+      // the way out, so snapshots generated before the persist-time fix still
+      // boot in the preview instead of 404-ing the engine and rendering blank.
+      const body = isHtml
+        ? Buffer.from(normalizeEngineCdnUrls(Buffer.from(bytes).toString('utf8')), 'utf8')
+        : Buffer.from(bytes);
       return (
         reply
           .header('Content-Type', ct)
@@ -1935,7 +1941,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           )
           .header('X-Content-Type-Options', 'nosniff')
           .header('Referrer-Policy', 'no-referrer')
-          .send(Buffer.from(bytes))
+          .send(body)
       );
     } catch {
       return reply.code(404).send({ error: 'file_not_found', path: filePath });

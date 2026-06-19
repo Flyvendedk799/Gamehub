@@ -103,6 +103,19 @@ function phaserValidate(files: ReadonlyArray<InputFile>): ValidationResult {
         severity: 'warn',
       });
     }
+    // The ESM build is `dist/phaser.esm.js` (a DOT). `dist/phaser-esm.js` (a
+    // DASH) is a common model typo that 404s on jsdelivr, so `import * as Phaser
+    // from "phaser"` rejects, window.__game is never set, and the game shows a
+    // blank page. Flag it as a hard error (the persist/serve layers also auto-
+    // correct it, but the agent should learn the right URL).
+    if (/phaser@[^/"'\s]+\/dist\/phaser-esm\.js/.test(indexHtml.content)) {
+      issues.push({
+        path: 'index.html',
+        message:
+          'Phaser ESM URL is malformed: the build is `dist/phaser.esm.js` (a dot), not `dist/phaser-esm.js` (a dash). The dash form 404s on the CDN so the game never boots. Use `https://cdn.jsdelivr.net/npm/phaser@3.88.0/dist/phaser.esm.js`.',
+        severity: 'error',
+      });
+    }
     if (
       !/<div[^>]*id=["']game["']/.test(indexHtml.content) &&
       !indexHtml.content.includes('<canvas')

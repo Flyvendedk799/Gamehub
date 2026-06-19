@@ -37,6 +37,7 @@ import {
 // browser/Vite-only vendor assets (?raw) that have no business in the
 // game-gen worker and won't resolve under its tsconfig.
 import { GAME_ENGINE_ADAPTERS } from '@playforge/runtime/engines';
+import { normalizeEngineCdnUrls } from '@playforge/shared';
 import type { ChatMessage } from '@playforge/shared';
 import type { GameSpec, ModelRef } from '@playforge/shared';
 import type { SnapshotStore, WriteResult } from '@playforge/storage';
@@ -530,6 +531,18 @@ export async function runGeneration(
   }
 
   await assertGeneratedJavaScriptSyntax(tree.toTextFiles());
+
+  // Deterministically correct near-miss engine CDN URLs before persisting (e.g.
+  // the model writing `phaser-esm.js` instead of `phaser.esm.js`, which 404s so
+  // the game never boots and the preview is blank). Fixing the bytes here means
+  // every consumer — preview, publish, export, ZIP, runtime-verify — gets a
+  // bootable artifact. (engine-cdn)
+  for (const f of tree.toTextFiles()) {
+    if (!f.path.endsWith('.html')) continue;
+    const fixed = normalizeEngineCdnUrls(f.content);
+    if (fixed !== f.content) tree.create(f.path, fixed);
+  }
+
   const snapshot = await tree.persist(ports.store);
 
   const encoder = new TextEncoder();
