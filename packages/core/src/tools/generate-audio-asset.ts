@@ -118,7 +118,10 @@ export function makeGenerateAudioAssetTool(
       const stem = sanitiseFilenameStem(params.filenameHint ?? match.entry.id);
       const safeStem = stem.length > 0 ? stem : match.entry.id;
       const path = `assets/audio/${safeStem}.${ext}`;
-      const dataUrl = `data:base64,${bytes.toString('base64')}`;
+      // Proper MIME-typed data URL (was the mime-less `data:base64,…`, which the
+      // snapshot decoder couldn't recognise → the raw text was served as the
+      // .wav and Phaser's decode threw, crashing the game's create()).
+      const dataUrl = `data:${match.entry.mimeType};base64,${bytes.toString('base64')}`;
       if (fs !== undefined) fs.create(path, dataUrl);
 
       logger.info('[audio_asset] step=ok', {

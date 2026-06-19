@@ -30,6 +30,26 @@ function countLines(s: string): number {
   return s.split('\n').length;
 }
 
+/**
+ * Generated binary assets (sprites, audio) are written into the tree as a
+ * base64 data-URL STRING — the image tool calls fs.create with
+ * `data:image/png;base64,…`, the audio tool with a mime-less `data:base64,…`.
+ * The tree only stores strings, so at PERSIST time we must DECODE those
+ * sentinels back to real bytes; otherwise the snapshot stores the literal
+ * data-URL text and the preview serves THAT as the file — the browser then
+ * can't decode the "PNG"/"WAV", and a failed audio decode throws uncaught out
+ * of the game's `create()`, leaving the game half-built. Anchored to the whole
+ * string so only a file that IS exactly a base64 data URL is decoded; normal
+ * HTML/JS/CSS/JSON content is UTF-8 encoded as before.
+ */
+const BASE64_DATA_URL = /^data:(?:[\w/+.-]+;)?base64,([\s\S]*)$/;
+
+export function decodeMaybeDataUrl(content: string): Uint8Array {
+  const match = BASE64_DATA_URL.exec(content);
+  if (match?.[1] !== undefined) return new Uint8Array(Buffer.from(match[1], 'base64'));
+  return new TextEncoder().encode(content);
+}
+
 /** 1-indexed line on which `offset` falls within `text`. */
 function lineAtOffset(text: string, offset: number): number {
   let line = 1;
@@ -166,11 +186,12 @@ export class WorkingTree {
     return this.files.size;
   }
 
-  /** Snapshot-store input for the current tree (UTF-8 encoded). */
+  /** Snapshot-store input for the current tree. Text files are UTF-8 encoded;
+   *  base64 data-URL asset sentinels are decoded back to their real bytes. */
   toSnapshotInput(): SnapshotInputFile[] {
     return [...this.files.entries()].map(([path, content]) => ({
       path,
-      bytes: new TextEncoder().encode(content),
+      bytes: decodeMaybeDataUrl(content),
     }));
   }
 
