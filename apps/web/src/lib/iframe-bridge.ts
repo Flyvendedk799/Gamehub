@@ -34,6 +34,70 @@ export interface InboundBridgeMessage {
   type: string;
 }
 
+// ─── Controls protocol (WS-A) — mirrors runtime engines/types.ts ──────────────
+
+export const CONTROLS_MANIFEST_MESSAGE_TYPE = 'playforge:controls:manifest' as const;
+export const CONTROLS_REBIND_MESSAGE_TYPE = 'playforge:controls:rebind' as const;
+export const CONTROLS_REQUEST_MESSAGE_TYPE = 'playforge:controls:request' as const;
+
+export interface ControlAction {
+  id: string;
+  label: string;
+  description?: string;
+  /** KeyboardEvent.code values bound to this action. */
+  keys: string[];
+}
+export interface ControlsManifest {
+  actions: ControlAction[];
+}
+
+/** Validate + parse an inbound `controls:manifest` message from the game. */
+export function parseControlsManifestMessage(
+  event: MessageEvent<unknown>,
+): ControlsManifest | null {
+  if (!isPreviewIframeOrigin(event.origin)) return null;
+  const data = event.data as { type?: unknown; manifest?: unknown } | null;
+  if (!data || data.type !== CONTROLS_MANIFEST_MESSAGE_TYPE) return null;
+  const manifest = data.manifest as { actions?: unknown } | null;
+  if (!manifest || typeof manifest !== 'object' || !Array.isArray(manifest.actions)) return null;
+  const actions: ControlAction[] = [];
+  for (const raw of manifest.actions) {
+    if (!raw || typeof raw !== 'object') continue;
+    const o = raw as Record<string, unknown>;
+    const id = typeof o['id'] === 'string' ? o['id'] : null;
+    if (!id) continue;
+    const keys = Array.isArray(o['keys'])
+      ? o['keys'].filter((k): k is string => typeof k === 'string')
+      : [];
+    actions.push({
+      id,
+      label: typeof o['label'] === 'string' ? o['label'] : id,
+      keys,
+      ...(typeof o['description'] === 'string' ? { description: o['description'] } : {}),
+    });
+  }
+  return { actions };
+}
+
+/** Host → game: apply rebound keys (actionId → KeyboardEvent.code[]). */
+export function sendControlsRebind(
+  iframe: HTMLIFrameElement | null,
+  bindings: Record<string, string[]>,
+): void {
+  iframe?.contentWindow?.postMessage(
+    { type: CONTROLS_REBIND_MESSAGE_TYPE, bindings },
+    PREVIEW_IFRAME_ORIGIN,
+  );
+}
+
+/** Host → game: ask the game to re-post its current control manifest. */
+export function sendControlsRequest(iframe: HTMLIFrameElement | null): void {
+  iframe?.contentWindow?.postMessage(
+    { type: CONTROLS_REQUEST_MESSAGE_TYPE },
+    PREVIEW_IFRAME_ORIGIN,
+  );
+}
+
 /**
  * Validates that an inbound `MessageEvent` came from the trusted preview origin
  * and carries a well-formed `{ type: string }` payload. Returns the typed

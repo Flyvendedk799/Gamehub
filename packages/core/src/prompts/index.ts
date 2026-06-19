@@ -1274,6 +1274,7 @@ window.addEventListener('beforeunload', () => renderer.dispose());
 
 ## Input
 
+- **Rebindable controls (preferred for keyboard actions)**: declare them so the builder's Controls tab can list + rebind them. Call \`window.__game.controls.define({ actions: [{ id: 'forward', label: 'Forward', keys: ['KeyW', 'ArrowUp'] }, …] })\` once at startup, then read via \`window.__game.controls.isDown('forward')\` in the RAF loop (held) or \`window.__game.controls.on('jump', () => …)\` (pressed). Keys are \`KeyboardEvent.code\`. Don't hardcode keys you want rebindable.
 - Keyboard: \`window.addEventListener('keydown' / 'keyup', e => …)\`.
 - Mouse / pointer: \`canvas.addEventListener('pointerdown' / 'pointermove' / 'pointerup', …)\`.
 - Gamepad: \`navigator.getGamepads()\` polled in the RAF loop.
@@ -1382,6 +1383,20 @@ const game = new Phaser.Game({
   scene: [PlayScene],
 });
 \`\`\`
+
+## Controls (rebindable)
+
+Declare every player action so the builder's Controls tab can list + rebind them, and read input THROUGH the layer (never hardcode keys) so a rebind applies live:
+\`\`\`js
+window.__game.controls.define({ actions: [
+  { id: 'left',  label: 'Move left',  keys: ['ArrowLeft', 'KeyA'] },
+  { id: 'right', label: 'Move right', keys: ['ArrowRight', 'KeyD'] },
+  { id: 'jump',  label: 'Jump',       keys: ['Space'] },
+] });
+// held, in update():  if (window.__game.controls.isDown('left')) this.player.setVelocityX(-speed);
+// pressed once, in create():  window.__game.controls.on('jump', () => this.player.jump());
+\`\`\`
+Keys are \`KeyboardEvent.code\` strings (\`ArrowUp\`, \`KeyW\`, \`Space\`, \`ShiftLeft\`, …). Call \`define\` once at startup with a clear \`label\` for each action.
 
 ## Hard rules (validator enforces)
 

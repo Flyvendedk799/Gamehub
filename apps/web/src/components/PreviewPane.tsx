@@ -2,11 +2,16 @@
 
 import { getToken } from '@/lib/auth';
 import {
+  type ControlsManifest,
   PREVIEW_IFRAME_ORIGIN,
   TWEAKS_UPDATE_MESSAGE_TYPE,
+  parseControlsManifestMessage,
   parseInboundBridgeMessage,
+  sendControlsRebind,
+  sendControlsRequest,
 } from '@/lib/iframe-bridge';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ControlsPanel } from './ControlsPanel';
 
 type TweakKind = 'color' | 'number' | 'boolean';
 
@@ -29,6 +34,8 @@ interface PreviewPaneProps {
   errorMessage?: string;
   /** Tweak schema for the current snapshot — drives the live-tweak panel. */
   tweakSchema?: TweakSchema | null;
+  /** Project id — keys per-project saved key bindings (WS-A Controls). */
+  projectId?: string;
 }
 
 export function PreviewPane({
@@ -37,16 +44,21 @@ export function PreviewPane({
   hasError,
   errorMessage,
   tweakSchema,
+  projectId,
 }: PreviewPaneProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [showTweaks, setShowTweaks] = useState(false);
   const [tweakValues, setTweakValues] = useState<Record<string, string | number | boolean>>({});
+  const [view, setView] = useState<'preview' | 'controls'>('preview');
+  const [controlsManifest, setControlsManifest] = useState<ControlsManifest | null>(null);
 
-  // Reset tweak values when URL changes (new game loaded)
+  // Reset tweak values + controls when URL changes (new game loaded)
   // biome-ignore lint/correctness/useExhaustiveDependencies: previewUrl is the intended trigger — reset tweak state whenever a new game URL loads
   useEffect(() => {
     setTweakValues({});
     setShowTweaks(false);
+    setControlsManifest(null);
+    setView('preview');
   }, [previewUrl]);
 
   // The owner-gated preview route accepts the session token via ?token= because
@@ -72,6 +84,12 @@ export function PreviewPane({
   // origin" gap and gives a typed seam for future bridge acks.
   useEffect(() => {
     function onMessage(event: MessageEvent<unknown>) {
+      // WS-A — the game posts its control manifest on startup (and on request).
+      const controls = parseControlsManifestMessage(event);
+      if (controls) {
+        setControlsManifest(controls);
+        return;
+      }
       const msg = parseInboundBridgeMessage(event);
       if (!msg) return; // untrusted origin or malformed shape → ignore
       // Reserved for future bridge ack handling.
@@ -79,6 +97,17 @@ export function PreviewPane({
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
   }, []);
+
+  // Push rebound keys to the running game.
+  const applyControls = useCallback((bindings: Record<string, string[]>) => {
+    sendControlsRebind(iframeRef.current, bindings);
+  }, []);
+
+  // Pull the manifest when the Controls tab opens (covers a game that declared
+  // its controls before this pane attached its message listener).
+  useEffect(() => {
+    if (view === 'controls') sendControlsRequest(iframeRef.current);
+  }, [view]);
 
   // Give the game keyboard focus the moment it loads. An iframe only receives
   // keydown while it (not the host page) holds focus, so without this the
@@ -129,7 +158,35 @@ export function PreviewPane({
           <span className="flex-1 text-center text-xs font-mono text-[#3f3f46]">no preview</span>
         )}
         <div className="flex items-center gap-2">
-          {hasTweaks && previewUrl && (
+          {previewUrl && (
+            <div className="flex rounded-md border border-[#222222] overflow-hidden text-[10px] font-mono">
+              <button
+                type="button"
+                onClick={() => setView('preview')}
+                aria-pressed={view === 'preview'}
+                className={`px-2.5 py-1 transition-colors ${
+                  view === 'preview'
+                    ? 'bg-[#6366f1]/20 text-[#818cf8]'
+                    : 'bg-[#1a1a1a] text-[#52525b] hover:text-[#a1a1aa]'
+                }`}
+              >
+                preview
+              </button>
+              <button
+                type="button"
+                onClick={() => setView('controls')}
+                aria-pressed={view === 'controls'}
+                className={`px-2.5 py-1 border-l border-[#222222] transition-colors ${
+                  view === 'controls'
+                    ? 'bg-[#6366f1]/20 text-[#818cf8]'
+                    : 'bg-[#1a1a1a] text-[#52525b] hover:text-[#a1a1aa]'
+                }`}
+              >
+                controls
+              </button>
+            </div>
+          )}
+          {hasTweaks && previewUrl && view === 'preview' && (
             <button
               type="button"
               onClick={() => setShowTweaks((v) => !v)}
@@ -182,6 +239,17 @@ export function PreviewPane({
               sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-downloads"
               className="absolute inset-0 w-full h-full border-0"
             />
+          )}
+
+          {/* Controls tab — overlays the (still-running) game so rebinds apply live */}
+          {view === 'controls' && previewUrl && !hasError && (
+            <div className="absolute inset-0 z-10 bg-[#0a0a0a]">
+              <ControlsPanel
+                manifest={controlsManifest}
+                onApply={applyControls}
+                storageKey={`pf:controls:${projectId ?? previewUrl}`}
+              />
+            </div>
           )}
 
           {/* Building placeholder */}

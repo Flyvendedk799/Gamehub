@@ -493,6 +493,7 @@ export default function BuilderPage() {
             hasError={hasError}
             errorMessage={errorMessage}
             tweakSchema={currentTweakSchema}
+            projectId={projectId}
           />
         </div>
 
