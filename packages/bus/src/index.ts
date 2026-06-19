@@ -19,12 +19,22 @@ import Redis from 'ioredis';
 export type BusHandler = (message: unknown) => void;
 export type Unsubscribe = () => void;
 
+export interface SubscribeOptions {
+  /**
+   * When false, skip the historical replay and deliver only messages published
+   * AFTER this subscription. Used by the SSE relay, which now backfills a run's
+   * history from the durable `run_events` table and only needs the bus for the
+   * live tail — replaying the bus history too would double every event. Default
+   * true (replay-on-subscribe, the original behaviour). */
+  replay?: boolean;
+}
+
 export interface EventBus {
   publish(channel: string, message: unknown): Promise<void>;
-  /** Subscribe with replay: the handler first receives all messages published
-   *  to the channel so far (in order), then every subsequent message until
-   *  unsubscribed. */
-  subscribe(channel: string, handler: BusHandler): Promise<Unsubscribe>;
+  /** Subscribe with replay (default): the handler first receives all messages
+   *  published to the channel so far (in order), then every subsequent message
+   *  until unsubscribed. Pass `{ replay: false }` for live-only delivery. */
+  subscribe(channel: string, handler: BusHandler, opts?: SubscribeOptions): Promise<Unsubscribe>;
   /**
    * Release any underlying transport resources (Redis connections). Called on
    * graceful API/worker shutdown so the process can exit cleanly instead of
@@ -56,10 +66,16 @@ export class InMemoryEventBus implements EventBus {
     for (const handler of c.handlers) handler(message);
   }
 
-  async subscribe(channel: string, handler: BusHandler): Promise<Unsubscribe> {
+  async subscribe(
+    channel: string,
+    handler: BusHandler,
+    opts?: SubscribeOptions,
+  ): Promise<Unsubscribe> {
     const c = this.channel(channel);
-    // Replay first, then go live.
-    for (const message of c.history) handler(message);
+    // Replay first (unless live-only requested), then go live.
+    if (opts?.replay !== false) {
+      for (const message of c.history) handler(message);
+    }
     c.handlers.add(handler);
     return () => {
       c.handlers.delete(handler);
@@ -158,31 +174,40 @@ export class RedisEventBus implements EventBus {
     await this.getPublisher().xadd(channel, '*', 'data', JSON.stringify(message));
   }
 
-  async subscribe(channel: string, handler: BusHandler): Promise<Unsubscribe> {
+  async subscribe(
+    channel: string,
+    handler: BusHandler,
+    opts?: SubscribeOptions,
+  ): Promise<Unsubscribe> {
     // A dedicated client per subscription: the blocking XREAD below must never
     // share the publisher (it would block every publish for the BLOCK window).
     const reader = this.makeClient();
     this.readers.add(reader);
-    const replayer = this.makeClient();
 
     type XEntry = [id: string, fields: string[]];
     type XResult = Array<[stream: string, entries: XEntry[]]>;
 
-    // 1. Replay all history synchronously via XRANGE.
-    const history = (await replayer.xrange(channel, '-', '+')) as XEntry[];
-    replayer.disconnect();
-
     let lastId = '0-0';
-    for (const [id, fields] of history) {
-      const dataIdx = fields.indexOf('data');
-      if (dataIdx !== -1) {
-        const raw = fields[dataIdx + 1];
-        if (raw !== undefined) {
-          const parsed = safeParseStreamData(raw);
-          if (parsed.ok) handler(parsed.value);
+    if (opts?.replay === false) {
+      // Live-only: start from the stream's current end ('$' means "only entries
+      // added after this XREAD"), skipping the XRANGE replay entirely.
+      lastId = '$';
+    } else {
+      // 1. Replay all history synchronously via XRANGE.
+      const replayer = this.makeClient();
+      const history = (await replayer.xrange(channel, '-', '+')) as XEntry[];
+      replayer.disconnect();
+      for (const [id, fields] of history) {
+        const dataIdx = fields.indexOf('data');
+        if (dataIdx !== -1) {
+          const raw = fields[dataIdx + 1];
+          if (raw !== undefined) {
+            const parsed = safeParseStreamData(raw);
+            if (parsed.ok) handler(parsed.value);
+          }
         }
+        lastId = id;
       }
-      lastId = id;
     }
 
     // 2. Poll for new entries via blocking XREAD.

@@ -224,6 +224,9 @@ export interface GenerationResult {
    *  `no_verdict`). The deterministic verdict — never an LLM judgement —
    *  drives this. */
   shipReason: ShipReason;
+  /** Run-total token usage, summed from every `turn_end`. Persisted to the
+   *  `runs` row for cost attribution. Zero when the provider streams no usage. */
+  usage: { inputTokens: number; outputTokens: number; totalTokens: number };
 }
 
 /**
@@ -293,23 +296,28 @@ export async function runGeneration(
   // is per-turn, not cumulative). So we accumulate across turns and compare the
   // RUN total to the ceiling; comparing a single turn against the whole-run
   // budget let a many-turn run spend a large multiple of the ceiling unchecked. (H1)
-  let usedTotalTokens = 0;
-  const wrappedOnEvent: ((event: AgentEvent) => void) | undefined =
-    ports.onEvent === undefined && tokenAbortController === undefined
-      ? undefined
-      : (event: AgentEvent) => {
-          if (tokenAbortController && !aborted && event.type === 'turn_end') {
-            const usage = (event.message as { usage?: { input?: number; output?: number } }).usage;
-            if (usage) {
-              usedTotalTokens += (usage.input ?? 0) + (usage.output ?? 0);
-              if (usedTotalTokens > ports.maxTokens!) {
-                aborted = true;
-                tokenAbortController.abort();
-              }
-            }
-          }
-          ports.onEvent?.(event);
-        };
+  // Run-total token usage, metered from every `turn_end` (each carries that
+  // turn's input/output). We accumulate UNCONDITIONALLY (not only when a token
+  // ceiling is set) so the completed run row records real token counts for cost
+  // attribution + the build-health dashboard — previously runs always persisted
+  // 0/0 because metering was gated behind maxTokens.
+  let usedInputTokens = 0;
+  let usedOutputTokens = 0;
+  const meterUsage = (event: AgentEvent): void => {
+    if (event.type !== 'turn_end') return;
+    const usage = (event.message as { usage?: { input?: number; output?: number } }).usage;
+    if (!usage) return;
+    usedInputTokens += usage.input ?? 0;
+    usedOutputTokens += usage.output ?? 0;
+    if (tokenAbortController && !aborted && usedInputTokens + usedOutputTokens > ports.maxTokens!) {
+      aborted = true;
+      tokenAbortController.abort();
+    }
+  };
+  const wrappedOnEvent: (event: AgentEvent) => void = (event: AgentEvent) => {
+    meterUsage(event);
+    ports.onEvent?.(event);
+  };
 
   const generateImageAsset = makeAssetGenerator({
     apiKey: req.apiKey,
@@ -392,7 +400,7 @@ export async function runGeneration(
   const deps: GenerateViaAgentDeps = {
     fs: tree,
     generateImageAsset,
-    ...(wrappedOnEvent !== undefined ? { onEvent: wrappedOnEvent } : {}),
+    onEvent: wrappedOnEvent,
     ...(runtimeVerify !== undefined ? { runtimeVerify } : {}),
     gameMode: {
       setEngine: (engine) => {
@@ -567,6 +575,11 @@ export async function runGeneration(
     fsState,
     repairRounds,
     shipReason,
+    usage: {
+      inputTokens: usedInputTokens,
+      outputTokens: usedOutputTokens,
+      totalTokens: usedInputTokens + usedOutputTokens,
+    },
     ...(lastRuntimeVerify !== undefined ? { runtimeVerify: lastRuntimeVerify } : {}),
   };
 }

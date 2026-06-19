@@ -6,6 +6,7 @@ import {
   normalizeAgentFrame,
   shouldOfferFix,
   toolActivityLabel,
+  toolResultLabel,
   writePathFromTool,
   writtenPaths,
 } from '../event-normalize';
@@ -180,9 +181,12 @@ describe('normalizeAgentFrame — run_paused (2.5)', () => {
 
 describe('toolActivityLabel — human-readable rows (2.1)', () => {
   it('keys labels on toolName', () => {
-    expect(toolActivityLabel('validate_game_scene', {})).toBe('validating scene');
-    expect(toolActivityLabel('playtest_game', {})).toBe('playtesting');
+    expect(toolActivityLabel('validate_game_scene', {})).toBe('checking the scene for errors');
+    expect(toolActivityLabel('playtest_game', {})).toBe('playtesting the game in a browser');
     expect(toolActivityLabel('choose_engine', { engine: 'three' })).toBe('choosing engine — three');
+    expect(toolActivityLabel('generate_image_asset', { purpose: 'hero sprite' })).toBe(
+      'generating art — hero sprite',
+    );
     expect(
       toolActivityLabel('str_replace_based_edit_tool', { command: 'create', path: 'a.js' }),
     ).toBe('writing a.js');
@@ -190,6 +194,37 @@ describe('toolActivityLabel — human-readable rows (2.1)', () => {
 
   it('falls back to a readable form of an unknown tool name', () => {
     expect(toolActivityLabel('some_new_tool', {})).toBe('some new tool');
+  });
+});
+
+describe('toolResultLabel — distinct outcome rows', () => {
+  it('gives a finished tool its own past-tense outcome, keyed on success', () => {
+    expect(toolResultLabel('playtest_game', {}, true)).toBe('playtest passed');
+    expect(toolResultLabel('playtest_game', {}, false)).toBe('playtest found problems');
+    expect(toolResultLabel('validate_game_scene', {}, true)).toBe('scene looks good');
+    expect(toolResultLabel('validate_game_scene', {}, false)).toBe('scene has issues to fix');
+    expect(toolResultLabel('generate_image_asset', {}, false)).toBe(
+      'art unavailable — using a placeholder',
+    );
+    expect(
+      toolResultLabel('str_replace_based_edit_tool', { command: 'create', path: 'a.js' }, true),
+    ).toBe('wrote a.js');
+  });
+
+  it('falls back to "<tool> done" / "<tool> failed" for unknown tools', () => {
+    expect(toolResultLabel('some_new_tool', {}, true)).toBe('some new tool done');
+    expect(toolResultLabel('some_new_tool', {}, false)).toBe('some new tool failed');
+  });
+});
+
+describe('tool_execution_end uses the result label, not the start label', () => {
+  it('labels a finished playtest with its outcome', () => {
+    const [ev] = normalizeAgentFrame(
+      { type: 'tool_execution_end', toolName: 'playtest_game', isError: false },
+      ctx,
+    );
+    expect(ev?.type).toBe('tool_result');
+    if (ev?.type === 'tool_result') expect(ev.label).toBe('playtest passed');
   });
 });
 

@@ -148,6 +148,17 @@ export async function createHardenedContext(
 ): Promise<{ context: BrowserContext; egress: EgressLog }> {
   // permissions: [] denies geolocation/camera/microphone/clipboard/etc.
   const context = await browser.newContext({ viewport, permissions: [] });
+  // tsx/esbuild (keepNames, on by default) rewrites named functions to
+  // `__name(fn, "…")`. When a `page.evaluate` callback's source is serialized to
+  // run INSIDE the page, that helper reference travels with it but `__name` is
+  // undefined in the browser → "ReferenceError: __name is not defined", which
+  // breaks tickFrames / measureJuice / playtest whenever the worker runs under
+  // tsx (its default `start` script, and the API's in-process pool). Define a
+  // harmless identity shim on every document so the helper resolves. Passed as a
+  // STRING so esbuild does not transform (and re-inject `__name` into) it.
+  await context.addInitScript(
+    'globalThis.__name = globalThis.__name || function (f) { return f; };',
+  );
   const egress = await installEgressLockdown(context);
   return { context, egress };
 }

@@ -90,3 +90,38 @@ export const runs = pgTable(
     userCreatedIdx: index('runs_user_created_idx').on(t.userId, t.createdAt),
   }),
 );
+
+/**
+ * Durable build-feed event log. Every event the generation pipeline streams to
+ * the browser (tool calls, assistant narration, the declared spec, the terminal
+ * run_complete/error/paused) is appended here with a per-run `seq`, so the
+ * builder log SURVIVES a page refresh and an API restart.
+ *
+ * Before this table the feed lived only in the (in-memory / Redis-Streams) bus:
+ * on ServerHoster the API runs the bus in-memory and restarts often, so a
+ * refresh mid-build showed an empty feed even though the run continued. The SSE
+ * relay now backfills from here first, then tails the bus live.
+ *
+ * Text deltas are coalesced per assistant turn before insert (one row per turn,
+ * not one per token) so the log stays compact; the live stream still pushes raw
+ * deltas for real-time typing. Rows are scoped to a project so they cascade away
+ * with the project, and a run's history is removed when the run is.
+ */
+export const runEvents = pgTable(
+  'run_events',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => runs.id, { onDelete: 'cascade' }),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    seq: integer('seq').notNull(),
+    event: jsonb('event').$type<unknown>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    runSeqKey: uniqueIndex('run_events_run_seq_key').on(t.runId, t.seq),
+  }),
+);

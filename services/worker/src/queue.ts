@@ -21,9 +21,10 @@ import {
   type TodoSnapshot,
   buildContinuationPrompt,
 } from '@playforge/agent-core';
-import { type EventBus, runChannel } from '@playforge/bus';
+import type { EventBus } from '@playforge/bus';
 import type { ModelRef } from '@playforge/shared';
 import type { SnapshotStore } from '@playforge/storage';
+import { type PersistRunEventFn, RunEventRecorder } from './run-event-recorder';
 import {
   type BrowserJobsPort,
   type GenerateFn,
@@ -74,6 +75,13 @@ export interface QueuePorts {
    * runGeneration. Omitted in offline tests / no-DB dev.
    */
   recordRunQuality?: (runId: string, metrics: RunQualityMetrics) => void | Promise<void>;
+  /**
+   * Durable build-feed sink. When supplied, every streamed event is also written
+   * to `run_events` (text deltas coalesced per turn) so the SSE relay can replay
+   * a run's history after a refresh / API restart. Omitted in offline tests /
+   * no-DB dev — the run then streams live-only as before.
+   */
+  persistEvent?: PersistRunEventFn;
 }
 
 export interface EnqueueResult extends GenerationResult {
@@ -82,7 +90,13 @@ export interface EnqueueResult extends GenerationResult {
 }
 
 export async function enqueueRun(input: EnqueueInput, ports: QueuePorts): Promise<EnqueueResult> {
-  const channel = runChannel(input.runId);
+  // Streams every event live AND durably persists it (text coalesced per turn).
+  const recorder = new RunEventRecorder(
+    input.runId,
+    input.projectId,
+    ports.bus,
+    ports.persistEvent,
+  );
 
   // Seed the working tree from the parent snapshot for iteration.
   let initialFiles: Map<string, string> | undefined;
@@ -165,14 +179,9 @@ export async function enqueueRun(input: EnqueueInput, ports: QueuePorts): Promis
               };
             }
           }
-          // Fire-and-forget on the agent's hot event path; a lost-Redis publish
-          // must not become an unhandled rejection that kills the job. (C3)
-          void ports.bus.publish(channel, event).catch((err: unknown) => {
-            console.error(
-              `[worker] event publish to ${channel} failed:`,
-              err instanceof Error ? err.message : err,
-            );
-          });
+          // Stream live + durably persist. Fire-and-forget on the agent's hot
+          // path; a lost publish/persist logs but never kills the job. (C3)
+          recorder.onAgentEvent(event);
         },
       },
     );
@@ -185,14 +194,14 @@ export async function enqueueRun(input: EnqueueInput, ports: QueuePorts): Promis
         fsState: result.fsState,
         originalUserPrompt: input.continuation?.originalUserPrompt ?? input.prompt,
       };
-      await ports.bus.publish(channel, { type: 'run_paused' });
+      await recorder.control({ type: 'run_paused' });
       return { ...result, pausedContinuation };
     }
 
-    await ports.bus.publish(channel, { type: 'run_complete' });
+    await recorder.control({ type: 'run_complete' });
     return result;
   } catch (err) {
-    await ports.bus.publish(channel, { type: 'run_error', error: String(err) });
+    await recorder.control({ type: 'run_error', error: String(err) });
     throw err;
   }
 }
