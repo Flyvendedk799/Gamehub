@@ -79,6 +79,35 @@ describe('RunEventRecorder', () => {
     expect((persisted[1]?.event as { type: string; error: string }).error).toBe('boom');
   });
 
+  it('streams streaming/loop internals live but never persists them', async () => {
+    const published: unknown[] = [];
+    const persisted: PersistRunEventInput[] = [];
+    const rec = new RunEventRecorder('r4', 'p4', fakeBus(published), (i) => {
+      persisted.push(i);
+    });
+
+    // A non-text message_update SNAPSHOT (openai-completions shape) + turn markers.
+    const snapshot = {
+      type: 'message_update',
+      message: { role: 'assistant', content: [] },
+    } as unknown as AgentEvent;
+    rec.onAgentEvent({ type: 'turn_start' } as AgentEvent);
+    rec.onAgentEvent(snapshot);
+    rec.onAgentEvent(snapshot);
+    rec.onAgentEvent({ type: 'message_start' } as AgentEvent);
+    rec.onAgentEvent(tool('playtest_game'));
+    rec.onAgentEvent({ type: 'turn_end' } as AgentEvent);
+    await flush();
+
+    // All 6 frames stream live…
+    expect(published).toHaveLength(6);
+    // …but only the tool call is persisted (seq 0, no noise rows).
+    expect(persisted.map((p) => (p.event as { type: string }).type)).toEqual([
+      'tool_execution_start',
+    ]);
+    expect(persisted[0]?.seq).toBe(0);
+  });
+
   it('still streams live when no persist sink is wired (no-DB dev)', async () => {
     const published: unknown[] = [];
     const rec = new RunEventRecorder('r3', 'p3', fakeBus(published));

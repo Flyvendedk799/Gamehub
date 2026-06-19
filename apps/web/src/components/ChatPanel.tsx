@@ -1,7 +1,7 @@
 'use client';
 
 import { buildRenderItems } from '@/lib/chat-render';
-import { shouldOfferFix, writtenPaths } from '@/lib/event-normalize';
+import { EDIT_TOOL, shouldOfferFix, writtenPaths } from '@/lib/event-normalize';
 import type { SseEvent } from '@/lib/types';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -197,11 +197,12 @@ function EventRow({
     case 'agent_start':
       return <StatusChip label="Agent started" color="indigo" />;
 
+    // Per-turn markers are agent-loop internals (and the agent emits them with
+    // no turnIndex → "Turn NaN"). They wrap every single tool call, drowning the
+    // real build steps in noise — suppress them entirely.
     case 'turn_start':
-      return <StatusChip label={`Turn ${event.turnIndex + 1} started`} color="indigo" dim />;
-
     case 'turn_end':
-      return <StatusChip label={`Turn ${event.turnIndex + 1} complete`} color="indigo" dim />;
+      return null;
 
     case 'agent_end':
       return <StatusChip label="Agent finished" color="green" />;
@@ -294,10 +295,11 @@ function EventRow({
       return <ToolChip label={event.label ?? event.toolName} status={event.status} />;
 
     case 'tool_result':
-      // Results for write tools are folded into the per-iteration "Changed N
-      // files" summary on run_complete, so a successful write doesn't also emit
-      // a redundant result chip. Failures still surface so problems are visible.
-      if (event.success && event.path) return null;
+      // Successful edit-tool calls (writes + reads) are folded into the start
+      // chip ("writing index.html") + the per-iteration "Changed N files"
+      // summary, so they don't also emit a redundant — and, since the end frame
+      // carries no args, mislabeled — result chip. Failures still surface.
+      if (event.success && (event.path || event.toolName === EDIT_TOOL)) return null;
       return (
         <ToolChip
           label={event.label ?? event.toolName}

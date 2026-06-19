@@ -46,6 +46,23 @@ function coalescedTextFrame(text: string): unknown {
   return { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: text } };
 }
 
+/**
+ * Streaming / agent-loop internals that carry no renderable build-feed signal:
+ * per-token assistant `message_update` SNAPSHOTS (the openai-completions shape is
+ * a full growing message, not a renderable `text_delta` — those are handled by
+ * the coalescer above), message envelope frames, and turn markers. They are
+ * still PUBLISHED live (the browser filters them) but must NOT be persisted —
+ * one real run emitted ~9k message_update snapshots, which would bloat
+ * `run_events` and make a refresh replay enormous for zero visible gain.
+ */
+const NON_PERSISTED_TYPES: ReadonlySet<string> = new Set([
+  'turn_start',
+  'turn_end',
+  'message_start',
+  'message_end',
+  'message_update',
+]);
+
 export class RunEventRecorder {
   private seq = 0;
   private textBuffer = '';
@@ -78,6 +95,9 @@ export class RunEventRecorder {
       this.textBuffer += text;
       return;
     }
+    // Drop streaming/loop internals from the durable log (still streamed live).
+    // Any `message_update` reaching here is a non-text snapshot — noise.
+    if (NON_PERSISTED_TYPES.has((event as { type?: string }).type ?? '')) return;
     this.flushTextPersist();
     this.persistEvent(event);
   }
