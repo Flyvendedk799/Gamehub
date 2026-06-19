@@ -9,9 +9,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { API_WS_BASE } from './config';
-
-const BASE_WS = API_WS_BASE;
+import { authenticatedProjectWebSocketUrl } from './project-ws-url';
 
 interface PresenceMessage {
   type: string;
@@ -43,12 +41,13 @@ export function usePresence(
   useEffect(() => {
     if (!projectId || typeof window === 'undefined') return;
 
+    const roomProjectId = projectId;
     let destroyed = false;
     let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 
     function connect() {
       if (destroyed) return;
-      const ws = new WebSocket(`${BASE_WS}/v1/projects/${projectId}/presence`);
+      const ws = new WebSocket(authenticatedProjectWebSocketUrl(roomProjectId, 'presence'));
       wsRef.current = ws;
 
       ws.onopen = () => {

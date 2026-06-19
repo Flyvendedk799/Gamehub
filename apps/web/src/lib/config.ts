@@ -5,7 +5,9 @@
  * default, which previously drifted across ~6 files.
  */
 
-export const API_BASE: string = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3191';
+export const DEFAULT_API_BASE = 'http://localhost:3191';
+
+export const API_BASE: string = process.env['NEXT_PUBLIC_API_URL'] ?? DEFAULT_API_BASE;
 
 /** Same origin as API_BASE but with the ws/wss scheme, for WebSocket routes. */
 export const API_WS_BASE: string = API_BASE.replace(/^http/, 'ws');
@@ -15,6 +17,6 @@ export const API_ORIGIN: string = (() => {
   try {
     return new URL(API_BASE).origin;
   } catch {
-    return 'http://localhost:3191';
+    return DEFAULT_API_BASE;
   }
 })();

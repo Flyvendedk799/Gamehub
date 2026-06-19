@@ -8,6 +8,7 @@ import type {
   GenerateGameResponse,
   GetProjectResponse,
   ListProjectsResponse,
+  Project,
   SseEvent,
 } from './types';
 
@@ -98,14 +99,21 @@ export function describeApiError(err: unknown): string {
 
 // ─── Projects ────────────────────────────────────────────────────────────────
 
+function normalizeProjectResponse(
+  response: Project | CreateProjectResponse,
+): CreateProjectResponse {
+  return 'project' in response ? response : { project: response };
+}
+
 export async function createProject(
   name: string,
   engine: Engine = 'phaser',
 ): Promise<CreateProjectResponse> {
-  return apiFetch<CreateProjectResponse>('/v1/projects', {
+  const response = await apiFetch<Project | CreateProjectResponse>('/v1/projects', {
     method: 'POST',
     body: JSON.stringify({ name, engine }),
   });
+  return normalizeProjectResponse(response);
 }
 
 export async function listProjects(): Promise<ListProjectsResponse> {
@@ -113,7 +121,8 @@ export async function listProjects(): Promise<ListProjectsResponse> {
 }
 
 export async function getProject(id: string): Promise<GetProjectResponse> {
-  return apiFetch<GetProjectResponse>(`/v1/projects/${id}`);
+  const response = await apiFetch<Project | GetProjectResponse>(`/v1/projects/${id}`);
+  return normalizeProjectResponse(response);
 }
 
 // ─── Chat history ────────────────────────────────────────────────────────────

@@ -16,10 +16,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import * as Y from 'yjs';
-import { API_WS_BASE } from './config';
+import { authenticatedProjectWebSocketUrl } from './project-ws-url';
 import { encodeVarUint, readVarUint } from './varint';
-
-const BASE_WS = API_WS_BASE;
 
 // y-websocket message type constants
 const MSG_SYNC = 0;
@@ -132,13 +130,14 @@ export function useCollab(projectId: string | null | undefined): CollabState {
   useEffect(() => {
     if (!projectId || typeof window === 'undefined') return;
 
+    const roomProjectId = projectId;
     let ws: WebSocket;
     let destroyed = false;
     let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 
     function connect() {
       if (destroyed) return;
-      ws = new WebSocket(`${BASE_WS}/v1/projects/${projectId}/collab`);
+      ws = new WebSocket(authenticatedProjectWebSocketUrl(roomProjectId, 'collab'));
       wsRef.current = ws;
       ws.binaryType = 'arraybuffer';
 

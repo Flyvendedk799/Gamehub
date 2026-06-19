@@ -170,6 +170,11 @@ export interface ServerDeps {
    * Example: "https://playforge.app https://staging.playforge.app"
    */
   allowedFrameOrigins?: string;
+  /**
+   * Optional: space-separated list of browser app origins allowed to call the API.
+   * When unset, localhost/127.0.0.1 dev origins are allowed.
+   */
+  allowedCorsOrigins?: string;
   /** Optional: BullMQ Queue instance used to report queue depth for autoscaling. */
   generateQueue?: import('bullmq').Queue;
   /** Optional: max tokens per run — hard ceiling to prevent runaway generation costs. */
@@ -223,6 +228,14 @@ const presenceSockets = new Map<string, Set<(msg: string) => void>>();
 /** Per-project CRDT collab rooms: projectId → Set of raw WebSocket objects for binary relay. */
 // biome-ignore lint/suspicious/noExplicitAny: raw ws WebSocket objects relayed as opaque binary; no shared type at this boundary.
 const collabRooms = new Map<string, Set<any>>();
+
+type ProjectWebSocket = {
+  close(code?: number, reason?: string): void;
+  send(data: string | Buffer): void;
+  on(event: 'message', listener: (data: Buffer | ArrayBuffer) => void): void;
+  on(event: 'close', listener: () => void): void;
+  readyState?: number;
+};
 
 const FREE_TIER_CREDITS = 100;
 const CREDITS_PER_RUN = 10;
@@ -319,6 +332,37 @@ export function attachSseHeartbeat(
   };
 }
 
+function parseOriginAllowlist(raw: string | undefined): Set<string> {
+  return new Set(
+    (raw ?? '')
+      .split(/\s+/)
+      .map((origin) => origin.trim())
+      .filter((origin) => origin.length > 0),
+  );
+}
+
+function isLocalDevOrigin(origin: string): boolean {
+  try {
+    const url = new URL(origin);
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '::1')
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isCorsOriginAllowed(
+  origin: string,
+  allowlist: Set<string>,
+  hasExplicitAllowlist: boolean,
+): boolean {
+  if (allowlist.has(origin)) return true;
+  if (!hasExplicitAllowlist && isLocalDevOrigin(origin)) return true;
+  return false;
+}
+
 export function buildServer(deps: ServerDeps): FastifyInstance {
   // bodyLimit caps total request size (#31) — a 1 MiB ceiling is ample for prompts,
   // chat, and auth payloads while refusing memory-exhaustion bodies (413).
@@ -327,6 +371,27 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // (auth throttle, play-count dedup) sees one shared proxy IP and either
   // throttles all users together or can't distinguish them. (auth H2)
   const app = Fastify({ logger: false, bodyLimit: 1_048_576, trustProxy: true });
+  const corsAllowlist = parseOriginAllowlist(deps.allowedCorsOrigins);
+  const hasExplicitCorsAllowlist =
+    deps.allowedCorsOrigins !== undefined && deps.allowedCorsOrigins.trim().length > 0;
+
+  app.addHook('onRequest', async (req, reply) => {
+    const rawOrigin = req.headers.origin;
+    const origin = Array.isArray(rawOrigin) ? rawOrigin[0] : rawOrigin;
+    if (origin && isCorsOriginAllowed(origin, corsAllowlist, hasExplicitCorsAllowlist)) {
+      reply.header('Access-Control-Allow-Origin', origin);
+      reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+      reply.header(
+        'Access-Control-Allow-Headers',
+        'Authorization,Content-Type,X-Admin-Token,X-User-Id',
+      );
+      reply.header('Access-Control-Max-Age', '600');
+      reply.header('Vary', 'Origin');
+      if (req.method === 'OPTIONS') {
+        return reply.code(204).send();
+      }
+    }
+  });
 
   // Project name = published title, rendered into <head>/OG tags + every feed
   // card. Cap it to bound stored content and OG payloads. (content MEDIUM)
@@ -499,7 +564,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
    * socket (1008 policy violation) and returns null on any failure.
    */
   async function authorizeProjectSocket(
-    socket: { close(code?: number, reason?: string): void },
+    socket: Pick<ProjectWebSocket, 'close'>,
     req: FastifyRequest,
     projectId: string,
   ): Promise<AuthedUser | null> {
@@ -515,6 +580,54 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return null;
     }
     return user;
+  }
+
+  function isProjectWebSocket(value: unknown): value is ProjectWebSocket {
+    return (
+      value !== null &&
+      typeof value === 'object' &&
+      typeof (value as { close?: unknown }).close === 'function' &&
+      typeof (value as { send?: unknown }).send === 'function' &&
+      typeof (value as { on?: unknown }).on === 'function'
+    );
+  }
+
+  function isFastifyRequest(value: unknown): value is FastifyRequest {
+    return (
+      value !== null &&
+      typeof value === 'object' &&
+      typeof (value as { url?: unknown }).url === 'string' &&
+      'headers' in value
+    );
+  }
+
+  function websocketArgs(
+    first: unknown,
+    second: unknown,
+  ): { socket: ProjectWebSocket; req: FastifyRequest } | null {
+    if (isProjectWebSocket(first) && isFastifyRequest(second)) {
+      return { socket: first, req: second };
+    }
+    if (isProjectWebSocket(second) && isFastifyRequest(first)) {
+      return { socket: second, req: first };
+    }
+    return null;
+  }
+
+  function projectIdFromSocketRequest(
+    req: FastifyRequest,
+    channel: 'presence' | 'collab',
+  ): string | null {
+    const idFromParams = (req.params as { id?: unknown } | undefined)?.id;
+    if (typeof idFromParams === 'string' && idFromParams.length > 0) return idFromParams;
+
+    try {
+      const pathname = new URL(req.url, 'http://localhost').pathname;
+      const match = pathname.match(new RegExp(`^/v1/projects/([^/]+)/${channel}$`));
+      return match?.[1] ? decodeURIComponent(match[1]) : null;
+    } catch {
+      return null;
+    }
   }
 
   /** Constant-time string compare (utf8). Length mismatch short-circuits — an
@@ -2487,77 +2600,93 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     return reply.send({ results });
   });
 
-  // ── WebSocket co-presence ─────────────────────────────────────────────────
+  app.after(() => {
+    // ── WebSocket co-presence ───────────────────────────────────────────────
 
-  app.get('/v1/projects/:id/presence', { websocket: true }, async (socket, req) => {
-    const { id } = req.params as { id: string };
-    // Authenticate + ownership-check before joining the room. Without this, anyone
-    // who guesses a projectId could enumerate presence on a victim's project.
-    if (!(await authorizeProjectSocket(socket, req, id))) return;
-    let sockets = presenceSockets.get(id);
-    if (!sockets) {
-      sockets = new Set();
-      presenceSockets.set(id, sockets);
-    }
-
-    const send = (msg: string) => {
-      try {
-        socket.send(msg);
-      } catch {
-        /* disconnected */
+    app.get('/v1/projects/:id/presence', { websocket: true }, async (first, second) => {
+      const args = websocketArgs(first, second);
+      if (!args) return;
+      const { socket, req } = args;
+      const id = projectIdFromSocketRequest(req, 'presence');
+      if (!id) {
+        socket.close(1008, 'invalid_project');
+        return;
       }
-    };
-    sockets.add(send);
+      // Authenticate + ownership-check before joining the room. Without this, anyone
+      // who guesses a projectId could enumerate presence on a victim's project.
+      if (!(await authorizeProjectSocket(socket, req, id))) return;
+      let sockets = presenceSockets.get(id);
+      if (!sockets) {
+        sockets = new Set();
+        presenceSockets.set(id, sockets);
+      }
 
-    const broadcast = () => {
-      const count = presenceSockets.get(id)?.size ?? 0;
-      const msg = JSON.stringify({ type: 'presence', projectId: id, count });
-      for (const fn of presenceSockets.get(id) ?? []) fn(msg);
-    };
+      const send = (msg: string) => {
+        try {
+          socket.send(msg);
+        } catch {
+          /* disconnected */
+        }
+      };
+      sockets.add(send);
 
-    broadcast();
+      const broadcast = () => {
+        const count = presenceSockets.get(id)?.size ?? 0;
+        const msg = JSON.stringify({ type: 'presence', projectId: id, count });
+        for (const fn of presenceSockets.get(id) ?? []) fn(msg);
+      };
 
-    socket.on('close', () => {
-      presenceSockets.get(id)?.delete(send);
-      if (presenceSockets.get(id)?.size === 0) presenceSockets.delete(id);
       broadcast();
+
+      socket.on('close', () => {
+        presenceSockets.get(id)?.delete(send);
+        if (presenceSockets.get(id)?.size === 0) presenceSockets.delete(id);
+        broadcast();
+      });
     });
-  });
 
-  // ── CRDT collab relay — GET /v1/projects/:id/collab (WebSocket) ───────────
-  // Pure binary relay: every message from peer A is forwarded to all other peers
-  // in the same project room. Clients run yjs + WebsocketProvider pointed here.
-  // No server-side Y.Doc; late-joiners get state from existing peers via the
-  // standard y-websocket sync step1/step2 protocol, which clients handle natively.
-  app.get('/v1/projects/:id/collab', { websocket: true }, async (socket, req) => {
-    const { id } = req.params as { id: string };
-    // Authenticate + ownership-check before relaying. Without this, anyone who
-    // guesses a projectId could inject arbitrary Yjs updates into the live document.
-    if (!(await authorizeProjectSocket(socket, req, id))) return;
+    // ── CRDT collab relay — GET /v1/projects/:id/collab (WebSocket) ─────────
+    // Pure binary relay: every message from peer A is forwarded to all other peers
+    // in the same project room. Clients run yjs + WebsocketProvider pointed here.
+    // No server-side Y.Doc; late-joiners get state from existing peers via the
+    // standard y-websocket sync step1/step2 protocol, which clients handle natively.
+    app.get('/v1/projects/:id/collab', { websocket: true }, async (first, second) => {
+      const args = websocketArgs(first, second);
+      if (!args) return;
+      const { socket, req } = args;
+      const id = projectIdFromSocketRequest(req, 'collab');
+      if (!id) {
+        socket.close(1008, 'invalid_project');
+        return;
+      }
+      // Authenticate + ownership-check before relaying. Without this, anyone who
+      // guesses a projectId could inject arbitrary Yjs updates into the live document.
+      if (!(await authorizeProjectSocket(socket, req, id))) return;
 
-    let room = collabRooms.get(id);
-    if (!room) {
-      room = new Set();
-      collabRooms.set(id, room);
-    }
-    room.add(socket);
+      let room = collabRooms.get(id);
+      if (!room) {
+        room = new Set();
+        collabRooms.set(id, room);
+      }
+      room.add(socket);
 
-    socket.on('message', (data: Buffer | ArrayBuffer) => {
-      const buf: Buffer = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
-      for (const peer of collabRooms.get(id) ?? []) {
-        if (peer !== socket && (peer.readyState as number) === 1 /* OPEN */) {
-          try {
-            (peer as { send(d: Buffer): void }).send(buf);
-          } catch {
-            /* disconnected */
+      socket.on('message', (data: Buffer | ArrayBuffer) => {
+        const buf: Buffer = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
+        for (const peer of collabRooms.get(id) ?? []) {
+          if (peer !== socket && (peer.readyState as number) === 1 /* OPEN */) {
+            try {
+              (peer as { send(d: Buffer): void }).send(buf);
+            } catch {
+              /* disconnected */
+            }
           }
         }
-      }
-    });
+      });
 
-    socket.on('close', () => {
-      collabRooms.get(id)?.delete(socket);
-      if (collabRooms.get(id)?.size === 0) collabRooms.delete(id);
+      socket.on('close', () => {
+        collabRooms.get(id)?.delete(socket);
+        if (collabRooms.get(id)?.size === 0) collabRooms.delete(id);
+      });
     });
   });
 

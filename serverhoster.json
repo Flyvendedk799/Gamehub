@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "services": [
+    {
+      "name": "Gamehub API",
+      "command": "pnpm --filter @playforge/api start",
+      "workingDir": ".",
+      "port": 3191,
+      "env": {
+        "DATABASE_URL": "postgres://localhost:5432/playforge",
+        "CORS_ORIGINS": "http://localhost:3004 http://127.0.0.1:3004",
+        "APP_BASE_URL": "http://localhost:3004"
+      },
+      "requiredSecrets": ["PLATFORM_API_KEY"]
+    },
+    {
+      "name": "Gamehub Web",
+      "command": "pnpm --filter @playforge/web start",
+      "workingDir": ".",
+      "port": 3004,
+      "env": {
+        "NEXT_PUBLIC_API_URL": "http://localhost:3191"
+      }
+    }
+  ]
+}

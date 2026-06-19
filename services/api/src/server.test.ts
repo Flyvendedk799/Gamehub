@@ -26,6 +26,7 @@ function makeApp(overrides?: {
   hubRepo?: InMemoryHubRepo;
   adminToken?: string;
   accountRepo?: InMemoryAccountRepo;
+  allowedCorsOrigins?: string;
 }) {
   return buildServer({
     repo: overrides?.repo ?? new InMemoryProjectRepo(),
@@ -37,6 +38,9 @@ function makeApp(overrides?: {
     ...(overrides?.publishRepo !== undefined ? { publishRepo: overrides.publishRepo } : {}),
     ...(overrides?.hubRepo !== undefined ? { hubRepo: overrides.hubRepo } : {}),
     ...(overrides?.adminToken !== undefined ? { adminToken: overrides.adminToken } : {}),
+    ...(overrides?.allowedCorsOrigins !== undefined
+      ? { allowedCorsOrigins: overrides.allowedCorsOrigins }
+      : {}),
     ...(overrides?.accountRepo !== undefined
       ? {
           accountRepo: overrides.accountRepo,
@@ -55,6 +59,49 @@ describe('health', () => {
     const res = await makeApp().inject({ method: 'GET', url: '/health' });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ ok: true });
+  });
+});
+
+describe('cors', () => {
+  it('answers local dev preflight requests', async () => {
+    const res = await makeApp().inject({
+      method: 'OPTIONS',
+      url: '/v1/auth/register',
+      headers: {
+        origin: 'http://localhost:3004',
+        'access-control-request-method': 'POST',
+      },
+    });
+
+    expect(res.statusCode).toBe(204);
+    expect(res.headers['access-control-allow-origin']).toBe('http://localhost:3004');
+    expect(res.headers['access-control-allow-methods']).toContain('POST');
+    expect(res.headers['access-control-allow-headers']).toContain('Authorization');
+  });
+
+  it('uses explicit CORS origins when configured', async () => {
+    const app = makeApp({ allowedCorsOrigins: 'https://app.playforge.test' });
+    const allowed = await app.inject({
+      method: 'OPTIONS',
+      url: '/v1/auth/register',
+      headers: {
+        origin: 'https://app.playforge.test',
+        'access-control-request-method': 'POST',
+      },
+    });
+    const local = await app.inject({
+      method: 'OPTIONS',
+      url: '/v1/auth/register',
+      headers: {
+        origin: 'http://localhost:3004',
+        'access-control-request-method': 'POST',
+      },
+    });
+
+    expect(allowed.statusCode).toBe(204);
+    expect(allowed.headers['access-control-allow-origin']).toBe('https://app.playforge.test');
+    expect(local.statusCode).toBe(404);
+    expect(local.headers['access-control-allow-origin']).toBeUndefined();
   });
 });
 

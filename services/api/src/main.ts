@@ -18,7 +18,8 @@ import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
  *   REDIS_URL           Redis connection string (default: none → in-process mode)
  *   PLATFORM_MODEL_ID   e.g. o4-mini (default)
  *   PLATFORM_PROVIDER   e.g. openai (default)
- *   PORT                HTTP listen port (default 3100)
+ *   PORT                HTTP listen port (default 3191)
+ *   CORS_ORIGINS        Space-separated browser app origins allowed to call the API
  *   BLOB_DIR            local blob-store root (default: .playforge-blobs)
  *   API_KEY_ENCRYPTION_SECRET  Secret for BYOK key encryption (falls back to PLATFORM_API_KEY)
  */
@@ -41,6 +42,7 @@ import { type EnqueueFn, buildServer } from './server';
 
 /** Run cost in credits — must match server.ts and worker/main.ts. */
 const CREDITS_PER_RUN = 10;
+export const DEFAULT_API_PORT = 3191;
 
 function requireEnv(name: string): string {
   const val = process.env[name];
@@ -82,8 +84,9 @@ async function main() {
   const modelProvider = process.env['PLATFORM_PROVIDER'] ?? 'openai';
   const platformModel = { provider: modelProvider, modelId };
   const apiKeyEncryptionSecret = process.env['API_KEY_ENCRYPTION_SECRET'] ?? platformApiKey;
-  const port = parsePositiveIntEnv(process.env['PORT'], 3100);
+  const port = parsePositiveIntEnv(process.env['PORT'], DEFAULT_API_PORT);
   const redisUrl = process.env['REDIS_URL'];
+  const corsOrigins = process.env['CORS_ORIGINS'];
   const blobDir = process.env['BLOB_DIR'] ?? '.playforge-blobs';
   const adminToken = process.env['ADMIN_TOKEN'];
   const maxConcurrentRunsPerUser = parsePositiveIntEnv(process.env['MAX_CONCURRENT_RUNS'], 1);
@@ -277,6 +280,7 @@ async function main() {
     ...(maxRunTokens !== undefined ? { maxRunTokens } : {}),
     ...(queue !== undefined ? { generateQueue: queue } : {}),
     ...(appBaseUrl !== undefined ? { appBaseUrl } : {}),
+    ...(corsOrigins !== undefined ? { allowedCorsOrigins: corsOrigins } : {}),
     ...(creditProvider !== undefined ? { creditProvider } : {}),
     ...(email !== undefined ? { email } : {}),
   });
