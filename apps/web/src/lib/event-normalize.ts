@@ -45,7 +45,7 @@ export function isRawAgentType(type: string): type is RawAgentType {
 }
 
 /** The file-writing edit tool used by the agent. */
-const EDIT_TOOL = 'str_replace_based_edit_tool';
+export const EDIT_TOOL = 'str_replace_based_edit_tool';
 /** Edit-tool commands that produce/modify a file. */
 const WRITE_COMMANDS = new Set(['create', 'str_replace', 'insert', 'patch']);
 const SPEC_TOOLS = new Set(['declare_game_spec', 'amend_game_spec']);
@@ -137,7 +137,11 @@ export function toolResultLabel(
 
   switch (toolName) {
     case EDIT_TOOL:
-      return success ? 'read the files' : "couldn't read the files";
+      // The `tool_execution_end` frame carries no args, so we can't tell a write
+      // from a read here — successful edit results are folded into the start chip
+      // + the "Changed N files" summary (suppressed in the renderer), so only the
+      // failure label surfaces. Keep it neutral rather than guessing "read".
+      return success ? 'file updated' : 'file edit failed';
     case 'validate_game_scene':
       return success ? 'scene looks good' : 'scene has issues to fix';
     case 'playtest_game':
@@ -299,15 +303,19 @@ export function shouldOfferFix(event: SseEvent): boolean {
 
 /**
  * Collect the file paths written across a run's events (Phase 2.6). Reads the
- * normalized `tool_result` rows (each successful write carries its `path`) and
- * returns the unique paths in first-seen order, so the completion row can list
- * "Changed N files".
+ * normalized `tool_use` START rows — only WRITE commands carry a `path` (set via
+ * writePathFromTool), and unlike `tool_execution_end` the start frame actually
+ * has the args. Returns the unique paths in first-seen order so the completion
+ * row can list "Changed N files".
+ *
+ * (Previously this read `tool_result.path`, but the agent's tool_execution_end
+ * frames carry no args, so results never had a path and the summary was empty.)
  */
 export function writtenPaths(events: readonly SseEvent[]): string[] {
   const seen = new Set<string>();
   const order: string[] = [];
   for (const ev of events) {
-    if (ev.type === 'tool_result' && ev.success && ev.path) {
+    if (ev.type === 'tool_use' && ev.path) {
       if (!seen.has(ev.path)) {
         seen.add(ev.path);
         order.push(ev.path);

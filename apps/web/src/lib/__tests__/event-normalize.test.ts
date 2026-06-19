@@ -209,6 +209,9 @@ describe('toolResultLabel — distinct outcome rows', () => {
     expect(
       toolResultLabel('str_replace_based_edit_tool', { command: 'create', path: 'a.js' }, true),
     ).toBe('wrote a.js');
+    // The real tool_execution_end frame carries no args → neutral edit label
+    // (the success case is suppressed in the renderer; only failures surface).
+    expect(toolResultLabel('str_replace_based_edit_tool', {}, false)).toBe('file edit failed');
   });
 
   it('falls back to "<tool> done" / "<tool> failed" for unknown tools', () => {
@@ -241,40 +244,30 @@ describe('writePathFromTool', () => {
 });
 
 describe('writtenPaths — "Changed N files" source (2.6)', () => {
-  it('collects unique successful write paths in first-seen order', () => {
+  it('collects unique write paths from tool_use START events in first-seen order', () => {
+    const write = (path: string): SseEvent => ({
+      type: 'tool_use',
+      runId: 'r',
+      toolName: 'str_replace_based_edit_tool',
+      status: 'start',
+      label: `writing ${path}`,
+      path,
+      timestamp: 't',
+    });
     const events: SseEvent[] = [
+      write('a.js'),
+      write('b.js'),
+      write('a.js'), // duplicate — dropped
+      // a read (no path) and a result row must NOT contribute paths
       {
-        type: 'tool_result',
+        type: 'tool_use',
         runId: 'r',
-        toolName: 't',
-        success: true,
-        path: 'a.js',
+        toolName: 'str_replace_based_edit_tool',
+        status: 'start',
+        label: 'reading the project files',
         timestamp: 't',
       },
-      {
-        type: 'tool_result',
-        runId: 'r',
-        toolName: 't',
-        success: true,
-        path: 'b.js',
-        timestamp: 't',
-      },
-      {
-        type: 'tool_result',
-        runId: 'r',
-        toolName: 't',
-        success: true,
-        path: 'a.js',
-        timestamp: 't',
-      },
-      {
-        type: 'tool_result',
-        runId: 'r',
-        toolName: 't',
-        success: false,
-        path: 'c.js',
-        timestamp: 't',
-      },
+      { type: 'tool_result', runId: 'r', toolName: 't', success: true, timestamp: 't' },
     ];
     expect(writtenPaths(events)).toEqual(['a.js', 'b.js']);
   });
