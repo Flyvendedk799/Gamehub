@@ -15,8 +15,22 @@ import {
   type GenerateFn,
   type PlaytestVerdict,
   type RuntimeVerifyVerdict,
+  isVerifyInlineAssetNoise,
   runGeneration,
 } from './run-generation';
+
+describe('isVerifyInlineAssetNoise (WS-C — drop inlining harness artifacts)', () => {
+  it('matches the XHR/asset-load failures inlining produces, not real game errors', () => {
+    expect(
+      isVerifyInlineAssetNoise("Failed to execute 'open' on 'XMLHttpRequest': Invalid URL"),
+    ).toBe(true);
+    expect(isVerifyInlineAssetNoise('Failed to load resource: 404')).toBe(true);
+    expect(isVerifyInlineAssetNoise("TypeError: Cannot read property 'x' of undefined")).toBe(
+      false,
+    );
+    expect(isVerifyInlineAssetNoise('window.__game never appeared')).toBe(false);
+  });
+});
 
 describe('ENGINE_SCENE_VALIDATOR (#1.1 — the worker now runs a REAL engine lint, not the old no-op)', () => {
   it('flags a Phaser add.image with no matching load.image as ok:false (was always ok:true)', () => {
@@ -126,6 +140,29 @@ describe('runGeneration (offline E2E)', () => {
     expect(result.fileCount).toBe(2);
     const bytes = await store.readFile(result.snapshot.manifest, 'src/main.js');
     expect(new TextDecoder().decode(bytes)).toBe('scene()');
+  });
+
+  it('surfaces the agent ask_user question on the result when the run pauses (WS-D)', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const askingAgent: GenerateFn = async (_input, deps) => {
+      await deps.fs?.create('index.html', RED_SQUARE);
+      // The real tool calls deps.onAskUser; the agent loop then pauses via
+      // getContinuationHint → interrupted. We simulate that boundary here.
+      deps.onAskUser?.('Endless or a finish line?');
+      return { ...emptyOutput('asked a question'), interrupted: true };
+    };
+
+    const result = await runGeneration(
+      {
+        prompt: 'make a racing game',
+        model: { provider: 'openai', modelId: 'o4-mini' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: askingAgent },
+    );
+
+    expect(result.output.interrupted).toBe(true);
+    expect(result.pendingQuestion).toBe('Endless or a finish line?');
   });
 });
 

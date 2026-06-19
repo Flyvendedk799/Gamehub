@@ -122,9 +122,12 @@ export async function enqueueRun(input: EnqueueInput, ports: QueuePorts): Promis
   // Track the latest set_todos result so we can build a continuation.
   let latestTodos: TodoSnapshot | null = null;
 
-  // Use the continuation prompt when resuming a paused run.
+  // Use the continuation prompt when resuming a paused run, and APPEND the
+  // user's latest message — without this the resume drops it, which would lose
+  // the answer to an ask_user question (WS-D) and any new instruction on a
+  // generic checkpoint resume.
   const basePrompt = input.continuation
-    ? buildContinuationPrompt(input.continuation)
+    ? `${buildContinuationPrompt(input.continuation)}\n\n## The user's latest message\n${input.prompt}`
     : input.prompt;
 
   // When seeding from a remixed project, wrap the prompt with an untrusted-content
@@ -194,7 +197,12 @@ export async function enqueueRun(input: EnqueueInput, ports: QueuePorts): Promis
         fsState: result.fsState,
         originalUserPrompt: input.continuation?.originalUserPrompt ?? input.prompt,
       };
-      await recorder.control({ type: 'run_paused' });
+      // WS-D — carry the clarifying question (ask_user pause) on the live frame
+      // so the builder can show it + an answer box immediately, not just on reload.
+      await recorder.control({
+        type: 'run_paused',
+        ...(result.pendingQuestion ? { question: result.pendingQuestion } : {}),
+      });
       return { ...result, pausedContinuation };
     }
 

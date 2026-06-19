@@ -59,6 +59,26 @@ function str(value: unknown): string | undefined {
 }
 
 /**
+ * Extract the assistant's narration text from a completions-style message
+ * snapshot's `content[]`, joining the `{type:'text'}` parts and ignoring
+ * `{type:'toolCall'}` items. Returns undefined when there's no prose (a
+ * tool-only turn).
+ */
+export function assistantTextFromContent(content: unknown): string | undefined {
+  if (!Array.isArray(content)) return undefined;
+  const parts: string[] = [];
+  for (const item of content) {
+    const c = asRecord(item);
+    if (c['type'] === 'text') {
+      const t = str(c['text']);
+      if (t) parts.push(t);
+    }
+  }
+  const joined = parts.join('').trim();
+  return joined.length > 0 ? joined : undefined;
+}
+
+/**
  * Extract the file path written by a tool call, if any. Today only the
  * agent's str_replace_based_edit_tool writes files (via a `path` arg on a
  * create/str_replace/insert/patch command); future tools can be added here.
@@ -194,6 +214,23 @@ function gameSpecEventFromArgs(
   };
 }
 
+/** Build a plan checklist event from a `set_todos` call's args. */
+function planEventFromArgs(
+  runId: string,
+  args: Record<string, unknown>,
+  timestamp: string,
+): SseEvent | null {
+  const items = args['items'];
+  if (!Array.isArray(items)) return null;
+  const parsed = items
+    .map((it) => {
+      const i = asRecord(it);
+      return { text: str(i['text']) ?? '', checked: Boolean(i['checked']) };
+    })
+    .filter((i) => i.text.length > 0);
+  return parsed.length > 0 ? { type: 'plan', runId, items: parsed, timestamp } : null;
+}
+
 export interface NormalizeContext {
   /** Run id to stamp on synthesized events (wire frames omit it). */
   runId: string;
@@ -220,6 +257,12 @@ export function normalizeAgentFrame(
       const toolName = str(frame['toolName']);
       if (!toolName) return [];
       const args = asRecord(frame['args']);
+      // set_todos renders as a live plan checklist (the agent's "what I'm
+      // doing"), not a generic chip — surface the plan card instead.
+      if (toolName === 'set_todos') {
+        const plan = planEventFromArgs(runId, args, timestamp);
+        return plan ? [plan] : [];
+      }
       const path = writePathFromTool(toolName, args);
       const label = toolActivityLabel(toolName, args);
       const out: SseEvent[] = [
@@ -261,15 +304,23 @@ export function normalizeAgentFrame(
     }
 
     case 'message_update': {
+      // Anthropic-style streaming: an append-only text delta.
       const ame = asRecord(frame['assistantMessageEvent']);
-      if (ame['type'] !== 'text_delta') return [];
-      const delta = str(ame['delta']) ?? str(ame['text']);
-      if (!delta) return [];
-      return [{ type: 'text_delta', runId, delta, timestamp }];
+      if (ame['type'] === 'text_delta') {
+        const delta = str(ame['delta']) ?? str(ame['text']);
+        return delta ? [{ type: 'text_delta', runId, delta, timestamp }] : [];
+      }
+      // openai-completions style (o4-mini): a full message SNAPSHOT in
+      // message.content[]. Extract the assistant's narration text (ignoring
+      // toolCall items) and emit a replace-style assistant_text so the feed
+      // shows the AI's "thoughts / what it's doing", not just tool chips.
+      const text = assistantTextFromContent(asRecord(frame['message'])['content']);
+      return text ? [{ type: 'assistant_text', runId, text, timestamp }] : [];
     }
 
     case 'run_paused': {
-      return [{ type: 'run_paused', runId, timestamp }];
+      const question = str(frame['question']);
+      return [{ type: 'run_paused', runId, timestamp, ...(question ? { question } : {}) }];
     }
 
     default:

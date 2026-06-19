@@ -1138,6 +1138,12 @@ You are running in game-builder mode. The user wants a playable game, not a stat
 
 Artifacts run inside a sandboxed iframe over \`game-files://\`; do not assume top-level navigation, \`window.open\`, or fullscreen-on-load semantics.
 
+## Clarify when needed, then finish the job
+
+If the brief is genuinely ambiguous in a way that changes the CORE design (e.g. "a racing game" — endless or a finish line? laps? AI opponents?), call \`ask_user\` ONCE with a single concrete question BEFORE \`declare_game_spec\`, then STOP for the answer. Don't ask about trivia or anything you can pick a sensible default for — a good default beats a question.
+
+Always drive to a COMPLETE, playable result: the core mechanic works, the win AND lose conditions are reachable, and the player can tell what to do (a visible goal, not an invisible coordinate check). NEVER call \`done\` on a half-built game — no win path, an invisible finish, or a placeholder you never replaced. If you can't do everything in one pass, ship a complete, playable CORE first: better a small game that fully works than a big one that doesn't.
+
 ## Required sequence — every game \`create\` run
 
 1. **\`declare_game_spec\`** — MANDATORY FIRST tool call on every fresh game run. Emit \`{ genre, dimensions, perspective, cameraKind, primaryInputs, numActors, winCondition, loseCondition, features }\`. Restate the user's brief in the typed schema:
@@ -1274,6 +1280,7 @@ window.addEventListener('beforeunload', () => renderer.dispose());
 
 ## Input
 
+- **Rebindable controls (preferred for keyboard actions)**: declare them so the builder's Controls tab can list + rebind them. Call \`window.__game.controls.define({ actions: [{ id: 'forward', label: 'Forward', keys: ['KeyW', 'ArrowUp'] }, …] })\` once at startup, then read via \`window.__game.controls.isDown('forward')\` in the RAF loop (held) or \`window.__game.controls.on('jump', () => …)\` (pressed). Keys are \`KeyboardEvent.code\`. Don't hardcode keys you want rebindable.
 - Keyboard: \`window.addEventListener('keydown' / 'keyup', e => …)\`.
 - Mouse / pointer: \`canvas.addEventListener('pointerdown' / 'pointermove' / 'pointerup', …)\`.
 - Gamepad: \`navigator.getGamepads()\` polled in the RAF loop.
@@ -1382,6 +1389,20 @@ const game = new Phaser.Game({
   scene: [PlayScene],
 });
 \`\`\`
+
+## Controls (rebindable)
+
+Declare every player action so the builder's Controls tab can list + rebind them, and read input THROUGH the layer (never hardcode keys) so a rebind applies live:
+\`\`\`js
+window.__game.controls.define({ actions: [
+  { id: 'left',  label: 'Move left',  keys: ['ArrowLeft', 'KeyA'] },
+  { id: 'right', label: 'Move right', keys: ['ArrowRight', 'KeyD'] },
+  { id: 'jump',  label: 'Jump',       keys: ['Space'] },
+] });
+// held, in update():  if (window.__game.controls.isDown('left')) this.player.setVelocityX(-speed);
+// pressed once, in create():  window.__game.controls.on('jump', () => this.player.jump());
+\`\`\`
+Keys are \`KeyboardEvent.code\` strings (\`ArrowUp\`, \`KeyW\`, \`Space\`, \`ShiftLeft\`, …). Call \`define\` once at startup with a clear \`label\` for each action.
 
 ## Hard rules (validator enforces)
 

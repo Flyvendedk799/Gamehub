@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { keyLabel } from '../../components/ControlsPanel';
 import {
+  CONTROLS_MANIFEST_MESSAGE_TYPE,
   PREVIEW_IFRAME_ORIGIN,
   TWEAKS_UPDATE_MESSAGE_TYPE,
   isPreviewIframeOrigin,
+  parseControlsManifestMessage,
   parseInboundBridgeMessage,
 } from '../iframe-bridge';
 
@@ -10,6 +13,41 @@ import {
 function evt(origin: string, data: unknown): MessageEvent<unknown> {
   return { origin, data } as MessageEvent<unknown>;
 }
+
+describe('parseControlsManifestMessage (WS-A)', () => {
+  const manifest = {
+    type: CONTROLS_MANIFEST_MESSAGE_TYPE,
+    manifest: {
+      actions: [
+        { id: 'jump', label: 'Jump', keys: ['Space'], description: 'Leap' },
+        { id: 'bad', keys: 'nope' }, // malformed keys → []
+        { label: 'no id' }, // dropped (no id)
+      ],
+    },
+  };
+
+  it('parses a valid manifest from the trusted origin', () => {
+    const out = parseControlsManifestMessage(evt(PREVIEW_IFRAME_ORIGIN, manifest));
+    expect(out?.actions).toEqual([
+      { id: 'jump', label: 'Jump', keys: ['Space'], description: 'Leap' },
+      { id: 'bad', label: 'bad', keys: [] },
+    ]);
+  });
+
+  it('rejects a foreign origin and non-manifest messages', () => {
+    expect(parseControlsManifestMessage(evt('https://evil.example', manifest))).toBeNull();
+    expect(parseControlsManifestMessage(evt(PREVIEW_IFRAME_ORIGIN, { type: 'other' }))).toBeNull();
+  });
+});
+
+describe('keyLabel', () => {
+  it('renders KeyboardEvent.code values for humans', () => {
+    expect(keyLabel('KeyW')).toBe('W');
+    expect(keyLabel('ArrowUp')).toBe('↑');
+    expect(keyLabel('Space')).toBe('Space');
+    expect(keyLabel('Digit1')).toBe('1');
+  });
+});
 
 describe('iframe bridge constants', () => {
   it('keeps the tweak protocol literal in lockstep with the runtime bridge', () => {
