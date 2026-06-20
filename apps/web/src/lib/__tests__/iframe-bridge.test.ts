@@ -47,6 +47,31 @@ describe('keyLabel', () => {
     expect(keyLabel('Space')).toBe('Space');
     expect(keyLabel('Digit1')).toBe('1');
   });
+  it('renders mouse-button binds', () => {
+    expect(keyLabel('Mouse0')).toBe('Left Click');
+    expect(keyLabel('Mouse1')).toBe('Middle Click');
+    expect(keyLabel('Mouse2')).toBe('Right Click');
+  });
+});
+
+describe('parseControlsManifestMessage — mouse + pointer', () => {
+  it('passes mouse-button binds + a pointer (look) control through', () => {
+    const msg = {
+      type: CONTROLS_MANIFEST_MESSAGE_TYPE,
+      manifest: {
+        actions: [
+          { id: 'heavy', label: 'Heavy', keys: ['KeyJ', 'Mouse0'] },
+          { id: 'look', label: 'Camera look', keys: [], pointer: 'look' },
+          { id: 'bad', label: 'Bad', keys: [], pointer: 'nonsense' },
+        ],
+      },
+    };
+    const out = parseControlsManifestMessage(evt(PREVIEW_IFRAME_ORIGIN, msg));
+    expect(out?.actions[0]?.keys).toEqual(['KeyJ', 'Mouse0']);
+    expect(out?.actions[1]?.pointer).toBe('look');
+    // invalid pointer value is dropped, not trusted
+    expect(out?.actions[2]?.pointer).toBeUndefined();
+  });
 });
 
 describe('iframe bridge constants', () => {

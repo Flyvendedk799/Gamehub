@@ -59,13 +59,19 @@ export const CONTROLS_MANIFEST_MESSAGE_TYPE = 'playforge:controls:manifest' as c
 export const CONTROLS_REBIND_MESSAGE_TYPE = 'playforge:controls:rebind' as const;
 export const CONTROLS_REQUEST_MESSAGE_TYPE = 'playforge:controls:request' as const;
 
-/** One rebindable action a game declares (id + human label + bound key codes). */
+/** One rebindable action a game declares (id + human label + bound inputs). */
 export interface ControlAction {
   id: string;
   label: string;
   description?: string;
-  /** KeyboardEvent.code values bound to this action (e.g. ['ArrowUp','KeyW']). */
+  /** Bound inputs: KeyboardEvent.code values (e.g. 'ArrowUp','KeyW') AND/OR mouse
+   *  buttons 'Mouse0' (left), 'Mouse1' (middle), 'Mouse2' (right). An action can
+   *  mix them, e.g. ['KeyJ','Mouse0'] for a strike on J or left-click. */
   keys: string[];
+  /** Set for a mouse-AXIS control (camera look / aim / drag) rather than a
+   *  button bind — it's shown in the Controls tab as a pointer-driven control,
+   *  not a rebindable key. */
+  pointer?: 'look' | 'aim' | 'drag';
 }
 
 export interface ControlsManifest {
@@ -200,7 +206,9 @@ window.__game.controls = window.__game.controls || (function () {
   function on(id, fn) { (handlers[id] = handlers[id] || []).push(fn); return api; }
   function buildManifest() {
     return { actions: order.map(function (id) {
-      return { id: id, label: (meta[id] && meta[id].label) || id, description: (meta[id] && meta[id].description) || '', keys: (bindings[id] || []).slice() };
+      var a = { id: id, label: (meta[id] && meta[id].label) || id, description: (meta[id] && meta[id].description) || '', keys: (bindings[id] || []).slice() };
+      if (meta[id] && meta[id].pointer) a.pointer = meta[id].pointer; // 'look'/'aim'/'drag' — a mouse-axis control, shown not key-rebound
+      return a;
     }) };
   }
   function postManifest() {
@@ -211,7 +219,7 @@ window.__game.controls = window.__game.controls || (function () {
     var actions = (manifest && manifest.actions) || [];
     for (var i = 0; i < actions.length; i++) {
       var a = actions[i]; if (!a || !a.id) continue;
-      order.push(a.id); bindings[a.id] = (a.keys || []).slice(); meta[a.id] = { label: a.label || a.id, description: a.description || '' };
+      order.push(a.id); bindings[a.id] = (a.keys || []).slice(); meta[a.id] = { label: a.label || a.id, description: a.description || '', pointer: a.pointer || '' };
     }
     api.manifest = buildManifest(); postManifest(); return api;
   }
@@ -219,11 +227,16 @@ window.__game.controls = window.__game.controls || (function () {
     if (!next) return; for (var id in next) { if (Object.prototype.hasOwnProperty.call(next, id)) bindings[id] = (next[id] || []).slice(); }
     api.manifest = buildManifest();
   }
-  window.addEventListener('keydown', function (e) {
-    if (e.repeat) return; down[e.code] = true;
-    for (var id in bindings) { if (keysFor(id).indexOf(e.code) !== -1) { var hs = handlers[id] || []; for (var j = 0; j < hs.length; j++) { try { hs[j](); } catch (_) {} } } }
-  });
-  window.addEventListener('keyup', function (e) { down[e.code] = false; });
+  function press(code) { down[code] = true; for (var id in bindings) { if (keysFor(id).indexOf(code) !== -1) { var hs = handlers[id] || []; for (var j = 0; j < hs.length; j++) { try { hs[j](); } catch (_) {} } } } }
+  function release(code) { down[code] = false; }
+  window.addEventListener('keydown', function (e) { if (e.repeat) return; press(e.code); });
+  window.addEventListener('keyup', function (e) { release(e.code); });
+  // Mouse BUTTON binds share the same keys[] as KeyboardEvent.code: 'Mouse0' (left),
+  // 'Mouse1' (middle), 'Mouse2' (right). So an action can bind e.g. ['KeyJ','Mouse0'].
+  window.addEventListener('mousedown', function (e) { press('Mouse' + e.button); });
+  window.addEventListener('mouseup', function (e) { release('Mouse' + e.button); });
+  // Suppress the browser context menu so a right-click (Mouse2) bind is usable.
+  window.addEventListener('contextmenu', function (e) { e.preventDefault(); });
   var api = { manifest: null, define: define, isDown: isDown, on: on, rebind: rebind };
   return api;
 })();

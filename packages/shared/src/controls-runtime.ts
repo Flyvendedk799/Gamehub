@@ -33,12 +33,16 @@ export const CONTROLS_RUNTIME_SNIPPET = `<script data-pf="${CONTROLS_RUNTIME_MAR
     function keysFor(id){return bindings[id]||[];}
     function isDown(id){var k=keysFor(id);for(var i=0;i<k.length;i++){if(down[k[i]])return true;}return false;}
     function on(id,fn){(handlers[id]=handlers[id]||[]).push(fn);return api;}
-    function buildManifest(){return {actions:order.map(function(id){return {id:id,label:(meta[id]&&meta[id].label)||id,description:(meta[id]&&meta[id].description)||'',keys:(bindings[id]||[]).slice()};})};}
+    function buildManifest(){return {actions:order.map(function(id){var a={id:id,label:(meta[id]&&meta[id].label)||id,description:(meta[id]&&meta[id].description)||'',keys:(bindings[id]||[]).slice()};if(meta[id]&&meta[id].pointer)a.pointer=meta[id].pointer;return a;})};}
     function postManifest(){try{if(window.parent&&window.parent!==window)window.parent.postMessage({type:${JSON.stringify(MANIFEST_TYPE)},manifest:buildManifest()},'*');}catch(e){}}
-    function define(m){bindings={};meta={};order=[];var as=(m&&m.actions)||[];for(var i=0;i<as.length;i++){var a=as[i];if(!a||!a.id)continue;order.push(a.id);bindings[a.id]=(a.keys||[]).slice();meta[a.id]={label:a.label||a.id,description:a.description||''};}api.manifest=buildManifest();postManifest();return api;}
+    function define(m){bindings={};meta={};order=[];var as=(m&&m.actions)||[];for(var i=0;i<as.length;i++){var a=as[i];if(!a||!a.id)continue;order.push(a.id);bindings[a.id]=(a.keys||[]).slice();meta[a.id]={label:a.label||a.id,description:a.description||'',pointer:a.pointer||''};}api.manifest=buildManifest();postManifest();return api;}
     function rebind(n){if(!n)return;for(var id in n){if(Object.prototype.hasOwnProperty.call(n,id))bindings[id]=(n[id]||[]).slice();}api.manifest=buildManifest();postManifest();}
-    window.addEventListener('keydown',function(e){if(e.repeat)return;down[e.code]=true;for(var id in bindings){if(keysFor(id).indexOf(e.code)!==-1){var hs=handlers[id]||[];for(var j=0;j<hs.length;j++){try{hs[j]();}catch(_){}}}}},true);
+    function press(code){down[code]=true;for(var id in bindings){if(keysFor(id).indexOf(code)!==-1){var hs=handlers[id]||[];for(var j=0;j<hs.length;j++){try{hs[j]();}catch(_){}}}}}
+    window.addEventListener('keydown',function(e){if(e.repeat)return;press(e.code);},true);
     window.addEventListener('keyup',function(e){down[e.code]=false;},true);
+    window.addEventListener('mousedown',function(e){press('Mouse'+e.button);},true);
+    window.addEventListener('mouseup',function(e){down['Mouse'+e.button]=false;},true);
+    window.addEventListener('contextmenu',function(e){e.preventDefault();});
     var api={manifest:null,define:define,isDown:isDown,on:on,rebind:rebind};
     window.__game.controls=api;
   }
