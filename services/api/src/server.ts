@@ -32,6 +32,7 @@ import {
   type ModelRef,
   PROVIDER_SHORTLIST,
   type WireApi,
+  injectControlsRuntime,
   normalizeEngineCdnUrls,
 } from '@playforge/shared';
 import { type SnapshotStore, contentTypeFor } from '@playforge/storage';
@@ -2263,8 +2264,16 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       // Correct near-miss engine CDN URLs (e.g. phaser-esm.js → phaser.esm.js) on
       // the way out, so snapshots generated before the persist-time fix still
       // boot in the preview instead of 404-ing the engine and rendering blank.
+      // HTML out: fix near-miss engine CDN URLs AND inject the rebindable
+      // controls runtime (WS-A). Injection is load-bearing because an agent that
+      // wrote its own index.html (not the engine starter) ships without the
+      // runtime — without it, controls.define lands on the game's stub and the
+      // Controls tab stays empty. Idempotent + runs before the game module.
       const body = isHtml
-        ? Buffer.from(normalizeEngineCdnUrls(Buffer.from(bytes).toString('utf8')), 'utf8')
+        ? Buffer.from(
+            injectControlsRuntime(normalizeEngineCdnUrls(Buffer.from(bytes).toString('utf8'))),
+            'utf8',
+          )
         : Buffer.from(bytes);
       return (
         reply
