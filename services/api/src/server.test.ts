@@ -1405,7 +1405,11 @@ describe('preview route', () => {
     expect(res.headers['content-security-policy']).toEqual(
       expect.stringContaining("connect-src 'self'"),
     );
-    expect(res.body).toBe(html);
+    // The original game HTML is preserved + the rebindable controls runtime is
+    // injected (WS-A) so the Controls tab works even when the agent wrote its own
+    // index.html instead of the engine starter.
+    expect(res.body).toContain(html);
+    expect(res.body).toContain('pf-controls-runtime');
   });
 
   it('uses a scoped preview auth cookie for generated subresources', async () => {
