@@ -790,6 +790,94 @@ export async function disconnectCodex(): Promise<CodexSubscriptionStatus> {
   return apiFetch<CodexSubscriptionStatus>('/v1/auth/codex', { method: 'DELETE' });
 }
 
+// ─── Project files (Files tab) ─────────────────────────────────────────────────
+
+/** One entry in a project's current game file listing. */
+export interface ProjectFileEntry {
+  path: string;
+  size: number;
+  contentType: string;
+  /** True for text files (text/* or application/json); false for binary. */
+  isText: boolean;
+}
+
+export interface ListProjectFilesResponse {
+  files: ProjectFileEntry[];
+  totalBytes: number;
+  engine: 'phaser' | 'three' | null;
+}
+
+/** List the current game's files. 409 `no_snapshot` when no game is built yet. */
+export async function listProjectFiles(projectId: string): Promise<ListProjectFilesResponse> {
+  return apiFetch<ListProjectFilesResponse>(`/v1/projects/${projectId}/files`);
+}
+
+/** Build the read/write URL for one file, encoding each "/" segment so a nested
+ *  path (e.g. "assets/img/p.png") round-trips safely. */
+function filePathToUrl(projectId: string, path: string): string {
+  const encoded = path.split('/').map(encodeURIComponent).join('/');
+  return `/v1/projects/${projectId}/files/${encoded}`;
+}
+
+export interface ReadProjectFileResponse {
+  path: string;
+  size: number;
+  contentType: string;
+  encoding: 'utf-8' | 'base64';
+  /** Text content (utf-8) or base64 bytes; omitted when `tooLarge`. */
+  content?: string;
+  /** True when the file is too large to inline — show a download prompt. */
+  tooLarge?: boolean;
+}
+
+/** Read one file. 404 `file_not_found` if the path isn't in the project. */
+export async function readProjectFile(
+  projectId: string,
+  path: string,
+): Promise<ReadProjectFileResponse> {
+  return apiFetch<ReadProjectFileResponse>(filePathToUrl(projectId, path));
+}
+
+export interface WriteProjectFileResponse {
+  ok: boolean;
+  path: string;
+  size: number;
+  manifestKey: string;
+  snapshotId: string;
+  filesHash: string;
+}
+
+/** Overwrite one TEXT file, creating a new version. 400 `not_editable` for
+ *  binary targets; 404 `file_not_found` (v1 edits existing files only). */
+export async function writeProjectFile(
+  projectId: string,
+  path: string,
+  content: string,
+): Promise<WriteProjectFileResponse> {
+  return apiFetch<WriteProjectFileResponse>(filePathToUrl(projectId, path), {
+    method: 'PUT',
+    body: JSON.stringify({ content }),
+  });
+}
+
+/** Authenticated fetch of the project zip as a Blob (a plain <a download> can't
+ *  send the Bearer token cross-origin). */
+export async function fetchProjectZip(projectId: string): Promise<Blob> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/v1/projects/${projectId}/game.zip`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    throw new ApiError(
+      res.status,
+      `API ${res.status}`,
+      undefined,
+      await res.text().catch(() => ''),
+    );
+  }
+  return res.blob();
+}
+
 // ─── Hub search ────────────────────────────────────────────────────────────────
 
 export async function searchHub(

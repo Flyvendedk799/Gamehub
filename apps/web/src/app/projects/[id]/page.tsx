@@ -494,6 +494,12 @@ export default function BuilderPage() {
             errorMessage={errorMessage}
             tweakSchema={currentTweakSchema}
             projectId={projectId}
+            onFileSaved={() => {
+              // A manual file edit created a new version — repoint the live
+              // preview at the project's current HEAD and refresh the timeline.
+              setPreviewUrl(`${BASE}/v1/projects/${projectId}/preview/?t=${Date.now()}`);
+              refreshSnapshots();
+            }}
             onMapControls={() => {
               // One scoped generation (one click = one run, no polling) that wires
               // the rebindable controls layer into a game that didn't declare it.
