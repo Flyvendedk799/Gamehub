@@ -736,10 +736,12 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     const store = new SnapshotStore(new InMemoryBlobStore());
     const browserJobs = queuedBrowserJobs([invertedPlaytest()]);
     const agent: GenerateFn = async (_input, deps) => {
-      // 'rpg' has no bundled playbook → selectGamePlaytestPlan returns null.
-      await deps.gameMode?.setSpec?.({ ...TOPDOWN_SPEC, genre: 'rpg' } as unknown as GameSpec);
+      // 'idle' has no bundled playbook → selectGamePlaytestPlan returns null.
+      // (The game still BOOTS in the mock, so the boot-gate has nothing to flag
+      // and the run ships an honest no_verdict.)
+      await deps.gameMode?.setSpec?.({ ...TOPDOWN_SPEC, genre: 'idle' } as unknown as GameSpec);
       await deps.fs?.create('index.html', RED_SQUARE);
-      return emptyOutput('rpg');
+      return emptyOutput('idle');
     };
 
     const result = await runGeneration(
@@ -755,6 +757,46 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     expect(result.shipReason).toBe('no_verdict');
     // No playbook → no playtest round-trip for the verdict.
     expect(browserJobs.playtestCalls).toBe(0);
+  });
+
+  it('boot-gate: a non-booting game with no playbook still repairs (not a silent no_verdict)', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    let rounds = 0;
+    const browserJobs: BrowserJobsPort & { playtestCalls: number } = {
+      playtestCalls: 0,
+      async runtimeVerify() {
+        // Round 0 didn't boot; after one repair round it boots.
+        return rounds <= 1
+          ? {
+              hasGameContract: false,
+              fatalErrors: ['Uncaught ReferenceError: Phaser is not defined'],
+            }
+          : { hasGameContract: true, fatalErrors: [] };
+      },
+      async playtest() {
+        this.playtestCalls += 1;
+        return null;
+      },
+    };
+    const agent: GenerateFn = async (_input, deps) => {
+      rounds += 1;
+      // 'idle' has no playbook — pre-fix this shipped a non-booting game as no_verdict.
+      await deps.gameMode?.setSpec?.({ ...TOPDOWN_SPEC, genre: 'idle' } as unknown as GameSpec);
+      await deps.fs?.create('index.html', RED_SQUARE);
+      return emptyOutput('idle');
+    };
+
+    const result = await runGeneration(
+      {
+        prompt: 'an idle game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: agent, browserJobs },
+    );
+
+    // The boot failure forced at least one repair round rather than shipping blind.
+    expect(result.repairRounds).toBeGreaterThanOrEqual(1);
   });
 
   it('budget exhaustion (interrupted run) stops the loop early with budget_exhausted', async () => {

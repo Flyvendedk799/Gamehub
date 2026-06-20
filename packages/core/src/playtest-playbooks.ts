@@ -16,6 +16,11 @@
  *   - puzzle     — drag/swap → grid permutation
  *   - topdown    — cardinal moves → x/y deltas
  *   - runner     — auto-forward + jump → y delta only
+ *   - shmup      — fire → score rises (hit loop) + lateral move
+ *   - racing     — accelerate → speed rises + steer → x delta
+ *   - rpg        — cardinal moves → x/y deltas
+ *   - roguelike  — grid steps → x/y deltas
+ *   - tps        — strafe → x delta + forward → z delta
  *
  * The agent reads `getPlaytestPlaybook(genre)` and adapts the keycodes
  * + assertions to its own input bindings. The host's `playtest_game`
@@ -297,6 +302,209 @@ const RUNNER: PlaytestPlaybook = {
   ],
 };
 
+const SHMUP: PlaytestPlaybook = {
+  schemaVersion: 1,
+  genre: 'shmup',
+  intent:
+    'Shoot-em-up: firing spawns projectiles that destroy enemies (score rises); lateral keys move the ship in x. Expose `score` and `playerPos.x` in debug.snapshot().',
+  steps: [
+    { kind: 'wait', durationFrames: 20, assert: 'Ship at spawn; a wave of enemies is on screen.' },
+    {
+      kind: 'key',
+      code: 'Space',
+      frames: 60,
+      assert:
+        'Holding fire from the spawn position spawns projectiles travelling toward the enemies.',
+    },
+    {
+      kind: 'wait',
+      durationFrames: 90,
+      // The keystone: proves the WHOLE shoot→travel→collide→score loop, not just
+      // that a bullet sprite appeared. This is the "bullets never hit enemies"
+      // bug class (score stays 0 forever) made deterministic.
+      assert: 'A projectile hit an enemy: `score` INCREASED — the core fire→hit→score loop works.',
+      predicates: [{ field: 'score', op: 'increased', frame: { step: 2 }, against: { step: 0 } }],
+    },
+    {
+      kind: 'key',
+      code: 'ArrowLeft',
+      frames: 20,
+      assert: 'Ship x DECREASED (moved left).',
+      predicates: [
+        { field: 'playerPos.x', op: 'decreased', frame: { step: 3 }, against: { step: 2 } },
+      ],
+    },
+    {
+      kind: 'key',
+      code: 'ArrowRight',
+      frames: 30,
+      assert: 'Ship x INCREASED past the left position (moved right).',
+      predicates: [
+        { field: 'playerPos.x', op: 'increased', frame: { step: 4 }, against: { step: 3 } },
+      ],
+    },
+  ],
+  watchFor: [
+    'Bullets spawn but never collide with enemies (score never rises) — the most common shmup bug.',
+    'Fire key does nothing (no projectile on press).',
+    'Enemies cannot damage the player (lives never change).',
+  ],
+};
+
+const RACING: PlaytestPlaybook = {
+  schemaVersion: 1,
+  genre: 'racing',
+  intent:
+    'Racing: accelerating raises `speed`; steering changes the lateral `playerPos.x`. Expose `speed` and `playerPos.x` in debug.snapshot().',
+  steps: [
+    { kind: 'wait', durationFrames: 20, assert: 'Car at the start line, idle (speed ~0).' },
+    {
+      kind: 'key',
+      code: 'ArrowUp',
+      frames: 40,
+      assert: 'Accelerating raised `speed` above the idle value.',
+      predicates: [{ field: 'speed', op: 'increased', frame: { step: 1 }, against: { step: 0 } }],
+    },
+    {
+      kind: 'key',
+      code: 'ArrowLeft',
+      frames: 20,
+      assert: 'Steering left changed the car x position.',
+      predicates: [
+        { field: 'playerPos.x', op: 'changed', frame: { step: 2 }, against: { step: 1 } },
+      ],
+    },
+    {
+      kind: 'key',
+      code: 'ArrowRight',
+      frames: 30,
+      assert: 'Steering right moved x the other way.',
+      predicates: [
+        { field: 'playerPos.x', op: 'changed', frame: { step: 3 }, against: { step: 2 } },
+      ],
+    },
+  ],
+  watchFor: [
+    'Accelerate does nothing (speed stays 0, the car never moves).',
+    'Steering rotates the sprite but never changes lateral position.',
+    'No sense of forward motion / the track never scrolls.',
+  ],
+};
+
+const RPG: PlaytestPlaybook = {
+  schemaVersion: 1,
+  genre: 'rpg',
+  intent:
+    'RPG overworld: WASD moves the character in the four cardinal directions. Expose `playerPos.x` / `playerPos.y`.',
+  steps: [
+    {
+      kind: 'key',
+      code: 'KeyW',
+      frames: 20,
+      assert: 'Player y DECREASED (north/up).',
+      predicates: [
+        { field: 'playerPos.y', op: 'decreased', frame: { step: 0 }, against: 'baseline' },
+      ],
+    },
+    {
+      kind: 'key',
+      code: 'KeyS',
+      frames: 20,
+      assert: 'Player y INCREASED (south/down).',
+      predicates: [
+        { field: 'playerPos.y', op: 'increased', frame: { step: 1 }, against: { step: 0 } },
+      ],
+    },
+    {
+      kind: 'key',
+      code: 'KeyD',
+      frames: 20,
+      assert: 'Player x INCREASED (east/right).',
+      predicates: [
+        { field: 'playerPos.x', op: 'increased', frame: { step: 2 }, against: { step: 1 } },
+      ],
+    },
+  ],
+  watchFor: [
+    'Movement keys do nothing (the character is decorative).',
+    'Player walks through walls / collisions never block movement.',
+  ],
+};
+
+const ROGUELIKE: PlaytestPlaybook = {
+  schemaVersion: 1,
+  genre: 'roguelike',
+  intent:
+    'Roguelike: movement keys step the player across the grid in x/y. Expose `playerPos.x` / `playerPos.y`.',
+  steps: [
+    {
+      kind: 'key',
+      code: 'KeyD',
+      frames: 20,
+      assert: 'Player x INCREASED (stepped east).',
+      predicates: [
+        { field: 'playerPos.x', op: 'increased', frame: { step: 0 }, against: 'baseline' },
+      ],
+    },
+    {
+      kind: 'key',
+      code: 'KeyW',
+      frames: 20,
+      assert: 'Player y DECREASED (stepped north).',
+      predicates: [
+        { field: 'playerPos.y', op: 'decreased', frame: { step: 1 }, against: { step: 0 } },
+      ],
+    },
+    {
+      kind: 'key',
+      code: 'KeyA',
+      frames: 20,
+      assert: 'Player x DECREASED (stepped west).',
+      predicates: [
+        { field: 'playerPos.x', op: 'decreased', frame: { step: 2 }, against: { step: 1 } },
+      ],
+    },
+  ],
+  watchFor: ['Movement keys do nothing.', 'Player steps onto/through walls (no grid collision).'],
+};
+
+const TPS: PlaytestPlaybook = {
+  schemaVersion: 1,
+  genre: 'tps',
+  intent:
+    'Third-person: strafe keys change `playerPos.x`, forward moves `playerPos.z`. Expose `playerPos.x` / `playerPos.z`.',
+  steps: [
+    {
+      kind: 'key',
+      code: 'KeyD',
+      frames: 30,
+      assert: 'Strafe right: player x INCREASED.',
+      predicates: [
+        { field: 'playerPos.x', op: 'increased', frame: { step: 0 }, against: 'baseline' },
+      ],
+    },
+    {
+      kind: 'key',
+      code: 'KeyA',
+      frames: 30,
+      assert: 'Strafe left: player x DECREASED back.',
+      predicates: [
+        { field: 'playerPos.x', op: 'decreased', frame: { step: 1 }, against: { step: 0 } },
+      ],
+    },
+    {
+      kind: 'key',
+      code: 'KeyW',
+      frames: 30,
+      assert: 'Forward: player z CHANGED (moved along the forward axis).',
+      predicates: [
+        { field: 'playerPos.z', op: 'changed', frame: { step: 2 }, against: { step: 1 } },
+      ],
+    },
+  ],
+  watchFor: ['WASD does nothing (player frozen).', 'Camera moves but the character never does.'],
+};
+
 const PLAYBOOKS: Partial<Record<GameGenre, PlaytestPlaybook>> = {
   platformer: PLATFORMER,
   fighting: FIGHTING,
@@ -304,6 +512,11 @@ const PLAYBOOKS: Partial<Record<GameGenre, PlaytestPlaybook>> = {
   puzzle: PUZZLE,
   topdown_arcade: TOPDOWN,
   runner: RUNNER,
+  shmup: SHMUP,
+  racing: RACING,
+  rpg: RPG,
+  roguelike: ROGUELIKE,
+  tps: TPS,
 };
 
 /** Return the canonical playbook for a genre, or null when no
