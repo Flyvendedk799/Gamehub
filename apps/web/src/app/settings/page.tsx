@@ -3,16 +3,12 @@
 import {
   type AccountProvider,
   type AccountSettingsResponse,
-  type ClaudeSubscriptionStatus,
-  type CodexSubscriptionStatus,
   connectClaude,
   connectCodex,
   deleteAccountProvider,
   disconnectClaude,
   disconnectCodex,
   getAccountSettings,
-  getClaudeAuthStatus,
-  getCodexAuthStatus,
   saveAccountProvider,
   updateAccountProfile,
 } from '@/lib/api';
@@ -23,12 +19,22 @@ const MODEL_OPTIONS: Record<AccountProvider, string[]> = {
   platform: [],
   anthropic: ['claude-sonnet-4-6', 'claude-opus-4-1'],
   openai: ['gpt-4o', 'gpt-4.1'],
+  'claude-subscription': [],
+  'codex-subscription': [],
 };
+
+function isSubscriptionProvider(
+  p: AccountProvider,
+): p is 'claude-subscription' | 'codex-subscription' {
+  return p === 'claude-subscription' || p === 'codex-subscription';
+}
 
 function providerBorder(provider: AccountProvider, selected: boolean): string {
   if (!selected) return 'border-[#222222] bg-[#111111]';
-  if (provider === 'anthropic') return 'border-[#f59e0b] bg-[#f59e0b]/10';
-  if (provider === 'openai') return 'border-[#22c55e] bg-[#22c55e]/10';
+  if (provider === 'anthropic' || provider === 'claude-subscription')
+    return 'border-[#f59e0b] bg-[#f59e0b]/10';
+  if (provider === 'openai' || provider === 'codex-subscription')
+    return 'border-[#22c55e] bg-[#22c55e]/10';
   return 'border-[#6366f1] bg-[#6366f1]/10';
 }
 
@@ -251,7 +257,15 @@ export default function SettingsPage() {
               <h2 className="text-lg font-semibold text-[#f4f4f5]">Build provider</h2>
 
               <div className="grid gap-3">
-                {(['platform', 'anthropic', 'openai'] as AccountProvider[]).map((option) => {
+                {(
+                  [
+                    'platform',
+                    'anthropic',
+                    'openai',
+                    'claude-subscription',
+                    'codex-subscription',
+                  ] as AccountProvider[]
+                ).map((option) => {
                   const meta = settings?.providers.find((item) => item.provider === option);
                   const selected = provider === option;
                   return (
@@ -278,16 +292,35 @@ export default function SettingsPage() {
                       <span className="mt-2 block text-xs text-[#71717a]">
                         {option === 'platform'
                           ? 'Included credits'
-                          : meta?.configured
-                            ? `Saved key ending ${meta.last4}`
-                            : 'No key saved'}
+                          : isSubscriptionProvider(option)
+                            ? meta?.configured
+                              ? 'Connected'
+                              : 'Not connected'
+                            : meta?.configured
+                              ? `Saved key ending ${meta.last4}`
+                              : 'No key saved'}
                       </span>
                     </button>
                   );
                 })}
               </div>
 
-              {provider !== 'platform' && (
+              {isSubscriptionProvider(provider) && (
+                <SubscriptionConnect
+                  provider={provider}
+                  connected={activeProvider?.configured ?? false}
+                  disabled={disabled}
+                  onChanged={() => {
+                    void getAccountSettings()
+                      .then(setSettings)
+                      .catch(() => {
+                        /* best-effort refresh */
+                      });
+                  }}
+                />
+              )}
+
+              {provider !== 'platform' && !isSubscriptionProvider(provider) && (
                 <div className="space-y-4">
                   <div>
                     <label
@@ -368,10 +401,12 @@ export default function SettingsPage() {
               )}
 
               <div className="flex flex-wrap items-center justify-between gap-3">
-                {provider !== 'platform' && activeProvider?.configured ? (
+                {provider !== 'platform' &&
+                !isSubscriptionProvider(provider) &&
+                activeProvider?.configured ? (
                   <button
                     type="button"
-                    onClick={() => removeKey(provider)}
+                    onClick={() => removeKey(provider as 'anthropic' | 'openai')}
                     disabled={disabled}
                     className="rounded-lg px-4 py-2.5 text-sm font-medium text-[#f87171] hover:bg-[#ef4444]/10 disabled:cursor-not-allowed disabled:opacity-40"
                   >
@@ -392,9 +427,6 @@ export default function SettingsPage() {
           </div>
         )}
 
-        <ClaudeSubscriptionCard />
-        <CodexSubscriptionCard />
-
         {notice && (
           <div className="rounded-lg border border-[#22c55e]/20 bg-[#22c55e]/10 px-4 py-3 text-sm text-[#86efac]">
             {notice}
@@ -410,30 +442,29 @@ export default function SettingsPage() {
   );
 }
 
-function ClaudeSubscriptionCard() {
-  const [status, setStatus] = useState<ClaudeSubscriptionStatus | null>(null);
+function SubscriptionConnect({
+  provider,
+  connected,
+  disabled,
+  onChanged,
+}: {
+  provider: 'claude-subscription' | 'codex-subscription';
+  connected: boolean;
+  disabled: boolean;
+  onChanged: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const isClaude = provider === 'claude-subscription';
 
-  useEffect(() => {
-    let cancelled = false;
-    void getClaudeAuthStatus()
-      .then((s) => {
-        if (!cancelled) setStatus(s);
-      })
-      .catch(() => {
-        /* status is best-effort */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const run = async (fn: () => Promise<ClaudeSubscriptionStatus>) => {
+  const run = async (action: 'connect' | 'reauth' | 'disconnect') => {
     setBusy(true);
     setErr('');
     try {
-      setStatus(await fn());
+      if (action === 'disconnect') await (isClaude ? disconnectClaude() : disconnectCodex());
+      else
+        await (isClaude ? connectClaude(action === 'reauth') : connectCodex(action === 'reauth'));
+      onChanged();
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Action failed');
     } finally {
@@ -441,40 +472,20 @@ function ClaudeSubscriptionCard() {
     }
   };
 
-  const connected = status?.connected ?? false;
-  const expires = status?.expiresAt ? new Date(status.expiresAt).toLocaleString() : null;
-
   return (
-    <section className="space-y-4 rounded-lg border border-[#222222] bg-[#111111] p-6">
-      <div>
-        <h2 className="text-lg font-semibold text-[#f4f4f5]">Claude subscription</h2>
-        <p className="text-sm text-[#a1a1aa]">
-          Generate on your Claude Code subscription — the real Anthropic API, your prompt, billed to
-          the subscription instead of a metered key. Reads the local Claude Code login on this
-          machine.
-        </p>
-      </div>
-      <div className="flex items-center gap-2 text-sm">
-        <span
-          className={`inline-block h-2 w-2 rounded-full ${connected ? 'bg-[#22c55e]' : 'bg-[#52525b]'}`}
-        />
-        {connected ? (
-          <span className="text-[#86efac]">
-            Connected
-            {expires ? ` · token valid until ${expires}` : ''}
-            {status?.canRefresh === false ? ' · re-auth to refresh' : ''}
-          </span>
-        ) : (
-          <span className="text-[#a1a1aa]">Not connected</span>
-        )}
-      </div>
+    <div className="space-y-3">
+      <p className="text-sm text-[#a1a1aa]">
+        {isClaude
+          ? 'Runs on your Claude Code subscription — the real Anthropic API, your prompt, billed to the subscription. Reads the local Claude Code login on this machine.'
+          : 'Runs on your ChatGPT/Codex subscription — the real OpenAI Codex API, your prompt, billed to the subscription. Reads the local codex CLI login on this machine.'}
+      </p>
       <div className="flex flex-wrap gap-2">
         {!connected && (
           <button
             type="button"
-            disabled={busy}
-            onClick={() => run(() => connectClaude(false))}
-            className="rounded-lg bg-[#f59e0b] px-4 py-2 text-sm font-medium text-[#1a1a1a] transition-colors hover:bg-[#d97706] disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={busy || disabled}
+            onClick={() => run('connect')}
+            className="rounded-lg bg-[#6366f1] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#4f46e5] disabled:cursor-not-allowed disabled:opacity-40"
           >
             {busy ? 'Connecting…' : 'Connect'}
           </button>
@@ -483,16 +494,16 @@ function ClaudeSubscriptionCard() {
           <>
             <button
               type="button"
-              disabled={busy}
-              onClick={() => run(() => connectClaude(true))}
-              className="rounded-lg border border-[#f59e0b]/40 bg-[#f59e0b]/10 px-4 py-2 text-sm font-medium text-[#fbbf24] transition-colors hover:bg-[#f59e0b]/20 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={busy || disabled}
+              onClick={() => run('reauth')}
+              className="rounded-lg border border-[#6366f1]/40 bg-[#6366f1]/10 px-4 py-2 text-sm font-medium text-[#818cf8] transition-colors hover:bg-[#6366f1]/20 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {busy ? 'Re-authing…' : 'Re-auth'}
             </button>
             <button
               type="button"
-              disabled={busy}
-              onClick={() => run(disconnectClaude)}
+              disabled={busy || disabled}
+              onClick={() => run('disconnect')}
               className="rounded-lg border border-[#222222] px-4 py-2 text-sm text-[#a1a1aa] transition-colors hover:bg-[#1a1a1a] disabled:cursor-not-allowed disabled:opacity-40"
             >
               Disconnect
@@ -501,100 +512,6 @@ function ClaudeSubscriptionCard() {
         )}
       </div>
       {err && <p className="text-sm text-[#fca5a5]">{err}</p>}
-    </section>
-  );
-}
-
-function CodexSubscriptionCard() {
-  const [status, setStatus] = useState<CodexSubscriptionStatus | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-
-  useEffect(() => {
-    let cancelled = false;
-    void getCodexAuthStatus()
-      .then((s) => {
-        if (!cancelled) setStatus(s);
-      })
-      .catch(() => {
-        /* status is best-effort */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const run = async (fn: () => Promise<CodexSubscriptionStatus>) => {
-    setBusy(true);
-    setErr('');
-    try {
-      setStatus(await fn());
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Action failed');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const connected = status?.connected ?? false;
-  const expires = status?.expiresAt ? new Date(status.expiresAt).toLocaleString() : null;
-
-  return (
-    <section className="space-y-4 rounded-lg border border-[#222222] bg-[#111111] p-6">
-      <div>
-        <h2 className="text-lg font-semibold text-[#f4f4f5]">Codex / ChatGPT subscription</h2>
-        <p className="text-sm text-[#a1a1aa]">
-          Generate on your ChatGPT/Codex subscription — the real OpenAI Codex API, your prompt,
-          billed to the subscription. Reads the local codex CLI login on this machine.
-        </p>
-      </div>
-      <div className="flex items-center gap-2 text-sm">
-        <span
-          className={`inline-block h-2 w-2 rounded-full ${connected ? 'bg-[#22c55e]' : 'bg-[#52525b]'}`}
-        />
-        {connected ? (
-          <span className="text-[#86efac]">
-            Connected
-            {status?.email ? ` as ${status.email}` : ''}
-            {expires ? ` · token valid until ${expires}` : ''}
-          </span>
-        ) : (
-          <span className="text-[#a1a1aa]">Not connected</span>
-        )}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {!connected && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => run(() => connectCodex(false))}
-            className="rounded-lg bg-[#22c55e] px-4 py-2 text-sm font-medium text-[#0a0a0a] transition-colors hover:bg-[#16a34a] disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {busy ? 'Connecting…' : 'Connect'}
-          </button>
-        )}
-        {connected && (
-          <>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => run(() => connectCodex(true))}
-              className="rounded-lg border border-[#22c55e]/40 bg-[#22c55e]/10 px-4 py-2 text-sm font-medium text-[#86efac] transition-colors hover:bg-[#22c55e]/20 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {busy ? 'Re-authing…' : 'Re-auth'}
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => run(disconnectCodex)}
-              className="rounded-lg border border-[#222222] px-4 py-2 text-sm text-[#a1a1aa] transition-colors hover:bg-[#1a1a1a] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Disconnect
-            </button>
-          </>
-        )}
-      </div>
-      {err && <p className="text-sm text-[#fca5a5]">{err}</p>}
-    </section>
+    </div>
   );
 }

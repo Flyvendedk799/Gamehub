@@ -4,7 +4,12 @@ import { and, eq, isNull } from 'drizzle-orm';
 
 export const BYOK_PROVIDERS = ['anthropic', 'openai'] as const;
 export type ByokProvider = (typeof BYOK_PROVIDERS)[number];
-export type AccountProvider = 'platform' | ByokProvider;
+/** Subscription credentials — no pasted key; connected via /v1/auth/<id>/connect
+ *  and backed by a local token store, but SELECTABLE as the default like a BYOK
+ *  provider. */
+export const SUBSCRIPTION_PROVIDERS = ['claude-subscription', 'codex-subscription'] as const;
+export type SubscriptionProvider = (typeof SUBSCRIPTION_PROVIDERS)[number];
+export type AccountProvider = 'platform' | ByokProvider | SubscriptionProvider;
 
 export interface SavedProviderKey {
   id: string;
@@ -58,8 +63,12 @@ export function isByokProvider(provider: string): provider is ByokProvider {
   return (BYOK_PROVIDERS as readonly string[]).includes(provider);
 }
 
+export function isSubscriptionProvider(provider: string): provider is SubscriptionProvider {
+  return (SUBSCRIPTION_PROVIDERS as readonly string[]).includes(provider);
+}
+
 export function isAccountProvider(provider: string): provider is AccountProvider {
-  return provider === 'platform' || isByokProvider(provider);
+  return provider === 'platform' || isByokProvider(provider) || isSubscriptionProvider(provider);
 }
 
 function normalizeAccountProvider(provider: string): AccountProvider {
