@@ -94,13 +94,24 @@ export async function finalizeRun(db: Db, args: FinalizeRunArgs): Promise<Finali
     ]);
 
     // A paused run is non-terminal — refund this run's reservation; the resume
-    // run reserves its own. Idempotent via the 'credit_ledger_refund_key'.
+    // run reserves its own. Idempotent via the 'credit_ledger_refund_key'. Only
+    // refund if a reservation EXISTS: a BYOK/subscription run isn't platform-
+    // funded so it never reserved, and a blind refund would print credits.
     if (userId) {
-      await db
-        .insert(schema.creditLedger)
-        .values({ userId, delta: creditsPerRun, reason: 'refund', runId })
-        .onConflictDoNothing()
-        .catch((err: unknown) => log(`[run:${runId}] paused-run refund failed: ${String(err)}`));
+      const reserved = await db
+        .select({ runId: schema.creditLedger.runId })
+        .from(schema.creditLedger)
+        .where(
+          sql`${schema.creditLedger.runId} = ${runId} AND ${schema.creditLedger.reason} = 'reservation'`,
+        )
+        .limit(1);
+      if (reserved.length > 0) {
+        await db
+          .insert(schema.creditLedger)
+          .values({ userId, delta: creditsPerRun, reason: 'refund', runId })
+          .onConflictDoNothing()
+          .catch((err: unknown) => log(`[run:${runId}] paused-run refund failed: ${String(err)}`));
+      }
     }
 
     log(

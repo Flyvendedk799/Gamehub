@@ -49,7 +49,7 @@ import { ConsoleEmailTransport, type EmailPort } from './email';
 import { DrizzleHubRepo } from './hub-repo';
 import { type InProcessBrowserJobs, makeInProcessBrowserJobs } from './in-process-browser';
 import { DrizzlePublishRepo } from './publish-repo';
-import { type EnqueueFn, buildServer } from './server';
+import { type EnqueueFn, buildServer, refundRunReservation } from './server';
 
 /** Run cost in credits — must match server.ts and worker/main.ts. */
 const CREDITS_PER_RUN = 10;
@@ -298,13 +298,9 @@ async function main() {
         // unique 'credit_ledger_refund_key'. (correctness C3)
         console.error(`[run:${runId}] enqueue to BullMQ failed:`, err);
         await runRepo.updateStatus(runId, 'failed').catch(() => {});
-        await db
-          .insert(schema.creditLedger)
-          .values({ userId, delta: CREDITS_PER_RUN, reason: 'refund', runId })
-          .onConflictDoNothing()
-          .catch((refundErr: unknown) => {
-            console.error(`[run:${runId}] credit refund after enqueue failure failed:`, refundErr);
-          });
+        await refundRunReservation(db, userId, runId).catch((refundErr: unknown) => {
+          console.error(`[run:${runId}] credit refund after enqueue failure failed:`, refundErr);
+        });
       }
       return;
     }
@@ -375,16 +371,13 @@ async function main() {
       .catch(async (err: unknown) => {
         console.error(`[run:${runId}] generation failed after ${Date.now() - startedAt}ms:`, err);
         await runRepo.updateStatus(runId, 'failed').catch(() => {});
-        // Refund the enqueue-time reservation so a failed run costs nothing. This
-        // mirrors the worker.on('failed') refund for the no-Redis in-process path.
-        // Idempotent via the partial unique 'credit_ledger_refund_key'.
-        await db
-          .insert(schema.creditLedger)
-          .values({ userId, delta: CREDITS_PER_RUN, reason: 'refund', runId })
-          .onConflictDoNothing()
-          .catch((refundErr: unknown) => {
-            console.error(`[run:${runId}] credit refund failed:`, refundErr);
-          });
+        // Refund the enqueue-time reservation so a failed PLATFORM run costs
+        // nothing. refundRunReservation no-ops when no reservation exists (a
+        // BYOK/subscription run was never charged). Idempotent via the
+        // partial unique 'credit_ledger_refund_key'.
+        await refundRunReservation(db, userId, runId).catch((refundErr: unknown) => {
+          console.error(`[run:${runId}] credit refund failed:`, refundErr);
+        });
       });
   };
 
