@@ -225,6 +225,27 @@ describe('decideRepairAction', () => {
     expect(action).toEqual({ kind: 'ship', reason: 'skipped_non_completable' });
   });
 
+  it('non-completable spec WITH an agent-authored contract is verified (repairs, not skipped)', () => {
+    // A genre-less creative game (non-completable) that declared its own playtest
+    // contract opted into verification — a failing contract must REPAIR, not take
+    // the creative escape hatch (else novel games could never earn a real pass).
+    const verdict = buildRepairVerdict(
+      { trace: INVERTED_TOPDOWN_TRACE, fatalErrors: [] },
+      predicatesFor('topdown_arcade'),
+    );
+    const nonCompletable: CompletabilitySpec = {
+      genre: 'topdown_arcade',
+      winCondition: '—',
+      loseCondition: '—',
+    };
+    const action = decideRepairAction(
+      verdict,
+      nonCompletable,
+      loopState({ contractAuthored: true }),
+    );
+    expect(action.kind).toBe('repair');
+  });
+
   it('ships with reason=budget_exhausted when the validation-tail budget is gone', () => {
     const verdict = buildRepairVerdict(
       { trace: INVERTED_TOPDOWN_TRACE, fatalErrors: [] },

@@ -256,6 +256,13 @@ export interface RepairLoopState {
    *  when true the loop must stop and ship regardless of the verdict. The
    *  worker computes this from the agent's interrupted flag / token meter. */
   budgetExhausted: boolean;
+  /** True when the verdict's predicates came from an AGENT-AUTHORED contract
+   *  (declare_playtest_contract) rather than a bundled genre playbook. A
+   *  non-completable spec normally escapes the genre-predicate gate (the genre
+   *  playbook's assumptions may not fit a creative variant) — but an authored
+   *  contract is the agent's own commitment, so it is NOT escaped. Defaults
+   *  false (genre-playbook or no-evidence verdict). */
+  contractAuthored?: boolean;
 }
 
 /**
@@ -285,11 +292,14 @@ export function decideRepairAction(
   // spec is treated as completable: we have no declared escape, so honour the
   // verdict.
   if (spec !== null && spec !== undefined && !isCompletableSpec(spec)) {
-    // The completability/predicate gate is skipped for creative / non-completable
-    // specs — BUT every game must still BOOT. A fatal boot error (window.__game
-    // never appeared, an uncaught throw) falls through to the repair logic below;
-    // only a cleanly-booting non-completable game ships here.
-    if (verdict.fatalErrors.length === 0) {
+    // The completability gate is skipped for creative / non-completable specs so
+    // a genre playbook's assumptions (e.g. "WASD moves the player +x") can't
+    // false-fail a creative variant that repurposes those inputs. TWO carve-outs:
+    //  - a fatal boot error still repairs (every game must boot — PR boot-gate);
+    //  - an AGENT-AUTHORED contract is the agent's OWN commitment, not an external
+    //    template, so it is verified even for a non-completable game (the path
+    //    that lets a genre-less creative game earn a real `passed`).
+    if (verdict.fatalErrors.length === 0 && state.contractAuthored !== true) {
       return { kind: 'ship', reason: 'skipped_non_completable' };
     }
   }

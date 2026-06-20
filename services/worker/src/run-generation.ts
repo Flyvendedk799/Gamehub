@@ -18,6 +18,7 @@ import {
   type AttemptObservation,
   type DoneError,
   type RuntimeVerifyObservation as EvalRuntimeVerify,
+  type GamePlaytestPlan,
   type GenerateInput,
   type GenerateOutput,
   type GenerateViaAgentDeps,
@@ -313,9 +314,16 @@ export async function runGeneration(
 
   // In-run mutable state the agent reads/writes via the gameMode callbacks and
   // that we persist alongside the snapshot once the run completes.
-  const state: { engine: WebEngine | null; spec: GameSpec | null } = {
+  const state: {
+    engine: WebEngine | null;
+    spec: GameSpec | null;
+    // Agent-authored playtest contract — the deterministic verdict source for a
+    // genre-less game (set via declare_playtest_contract; null otherwise).
+    contract: GamePlaytestPlan | null;
+  } = {
     engine: req.engine ?? null,
     spec: null,
+    contract: null,
   };
 
   // Wrap the caller's event sink so we can meter token usage from `turn_end`
@@ -503,6 +511,10 @@ export async function runGeneration(
         state.spec = spec;
       },
       getSpec: () => state.spec ?? undefined,
+      setContract: (plan) => {
+        state.contract = plan;
+      },
+      getContract: () => state.contract ?? undefined,
       ...(playtester !== undefined ? { playtester } : {}),
     },
   };
@@ -551,7 +563,12 @@ export async function runGeneration(
     const entry = tree.view('index.html');
     if (entry === null) return null;
 
-    const plan = selectGamePlaytestPlan(spec.genre);
+    // The genre playbook is the preferred verdict source (an EXTERNAL check the
+    // agent didn't author). When the genre has none (genre-less / novel games),
+    // fall back to the agent-authored contract so creativity is still verified
+    // against its own declared input→state behaviour instead of shipping
+    // unverified. Boot + juice stay external regardless.
+    const plan = selectGamePlaytestPlan(spec.genre) ?? state.contract;
     const hasPredicates = plan !== null && plan.predicates.length > 0;
 
     // Inline the WHOLE project into one self-contained HTML before booting it in
@@ -624,10 +641,18 @@ export async function runGeneration(
     // (`output.interrupted`). Either way a further repair round can't run to
     // completion, so we stop and ship the best attempt.
     const budgetExhausted = aborted || output.interrupted;
+    // The verdict's predicates came from the agent's contract (not a genre
+    // playbook) when the genre has no bundled playbook and a contract was set.
+    // This makes a non-completable creative game gate on its OWN contract.
+    const contractAuthored =
+      state.spec !== null &&
+      selectGamePlaytestPlan(state.spec.genre) === null &&
+      state.contract !== null;
     const action = decideRepairAction(verdict, state.spec, {
       roundsRun: repairRounds,
       maxRounds: maxRepairRounds,
       budgetExhausted,
+      contractAuthored,
     });
     if (action.kind === 'ship') {
       shipReason = action.reason;

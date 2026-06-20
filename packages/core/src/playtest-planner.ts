@@ -14,7 +14,7 @@
  */
 
 import type { GameGenre } from '@playforge/shared';
-import type { PlaytestPredicate } from './eval/playtest-score.js';
+import type { FrameRef, PlaytestPredicate } from './eval/playtest-score.js';
 import {
   type PlaybookStep,
   type PlaytestPlaybook,
@@ -191,4 +191,142 @@ export function selectGamePlaytestPlan(genre: GameGenre): GamePlaytestPlan | nul
   }
   const predicates = playbook.steps.flatMap((s) => s.predicates ?? []);
   return { playbook, steps, predicates: [...predicates] };
+}
+
+// ---------------------------------------------------------------------------
+// Agent-authored playtest contracts — the path for genre-LESS / novel games.
+//
+// The genre playbooks above cover known shapes. A game that doesn't fit a genre
+// (`genre: 'other'`, or any genre with no bundled playbook) would otherwise ship
+// `no_verdict` — verified for BOOT but never for PLAY — so a beautiful-but-broken
+// novel mechanic is indistinguishable from a working one. The fix: the agent
+// declares its OWN input→state contract for the game it is about to build, and
+// we project it onto the SAME { steps, predicates } the genre playbooks produce,
+// scored by the SAME pure `scorePlaytest`. The integrity guard lives in the
+// authoring flow (the contract is committed BEFORE the build, in declare order),
+// not here — this is a pure, total projection.
+// ---------------------------------------------------------------------------
+
+/** One input→state check in an agent-authored contract. `action` drives a
+ *  synthetic input; the optional `assert*` fields turn the snapshot AFTER that
+ *  input into a machine-checkable predicate. A check with no `assertField` is a
+ *  pure setup/settle step (e.g. a `wait` to let physics resolve). */
+export interface AuthoredContractCheck {
+  action: 'key' | 'pointerMove' | 'pointerDown' | 'pointerUp' | 'wait';
+  /** KeyboardEvent.code for `action: 'key'`. */
+  key?: string;
+  /** Frames to hold a key / advance a wait. */
+  holdFrames?: number;
+  /** Normalised viewport target (0..1) for `action: 'pointerMove'`. */
+  x?: number;
+  y?: number;
+  /** Dotted snapshot path to assert on, e.g. `progress` or `playerPos.x`. */
+  assertField?: string;
+  assertOp?:
+    | 'increases'
+    | 'decreases'
+    | 'changes'
+    | 'unchanged'
+    | 'greaterThan'
+    | 'lessThan'
+    | 'equals';
+  /** Comparison value for greaterThan / lessThan / equals. */
+  assertValue?: number;
+  /** Compare against the PREVIOUS asserting check instead of the pre-input
+   *  baseline (for round-trips like move-left-then-right). Default false. */
+  assertVsPrevious?: boolean;
+}
+
+export interface AuthoredContract {
+  intent: string;
+  checks: AuthoredContractCheck[];
+}
+
+const CONTRACT_OP_MAP: Record<
+  NonNullable<AuthoredContractCheck['assertOp']>,
+  PlaytestPredicate['op']
+> = {
+  increases: 'increased',
+  decreases: 'decreased',
+  changes: 'changed',
+  unchanged: 'unchanged',
+  greaterThan: 'gt',
+  lessThan: 'lt',
+  equals: 'eq',
+};
+
+const LITERAL_OPS = new Set<PlaytestPredicate['op']>(['eq', 'gt', 'lt']);
+
+/** Project one contract check onto the browser-worker's synthetic-input union.
+ *  Returns null only for a `key` check missing its `code` (the tool validates
+ *  this up front, so in practice never). */
+function projectContractAction(check: AuthoredContractCheck): GamePlaytestStep | null {
+  switch (check.action) {
+    case 'key':
+      if (check.key === undefined || check.key.length === 0) return null;
+      return check.holdFrames !== undefined
+        ? { kind: 'key', code: check.key, frames: check.holdFrames }
+        : { kind: 'key', code: check.key };
+    case 'pointerMove':
+      return { kind: 'mouseMove', x: clamp01(check.x ?? 0.5), y: clamp01(check.y ?? 0.5) };
+    case 'pointerDown':
+      return { kind: 'mouseDown' };
+    case 'pointerUp':
+      return { kind: 'mouseUp' };
+    case 'wait':
+      return { kind: 'wait', frames: check.holdFrames ?? 30 };
+  }
+}
+
+function clamp01(n: number): number {
+  return n < 0 ? 0 : n > 1 ? 1 : n;
+}
+
+/**
+ * Build a deterministic playtest plan from an agent-authored contract. Each
+ * check becomes one synthetic-input step; checks carrying an `assertField`
+ * additionally become a machine-checkable predicate whose subject frame is that
+ * step and whose comparison frame is the prior asserting step (or the pre-input
+ * baseline). Pure + total: malformed checks are dropped, never thrown. The
+ * synthetic playbook keeps the GamePlaytestPlan shape uniform with the genre
+ * path (the boot-and-repair loop reads only `steps` + `predicates`).
+ */
+export function planFromContract(contract: AuthoredContract): GamePlaytestPlan {
+  const steps: GamePlaytestStep[] = [];
+  const predicates: PlaytestPredicate[] = [];
+  let prevAssertStepIdx: number | null = null;
+
+  for (const check of contract.checks) {
+    const projected = projectContractAction(check);
+    if (projected === null) continue;
+    const stepIdx = steps.length;
+    steps.push(projected);
+
+    if (check.assertField !== undefined && check.assertField.length > 0 && check.assertOp) {
+      const op = CONTRACT_OP_MAP[check.assertOp];
+      const needsValue = LITERAL_OPS.has(op);
+      if (needsValue && check.assertValue === undefined) continue; // tool validates; skip if absent
+      const against: FrameRef =
+        check.assertVsPrevious === true && prevAssertStepIdx !== null
+          ? { step: prevAssertStepIdx }
+          : 'baseline';
+      predicates.push({
+        field: check.assertField,
+        op,
+        frame: { step: stepIdx },
+        ...(needsValue ? {} : { against }),
+        ...(needsValue && check.assertValue !== undefined ? { value: check.assertValue } : {}),
+      });
+      prevAssertStepIdx = stepIdx;
+    }
+  }
+
+  const playbook: PlaytestPlaybook = {
+    schemaVersion: 1,
+    genre: 'other',
+    intent: contract.intent,
+    steps: [],
+    watchFor: [],
+  };
+  return { playbook, steps, predicates };
 }
