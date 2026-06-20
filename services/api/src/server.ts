@@ -815,7 +815,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (provider === 'platform') return (deps.platformModel ?? DEFAULT_PLATFORM_MODEL).modelId;
     if (provider === 'claude-subscription')
       return deps.claudeSubscriptionModel ?? 'claude-sonnet-4-6';
-    if (provider === 'codex-subscription') return deps.codexSubscriptionModel ?? 'gpt-5-codex';
+    if (provider === 'codex-subscription') return deps.codexSubscriptionModel ?? 'gpt-5.5';
     return DEFAULT_BYOK_MODELS[provider];
   }
 
@@ -950,7 +950,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
             if (current.accountId) headers['chatgpt-account-id'] = current.accountId;
             return {
               ok: true,
-              model: { provider: 'openai', modelId: deps.codexSubscriptionModel ?? 'gpt-5-codex' },
+              model: { provider: 'openai', modelId: deps.codexSubscriptionModel ?? 'gpt-5.5' },
               apiKey: await deps.codexAuthStore.getValidAccessToken(),
               wire: 'openai-codex-responses',
               ...(Object.keys(headers).length > 0 ? { httpHeaders: headers } : {}),

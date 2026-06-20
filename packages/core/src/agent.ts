@@ -363,7 +363,12 @@ function buildPiModel(
   const resolvedBaseUrl =
     baseUrl && baseUrl.trim().length > 0
       ? baseUrl
-      : (BUILTIN_PUBLIC_BASE_URLS[model.provider] ?? '');
+      : wire === 'openai-codex-responses'
+        ? // ChatGPT/Codex subscription auth lives on the chatgpt.com backend, NOT
+          // api.openai.com (the subscription token 401s there). pi-ai's codex wire
+          // appends `/codex/responses` to this bare base.
+          'https://chatgpt.com/backend-api'
+        : (BUILTIN_PUBLIC_BASE_URLS[model.provider] ?? '');
   if (resolvedBaseUrl.length === 0) {
     throw new PlayforgeError(
       `Provider "${model.provider}" has no baseUrl configured. Add one in Settings or re-import the config.`,

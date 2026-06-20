@@ -187,7 +187,7 @@ async function main() {
       return creds;
     },
   });
-  const codexSubscriptionModel = process.env['CODEX_SUBSCRIPTION_MODEL'] ?? 'gpt-5-codex';
+  const codexSubscriptionModel = process.env['CODEX_SUBSCRIPTION_MODEL'] ?? 'gpt-5.5';
 
   const projectRepo = new DrizzleProjectRepo(db);
   const runRepo = new DrizzleRunRepo(db);
