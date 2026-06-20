@@ -20,6 +20,7 @@ import {
   boolean,
   index,
   integer,
+  jsonb,
   numeric,
   pgTable,
   text,
@@ -51,6 +52,10 @@ export const runQualityMetrics = pgTable(
     juiceScore: numeric('juice_score', { precision: 12, scale: 0 }),
     /** Whether window.__game appeared on boot (5.3), or null when not measured. */
     runtimeBooted: boolean('runtime_booted'),
+    /** Full structured per-run build report (spec shape, tool/skill histogram,
+     *  invariant warnings, novelty path, tokens) — the richer telemetry we learn
+     *  from. Mirrors the `[build-report]` log line. */
+    report: jsonb('report').$type<Record<string, unknown>>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

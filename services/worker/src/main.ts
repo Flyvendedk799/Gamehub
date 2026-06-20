@@ -295,6 +295,7 @@ async function main() {
                 playbookTotal: m.playbookTotal,
                 juiceScore,
                 runtimeBooted: m.runtimeBooted,
+                report: m.report ?? null,
               };
               await db
                 .insert(schema.runQualityMetrics)
@@ -310,6 +311,7 @@ async function main() {
                     playbookTotal: row.playbookTotal,
                     juiceScore: row.juiceScore,
                     runtimeBooted: row.runtimeBooted,
+                    report: row.report,
                   },
                 });
             },

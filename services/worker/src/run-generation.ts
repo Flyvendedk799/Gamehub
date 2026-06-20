@@ -46,6 +46,7 @@ import type { SnapshotStore, WriteResult } from '@playforge/storage';
 // the worker) — reuses the proven single-file game bundler for the verify gate.
 import { buildGameHtml } from '../../../packages/exporters/src/index';
 import { makeAssetGenerator } from './asset-generator';
+import { createRunSignalAggregator } from './run-signal';
 import { assertGeneratedJavaScriptSyntax } from './syntax-check';
 import { WorkingTree } from './working-tree';
 
@@ -147,6 +148,10 @@ export interface RunQualityMetrics {
   juiceScore: number | null;
   /** Whether window.__game appeared on boot (5.3), or null when not measured. */
   runtimeBooted: boolean | null;
+  /** Full structured per-run build report (spec shape + tool/skill histogram +
+   *  invariant warnings + novelty path + tokens) persisted as JSON for analysis.
+   *  Optional so existing callers/tests that build a metrics literal still type. */
+  report?: Record<string, unknown>;
 }
 
 /**
@@ -369,8 +374,12 @@ export async function runGeneration(
       tokenAbortController.abort();
     }
   };
+  // Distils the agent's tool/skill/invariant/contract signal from the live event
+  // stream so each run emits a structured [build-report] we can learn from.
+  const signal = createRunSignalAggregator();
   const wrappedOnEvent: (event: AgentEvent) => void = (event: AgentEvent) => {
     meterUsage(event);
+    signal.observe(event);
     ports.onEvent?.(event);
   };
 
@@ -700,6 +709,34 @@ export async function runGeneration(
   // (no_verdict / skipped_non_completable), there was no gate to force past, so
   // force_accept stays false. The whole write is wrapped: a telemetry failure
   // must NEVER fail a generation.
+
+  // ── Structured per-run build report (telemetry: learn from every run) ───────
+  // One greppable JSON line carrying HOW the game was built — spec shape, the
+  // tool/skill histogram, the quality-gate verdict + invariant warnings, the
+  // novelty path (contract/tweak), tokens. Emitted unconditionally + persisted
+  // to run_quality_metrics.report.
+  const sig = signal.snapshot();
+  const reportScore = shippedVerdict?.score ?? null;
+  const buildReport = {
+    genre: state.spec?.genre ?? null,
+    engine: state.engine,
+    dimensions: state.spec?.dimensions ?? null,
+    winCondition: state.spec?.winCondition ?? null,
+    fileCount: tree.size,
+    shipReason,
+    forceAccept: shippedVerdict !== null && !shippedVerdict.pass,
+    repairRounds,
+    runtimeBooted: lastRuntimeVerify === undefined ? null : lastRuntimeVerify.booted,
+    juiceScore: lastRuntimeVerify?.juiceScore ?? null,
+    playbookPass: reportScore === null ? 0 : reportScore.results.length - reportScore.failures,
+    playbookTotal: reportScore === null ? 0 : reportScore.results.length,
+    inputTokens: usedInputTokens,
+    outputTokens: usedOutputTokens,
+    totalTokens: usedInputTokens + usedOutputTokens,
+    ...sig,
+  };
+  console.log(`[build-report] ${JSON.stringify(buildReport)}`);
+
   if (ports.recordRunQuality !== undefined) {
     const score = shippedVerdict?.score ?? null;
     const metrics: RunQualityMetrics = {
@@ -711,6 +748,7 @@ export async function runGeneration(
       playbookTotal: score === null ? 0 : score.results.length,
       juiceScore: lastRuntimeVerify?.juiceScore ?? null,
       runtimeBooted: lastRuntimeVerify === undefined ? null : lastRuntimeVerify.booted,
+      report: buildReport,
     };
     // Per-predicate telemetry — WHICH predicates passed/failed (+ the
     // observed-vs-expected reason on failures), so a quality regression is
