@@ -234,7 +234,14 @@ export interface GenerationResult {
   shipReason: ShipReason;
   /** Run-total token usage, summed from every `turn_end`. Persisted to the
    *  `runs` row for cost attribution. Zero when the provider streams no usage. */
-  usage: { inputTokens: number; outputTokens: number; totalTokens: number };
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    /** Prompt-cache reads (the static prefix served from cache) + writes. */
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+  };
   /** WS-D — set when the run paused because the agent called `ask_user`. The
    *  caller persists it on the continuation_pending row so the builder can show
    *  the question + collect an answer. Null for a normal/complete run. */
@@ -327,12 +334,28 @@ export async function runGeneration(
   // 0/0 because metering was gated behind maxTokens.
   let usedInputTokens = 0;
   let usedOutputTokens = 0;
+  // Prompt-cache visibility — cacheRead = the big static prefix served from
+  // cache (the win), cacheWrite = priming it. A high read/input ratio means
+  // caching is working; logged at completion so it's monitorable.
+  let usedCacheReadTokens = 0;
+  let usedCacheWriteTokens = 0;
   const meterUsage = (event: AgentEvent): void => {
     if (event.type !== 'turn_end') return;
-    const usage = (event.message as { usage?: { input?: number; output?: number } }).usage;
+    const usage = (
+      event.message as {
+        usage?: {
+          input?: number;
+          output?: number;
+          cacheRead?: number;
+          cacheWrite?: number;
+        };
+      }
+    ).usage;
     if (!usage) return;
     usedInputTokens += usage.input ?? 0;
     usedOutputTokens += usage.output ?? 0;
+    usedCacheReadTokens += usage.cacheRead ?? 0;
+    usedCacheWriteTokens += usage.cacheWrite ?? 0;
     if (tokenAbortController && !aborted && usedInputTokens + usedOutputTokens > ports.maxTokens!) {
       aborted = true;
       tokenAbortController.abort();
@@ -663,6 +686,8 @@ export async function runGeneration(
       inputTokens: usedInputTokens,
       outputTokens: usedOutputTokens,
       totalTokens: usedInputTokens + usedOutputTokens,
+      cacheReadTokens: usedCacheReadTokens,
+      cacheWriteTokens: usedCacheWriteTokens,
     },
     pendingQuestion,
     ...(lastRuntimeVerify !== undefined ? { runtimeVerify: lastRuntimeVerify } : {}),

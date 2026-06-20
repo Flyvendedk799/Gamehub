@@ -284,7 +284,7 @@ export const BUILTIN_PROVIDERS: Readonly<Record<SupportedOnboardingProvider, Pro
     builtin: true,
     wire: 'openai-chat',
     baseUrl: 'https://api.openai.com/v1',
-    defaultModel: 'gpt-4o',
+    defaultModel: 'gpt-5.5',
     capabilities: {
       supportsKeyless: false,
       supportsModelsEndpoint: true,
@@ -509,8 +509,8 @@ export const PROVIDER_SHORTLIST: Record<SupportedOnboardingProvider, ProviderSho
     provider: 'openai',
     label: 'OpenAI',
     keyHelpUrl: 'https://platform.openai.com/api-keys',
-    primary: ['gpt-4o', 'gpt-4.1'],
-    defaultPrimary: 'gpt-4o',
+    primary: ['gpt-5.5', 'gpt-4.1'],
+    defaultPrimary: 'gpt-5.5',
   },
   openrouter: {
     provider: 'openrouter',

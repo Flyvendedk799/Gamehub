@@ -206,7 +206,8 @@ export async function finalizeRun(db: Db, args: FinalizeRunArgs): Promise<Finali
     `[run:${runId}] completed — manifest=${completedManifestKey} snapshot=${snapshotId ?? 'n/a'} ` +
       `engine=${result.engine ?? 'n/a'} files=${result.fileCount} repairRounds=${result.repairRounds} ` +
       `shipReason=${result.shipReason} tokens=${usage.totalTokens} ` +
-      `(in=${usage.inputTokens}/out=${usage.outputTokens})`,
+      `(in=${usage.inputTokens}/out=${usage.outputTokens}` +
+      `/cacheRead=${usage.cacheReadTokens}/cacheWrite=${usage.cacheWriteTokens})`,
   );
   return { manifestKey: completedManifestKey, paused: false, snapshotId };
 }

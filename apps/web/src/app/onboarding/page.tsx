@@ -16,7 +16,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 const MODEL_OPTIONS: Record<AccountProvider, string[]> = {
   platform: [],
   anthropic: ['claude-sonnet-4-6', 'claude-opus-4-1'],
-  openai: ['gpt-4o', 'gpt-4.1'],
+  openai: ['gpt-5.5', 'gpt-4.1'],
   'claude-subscription': [],
   'codex-subscription': [],
 };

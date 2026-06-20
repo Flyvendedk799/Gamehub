@@ -77,6 +77,20 @@ describe('scanInteractivity', () => {
     );
     expect(r).toHaveLength(0);
   });
+
+  it('counts Phaser keyboard input — a keyboard game is NOT zero-interactive', () => {
+    const phaser = `this.cursors = this.input.keyboard.createCursorKeys();
+      if (this.cursors.left.isDown) this.paddle.setVelocityX(-320);`;
+    expect(scanInteractivity(phaser)).toHaveLength(0);
+  });
+
+  it('counts vanilla keydown handlers + the controls layer', () => {
+    expect(
+      scanInteractivity(
+        `window.addEventListener('keydown', onKey); window.__game.controls.isDown('jump');`,
+      ),
+    ).toHaveLength(0);
+  });
 });
 
 describe('scanA11yFatal', () => {

@@ -15,8 +15,8 @@ import { createDb, schema } from '@playforge/db';
  *
  * Optional:
  *   REDIS_URL           Redis connection string (default: none → in-process mode)
- *   PLATFORM_MODEL_ID   e.g. o4-mini (default)
- *   PLATFORM_PROVIDER   e.g. openai (default)
+ *   PLATFORM_MODEL_ID   e.g. claude-sonnet-4-6 (default)
+ *   PLATFORM_PROVIDER   e.g. anthropic (default)
  *   PORT                HTTP listen port (default 3191)
  *   CORS_ORIGINS        Space-separated browser app origins allowed to call the API
  *   BLOB_DIR            local blob-store root (default: .playforge-blobs)
@@ -91,8 +91,8 @@ export function parsePositiveIntEnv(raw: string | undefined, fallback: number): 
 async function main() {
   const databaseUrl = requireEnv('DATABASE_URL');
   const platformApiKey = requireEnv('PLATFORM_API_KEY');
-  const modelId = process.env['PLATFORM_MODEL_ID'] ?? 'o4-mini';
-  const modelProvider = process.env['PLATFORM_PROVIDER'] ?? 'openai';
+  const modelId = process.env['PLATFORM_MODEL_ID'] ?? 'claude-sonnet-4-6';
+  const modelProvider = process.env['PLATFORM_PROVIDER'] ?? 'anthropic';
   const platformModel = { provider: modelProvider, modelId };
   const apiKeyEncryptionSecret = process.env['API_KEY_ENCRYPTION_SECRET'] ?? platformApiKey;
   const port = parsePositiveIntEnv(process.env['PORT'], DEFAULT_API_PORT);

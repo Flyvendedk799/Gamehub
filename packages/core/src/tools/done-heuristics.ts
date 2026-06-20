@@ -82,6 +82,18 @@ const INTERACTIVITY_TOKENS = [
   /\buseState\s*\(/g,
   /\bsetState\s*\(/g,
   /\busePopover\s*\(/g, // common in UI snippets
+  // Game input — Phaser/Three/canvas/keyboard. Without these the heuristic
+  // counts DOM clicks only and FALSE-FLAGS every keyboard game (most games) as
+  // "0 interactive changes", even when the player clearly drives it.
+  /\.input\.keyboard/g, // Phaser keyboard plugin
+  /createCursorKeys\s*\(/g, // Phaser arrow keys
+  /\.addKey\s*\(/g, // Phaser key bind
+  /\.input\.on\s*\(/g, // Phaser pointer/input events
+  /window\.__game\.controls/g, // the rebindable controls layer
+  /\bon(?:keydown|keyup|keypress)\b/gi, // vanilla keyboard handlers
+  /['"`](?:keydown|keyup|keypress)['"`]/g, // addEventListener('keydown', …)
+  /\bgamepad\b/gi,
+  /\.setVelocity[XY]?\s*\(/g, // arcade-physics movement (player-driven)
 ];
 
 export function scanInteractivity(src: string): DoneError[] {
@@ -93,7 +105,7 @@ export function scanInteractivity(src: string): DoneError[] {
   if (count >= 2) return [];
   return [
     {
-      message: `Only ${count} interactive state change${count === 1 ? '' : 's'} detected — aim for ≥2 (clicks, toggles, form interactions) so the prototype feels live.`,
+      message: `Only ${count} interactive state change${count === 1 ? '' : 's'} detected — aim for ≥2 (clicks, key/pointer handlers, player input) so it feels live.`,
       source: 'interactivity.minimum',
     },
   ];
