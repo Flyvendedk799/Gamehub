@@ -35,7 +35,7 @@ import {
   injectControlsRuntime,
   normalizeEngineCdnUrls,
 } from '@playforge/shared';
-import { type SnapshotStore, contentTypeFor } from '@playforge/storage';
+import { type SnapshotStore, contentTypeFor, isSafeBundlePath } from '@playforge/storage';
 import {
   and as drizzleAnd,
   eq as drizzleEq,
@@ -200,6 +200,23 @@ function previewAuthCookieHeader(runId: string, value: string): string {
   return [
     `${PREVIEW_AUTH_COOKIE}=${encodeURIComponent(value)}`,
     `Path=/v1/runs/${encodeURIComponent(runId)}/preview/`,
+    `Max-Age=${PREVIEW_AUTH_COOKIE_MAX_AGE_SECONDS}`,
+    'HttpOnly',
+    'SameSite=Lax',
+  ].join('; ');
+}
+
+/**
+ * Cookie for the project-scoped preview (`/v1/projects/:id/preview/*`). Same
+ * shape as the run-preview cookie but Path-scoped to the project preview so the
+ * iframe's relative subresource requests (which can't carry ?token=) still
+ * authenticate. Used for the live preview of HEAD after a manual file edit or a
+ * version restore.
+ */
+function projectPreviewAuthCookieHeader(projectId: string, value: string): string {
+  return [
+    `${PREVIEW_AUTH_COOKIE}=${encodeURIComponent(value)}`,
+    `Path=/v1/projects/${encodeURIComponent(projectId)}/preview/`,
     `Max-Age=${PREVIEW_AUTH_COOKIE_MAX_AGE_SECONDS}`,
     'HttpOnly',
     'SameSite=Lax',
@@ -2295,6 +2312,235 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     } catch {
       return reply.code(404).send({ error: 'file_not_found', path: filePath });
     }
+  });
+
+  // Serves files from a PROJECT's current snapshot (HEAD) so the builder can
+  // live-preview the result of a manual file edit or a version restore — the run
+  // preview above is pinned to one run's snapshot and goes stale after an edit.
+  // Owner-only; the iframe passes ?token= (first request) and a path-scoped
+  // cookie (subresources), exactly like the run preview.
+  // Route: GET /v1/projects/:id/preview/           → index.html
+  //        GET /v1/projects/:id/preview/assets/...  → asset files
+  app.get('/v1/projects/:id/preview/*', async (req, reply) => {
+    if (!deps.store) return reply.code(503).send({ error: 'preview_unavailable' });
+
+    const { id } = req.params as { id: string };
+    const filePath = (req.params as Record<string, string>)['*'] || 'index.html';
+    // Defense-in-depth: the manifest lookup already bounds what can be served (a
+    // path not in the manifest 404s), but reject traversal-shaped paths up front
+    // so this route matches the files read/write routes' validation posture.
+    if (!isSafeBundlePath(filePath)) {
+      return reply.code(400).send({ error: 'invalid_path' });
+    }
+    const cookieValue = previewAuthCookieValue(req);
+    const user = await requireUser(req, reply, {
+      allowQueryToken: true,
+      allowPreviewCookie: true,
+    });
+    if (!user) return;
+
+    const project = await deps.repo.get(id);
+    if (!project || project.ownerId !== user.userId || !project.currentManifestKey) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    if (cookieValue) {
+      reply.header('Set-Cookie', projectPreviewAuthCookieHeader(id, cookieValue));
+    }
+
+    try {
+      const manifest = await deps.store.readManifest(project.currentManifestKey);
+      const bytes = await deps.store.readFile(manifest, filePath);
+      const ct = contentTypeFor(filePath);
+      const isHtml = ct.startsWith('text/html');
+      // HTML out: fix near-miss engine CDN URLs + inject the rebindable controls
+      // runtime (same as the run preview) so an edited game still boots.
+      const body = isHtml
+        ? Buffer.from(
+            injectControlsRuntime(normalizeEngineCdnUrls(Buffer.from(bytes).toString('utf8'))),
+            'utf8',
+          )
+        : Buffer.from(bytes);
+      return reply
+        .header('Content-Type', ct)
+        .header('Cache-Control', 'no-cache')
+        .header(
+          'Content-Security-Policy',
+          isHtml
+            ? gameContentCsp(deps.allowedFrameOrigins ?? '*', 'preview-multifile')
+            : "default-src 'none'",
+        )
+        .header('X-Content-Type-Options', 'nosniff')
+        .header('Referrer-Policy', 'no-referrer')
+        .send(body);
+    } catch {
+      return reply.code(404).send({ error: 'file_not_found', path: filePath });
+    }
+  });
+
+  // ── project files (Files tab) ─────────────────────────────────────────────
+  // GET /v1/projects/:id/files          — list HEAD's file tree (flat)
+  // GET /v1/projects/:id/files/*        — read one file (text→utf-8 / binary→base64)
+  // PUT /v1/projects/:id/files/*        — overwrite one TEXT file → new 'edit' version
+  // All owner-only (Bearer); back the Lovable-style Files tab in the builder.
+
+  // Text content types (text/* + JSON) render in the viewer + are editable; all
+  // else (images/audio/models) are binary — base64 on read, not editable.
+  function isTextContentType(ct: string): boolean {
+    return ct.startsWith('text/') || ct.startsWith('application/json');
+  }
+  // Hard cap on inlined file bytes for the read endpoint — a huge binary asset
+  // would balloon the base64 JSON response, so beyond this we return metadata
+  // only (tooLarge) and the client offers a download instead.
+  const MAX_INLINE_FILE_BYTES = 3 * 1024 * 1024;
+  // A manual edit rebuilds the whole file tree in memory (every blob is re-read).
+  // Generated games are small; cap the total so a pathologically large project
+  // can't be edited into an unbounded-memory rebuild.
+  const MAX_REBUILD_TOTAL_BYTES = 64 * 1024 * 1024;
+
+  app.get('/v1/projects/:id/files', async (req, reply) => {
+    if (!deps.store) return reply.code(503).send({ error: 'store_unavailable' });
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { id } = req.params as { id: string };
+    const project = await deps.repo.get(id);
+    if (!project || project.ownerId !== user.userId) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    if (!project.currentManifestKey) {
+      return reply.code(409).send({ error: 'no_snapshot', message: 'Generate a game first.' });
+    }
+    const manifest = await deps.store.readManifest(project.currentManifestKey);
+    const files = Object.entries(manifest.files)
+      .map(([path, entry]) => ({
+        path,
+        size: entry.size,
+        contentType: entry.contentType,
+        isText: isTextContentType(entry.contentType),
+      }))
+      .sort((a, b) => a.path.localeCompare(b.path));
+    const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
+    return reply.send({ files, totalBytes, engine: project.engine ?? null });
+  });
+
+  app.get('/v1/projects/:id/files/*', async (req, reply) => {
+    if (!deps.store) return reply.code(503).send({ error: 'store_unavailable' });
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { id } = req.params as { id: string };
+    const filePath = (req.params as Record<string, string>)['*'] || '';
+    if (!isSafeBundlePath(filePath)) {
+      return reply.code(400).send({ error: 'invalid_path' });
+    }
+    const project = await deps.repo.get(id);
+    if (!project || project.ownerId !== user.userId) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    if (!project.currentManifestKey) {
+      return reply.code(409).send({ error: 'no_snapshot', message: 'Generate a game first.' });
+    }
+    const manifest = await deps.store.readManifest(project.currentManifestKey);
+    const entry = manifest.files[filePath];
+    if (!entry) {
+      return reply.code(404).send({ error: 'file_not_found', path: filePath });
+    }
+    if (entry.size > MAX_INLINE_FILE_BYTES) {
+      return reply.send({
+        path: filePath,
+        size: entry.size,
+        contentType: entry.contentType,
+        encoding: isTextContentType(entry.contentType) ? 'utf-8' : 'base64',
+        tooLarge: true,
+      });
+    }
+    const bytes = await deps.store.readFile(manifest, filePath);
+    const buf = Buffer.from(bytes);
+    const isText = isTextContentType(entry.contentType);
+    return reply.send({
+      path: filePath,
+      size: entry.size,
+      contentType: entry.contentType,
+      encoding: isText ? 'utf-8' : 'base64',
+      content: isText ? buf.toString('utf8') : buf.toString('base64'),
+    });
+  });
+
+  app.put('/v1/projects/:id/files/*', async (req, reply) => {
+    if (!deps.store) return reply.code(503).send({ error: 'store_unavailable' });
+    if (!deps.snapshotRepo) return reply.code(503).send({ error: 'snapshots_unavailable' });
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { id } = req.params as { id: string };
+    const filePath = (req.params as Record<string, string>)['*'] || '';
+    if (!isSafeBundlePath(filePath)) {
+      return reply.code(400).send({ error: 'invalid_path' });
+    }
+    const body = (req.body ?? {}) as { content?: unknown };
+    if (typeof body.content !== 'string') {
+      return reply.code(400).send({ error: 'content_required' });
+    }
+    const project = await deps.repo.get(id);
+    if (!project || project.ownerId !== user.userId) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    if (!project.currentManifestKey) {
+      return reply.code(409).send({ error: 'no_snapshot', message: 'Generate a game first.' });
+    }
+    const manifest = await deps.store.readManifest(project.currentManifestKey);
+    const target = manifest.files[filePath];
+    // v1 edits EXISTING text files only — no create (keeps the contract tight and
+    // the path/content-type derivation unambiguous) and no binary edits.
+    if (!target) {
+      return reply.code(404).send({ error: 'file_not_found', path: filePath });
+    }
+    if (!isTextContentType(target.contentType)) {
+      return reply.code(400).send({ error: 'not_editable', path: filePath });
+    }
+    const totalBytes = Object.values(manifest.files).reduce((sum, e) => sum + e.size, 0);
+    if (totalBytes > MAX_REBUILD_TOTAL_BYTES) {
+      return reply.code(413).send({ error: 'project_too_large' });
+    }
+
+    // Rebuild the full file set, swapping the edited file's bytes. Unchanged
+    // files re-put to the same content-addressed blobs (cheap), so this is a
+    // normal incremental version, identical in shape to a generated snapshot.
+    const newContent = Buffer.from(body.content, 'utf8');
+    const inputFiles = await Promise.all(
+      Object.keys(manifest.files).map(async (path) => ({
+        path,
+        bytes:
+          path === filePath
+            ? new Uint8Array(newContent)
+            : await deps.store!.readFile(manifest, path),
+      })),
+    );
+    const written = await deps.store.write(inputFiles);
+
+    // Carry forward engine/spec/tweaks from HEAD so the live-tweaks panel keeps
+    // working after a hand-edit; parent the new version on the current HEAD.
+    const head = project.currentSnapshotId
+      ? await deps.snapshotRepo.getById(project.currentSnapshotId)
+      : ((await deps.snapshotRepo.listByProject(id))[0] ?? null);
+    const snapshot = await deps.snapshotRepo.append({
+      projectId: id,
+      parentId: project.currentSnapshotId,
+      type: 'edit',
+      prompt: `Manual edit: ${filePath}`,
+      engine: project.engine ?? head?.engine ?? null,
+      gameSpec: head?.gameSpec ?? null,
+      tweakSchema: head?.tweakSchema ?? null,
+      filesManifestKey: written.manifestKey,
+      filesHash: written.filesHash,
+    });
+    await deps.repo.setCurrentSnapshot(id, snapshot.id, written.manifestKey);
+
+    return reply.send({
+      ok: true,
+      path: filePath,
+      size: newContent.byteLength,
+      manifestKey: written.manifestKey,
+      snapshotId: snapshot.id,
+      filesHash: written.filesHash,
+    });
   });
 
   // ── publish pipeline ──────────────────────────────────────────────────────

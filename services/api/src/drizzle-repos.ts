@@ -12,7 +12,12 @@ import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { ChatMessage, ChatRepo } from './chat-repo';
 import type { CreateProjectInput, Engine, Project, ProjectRepo, Visibility } from './repo';
 import type { CreateRunInput, Run, RunRepo, RunStats } from './run-repo';
-import type { SnapshotEngine, SnapshotEntry, SnapshotRepo } from './snapshot-repo';
+import type {
+  AppendSnapshotInput,
+  SnapshotEngine,
+  SnapshotEntry,
+  SnapshotRepo,
+} from './snapshot-repo';
 
 function slugify(name: string, id: string): string {
   const base = name
@@ -308,5 +313,52 @@ export class DrizzleSnapshotRepo implements SnapshotRepo {
       .from(schema.snapshots)
       .where(eq(schema.snapshots.id, snapshotId));
     return row ? rowToSnapshotEntry(row) : null;
+  }
+
+  /**
+   * Append a new snapshot version, allocating the next per-project `seq` under a
+   * project-row FOR UPDATE lock (mirrors the worker's finalizeRun completion so
+   * seq allocation can't collide with a concurrent generation). Retries once on
+   * the UNIQUE (project_id, seq) guard.
+   */
+  async append(input: AppendSnapshotInput): Promise<SnapshotEntry> {
+    const row = await this.db.transaction(async (tx) => {
+      // Serialize seq allocation + HEAD advance against concurrent writers.
+      await tx
+        .select({ id: schema.projects.id })
+        .from(schema.projects)
+        .where(eq(schema.projects.id, input.projectId))
+        .for('update');
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const [seqRow] = await tx
+          .select({ val: sql<number>`COALESCE(MAX(${schema.snapshots.seq}), -1)` })
+          .from(schema.snapshots)
+          .where(eq(schema.snapshots.projectId, input.projectId));
+        const nextSeq = (seqRow?.val ?? -1) + 1 + attempt;
+        try {
+          const [inserted] = await tx
+            .insert(schema.snapshots)
+            .values({
+              projectId: input.projectId,
+              ...(input.parentId != null ? { parentId: input.parentId } : {}),
+              seq: nextSeq,
+              type: input.type,
+              ...(input.prompt != null ? { prompt: input.prompt } : {}),
+              ...(input.gameSpec != null ? { gameSpec: input.gameSpec } : {}),
+              ...(input.engine != null ? { engine: input.engine } : {}),
+              ...(input.tweakSchema != null ? { tweakSchema: input.tweakSchema } : {}),
+              filesManifestKey: input.filesManifestKey,
+              filesHash: input.filesHash,
+            })
+            .returning();
+          if (inserted) return inserted;
+        } catch (insErr) {
+          if (attempt === 1) throw insErr;
+        }
+      }
+      throw new Error('snapshot append failed: seq allocation exhausted');
+    });
+    return rowToSnapshotEntry(row);
   }
 }

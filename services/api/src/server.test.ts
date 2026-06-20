@@ -15,6 +15,7 @@ import {
   buildServer,
   decideAffordability,
 } from './server';
+import { InMemorySnapshotRepo } from './snapshot-repo';
 
 function makeApp(overrides?: {
   bus?: InstanceType<typeof InMemoryEventBus>;
@@ -22,6 +23,7 @@ function makeApp(overrides?: {
   repo?: InstanceType<typeof InMemoryProjectRepo>;
   enqueue?: EnqueueFn;
   store?: SnapshotStore;
+  snapshotRepo?: InMemorySnapshotRepo;
   publishRepo?: InMemoryPublishRepo;
   hubRepo?: InMemoryHubRepo;
   adminToken?: string;
@@ -37,6 +39,7 @@ function makeApp(overrides?: {
     runRepo: overrides?.runRepo ?? new InMemoryRunRepo(),
     enqueue: overrides?.enqueue ?? (async () => {}),
     ...(overrides?.store !== undefined ? { store: overrides.store } : {}),
+    ...(overrides?.snapshotRepo !== undefined ? { snapshotRepo: overrides.snapshotRepo } : {}),
     ...(overrides?.publishRepo !== undefined ? { publishRepo: overrides.publishRepo } : {}),
     ...(overrides?.hubRepo !== undefined ? { hubRepo: overrides.hubRepo } : {}),
     ...(overrides?.adminToken !== undefined ? { adminToken: overrides.adminToken } : {}),
@@ -2678,5 +2681,333 @@ describe('password reset (6.2)', () => {
       payload: { email: 'a@b.io' },
     });
     expect(res.statusCode).toBe(503);
+  });
+});
+
+describe('project files (Files tab)', () => {
+  // 1x1 transparent PNG.
+  const PNG_BYTES = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+    'base64',
+  );
+
+  async function seedProject(opts?: { withSnapshot?: boolean }) {
+    const repo = new InMemoryProjectRepo();
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const snapshotRepo = new InMemorySnapshotRepo();
+    const project = await repo.create({ ownerId: 'alice', name: 'My Game', engine: 'phaser' });
+    const { manifestKey, filesHash } = await store.write([
+      { path: 'index.html', bytes: Buffer.from('<!doctype html><body>hi</body>') },
+      { path: 'main.js', bytes: Buffer.from('console.log("hi")') },
+      { path: 'assets/logo.png', bytes: new Uint8Array(PNG_BYTES) },
+    ]);
+    await repo.setCurrentManifestKey(project.id, manifestKey);
+    if (opts?.withSnapshot) {
+      const snap = await snapshotRepo.append({
+        projectId: project.id,
+        type: 'initial',
+        engine: 'phaser',
+        tweakSchema: { speed: { kind: 'number' } },
+        filesManifestKey: manifestKey,
+        filesHash,
+      });
+      await repo.setCurrentSnapshot(project.id, snap.id, manifestKey);
+    }
+    return { repo, store, snapshotRepo, project };
+  }
+
+  it('lists the current snapshot files with sizes + isText + engine', async () => {
+    const { repo, store, snapshotRepo, project } = await seedProject();
+    const app = makeApp({ repo, store, snapshotRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/files`,
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      files: Array<{ path: string; size: number; contentType: string; isText: boolean }>;
+      totalBytes: number;
+      engine: string | null;
+    };
+    expect(body.engine).toBe('phaser');
+    expect(body.files.map((f) => f.path)).toEqual(['assets/logo.png', 'index.html', 'main.js']);
+    const png = body.files.find((f) => f.path === 'assets/logo.png');
+    expect(png?.isText).toBe(false);
+    expect(body.files.find((f) => f.path === 'index.html')?.isText).toBe(true);
+    expect(body.totalBytes).toBeGreaterThan(0);
+  });
+
+  it('returns 409 when the project has no snapshot yet', async () => {
+    const repo = new InMemoryProjectRepo();
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const project = await repo.create({ ownerId: 'alice', name: 'Empty' });
+    const app = makeApp({ repo, store });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/files`,
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: string }).error).toBe('no_snapshot');
+  });
+
+  it('returns 404 to a non-owner', async () => {
+    const { repo, store, snapshotRepo, project } = await seedProject();
+    const app = makeApp({ repo, store, snapshotRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/files`,
+      headers: AS_BOB,
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('returns 503 when no store is configured', async () => {
+    const repo = new InMemoryProjectRepo();
+    const project = await repo.create({ ownerId: 'alice', name: 'x' });
+    const app = makeApp({ repo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/files`,
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(503);
+  });
+
+  it('reads a text file as utf-8', async () => {
+    const { repo, store, snapshotRepo, project } = await seedProject();
+    const app = makeApp({ repo, store, snapshotRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/files/main.js`,
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { encoding: string; content: string };
+    expect(body.encoding).toBe('utf-8');
+    expect(body.content).toBe('console.log("hi")');
+  });
+
+  it('reads a binary file as base64', async () => {
+    const { repo, store, snapshotRepo, project } = await seedProject();
+    const app = makeApp({ repo, store, snapshotRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/files/assets/logo.png`,
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { encoding: string; content: string };
+    expect(body.encoding).toBe('base64');
+    expect(Buffer.from(body.content, 'base64').equals(PNG_BYTES)).toBe(true);
+  });
+
+  it('404s an unknown file and 400s a traversal path', async () => {
+    const { repo, store, snapshotRepo, project } = await seedProject();
+    const app = makeApp({ repo, store, snapshotRepo });
+    const missing = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/files/nope.js`,
+      headers: AS_ALICE,
+    });
+    expect(missing.statusCode).toBe(404);
+    const traversal = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/files/..%2f..%2fetc%2fpasswd`,
+      headers: AS_ALICE,
+    });
+    expect(traversal.statusCode).toBe(400);
+  });
+
+  it('edits a text file → 200, new version, advanced HEAD, persisted content', async () => {
+    const { repo, store, snapshotRepo, project } = await seedProject({ withSnapshot: true });
+    const app = makeApp({ repo, store, snapshotRepo });
+    const before = await snapshotRepo.listByProject(project.id);
+    expect(before).toHaveLength(1);
+    const initialSnapshotId = before[0]?.id;
+
+    const newSource = 'console.log("edited")';
+    const put = await app.inject({
+      method: 'PUT',
+      url: `/v1/projects/${project.id}/files/main.js`,
+      headers: AS_ALICE,
+      payload: { content: newSource },
+    });
+    expect(put.statusCode).toBe(200);
+    const putBody = put.json() as {
+      ok: boolean;
+      path: string;
+      size: number;
+      snapshotId: string;
+      manifestKey: string;
+      filesHash: string;
+    };
+    expect(putBody.ok).toBe(true);
+    expect(putBody.path).toBe('main.js');
+    expect(putBody.size).toBe(Buffer.byteLength(newSource, 'utf8'));
+    expect(typeof putBody.filesHash).toBe('string');
+
+    // A new 'edit' snapshot was appended and HEAD advanced to it.
+    const after = await snapshotRepo.listByProject(project.id);
+    expect(after).toHaveLength(2);
+    const editSnap = after[0];
+    expect(editSnap?.type).toBe('edit');
+    expect(editSnap?.id).toBe(putBody.snapshotId);
+    // Parented on the prior HEAD, carries a descriptive prompt, and carries
+    // forward engine + tweak schema so the live-tweaks panel keeps working.
+    expect(editSnap?.parentId).toBe(initialSnapshotId);
+    expect(editSnap?.prompt).toBe('Manual edit: main.js');
+    expect(editSnap?.engine).toBe('phaser');
+    expect(editSnap?.tweakSchema).toEqual({ speed: { kind: 'number' } });
+    const proj = await repo.get(project.id);
+    expect(proj?.currentSnapshotId).toBe(putBody.snapshotId);
+    expect(proj?.currentManifestKey).toBe(putBody.manifestKey);
+
+    // Reading the file back returns the edited content; other files unchanged.
+    const read = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/files/main.js`,
+      headers: AS_ALICE,
+    });
+    expect((read.json() as { content: string }).content).toBe(newSource);
+    const index = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/files/index.html`,
+      headers: AS_ALICE,
+    });
+    expect((index.json() as { content: string }).content).toContain('hi');
+  });
+
+  it('edit flows through to the project preview (HEAD) immediately', async () => {
+    const { repo, store, snapshotRepo, project } = await seedProject({ withSnapshot: true });
+    const app = makeApp({ repo, store, snapshotRepo });
+
+    const before = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/preview/`,
+      headers: AS_ALICE,
+    });
+    expect(before.body).toContain('hi');
+    expect(before.body).not.toContain('EDITED-MARKER');
+
+    const put = await app.inject({
+      method: 'PUT',
+      url: `/v1/projects/${project.id}/files/index.html`,
+      headers: AS_ALICE,
+      payload: { content: '<!doctype html><body>EDITED-MARKER</body>' },
+    });
+    expect(put.statusCode).toBe(200);
+
+    const after = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/preview/`,
+      headers: AS_ALICE,
+    });
+    expect(after.statusCode).toBe(200);
+    expect(after.body).toContain('EDITED-MARKER');
+  });
+
+  it('round-trips a file path containing a space (percent-encoded)', async () => {
+    const repo = new InMemoryProjectRepo();
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const snapshotRepo = new InMemorySnapshotRepo();
+    const project = await repo.create({ ownerId: 'alice', name: 'Spaces', engine: 'phaser' });
+    const { manifestKey } = await store.write([
+      { path: 'index.html', bytes: Buffer.from('<body>hi</body>') },
+      { path: 'assets/my sprite.js', bytes: Buffer.from('// spaced') },
+    ]);
+    await repo.setCurrentManifestKey(project.id, manifestKey);
+    const app = makeApp({ repo, store, snapshotRepo });
+
+    // The client encodes each segment with encodeURIComponent; Fastify decodes the
+    // wildcard back to the exact manifest key.
+    const read = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/files/assets/my%20sprite.js`,
+      headers: AS_ALICE,
+    });
+    expect(read.statusCode).toBe(200);
+    const body = read.json() as { path: string; content: string };
+    expect(body.path).toBe('assets/my sprite.js');
+    expect(body.content).toBe('// spaced');
+  });
+
+  it('refuses editing a binary file (400 not_editable)', async () => {
+    const { repo, store, snapshotRepo, project } = await seedProject({ withSnapshot: true });
+    const app = makeApp({ repo, store, snapshotRepo });
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/v1/projects/${project.id}/files/assets/logo.png`,
+      headers: AS_ALICE,
+      payload: { content: 'not a png' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: string }).error).toBe('not_editable');
+  });
+
+  it('404s editing an unknown file and 400s missing content', async () => {
+    const { repo, store, snapshotRepo, project } = await seedProject({ withSnapshot: true });
+    const app = makeApp({ repo, store, snapshotRepo });
+    const missing = await app.inject({
+      method: 'PUT',
+      url: `/v1/projects/${project.id}/files/nope.js`,
+      headers: AS_ALICE,
+      payload: { content: 'x' },
+    });
+    expect(missing.statusCode).toBe(404);
+    const noContent = await app.inject({
+      method: 'PUT',
+      url: `/v1/projects/${project.id}/files/main.js`,
+      headers: AS_ALICE,
+      payload: {},
+    });
+    expect(noContent.statusCode).toBe(400);
+    expect((noContent.json() as { error: string }).error).toBe('content_required');
+  });
+
+  it('503s a write when snapshotRepo is not configured', async () => {
+    const { repo, store, project } = await seedProject();
+    const app = makeApp({ repo, store }); // no snapshotRepo
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/v1/projects/${project.id}/files/main.js`,
+      headers: AS_ALICE,
+      payload: { content: 'x' },
+    });
+    expect(res.statusCode).toBe(503);
+  });
+
+  it('serves the project preview (HEAD) to the owner and 404s others', async () => {
+    const { repo, store, snapshotRepo, project } = await seedProject({ withSnapshot: true });
+    const app = makeApp({ repo, store, snapshotRepo });
+    const ok = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/preview/`,
+      headers: AS_ALICE,
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.headers['content-type']).toContain('text/html');
+    expect(ok.body).toContain('hi');
+
+    const forbidden = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/preview/`,
+      headers: AS_BOB,
+    });
+    expect(forbidden.statusCode).toBe(404);
+  });
+
+  it('404s the project preview when there is no snapshot', async () => {
+    const repo = new InMemoryProjectRepo();
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const project = await repo.create({ ownerId: 'alice', name: 'Empty' });
+    const app = makeApp({ repo, store });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/preview/`,
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(404);
   });
 });

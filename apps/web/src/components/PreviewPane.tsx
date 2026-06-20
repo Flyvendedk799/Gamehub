@@ -12,6 +12,7 @@ import {
 } from '@/lib/iframe-bridge';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ControlsPanel } from './ControlsPanel';
+import { FilesPanel } from './FilesPanel';
 
 type TweakKind = 'color' | 'number' | 'boolean';
 
@@ -39,6 +40,9 @@ interface PreviewPaneProps {
   /** Legacy rescue: fire one scoped generation to wire the controls layer into a
    *  game that didn't declare it. Surfaced in the Controls tab's empty state. */
   onMapControls?: () => void;
+  /** Fired after a manual file save in the Files tab so the parent can repoint
+   *  the live preview at the project's just-edited HEAD and refresh versions. */
+  onFileSaved?: () => void;
 }
 
 export function PreviewPane({
@@ -49,16 +53,38 @@ export function PreviewPane({
   tweakSchema,
   projectId,
   onMapControls,
+  onFileSaved,
 }: PreviewPaneProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [showTweaks, setShowTweaks] = useState(false);
   const [tweakValues, setTweakValues] = useState<Record<string, string | number | boolean>>({});
-  const [view, setView] = useState<'preview' | 'controls'>('preview');
+  const [view, setView] = useState<'preview' | 'controls' | 'files'>('preview');
   const [controlsManifest, setControlsManifest] = useState<ControlsManifest | null>(null);
+  // Tracks unsaved edits in the Files tab so switching tabs can't silently
+  // discard them (the FilesPanel bubbles this up via onDirtyChange).
+  const [filesDirty, setFilesDirty] = useState(false);
 
-  // Reset tweak values + controls when URL changes (new game loaded)
-  // biome-ignore lint/correctness/useExhaustiveDependencies: previewUrl is the intended trigger — reset tweak state whenever a new game URL loads
+  // Guarded tab switch: confirm before leaving the Files tab with unsaved edits.
+  const switchView = useCallback(
+    (next: 'preview' | 'controls' | 'files') => {
+      if (view === 'files' && next !== 'files' && filesDirty) {
+        if (!window.confirm('Discard unsaved changes?')) return;
+        setFilesDirty(false);
+      }
+      setView(next);
+    },
+    [view, filesDirty],
+  );
+
+  // Reset tweak values + controls when a NEW game loads. A manual file save (or a
+  // revert) repoints previewUrl at the project's HEAD preview
+  // (`/v1/projects/:id/preview/`) to refresh the iframe — that must NOT kick the
+  // user out of the Files tab or wipe their controls. So only do the full reset
+  // when the URL is NOT a project-preview URL: that covers null + a fresh build's
+  // run preview (`/v1/runs/.../preview/`), the real "new game" cases.
   useEffect(() => {
+    const isProjectPreview = Boolean(previewUrl) && previewUrl?.includes('/v1/projects/');
+    if (isProjectPreview) return; // save/revert refresh of the same project — keep view + controls
     setTweakValues({});
     setShowTweaks(false);
     setControlsManifest(null);
@@ -182,7 +208,7 @@ export function PreviewPane({
             <div className="flex rounded-md border border-[#222222] overflow-hidden text-[10px] font-mono">
               <button
                 type="button"
-                onClick={() => setView('preview')}
+                onClick={() => switchView('preview')}
                 aria-pressed={view === 'preview'}
                 className={`px-2.5 py-1 transition-colors ${
                   view === 'preview'
@@ -194,7 +220,7 @@ export function PreviewPane({
               </button>
               <button
                 type="button"
-                onClick={() => setView('controls')}
+                onClick={() => switchView('controls')}
                 aria-pressed={view === 'controls'}
                 className={`px-2.5 py-1 border-l border-[#222222] transition-colors ${
                   view === 'controls'
@@ -203,6 +229,18 @@ export function PreviewPane({
                 }`}
               >
                 controls
+              </button>
+              <button
+                type="button"
+                onClick={() => switchView('files')}
+                aria-pressed={view === 'files'}
+                className={`px-2.5 py-1 border-l border-[#222222] transition-colors ${
+                  view === 'files'
+                    ? 'bg-[#6366f1]/20 text-[#818cf8]'
+                    : 'bg-[#1a1a1a] text-[#52525b] hover:text-[#a1a1aa]'
+                }`}
+              >
+                files
               </button>
             </div>
           )}
@@ -271,6 +309,19 @@ export function PreviewPane({
                 // reverts stale manual binds to the new game's declared defaults.
                 storageKey={`pf:controls:${previewUrl ?? projectId}`}
                 {...(onMapControls ? { onMapWithAI: onMapControls } : {})}
+              />
+            </div>
+          )}
+
+          {/* Files tab — overlays the (still-running) game like Controls does */}
+          {view === 'files' && previewUrl && !hasError && (
+            <div className="absolute inset-0 z-10 bg-[#0a0a0a]">
+              <FilesPanel
+                projectId={projectId ?? ''}
+                previewUrl={previewUrl}
+                isBuilding={isBuilding}
+                onDirtyChange={setFilesDirty}
+                {...(onFileSaved ? { onFileSaved } : {})}
               />
             </div>
           )}
