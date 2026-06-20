@@ -17,6 +17,7 @@ describe('assertGameInvariants', () => {
           path: 'src/main.js',
           content: `
             let score = 0;
+            window.__game.controls.define({ actions: [{ id: 'restart', label: 'Restart', keys: ['KeyR'] }] });
             function onCollision() {
               score += 10;
               new Audio('coin.wav').play();
@@ -106,6 +107,7 @@ describe('assertGameInvariants', () => {
           path: 'src/main.js',
           content: `
             let score = 0;
+            window.__game.controls.define({ actions: [{ id: 'restart', label: 'Restart', keys: ['KeyR'] }] });
             function onCollision() { score += 1; new Audio().play(); }
             function onGameOver() {}
             window.addEventListener('keydown', (e) => { if (e.code === 'KeyR') score = 0; });
@@ -149,6 +151,7 @@ describe('makeAssertGameInvariantsTool', () => {
           path: 'src/main.js',
           content: `
             let score = 0;
+            window.__game.controls.define({ actions: [{ id: 'restart', label: 'Restart', keys: ['KeyR'] }] });
             function onCollision() { score += 1; new Audio().play(); }
             function onGameOver() {}
             window.addEventListener('keydown', (e) => { if (e.code === 'KeyR') score = 0; });
@@ -158,7 +161,7 @@ describe('makeAssertGameInvariantsTool', () => {
     });
     const result = await tool.execute('call-2', {});
     const text = result.content?.[0]?.type === 'text' ? result.content[0].text : '';
-    expect(text).toContain('All four game invariants present');
+    expect(text).toContain('game invariants present');
     expect(result.details?.ok).toBe(true);
   });
 });
@@ -265,8 +268,40 @@ describe('assertGameInvariants brawler-specific checks (Sequence 6)', () => {
       deps([{ path: 'src/main.js', content: `${baseFour}\nrotation.y = -playerAngle;` }]),
     );
     expect(result.issues.map((i) => i.invariant)).not.toContain('brawler-aim-hitbox-parity');
-    expect(result.checked).toEqual(['restart', 'fail-state', 'score-or-state', 'feedback']);
+    expect(result.checked).toEqual([
+      'restart',
+      'fail-state',
+      'score-or-state',
+      'feedback',
+      'controls',
+    ]);
     expect(result.genre).toBeNull();
+  });
+
+  it('controls invariant: warns when keyboard is read directly without declaring controls', () => {
+    const result = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: `const cursors = this.input.keyboard.createCursorKeys();
+            if (cursors.left.isDown) player.x -= 2;`,
+        },
+      ]),
+    );
+    expect(result.issues.map((i) => i.invariant)).toContain('controls');
+  });
+
+  it('controls invariant: no warning when the game declares controls + reads via the layer', () => {
+    const result = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: `window.__game.controls.define({ actions: [{ id: 'left', label: 'Left', keys: ['ArrowLeft'] }] });
+            if (window.__game.controls.isDown('left')) player.x -= 2;`,
+        },
+      ]),
+    );
+    expect(result.issues.map((i) => i.invariant)).not.toContain('controls');
   });
 });
 

@@ -34,8 +34,11 @@ interface PreviewPaneProps {
   errorMessage?: string;
   /** Tweak schema for the current snapshot — drives the live-tweak panel. */
   tweakSchema?: TweakSchema | null;
-  /** Project id — keys per-project saved key bindings (WS-A Controls). */
+  /** Project id — fallback storage key for saved key bindings (WS-A Controls). */
   projectId?: string;
+  /** Legacy rescue: fire one scoped generation to wire the controls layer into a
+   *  game that didn't declare it. Surfaced in the Controls tab's empty state. */
+  onMapControls?: () => void;
 }
 
 export function PreviewPane({
@@ -45,6 +48,7 @@ export function PreviewPane({
   errorMessage,
   tweakSchema,
   projectId,
+  onMapControls,
 }: PreviewPaneProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [showTweaks, setShowTweaks] = useState(false);
@@ -247,7 +251,10 @@ export function PreviewPane({
               <ControlsPanel
                 manifest={controlsManifest}
                 onApply={applyControls}
-                storageKey={`pf:controls:${projectId ?? previewUrl}`}
+                // Key per-RUN (previewUrl carries the runId) so a fresh generation
+                // reverts stale manual binds to the new game's declared defaults.
+                storageKey={`pf:controls:${previewUrl ?? projectId}`}
+                {...(onMapControls ? { onMapWithAI: onMapControls } : {})}
               />
             </div>
           )}
