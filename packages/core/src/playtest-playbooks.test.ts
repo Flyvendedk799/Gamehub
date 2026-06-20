@@ -25,21 +25,47 @@ describe('getPlaytestPlaybook', () => {
     expect(pb).toBeNull();
   });
 
-  it('listSupportedGenres includes the 6 bundled cases', () => {
+  it('listSupportedGenres includes the bundled cases (original 6 + shmup/racing/rpg/roguelike/tps)', () => {
     const genres = listSupportedGenres();
-    expect(genres).toContain('platformer');
-    expect(genres).toContain('fighting');
-    expect(genres).toContain('fps');
-    expect(genres).toContain('puzzle');
-    expect(genres).toContain('topdown_arcade');
-    expect(genres).toContain('runner');
+    for (const g of [
+      'platformer',
+      'fighting',
+      'fps',
+      'puzzle',
+      'topdown_arcade',
+      'runner',
+      'shmup',
+      'racing',
+      'rpg',
+      'roguelike',
+      'tps',
+    ] as const) {
+      expect(genres).toContain(g);
+    }
+  });
+
+  it('every bundled playbook predicate is well-formed (parses without throwing)', () => {
+    for (const genre of listSupportedGenres()) {
+      const pb = getPlaytestPlaybook(genre);
+      for (const step of pb?.steps ?? []) {
+        for (const p of step.predicates ?? []) {
+          // The evaluator requires a non-empty field + a valid op; a typo here
+          // would silently make a playbook always-fail → force-accept churn.
+          expect(typeof p.field).toBe('string');
+          expect(p.field.length).toBeGreaterThan(0);
+          expect(['increased', 'decreased', 'changed', 'unchanged', 'eq', 'gt', 'lt']).toContain(
+            p.op,
+          );
+        }
+      }
+    }
   });
 });
 
 describe('playbook machine-checkable predicates (Phase 5.4)', () => {
   /** Gather every step predicate in a playbook (the harness flattens the
    *  per-step lists into one set against the run's trace). */
-  function allPredicates(genre: 'topdown_arcade' | 'fighting') {
+  function allPredicates(genre: 'topdown_arcade' | 'fighting' | 'shmup') {
     const pb = getPlaytestPlaybook(genre);
     return (pb?.steps ?? []).flatMap((s) => s.predicates ?? []);
   }
@@ -71,6 +97,36 @@ describe('playbook machine-checkable predicates (Phase 5.4)', () => {
     const score = scorePlaytest(trace, allPredicates('topdown_arcade'));
     expect(score.pass).toBe(false);
     expect(score.results.some((r) => !r.pass && /playerPos.x/.test(r.reason))).toBe(true);
+  });
+
+  it('a CORRECT shmup trace (firing raises score, ship moves) passes', () => {
+    const trace: PlaytestTrace = {
+      baseline: { score: 0, playerPos: { x: 270 } },
+      frames: [
+        { stepIndex: 0, snapshot: { score: 0, playerPos: { x: 270 } } }, // settle
+        { stepIndex: 1, snapshot: { score: 0, playerPos: { x: 270 } } }, // fire (in flight)
+        { stepIndex: 2, snapshot: { score: 100, playerPos: { x: 270 } } }, // hit → score rose
+        { stepIndex: 3, snapshot: { score: 100, playerPos: { x: 200 } } }, // left
+        { stepIndex: 4, snapshot: { score: 100, playerPos: { x: 260 } } }, // right
+      ],
+    };
+    expect(scorePlaytest(trace, allPredicates('shmup')).pass).toBe(true);
+  });
+
+  it('the shmup playbook flags "bullets never hit enemies" (score stays 0) deterministically', () => {
+    const trace: PlaytestTrace = {
+      baseline: { score: 0, playerPos: { x: 270 } },
+      frames: [
+        { stepIndex: 0, snapshot: { score: 0, playerPos: { x: 270 } } },
+        { stepIndex: 1, snapshot: { score: 0, playerPos: { x: 270 } } },
+        { stepIndex: 2, snapshot: { score: 0, playerPos: { x: 270 } } }, // fired, but NO hit → score flat
+        { stepIndex: 3, snapshot: { score: 0, playerPos: { x: 200 } } },
+        { stepIndex: 4, snapshot: { score: 0, playerPos: { x: 260 } } },
+      ],
+    };
+    const score = scorePlaytest(trace, allPredicates('shmup'));
+    expect(score.pass).toBe(false);
+    expect(score.results.some((r) => !r.pass && /score/.test(r.reason))).toBe(true);
   });
 
   it('the fighting playbook flags the c44763af sign-error class (D should move +x)', () => {

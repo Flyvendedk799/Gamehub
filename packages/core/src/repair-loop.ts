@@ -285,7 +285,13 @@ export function decideRepairAction(
   // spec is treated as completable: we have no declared escape, so honour the
   // verdict.
   if (spec !== null && spec !== undefined && !isCompletableSpec(spec)) {
-    return { kind: 'ship', reason: 'skipped_non_completable' };
+    // The completability/predicate gate is skipped for creative / non-completable
+    // specs — BUT every game must still BOOT. A fatal boot error (window.__game
+    // never appeared, an uncaught throw) falls through to the repair logic below;
+    // only a cleanly-booting non-completable game ships here.
+    if (verdict.fatalErrors.length === 0) {
+      return { kind: 'ship', reason: 'skipped_non_completable' };
+    }
   }
   // (2) No deterministic evidence to judge — ship as-is rather than claim a
   // pass we can't substantiate or repair blind. Checked BEFORE the pass branch

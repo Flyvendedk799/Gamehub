@@ -548,12 +548,17 @@ export async function runGeneration(
     if (browserJobs === undefined) return null;
     const spec = state.spec;
     if (spec === null) return null;
-    const plan = selectGamePlaytestPlan(spec.genre);
-    if (plan === null || plan.predicates.length === 0) return null;
     const entry = tree.view('index.html');
     if (entry === null) return null;
 
-    const playVerdict = await browserJobs.playtest(entry.content, plan.steps);
+    const plan = selectGamePlaytestPlan(spec.genre);
+    const hasPredicates = plan !== null && plan.predicates.length > 0;
+
+    // The boot check runs REGARDLESS of whether the genre has playbook
+    // predicates. Previously a genre with no playbook returned null here and
+    // shipped 'no_verdict' — so a game that never booted (window.__game absent)
+    // went out as if it were fine (the racing booted=0 case). Now a boot failure
+    // always produces a verdict → the repair loop gets a round to fix it.
     const rvVerdict = await browserJobs.runtimeVerify(entry.content);
     if (rvVerdict !== null) {
       // Keep the eval observation current with this attempt's boot result so
@@ -569,11 +574,18 @@ export async function runGeneration(
     if (rvVerdict !== null && !rvVerdict.hasGameContract) {
       fatalErrors.push('Runtime load: window.__game never appeared — the game did not boot.');
     }
+
+    // Nothing to gate on: the game booted cleanly AND the genre has no playbook
+    // predicates → honest no_verdict (ship as-is).
+    if (fatalErrors.length === 0 && !hasPredicates) return null;
+
+    const playVerdict =
+      hasPredicates && plan !== null ? await browserJobs.playtest(entry.content, plan.steps) : null;
     const observation: AttemptObservation = {
       trace: playVerdict === null ? null : traceFromPlaytestResult(playVerdict),
       fatalErrors,
     };
-    return buildRepairVerdict(observation, plan.predicates);
+    return buildRepairVerdict(observation, hasPredicates && plan !== null ? plan.predicates : []);
   };
 
   // Round 0 + repair rounds. `history` carries the prior transcript forward so
@@ -666,6 +678,36 @@ export async function runGeneration(
       juiceScore: lastRuntimeVerify?.juiceScore ?? null,
       runtimeBooted: lastRuntimeVerify === undefined ? null : lastRuntimeVerify.booted,
     };
+    // Per-predicate telemetry — WHICH predicates passed/failed (+ the
+    // observed-vs-expected reason on failures), so a quality regression is
+    // diagnosable from the logs/data rather than re-derived by hand.
+    const predicateSummary =
+      score === null
+        ? 'none'
+        : score.results
+            .map((r) => `${r.predicate.field}:${r.predicate.op}=${r.pass ? 'ok' : 'FAIL'}`)
+            .join(' ');
+    console.log(
+      `[run-quality] genre=${metrics.genre ?? 'n/a'} booted=${metrics.runtimeBooted} ` +
+        `ship=${shipReason} forceAccept=${metrics.forceAccept} repair=${repairRounds} ` +
+        `playbook=${metrics.playbookPass}/${metrics.playbookTotal} juice=${metrics.juiceScore ?? 'n/a'} ` +
+        `predicates=[${predicateSummary}]`,
+    );
+    if (score !== null && score.failures > 0) {
+      for (const r of score.results.filter((x) => !x.pass)) {
+        console.log(`[run-quality]   FAIL ${r.predicate.field} ${r.predicate.op}: ${r.reason}`);
+      }
+    }
+    if (
+      (metrics.runtimeBooted === false || shipReason === 'no_verdict') &&
+      metrics.playbookTotal === 0
+    ) {
+      // Surface the coverage gap that the report data revealed: a genre shipping
+      // with no deterministic gate. Makes the "needs a playbook" signal greppable.
+      console.log(
+        `[run-quality]   COVERAGE-GAP genre=${metrics.genre ?? 'n/a'} has no playbook predicates (shipped on boot+juice only).`,
+      );
+    }
     try {
       await ports.recordRunQuality(metrics);
     } catch (err) {
