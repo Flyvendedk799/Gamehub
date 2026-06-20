@@ -76,6 +76,7 @@ const THREE_SKILLS: ReadonlyArray<GameSkillSpec> = [
   { name: 'three/knockback.jsx', engine: 'three', category: 'feel' },
   // Pre-existing engine scaffolding (previously dead).
   { name: 'three/audio-cue.jsx', engine: 'three', category: 'engine' },
+  { name: 'three/camera-controller.jsx', engine: 'three', category: 'engine' },
   { name: 'three/controller.jsx', engine: 'three', category: 'engine' },
   { name: 'three/game-loop.jsx', engine: 'three', category: 'engine' },
   { name: 'three/input-handler.jsx', engine: 'three', category: 'engine' },

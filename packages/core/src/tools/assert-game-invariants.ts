@@ -66,6 +66,7 @@ export type GameInvariant =
   | 'score-or-state'
   | 'feedback'
   | 'controls'
+  | 'camera-relative'
   | 'brawler-combo'
   | 'brawler-hitstop'
   | 'brawler-per-attack-limb'
@@ -160,6 +161,38 @@ const KEYBOARD_INPUT_PATTERNS: readonly RegExp[] = [
   /\bcursors?\s*\.\s*(left|right|up|down)/i,
 ];
 const CONTROLS_DEFINE_PATTERN = /\bcontrols\s*\.\s*define\s*\(/;
+
+// Camera-relative movement (3D's #1 recurring bug). A 3D game with a MOVING
+// camera (follow / first-person / third-person) that applies movement input to
+// position WITHOUT projecting onto the camera basis ships controls that "feel
+// inverted/mismatched" the moment the camera turns. We only flag when the camera
+// actually moves AND movement hits position AND no camera-relative transform is
+// present — a fixed-camera 3D game (isometric / locked) is unaffected.
+const IS_3D_PATTERNS: readonly RegExp[] = [
+  /\bWebGLRenderer\b/,
+  /\bPerspectiveCamera\b/,
+  /THREE\.Scene\b/,
+];
+const CAMERA_DYNAMIC_PATTERNS: readonly RegExp[] = [
+  // Per-frame camera motion (follow / look) — NOT a one-time `.set` at setup, so
+  // a static/locked camera isn't flagged.
+  /camera\s*\.\s*lookAt\s*\(/,
+  /camera\s*\.\s*position\s*\.\s*(lerp|copy|add|addScaledVector)\b/,
+  /camera\s*\.\s*rotation\s*\.\s*[xyz]/,
+];
+const MOVE_TO_POSITION_PATTERNS: readonly RegExp[] = [
+  /\.\s*position\s*\.\s*(add|addScaledVector)\s*\(/,
+  /\.\s*position\s*\.\s*[xyz]\s*[+\-]=/,
+];
+const CAMERA_RELATIVE_PATTERNS: readonly RegExp[] = [
+  /getWorldDirection\s*\(/,
+  /applyQuaternion\s*\(/,
+  /camera\s*\.\s*quaternion/,
+  /setFromMatrixColumn\s*\(/,
+  /crossVectors\s*\(/,
+  /\bOrbitControls\b|\bPointerLockControls\b/,
+  /makeCameraController\s*\(/,
+];
 
 function anyMatch(source: string, patterns: readonly RegExp[]): boolean {
   return patterns.some((re) => re.test(source));
@@ -284,6 +317,21 @@ export function assertGameInvariants(
       message:
         'Keyboard input is read directly without declaring a controls scheme. The runtime layer is already present — call window.__game.controls.define({ actions: [{ id, label, keys: ["ArrowLeft","KeyA"] }, …] }) and read input via controls.isDown(id) / controls.on(id, fn). This populates the builder Controls tab and lets players rebind keys live; reading cursors/keydown directly bypasses it, so the controls are invisible and unmappable.',
     });
+  }
+  if (anyMatch(source, IS_3D_PATTERNS)) {
+    checked.push('camera-relative');
+    if (
+      anyMatch(source, CAMERA_DYNAMIC_PATTERNS) &&
+      anyMatch(source, MOVE_TO_POSITION_PATTERNS) &&
+      !anyMatch(source, CAMERA_RELATIVE_PATTERNS)
+    ) {
+      issues.push({
+        invariant: 'camera-relative',
+        severity: 'warn',
+        message:
+          'A 3D game with a moving camera applies movement directly to world position with no camera-basis transform — the controls will feel inverted/mismatched the moment the camera turns (3D\'s #1 bug). Project input onto the camera basis: camera.getWorldDirection(fwd); fwd.y=0; fwd.normalize(); right.crossVectors(fwd, UP); move = fwd*forward + right*strafe. Or adapt view_game_feel({ name: "three/camera-controller.jsx" }). Also clamp mouse-look pitch and keep sensitivity ~0.002 rad/px so the camera is not springy.',
+      });
+    }
   }
 
   const genre = opts.genre ?? null;
