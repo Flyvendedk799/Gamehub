@@ -61,6 +61,15 @@ window.addEventListener('beforeunload', () => renderer.dispose());
 - Gamepad: `navigator.getGamepads()` polled in the RAF loop.
 - Pointer lock (FPS-style): the game-files iframe sandbox grants `allow-pointer-lock` + `allow-fullscreen`. Acquire via `canvas.requestPointerLock()` on a user gesture, BUT after Esc-driven exit Chromium throws `SecurityError: Pointer lock cannot be acquired immediately after the user has exited the lock` if you re-acquire within ~1.25s. Wait for at least 1250 ms after a `pointerlockchange` exit before re-requesting. If acquire is rejected (sandbox policy, user denial, or cooldown active), fall back to tracking pointer deltas via `pointermove` while a button is held — `movementX/Y` is non-zero on Chromium even without an active lock.
 
+## Camera + movement (3D's #1 failure mode — get this right)
+
+If the camera can move (first-person OR third-person / follow), this is the single most common 3D bug and it makes the whole game feel broken:
+
+- **Move camera-RELATIVE, never world-relative.** Build the move direction from the camera's OWN basis, not raw world axes. Safe pattern (no sign math to get wrong): `camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize(); right.crossVectors(fwd, new THREE.Vector3(0,1,0)).normalize(); move.copy(fwd).multiplyScalar(forwardInput).addScaledVector(right, strafeInput)`. Applying `(strafe, 0, forward)` straight to `position` is the bug where "the controls feel inverted/mismatched" the moment the camera turns — world +z stops being "up the screen", so WASD no longer matches what the player sees.
+- **Mouse-look = yaw + pitch, with pitch CLAMPED.** Accumulate `yaw -= movementX * s; pitch -= movementY * s` and clamp pitch to ~[-1.45, 1.45] rad so the camera can never flip / gimbal-lock (no vertical look is the other half of this complaint). Keep sensitivity `s` LOW and CONSTANT (~0.002 rad/px) — never multiply mouse deltas by large numbers or by `dt`; that is the "way too springy / extreme" feel.
+- **Drive the camera from the MOUSE, not the player's heading.** A follow camera that re-aims itself to the player's facing every frame swings unpredictably and re-creates the mismatch. Yaw/pitch come from the pointer; the player turns to face their movement/target independently of the camera.
+- **Don't reinvent it.** `view_game_feel({ name: 'three/camera-controller.jsx' })` is a vetted controller that does ALL of the above — camera-relative `moveVector(strafe, forward)`, clamped mouse-look, smooth (non-springy) follow, and the pointer-lock + drag fallback. Adapt it instead of hand-rolling camera math.
+
 ## Asset loading
 
 ```js

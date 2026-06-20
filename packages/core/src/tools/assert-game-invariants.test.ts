@@ -303,6 +303,57 @@ describe('assertGameInvariants brawler-specific checks (Sequence 6)', () => {
     );
     expect(result.issues.map((i) => i.invariant)).not.toContain('controls');
   });
+
+  it('camera-relative: warns on a 3D moving-camera game with world-relative movement (the real bug)', () => {
+    const result = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: `const renderer = new THREE.WebGLRenderer();
+            const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+            const input = new THREE.Vector3(strafe, 0, forward);
+            player.position.addScaledVector(input, speed * dt);
+            camera.position.lerp(desired, 0.1);
+            camera.lookAt(player.position);`,
+        },
+      ]),
+    );
+    expect(result.issues.map((i) => i.invariant)).toContain('camera-relative');
+  });
+
+  it('camera-relative: no warning when movement uses the camera basis', () => {
+    const result = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: `const renderer = new THREE.WebGLRenderer();
+            const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+            camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
+            right.crossVectors(fwd, UP).normalize();
+            const move = fwd.multiplyScalar(forward).addScaledVector(right, strafe);
+            player.position.addScaledVector(move, speed * dt);
+            camera.lookAt(player.position);`,
+        },
+      ]),
+    );
+    expect(result.issues.map((i) => i.invariant)).not.toContain('camera-relative');
+  });
+
+  it('camera-relative: skips a fixed-camera 3D game', () => {
+    const result = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: `const renderer = new THREE.WebGLRenderer();
+            const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+            camera.position.set(0, 12, 12);
+            const input = new THREE.Vector3(strafe, 0, forward);
+            player.position.addScaledVector(input, speed * dt);`,
+        },
+      ]),
+    );
+    expect(result.issues.map((i) => i.invariant)).not.toContain('camera-relative');
+  });
 });
 
 describe('assert_game_invariants tool (genre param wiring)', () => {
