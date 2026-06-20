@@ -370,3 +370,60 @@ describe('assert_game_invariants tool (genre param wiring)', () => {
     expect(details.issues.map((i) => i.invariant)).toContain('brawler-aim-hitbox-parity');
   });
 });
+
+describe('assertGameInvariants — difficulty escalation (genre-gated)', () => {
+  // A complete game (restart + fail + score + feedback + controls) so the ONLY
+  // thing the escalation check can flag is the absence of difficulty ramp.
+  const COMPLETE_BASE = `
+    window.__game.controls.define({ actions: [{ id: 'fire', label: 'Fire', keys: ['Space'] }] });
+    let score = 0, lives = 3;
+    function update() { if (window.__game.controls.isDown('fire')) shoot(); }
+    function onHit() { score += 1; new Audio('hit.wav').play(); camera.shake(); }
+    function tick() { if (lives <= 0) restart(); }
+    function restart() { score = 0; lives = 3; }
+  `;
+
+  it('warns a flat shooter that never gets harder', () => {
+    const result = assertGameInvariants(deps([{ path: 'src/main.js', content: COMPLETE_BASE }]), {
+      genre: 'shooter',
+    });
+    expect(result.checked).toContain('escalation');
+    expect(result.issues.map((i) => i.invariant)).toContain('escalation');
+  });
+
+  it('warns a flat tower-defense + survival', () => {
+    for (const genre of ['tower-defense', 'survival', 'runner'] as const) {
+      const result = assertGameInvariants(deps([{ path: 'src/main.js', content: COMPLETE_BASE }]), {
+        genre,
+      });
+      expect(result.issues.map((i) => i.invariant), genre).toContain('escalation');
+    }
+  });
+
+  it('passes when the wave-spawner skill is used', () => {
+    const content = `${COMPLETE_BASE}\n const sys = createWaveSystem(scene, { spawn });`;
+    const result = assertGameInvariants(deps([{ path: 'src/main.js', content }]), {
+      genre: 'shooter',
+    });
+    expect(result.checked).toContain('escalation');
+    expect(result.issues.map((i) => i.invariant)).not.toContain('escalation');
+  });
+
+  it('passes when a geometric difficulty ramp is present', () => {
+    const content = `${COMPLETE_BASE}\n const diff = 1.15 ** wave; enemySpeed = base * diff;`;
+    const result = assertGameInvariants(deps([{ path: 'src/main.js', content }]), {
+      genre: 'survival',
+    });
+    expect(result.issues.map((i) => i.invariant)).not.toContain('escalation');
+  });
+
+  it('does NOT apply the escalation check to genres that pace differently', () => {
+    for (const genre of ['puzzle', 'brawler', 'racer'] as const) {
+      const result = assertGameInvariants(deps([{ path: 'src/main.js', content: COMPLETE_BASE }]), {
+        genre,
+      });
+      expect(result.checked, genre).not.toContain('escalation');
+      expect(result.issues.map((i) => i.invariant), genre).not.toContain('escalation');
+    }
+  });
+});
