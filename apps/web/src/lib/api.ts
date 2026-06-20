@@ -673,7 +673,12 @@ export async function getMe(): Promise<MeResponse> {
 
 // ─── Account settings ───────────────────────────────────────────────────────
 
-export type AccountProvider = 'platform' | 'anthropic' | 'openai';
+export type AccountProvider =
+  | 'platform'
+  | 'anthropic'
+  | 'openai'
+  | 'claude-subscription'
+  | 'codex-subscription';
 
 export interface AccountProviderState {
   provider: AccountProvider;
@@ -683,6 +688,8 @@ export interface AccountProviderState {
   defaultModelId: string;
   active: boolean;
   keyHelpUrl?: string;
+  /** True for the subscription credentials (no pasted key — connect instead). */
+  subscription?: boolean;
 }
 
 export interface AccountSettingsResponse {

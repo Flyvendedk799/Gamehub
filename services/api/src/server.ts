@@ -48,8 +48,10 @@ import {
   type AccountRepo,
   type AccountSettings,
   type ByokProvider,
+  type SubscriptionProvider,
   isAccountProvider,
   isByokProvider,
+  isSubscriptionProvider,
 } from './account-repo';
 import { decryptApiKey, encryptApiKey, last4OfApiKey } from './api-key-crypto';
 import type { AuthedUser, Authenticator } from './auth';
@@ -344,7 +346,13 @@ export interface ServerDeps {
 
 const ENGINES: Engine[] = ['three', 'phaser'];
 const VISIBILITIES: Visibility[] = ['private', 'unlisted', 'public'];
-const ACCOUNT_PROVIDERS: AccountProvider[] = ['platform', 'anthropic', 'openai'];
+const ACCOUNT_PROVIDERS: AccountProvider[] = [
+  'platform',
+  'anthropic',
+  'openai',
+  'claude-subscription',
+  'codex-subscription',
+];
 const DEFAULT_PLATFORM_MODEL: ModelRef = { provider: 'openai', modelId: 'o4-mini' };
 const DEFAULT_BYOK_MODELS: Record<ByokProvider, string> = {
   anthropic: PROVIDER_SHORTLIST.anthropic.defaultPrimary,
@@ -804,16 +812,31 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   }
 
   function defaultModelForProvider(provider: AccountProvider): string {
-    if (provider === 'platform') {
-      return (deps.platformModel ?? DEFAULT_PLATFORM_MODEL).modelId;
-    }
+    if (provider === 'platform') return (deps.platformModel ?? DEFAULT_PLATFORM_MODEL).modelId;
+    if (provider === 'claude-subscription')
+      return deps.claudeSubscriptionModel ?? 'claude-sonnet-4-6';
+    if (provider === 'codex-subscription') return deps.codexSubscriptionModel ?? 'gpt-5-codex';
     return DEFAULT_BYOK_MODELS[provider];
   }
 
-  function accountSettingsResponse(settings: AccountSettings) {
+  /** True when the named subscription has a connected identity in its store. */
+  async function isSubscriptionConnected(provider: SubscriptionProvider): Promise<boolean> {
+    try {
+      if (provider === 'claude-subscription') {
+        return deps.claudeAuthStore ? await deps.claudeAuthStore.isConnected() : false;
+      }
+      return deps.codexAuthStore ? (await deps.codexAuthStore.read()) !== null : false;
+    } catch {
+      return false;
+    }
+  }
+
+  async function accountSettingsResponse(settings: AccountSettings) {
     const keyByProvider = new Map(settings.keys.map((key) => [key.provider, key]));
     const defaultModelId =
       settings.defaultModelId?.trim() || defaultModelForProvider(settings.defaultProvider);
+    const claudeConnected = await isSubscriptionConnected('claude-subscription');
+    const codexConnected = await isSubscriptionConnected('codex-subscription');
     return {
       user: {
         id: settings.userId,
@@ -836,6 +859,21 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
             last4: null,
             defaultModelId: platformModel.modelId,
             active: settings.defaultProvider === provider,
+          };
+        }
+        if (provider === 'claude-subscription' || provider === 'codex-subscription') {
+          const connected = provider === 'claude-subscription' ? claudeConnected : codexConnected;
+          return {
+            provider,
+            label:
+              provider === 'claude-subscription' ? 'Claude (subscription)' : 'Codex (subscription)',
+            // 'configured' = connected, so the picker shows the right badge and can
+            // gate selection on a live connection.
+            configured: connected,
+            last4: null,
+            defaultModelId: defaultModelForProvider(provider),
+            active: settings.defaultProvider === provider,
+            subscription: true,
           };
         }
         const key = keyByProvider.get(provider);
@@ -876,64 +914,60 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       }
     | { ok: false; status: number; body: Record<string, unknown> }
   > {
-    // Claude subscription takes precedence when connected — generation runs on
-    // the subscription (a fresh OAuth access token over the REAL Anthropic API,
-    // same prompt + model as a metered key, only the billing differs). Resolved
-    // ONCE here: getValidAccessToken auto-refreshes inside its buffer and the
-    // token is valid for hours, far longer than a single run, so no per-turn
-    // refresh threading is needed. On a revoked/failed token we fall through to
-    // the configured credential so generation still works; the user reconnects.
-    if (deps.claudeAuthStore) {
+    // The credential is whichever provider the user SELECTED (settings
+    // .defaultProvider) — platform credits, a BYOK API key, or a connected
+    // subscription. Subscriptions resolve to a fresh OAuth token over the REAL
+    // provider API (same prompt + model, only the billing differs); resolved
+    // ONCE here since the token outlives a single run.
+    if (!deps.accountRepo) {
+      return { ok: true };
+    }
+    const settings = await deps.accountRepo.getSettings(userId);
+    const provider: AccountProvider = settings?.defaultProvider ?? 'platform';
+
+    // Selected a subscription: use it if connected, else fall back to platform
+    // credits so generation isn't blocked (the picker shows the connect state).
+    if (isSubscriptionProvider(provider)) {
       try {
-        if (await deps.claudeAuthStore.isConnected()) {
-          const apiKey = await deps.claudeAuthStore.getValidAccessToken();
+        if (
+          provider === 'claude-subscription' &&
+          deps.claudeAuthStore &&
+          (await deps.claudeAuthStore.isConnected())
+        ) {
           return {
             ok: true,
             model: {
               provider: 'anthropic',
               modelId: deps.claudeSubscriptionModel ?? 'claude-sonnet-4-6',
             },
-            apiKey,
+            apiKey: await deps.claudeAuthStore.getValidAccessToken(),
           };
         }
-      } catch (err) {
-        console.warn(
-          `[claude-sub] token unavailable, falling back to configured credential: ${String(err)}`,
-        );
-      }
-    }
-    // Codex / ChatGPT subscription — same once-per-run resolution, over the
-    // openai-codex-responses wire with the chatgpt-account-id header.
-    if (deps.codexAuthStore) {
-      try {
-        const current = await deps.codexAuthStore.read();
-        if (current) {
-          const apiKey = await deps.codexAuthStore.getValidAccessToken();
-          const headers: Record<string, string> = {};
-          if (current.accountId) headers['chatgpt-account-id'] = current.accountId;
-          return {
-            ok: true,
-            model: { provider: 'openai', modelId: deps.codexSubscriptionModel ?? 'gpt-5-codex' },
-            apiKey,
-            wire: 'openai-codex-responses',
-            ...(Object.keys(headers).length > 0 ? { httpHeaders: headers } : {}),
-          };
+        if (provider === 'codex-subscription' && deps.codexAuthStore) {
+          const current = await deps.codexAuthStore.read();
+          if (current) {
+            const headers: Record<string, string> = {};
+            if (current.accountId) headers['chatgpt-account-id'] = current.accountId;
+            return {
+              ok: true,
+              model: { provider: 'openai', modelId: deps.codexSubscriptionModel ?? 'gpt-5-codex' },
+              apiKey: await deps.codexAuthStore.getValidAccessToken(),
+              wire: 'openai-codex-responses',
+              ...(Object.keys(headers).length > 0 ? { httpHeaders: headers } : {}),
+            };
+          }
         }
       } catch (err) {
-        console.warn(
-          `[codex-sub] token unavailable, falling back to configured credential: ${String(err)}`,
-        );
+        console.warn(`[${provider}] token unavailable, falling back to platform: ${String(err)}`);
       }
-    }
-    if (!deps.accountRepo) {
-      return { ok: true };
-    }
-    const settings = await deps.accountRepo.getSettings(userId);
-    if (!settings || settings.defaultProvider === 'platform') {
       return { ok: true, model: deps.platformModel ?? DEFAULT_PLATFORM_MODEL };
     }
 
-    const provider = settings.defaultProvider;
+    if (!settings || provider === 'platform') {
+      return { ok: true, model: deps.platformModel ?? DEFAULT_PLATFORM_MODEL };
+    }
+
+    // BYOK (anthropic | openai) — needs a saved key.
     const savedKey = settings.keys.find((key) => key.provider === provider);
     if (!savedKey) {
       return {
@@ -1158,7 +1192,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!deps.accountRepo) return reply.code(503).send({ error: 'account_unavailable' });
     const settings = await deps.accountRepo.getSettings(user.userId);
     if (!settings) return reply.code(404).send({ error: 'not_found' });
-    return reply.send(accountSettingsResponse(settings));
+    return reply.send(await accountSettingsResponse(settings));
   });
 
   app.patch('/v1/account/profile', async (req, reply) => {
@@ -1212,7 +1246,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
     const settings = await deps.accountRepo.updateProfile(user.userId, patch);
     if (!settings) return reply.code(404).send({ error: 'not_found' });
-    return reply.send(accountSettingsResponse(settings));
+    return reply.send(await accountSettingsResponse(settings));
   });
 
   app.put('/v1/account/provider', async (req, reply) => {
@@ -1260,11 +1294,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
     const settings = await deps.accountRepo.saveProvider(user.userId, {
       provider,
-      modelId: provider === 'platform' ? null : modelId,
+      // Platform + subscriptions use a server-fixed model; only BYOK stores one.
+      modelId: provider === 'platform' || isSubscriptionProvider(provider) ? null : modelId,
       markOnboardingComplete,
     });
     if (!settings) return reply.code(404).send({ error: 'not_found' });
-    return reply.send(accountSettingsResponse(settings));
+    return reply.send(await accountSettingsResponse(settings));
   });
 
   app.delete('/v1/account/provider/:provider', async (req, reply) => {
@@ -1285,7 +1320,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           })
         : await deps.accountRepo.getSettings(user.userId);
     if (!settings) return reply.code(404).send({ error: 'not_found' });
-    return reply.send(accountSettingsResponse(settings));
+    return reply.send(await accountSettingsResponse(settings));
   });
 
   // ── Claude subscription (OAuth) ──────────────────────────────────────────────
