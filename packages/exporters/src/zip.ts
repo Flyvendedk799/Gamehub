@@ -17,7 +17,7 @@ export interface ExportZipOptions {
 
 const README_TEMPLATE = (title: string, generatedAt: string) => `# ${title}
 
-This bundle was exported from Playforge.
+This bundle was exported from PlayerZero.
 
 ## Layout
 
@@ -32,7 +32,7 @@ This bundle was exported from Playforge.
 
 - Generated: ${generatedAt}
 - The HTML is self-contained; opening \`index.html\` directly works without a server.
-- To keep editing, re-import this bundle into Playforge.
+- To keep editing, re-import this bundle into PlayerZero.
 `;
 
 /**
@@ -59,7 +59,7 @@ export async function exportZip(
     await fs.writeFile(indexPath, htmlContent, 'utf8');
 
     const readme = README_TEMPLATE(
-      opts.readmeTitle ?? 'Playforge export',
+      opts.readmeTitle ?? 'PlayerZero export',
       new Date().toISOString(),
     );
     const readmePath = path.join(stagingDir, 'README.md');

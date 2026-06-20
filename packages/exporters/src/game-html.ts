@@ -208,7 +208,7 @@ function buildRemixCta(appBaseUrl: string, publishSlug: string): string {
 #${id}-dismiss{position:absolute;opacity:0;pointer-events:none}
 #${id}-dismiss:checked ~ .pf-cta-card{display:none}
 </style>
-<div id="${id}"><input type="checkbox" id="${id}-dismiss"><div class="pf-cta-card"><a class="pf-cta-link" href="${hrefAttr}" target="_blank" rel="noopener noreferrer">Made with <b>Playforge</b> — Remix this</a><label class="pf-cta-close" for="${id}-dismiss" title="Dismiss" aria-label="Dismiss">×</label></div></div>`;
+<div id="${id}"><input type="checkbox" id="${id}-dismiss"><div class="pf-cta-card"><a class="pf-cta-link" href="${hrefAttr}" target="_blank" rel="noopener noreferrer">Made with <b>PlayerZero</b> — Remix this</a><label class="pf-cta-close" for="${id}-dismiss" title="Dismiss" aria-label="Dismiss">×</label></div></div>`;
 }
 
 /**

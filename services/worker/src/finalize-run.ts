@@ -72,6 +72,8 @@ export async function finalizeRun(db: Db, args: FinalizeRunArgs): Promise<Finali
           continuation: result.pausedContinuation as unknown,
           inputTokens: usage.inputTokens,
           outputTokens: usage.outputTokens,
+          cachedInputTokens: usage.cacheReadTokens,
+          cacheCreationInputTokens: usage.cacheWriteTokens,
           updatedAt: new Date(),
         })
         .where(eq(schema.runs.id, runId)),
@@ -185,6 +187,8 @@ export async function finalizeRun(db: Db, args: FinalizeRunArgs): Promise<Finali
         status: 'completed',
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
+        cachedInputTokens: usage.cacheReadTokens,
+        cacheCreationInputTokens: usage.cacheWriteTokens,
         updatedAt: new Date(),
         finishedAt: new Date(),
       })

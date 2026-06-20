@@ -1,5 +1,6 @@
 'use client';
 
+import { BrandMark, Wordmark } from '@/components/Logo';
 import {
   addComment,
   getComments,
@@ -205,14 +206,8 @@ export default function PlayClient({
       {/* Top bar */}
       <header className="flex-shrink-0 h-12 border-b border-[#222222] bg-[#111111] flex items-center px-4 gap-4 z-10">
         <Link href="/" className="flex items-center gap-2 group flex-shrink-0">
-          <div className="w-6 h-6 rounded-md bg-[#6366f1] flex items-center justify-center">
-            <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
-              <polygon points="2,1 9,5.5 2,10" fill="white" />
-            </svg>
-          </div>
-          <span className="text-xs font-semibold text-[#f4f4f5] hidden sm:block group-hover:text-[#6366f1] transition-colors">
-            Playforge
-          </span>
+          <BrandMark size={24} />
+          <Wordmark className="text-xs font-semibold text-[#f4f4f5] hidden sm:block group-hover:text-[#6366f1] transition-colors" />
         </Link>
 
         <div className="w-px h-5 bg-[#222222] flex-shrink-0" />

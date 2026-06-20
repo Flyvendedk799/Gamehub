@@ -41,7 +41,7 @@ export async function generateMetadata({
   const { slug } = await params;
   const meta = await fetchGameMeta(slug);
   const title = meta?.title ?? slug;
-  const description = `Play "${title}" — an AI-generated game on Playforge`;
+  const description = `Play "${title}" — an AI-generated game on PlayerZero`;
   const images = meta?.thumbnailUrl
     ? [
         {
@@ -56,7 +56,7 @@ export async function generateMetadata({
     : [];
 
   return {
-    title: `${title} — Playforge`,
+    title: `${title} — PlayerZero`,
     description,
     openGraph: {
       title,

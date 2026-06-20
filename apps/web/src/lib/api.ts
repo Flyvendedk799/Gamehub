@@ -1,3 +1,4 @@
+import type { SocialOutroSummary } from '@playforge/shared/social-outro';
 import { getToken } from './auth';
 import { API_BASE } from './config';
 import { RAW_AGENT_TYPES, isRawAgentType, normalizeAgentFrame } from './event-normalize';
@@ -123,6 +124,13 @@ export async function listProjects(): Promise<ListProjectsResponse> {
 export async function getProject(id: string): Promise<GetProjectResponse> {
   const response = await apiFetch<Project | GetProjectResponse>(`/v1/projects/${id}`);
   return normalizeProjectResponse(response);
+}
+
+// ─── Social outro (Share card) ─────────────────────────────────────────────────
+
+/** Owner-only build metrics + share link that drive the 10s animated share card. */
+export async function getSocialOutro(projectId: string): Promise<SocialOutroSummary> {
+  return apiFetch<SocialOutroSummary>(`/v1/projects/${projectId}/social-outro`);
 }
 
 // ─── Chat history ────────────────────────────────────────────────────────────

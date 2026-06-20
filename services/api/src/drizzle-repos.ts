@@ -11,7 +11,14 @@ import type { ChatMessageKind } from '@playforge/shared';
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { ChatMessage, ChatRepo } from './chat-repo';
 import type { CreateProjectInput, Engine, Project, ProjectRepo, Visibility } from './repo';
-import type { CreateRunInput, Run, RunRepo, RunStats } from './run-repo';
+import type {
+  CreateRunInput,
+  ProjectSocialMetrics,
+  Run,
+  RunRepo,
+  RunRuntimeUpdate,
+  RunStats,
+} from './run-repo';
 import type {
   AppendSnapshotInput,
   SnapshotEngine,
@@ -244,6 +251,59 @@ export class DrizzleRunRepo implements RunRepo {
     const failed = row?.failed ?? 0;
     const active = row?.active ?? 0;
     return { total, completed, failed, active, successRate: total > 0 ? completed / total : 0 };
+  }
+
+  async setRuntime(id: string, update: RunRuntimeUpdate): Promise<void> {
+    await this.db
+      .update(schema.runs)
+      .set({
+        aiStartedAt: update.startedAt,
+        aiFinishedAt: update.finishedAt,
+        aiRuntimeMs: update.runtimeMs,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.runs.id, id));
+  }
+
+  async getProjectSocialMetrics(projectId: string): Promise<ProjectSocialMetrics> {
+    // Headline metrics for the social-outro card: only completed runs that
+    // produced a snapshot (excludes failed/canceled/queued/running/paused).
+    // bigint sums come back as strings from pg — Number() them on read.
+    const [row] = await this.db
+      .select({
+        promptLoops: sql<number>`count(*)::int`,
+        aiRuntimeMs: sql<number>`coalesce(sum(${schema.runs.aiRuntimeMs}), 0)::int`,
+        inputTokens: sql<string>`coalesce(sum(${schema.runs.inputTokens}), 0)::bigint`,
+        outputTokens: sql<string>`coalesce(sum(${schema.runs.outputTokens}), 0)::bigint`,
+        cachedInputTokens: sql<string>`coalesce(sum(${schema.runs.cachedInputTokens}), 0)::bigint`,
+        cacheCreationInputTokens: sql<string>`coalesce(sum(${schema.runs.cacheCreationInputTokens}), 0)::bigint`,
+      })
+      .from(schema.runs)
+      .where(
+        and(
+          eq(schema.runs.projectId, projectId),
+          eq(schema.runs.status, 'completed'),
+          sql`${schema.runs.snapshotManifestKey} is not null`,
+        ),
+      );
+    if (!row) {
+      return {
+        aiRuntimeMs: 0,
+        promptLoops: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedInputTokens: 0,
+        cacheCreationInputTokens: 0,
+      };
+    }
+    return {
+      aiRuntimeMs: Number(row.aiRuntimeMs),
+      promptLoops: Number(row.promptLoops),
+      inputTokens: Number(row.inputTokens),
+      outputTokens: Number(row.outputTokens),
+      cachedInputTokens: Number(row.cachedInputTokens),
+      cacheCreationInputTokens: Number(row.cacheCreationInputTokens),
+    };
   }
 }
 

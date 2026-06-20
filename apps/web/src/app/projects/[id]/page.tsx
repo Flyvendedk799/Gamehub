@@ -1,7 +1,9 @@
 'use client';
 
 import { ChatPanel } from '@/components/ChatPanel';
+import { BrandMark, Wordmark } from '@/components/Logo';
 import { PreviewPane, type TweakSchema } from '@/components/PreviewPane';
+import { SocialOutroModal } from '@/components/SocialOutroModal';
 import {
   type SnapshotEntry,
   describeApiError,
@@ -9,6 +11,7 @@ import {
   getChatHistory,
   getProject,
   getSnapshots,
+  getSocialOutro,
   publishProject,
   revertToSnapshot,
   streamRun,
@@ -19,6 +22,7 @@ import { TRANSPORT_LOST_MESSAGE } from '@/lib/event-normalize';
 import type { Project, RunCompleteEvent, RunErrorEvent, SseEvent } from '@/lib/types';
 import { useCollab } from '@/lib/use-collab';
 import { usePresence } from '@/lib/use-presence';
+import type { SocialOutroSummary } from '@playforge/shared/social-outro';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -47,6 +51,30 @@ export default function BuilderPage() {
   const [showTimeline, setShowTimeline] = useState(false);
   const [isReverting, setIsReverting] = useState<string | null>(null);
   const [currentTweakSchema, setCurrentTweakSchema] = useState<TweakSchema | null>(null);
+
+  // ─── Social outro (Share card) ─────────────────────────────────────────────
+  const [showSocialOutro, setShowSocialOutro] = useState(false);
+  const [socialOutro, setSocialOutro] = useState<SocialOutroSummary | null>(null);
+  const [isLoadingSocialOutro, setIsLoadingSocialOutro] = useState(false);
+  const [socialOutroError, setSocialOutroError] = useState<string | null>(null);
+
+  const loadSocialOutro = useCallback(async () => {
+    if (!projectId) return;
+    setIsLoadingSocialOutro(true);
+    setSocialOutroError(null);
+    try {
+      setSocialOutro(await getSocialOutro(projectId));
+    } catch (err) {
+      setSocialOutroError(describeApiError(err));
+    } finally {
+      setIsLoadingSocialOutro(false);
+    }
+  }, [projectId]);
+
+  function openSocialOutro() {
+    setShowSocialOutro(true);
+    void loadSocialOutro();
+  }
 
   // CRDT collab — syncs a shared Y.Doc across all browser tabs on this project
   const { peerCount, connected: collabConnected } = useCollab(projectId || null);
@@ -318,14 +346,8 @@ export default function BuilderPage() {
       {/* Top nav bar */}
       <header className="flex-shrink-0 h-12 border-b border-[#222222] bg-[#111111] flex items-center px-4 gap-3 z-10">
         <Link href="/" className="flex items-center gap-2 group flex-shrink-0">
-          <div className="w-6 h-6 rounded-md bg-[#6366f1] flex items-center justify-center">
-            <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
-              <polygon points="2,1 9,5.5 2,10" fill="white" />
-            </svg>
-          </div>
-          <span className="text-xs font-semibold text-[#f4f4f5] hidden sm:block group-hover:text-[#6366f1] transition-colors">
-            Playforge
-          </span>
+          <BrandMark size={24} />
+          <Wordmark className="text-xs text-[#f4f4f5] hidden sm:block" />
         </Link>
 
         <div className="w-px h-5 bg-[#222222] flex-shrink-0" />
@@ -381,6 +403,22 @@ export default function BuilderPage() {
               >
                 Download ↓
               </a>
+              {/* Share — opens the animated social-outro card */}
+              <button
+                type="button"
+                onClick={openSocialOutro}
+                disabled={isStreaming}
+                className="
+                  text-xs px-2 py-1.5 md:px-3 rounded-lg
+                  bg-[#46e6f0]/10 hover:bg-[#46e6f0]/20
+                  text-[#46e6f0] border border-[#46e6f0]/20
+                  transition-colors font-medium
+                  disabled:opacity-40 disabled:cursor-not-allowed
+                "
+                title="Create a shareable outro"
+              >
+                <span className="hidden md:inline">Share </span>↗
+              </button>
               {publishUrl ? (
                 <a
                   href={publishUrl}
@@ -587,6 +625,17 @@ export default function BuilderPage() {
           </div>
         )}
       </div>
+
+      <SocialOutroModal
+        open={showSocialOutro}
+        summary={socialOutro}
+        loading={isLoadingSocialOutro}
+        error={socialOutroError}
+        onClose={() => setShowSocialOutro(false)}
+        onReload={() => {
+          void loadSocialOutro();
+        }}
+      />
     </div>
   );
 }

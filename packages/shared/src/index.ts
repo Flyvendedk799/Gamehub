@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BRAND_NAME } from './brand';
 import type { PlayforgeErrorCode } from './error-codes';
 
 export const ProviderId = z.enum([
@@ -311,7 +312,7 @@ export const IframeErrorEvent = z.object({
 export type IframeErrorEvent = z.infer<typeof IframeErrorEvent>;
 
 export const BRAND = {
-  appName: 'Playforge',
+  appName: BRAND_NAME,
   backgroundColor: '#faf8f3',
 } as const;
 
@@ -787,3 +788,17 @@ export type { EditmodeBlock, TokenSchemaEntry, TweakSchema } from './editmode';
 export * from './ssrf';
 export * from './engine-cdn';
 export * from './controls-runtime';
+export * from './brand';
+export {
+  SOCIAL_OUTRO_SCHEMA_VERSION,
+  SocialOutroProjectSchema,
+  SocialOutroShareSchema,
+  SocialOutroMetricsSchema,
+  SocialOutroSummarySchema,
+} from './social-outro';
+export type {
+  SocialOutroProject,
+  SocialOutroShare,
+  SocialOutroMetrics,
+  SocialOutroSummary,
+} from './social-outro';

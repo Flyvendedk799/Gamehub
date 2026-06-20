@@ -81,6 +81,15 @@ export const runs = pgTable(
       .default(0),
     costUsd: numeric('cost_usd', { precision: 10, scale: 5 }).notNull().default('0'),
     creditsCharged: integer('credits_charged').notNull().default(0),
+    /**
+     * Active-generation timing for the social-outro card (docs/SOCIAL_OUTRO_PLAN.md).
+     * `aiStartedAt`/`aiFinishedAt` bracket the agent loop; `aiRuntimeMs` is the
+     * monotonic elapsed time of that loop (NOT createdAt→now / queue wait), summed
+     * across completed snapshot runs for the project's headline "AI runtime".
+     */
+    aiStartedAt: timestamp('ai_started_at', { withTimezone: true }),
+    aiFinishedAt: timestamp('ai_finished_at', { withTimezone: true }),
+    aiRuntimeMs: integer('ai_runtime_ms').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp('finished_at', { withTimezone: true }),

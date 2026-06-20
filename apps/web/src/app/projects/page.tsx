@@ -1,5 +1,6 @@
 'use client';
 
+import { BrandMark, Wordmark } from '@/components/Logo';
 import { listProjects } from '@/lib/api';
 import type { Project } from '@/lib/types';
 import Link from 'next/link';
@@ -25,14 +26,8 @@ export default function ProjectsPage() {
       <header className="border-b border-[#222222] bg-[#111111]">
         <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2 group">
-            <div className="w-7 h-7 rounded-lg bg-[#6366f1] flex items-center justify-center">
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                <polygon points="2,1 12,7 2,13" fill="white" />
-              </svg>
-            </div>
-            <span className="text-sm font-semibold text-[#f4f4f5] group-hover:text-[#6366f1] transition-colors">
-              Playforge
-            </span>
+            <BrandMark size={28} />
+            <Wordmark className="text-sm font-semibold text-[#f4f4f5] group-hover:text-[#6366f1] transition-colors" />
           </Link>
           <Link href="/" className="text-sm text-[#a1a1aa] hover:text-[#f4f4f5] transition-colors">
             + New game

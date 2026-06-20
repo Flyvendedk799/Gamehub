@@ -335,7 +335,7 @@ describe('generateViaAgent() — Phase 1 pass-through', () => {
     if (!call) throw new Error('expected agent call');
     const init = call.options.initialState;
     expect(init?.tools).toEqual([]);
-    expect(init?.systemPrompt).toContain('Playforge');
+    expect(init?.systemPrompt).toContain('PlayerZero');
     expect(init?.messages).toHaveLength(1);
     const seed = init?.messages?.[0];
     expect(seed?.role).toBe('user');

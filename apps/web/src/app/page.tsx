@@ -1,5 +1,6 @@
 'use client';
 
+import { BrandMark, Wordmark } from '@/components/Logo';
 import { createProject, generateGame } from '@/lib/api';
 import { isAuthenticated } from '@/lib/auth';
 import {
@@ -75,25 +76,14 @@ export default function HomePage() {
       {/* Logo / wordmark */}
       <div className="mb-12 text-center">
         <div className="inline-flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-xl bg-[#6366f1] flex items-center justify-center shadow-lg shadow-indigo-500/20">
-            <svg
-              width="22"
-              height="22"
-              viewBox="0 0 22 22"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              aria-hidden="true"
-            >
-              <polygon points="4,3 18,11 4,19" fill="white" />
-            </svg>
-          </div>
-          <span className="text-2xl font-semibold tracking-tight text-[#f4f4f5]">Playforge</span>
+          <BrandMark size={40} />
+          <Wordmark className="text-2xl font-semibold tracking-tight text-[#f4f4f5]" />
         </div>
         <h1 className="text-4xl sm:text-5xl font-bold text-[#f4f4f5] leading-tight">
           Build games with AI
         </h1>
         <p className="mt-4 text-lg text-[#a1a1aa] max-w-md mx-auto">
-          Describe the game you want. Playforge writes the code, builds it, and gives you something
+          Describe the game you want. PlayerZero writes the code, builds it, and gives you something
           you can play instantly.
         </p>
       </div>
@@ -187,7 +177,7 @@ export default function HomePage() {
 
       {/* Footer */}
       <div className="mt-16 flex items-center gap-4">
-        <p className="text-xs text-[#3f3f46]">Playforge — Phase 0 · Dev build</p>
+        <p className="text-xs text-[#3f3f46]">PlayerZero — Phase 0 · Dev build</p>
         <span className="text-[#2a2a2a]">·</span>
         <Link href="/hub" className="text-xs text-[#52525b] hover:text-[#a1a1aa] transition-colors">
           Community Hub

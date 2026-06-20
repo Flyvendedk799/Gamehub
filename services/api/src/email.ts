@@ -74,7 +74,7 @@ export function buildPasswordResetEmail(opts: {
     : `Your password reset token (valid ${opts.ttlMinutes} minutes):\n${opts.token}`;
   return {
     to: opts.to,
-    subject: 'Reset your Playforge password',
-    text: `We received a request to reset your Playforge password.\n\n${action}\n\nThis link expires in ${opts.ttlMinutes} minutes and can be used once. If you didn't request this, you can safely ignore this email.`,
+    subject: 'Reset your PlayerZero password',
+    text: `We received a request to reset your PlayerZero password.\n\n${action}\n\nThis link expires in ${opts.ttlMinutes} minutes and can be used once. If you didn't request this, you can safely ignore this email.`,
   };
 }

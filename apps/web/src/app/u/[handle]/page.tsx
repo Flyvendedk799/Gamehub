@@ -2,6 +2,7 @@
 
 import { GameCard } from '@/components/GameCard';
 import type { GameCardData } from '@/components/GameCard';
+import { BrandMark, Wordmark } from '@/components/Logo';
 import { followUser, getCreatorGames, getCreatorProfile, unfollowUser } from '@/lib/api';
 import type { CreatorGame, CreatorProfile } from '@/lib/api';
 import { isAuthenticated } from '@/lib/auth';
@@ -85,14 +86,8 @@ export default function CreatorProfilePage() {
         <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Link href="/" className="flex items-center gap-2 group">
-              <div className="w-7 h-7 rounded-lg bg-[#6366f1] flex items-center justify-center">
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                  <polygon points="2,1 12,7 2,13" fill="white" />
-                </svg>
-              </div>
-              <span className="text-sm font-semibold text-[#f4f4f5] group-hover:text-[#6366f1] transition-colors">
-                Playforge
-              </span>
+              <BrandMark size={28} />
+              <Wordmark className="text-sm font-semibold text-[#f4f4f5] group-hover:text-[#6366f1] transition-colors" />
             </Link>
 
             <div className="w-px h-5 bg-[#222222]" />

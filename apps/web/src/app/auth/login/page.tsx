@@ -1,5 +1,6 @@
 'use client';
 
+import { BrandMark, Wordmark } from '@/components/Logo';
 import { login } from '@/lib/api';
 import { setToken } from '@/lib/auth';
 import Link from 'next/link';
@@ -89,14 +90,8 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 mb-6 group">
-            <div className="w-8 h-8 rounded-lg bg-[#6366f1] flex items-center justify-center">
-              <svg width="16" height="16" viewBox="0 0 22 22" fill="none" aria-hidden="true">
-                <polygon points="4,3 18,11 4,19" fill="white" />
-              </svg>
-            </div>
-            <span className="text-lg font-semibold text-[#f4f4f5] group-hover:text-white transition-colors">
-              Playforge
-            </span>
+            <BrandMark size={32} />
+            <Wordmark className="text-lg font-semibold text-[#f4f4f5] group-hover:text-white transition-colors" />
           </Link>
           <h1 className="text-2xl font-bold text-[#f4f4f5]">Welcome back</h1>
           <p className="mt-1 text-sm text-[#71717a]">Sign in to your account to continue</p>

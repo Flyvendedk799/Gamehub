@@ -1,3 +1,4 @@
+import { performance } from 'node:perf_hooks';
 import type { ContinuationPromptInput } from '@playforge/agent-core';
 import { RedisEventBus } from '@playforge/bus';
 import { createDb, schema } from '@playforge/db';
@@ -256,69 +257,90 @@ async function main() {
         .set({ status: 'running', updatedAt: new Date() })
         .where(eq(schema.runs.id, runId));
 
-      const result = await enqueueRun(
-        {
-          runId,
-          projectId,
-          prompt,
-          model,
-          apiKey,
-          ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
-          ...(continuation !== undefined ? { continuation } : {}),
-          ...(maxTokens !== undefined ? { maxTokens } : {}),
-          ...(isRemix === true ? { isRemix } : {}),
-        },
-        {
-          bus,
-          store,
-          ...(browserJobs !== undefined ? { browserJobs } : {}),
-          // #5.6 — persist the per-run quality telemetry row. numeric(juice_score)
-          // is string-typed in drizzle, so the measured score is stringified.
-          // onConflictDoUpdate so a resumed run's final ship overwrites the row.
-          recordRunQuality: async (qRunId, m) => {
-            const juiceScore = m.juiceScore === null ? null : String(m.juiceScore);
-            const row = {
-              runId: qRunId,
-              genre: m.genre,
-              forceAccept: m.forceAccept,
-              repairRounds: m.repairRounds,
-              shipReason: m.shipReason,
-              playbookPass: m.playbookPass,
-              playbookTotal: m.playbookTotal,
-              juiceScore,
-              runtimeBooted: m.runtimeBooted,
-            };
-            await db
-              .insert(schema.runQualityMetrics)
-              .values(row)
-              .onConflictDoUpdate({
-                target: schema.runQualityMetrics.runId,
-                set: {
-                  genre: row.genre,
-                  forceAccept: row.forceAccept,
-                  repairRounds: row.repairRounds,
-                  shipReason: row.shipReason,
-                  playbookPass: row.playbookPass,
-                  playbookTotal: row.playbookTotal,
-                  juiceScore: row.juiceScore,
-                  runtimeBooted: row.runtimeBooted,
-                },
-              });
+      // Bracket the active agent loop for the social-outro "AI runtime" metric
+      // (docs/SOCIAL_OUTRO_PLAN.md): wall-clock start + a monotonic start, and a
+      // finally that persists the elapsed ms — excludes queue wait / idle time.
+      const aiStartedAt = new Date();
+      const aiStartMs = performance.now();
+      let result: Awaited<ReturnType<typeof enqueueRun>>;
+      try {
+        result = await enqueueRun(
+          {
+            runId,
+            projectId,
+            prompt,
+            model,
+            apiKey,
+            ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
+            ...(continuation !== undefined ? { continuation } : {}),
+            ...(maxTokens !== undefined ? { maxTokens } : {}),
+            ...(isRemix === true ? { isRemix } : {}),
           },
-          // Durable build-feed log so the SSE relay can replay after a refresh.
-          persistEvent: async (rec) => {
-            await db
-              .insert(schema.runEvents)
-              .values({
-                runId: rec.runId,
-                projectId: rec.projectId,
-                seq: rec.seq,
-                event: rec.event,
-              })
-              .onConflictDoNothing();
+          {
+            bus,
+            store,
+            ...(browserJobs !== undefined ? { browserJobs } : {}),
+            // #5.6 — persist the per-run quality telemetry row. numeric(juice_score)
+            // is string-typed in drizzle, so the measured score is stringified.
+            // onConflictDoUpdate so a resumed run's final ship overwrites the row.
+            recordRunQuality: async (qRunId, m) => {
+              const juiceScore = m.juiceScore === null ? null : String(m.juiceScore);
+              const row = {
+                runId: qRunId,
+                genre: m.genre,
+                forceAccept: m.forceAccept,
+                repairRounds: m.repairRounds,
+                shipReason: m.shipReason,
+                playbookPass: m.playbookPass,
+                playbookTotal: m.playbookTotal,
+                juiceScore,
+                runtimeBooted: m.runtimeBooted,
+              };
+              await db
+                .insert(schema.runQualityMetrics)
+                .values(row)
+                .onConflictDoUpdate({
+                  target: schema.runQualityMetrics.runId,
+                  set: {
+                    genre: row.genre,
+                    forceAccept: row.forceAccept,
+                    repairRounds: row.repairRounds,
+                    shipReason: row.shipReason,
+                    playbookPass: row.playbookPass,
+                    playbookTotal: row.playbookTotal,
+                    juiceScore: row.juiceScore,
+                    runtimeBooted: row.runtimeBooted,
+                  },
+                });
+            },
+            // Durable build-feed log so the SSE relay can replay after a refresh.
+            persistEvent: async (rec) => {
+              await db
+                .insert(schema.runEvents)
+                .values({
+                  runId: rec.runId,
+                  projectId: rec.projectId,
+                  seq: rec.seq,
+                  event: rec.event,
+                })
+                .onConflictDoNothing();
+            },
           },
-        },
-      );
+        );
+      } finally {
+        // Persist the active-generation runtime regardless of success/throw.
+        // The worker.on('failed') handler still marks the run failed; this only
+        // records timing on the row. Don't let a timing write mask the real error.
+        const aiFinishedAt = new Date();
+        const aiRuntimeMs = Math.max(0, Math.round(performance.now() - aiStartMs));
+        await db
+          .update(schema.runs)
+          .set({ aiStartedAt, aiFinishedAt, aiRuntimeMs, updatedAt: new Date() })
+          .where(eq(schema.runs.id, runId))
+          .catch((err: unknown) =>
+            console.error(`[worker] run=${runId} ai-runtime persist failed:`, err),
+          );
+      }
 
       // Settle the finished run through the ONE canonical persistence path
       // (finalizeRun, shared with the API's in-process fallback so the two can
