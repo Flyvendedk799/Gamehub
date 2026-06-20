@@ -108,10 +108,26 @@ export function PreviewPane({
   }, []);
 
   // Pull the manifest when the Controls tab opens (covers a game that declared
-  // its controls before this pane attached its message listener).
+  // its controls before this pane attached its message listener). Retry over a
+  // few seconds and stop once a manifest arrives: a Three.js game can take a
+  // moment to load its engine module + call controls.define, so a single request
+  // on open often fires before the game has declared anything.
   useEffect(() => {
-    if (view === 'controls') sendControlsRequest(iframeRef.current);
-  }, [view]);
+    if (view !== 'controls' || controlsManifest) return;
+    let cancelled = false;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    for (const delay of [0, 700, 1500, 3000, 5000]) {
+      timers.push(
+        setTimeout(() => {
+          if (!cancelled) sendControlsRequest(iframeRef.current);
+        }, delay),
+      );
+    }
+    return () => {
+      cancelled = true;
+      for (const t of timers) clearTimeout(t);
+    };
+  }, [view, controlsManifest]);
 
   // Give the game keyboard focus the moment it loads. An iframe only receives
   // keydown while it (not the host page) holds focus, so without this the
