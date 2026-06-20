@@ -62,6 +62,9 @@ const PHASER_SKILLS: ReadonlyArray<GameSkillSpec> = [
   { name: 'phaser/scene-system.js', engine: 'phaser', category: 'engine' },
   { name: 'phaser/sprite-batching.js', engine: 'phaser', category: 'engine' },
   { name: 'phaser/tilemap-loader.js', engine: 'phaser', category: 'engine' },
+  // Combat & difficulty (enemies + escalating waves — the anti-flat-game set).
+  { name: 'phaser/enemy-ai.js', engine: 'phaser', category: 'engine' },
+  { name: 'phaser/wave-spawner.js', engine: 'phaser', category: 'engine' },
 ];
 
 // ── Three.js ────────────────────────────────────────────────────────────────
@@ -82,6 +85,9 @@ const THREE_SKILLS: ReadonlyArray<GameSkillSpec> = [
   { name: 'three/input-handler.jsx', engine: 'three', category: 'engine' },
   { name: 'three/scene-transition.jsx', engine: 'three', category: 'engine' },
   { name: 'three/sprite-system.jsx', engine: 'three', category: 'engine' },
+  // Combat & difficulty (enemies + escalating waves — the anti-flat-game set).
+  { name: 'three/enemy-ai.jsx', engine: 'three', category: 'engine' },
+  { name: 'three/wave-spawner.jsx', engine: 'three', category: 'engine' },
 ];
 
 const ALL_SPECS: ReadonlyArray<GameSkillSpec> = [...PHASER_SKILLS, ...THREE_SKILLS];

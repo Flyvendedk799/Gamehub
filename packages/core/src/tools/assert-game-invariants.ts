@@ -67,6 +67,7 @@ export type GameInvariant =
   | 'feedback'
   | 'controls'
   | 'camera-relative'
+  | 'escalation'
   | 'brawler-combo'
   | 'brawler-hitstop'
   | 'brawler-per-attack-limb'
@@ -247,6 +248,36 @@ function brawlerLimbCount(source: string): number {
   return hits;
 }
 
+/** Difficulty-escalation signals — a game in a "must ramp" genre that has
+ *  none of these reads as a flat tech demo (anti-slop §pacing). We match the
+ *  common ways a build raises pressure over time/waves: a wave counter that
+ *  advances, a difficulty multiplier, a shrinking spawn interval, enemy
+ *  speed/hp/count scaled by wave/level/time, or use of the bundled
+ *  wave-spawner / endlessRamp skills. Pattern-based + warn-only like the rest. */
+const ESCALATION_PATTERNS: readonly RegExp[] = [
+  /\bwave\s*(\+\+|\+=|=\s*wave\s*\+|number\s*\+\+)/i,
+  /\b(nextWave|startNextWave|spawnWave|advanceWave|incrementWave)\b/i,
+  /\b(createWaveSystem|endlessRamp|waveSpawner|WaveSystem)\b/,
+  /\bdifficulty(Multiplier|Scale|Factor|Mult)?\s*[*+]?=/i,
+  /\b1\.\d+\s*\*\*/, // geometric ramp e.g. 1.15 ** wave
+  /Math\.pow\(\s*1\.\d+/, // geometric ramp via Math.pow
+  /\b(spawn(Rate|Interval|Delay|Cooldown|Timer|Every))\b[^\n;]{0,40}[*]\s*0?\.\d/i, // shrinking spawn interval
+  /Math\.max\([^)]*spawn(Interval|Delay|Rate|Cooldown)/i, // clamped shrinking interval
+  /\b(enemySpeed|enemyHp|enemyHealth|enemyCount|maxEnemies|spawnCount)\b[^\n;]{0,40}[*+]/i,
+  /\b(speed|hp|health|count|enemies?)\b[^\n;]{0,30}\*[^\n;]{0,20}\b(wave|level|elapsed|time|difficulty)\b/i,
+];
+
+/** GameGenre tokens (game-workflow §2 menu) whose games MUST get harder over
+ *  time to feel like a game rather than a demo. Survival/arcade/runner/TD all
+ *  ramp; brawler/puzzle/racer/rhythm/platformer pace differently (handcrafted
+ *  levels, fixed bouts) so they are exempt from this soft check. */
+const SHOULD_ESCALATE_GENRES: ReadonlySet<GameGenre> = new Set<GameGenre>([
+  'shooter',
+  'runner',
+  'tower-defense',
+  'survival',
+]);
+
 const ROTATION_NEGATED_ANGLE: readonly RegExp[] = [
   /rotation\.y\s*=\s*-\s*playerAngle/i,
   /rotation\.y\s*=\s*-\s*aimAngle/i,
@@ -372,6 +403,20 @@ export function assertGameInvariants(
         severity: 'warn',
         message:
           'Suspect aim/hitbox sign error — `rotation.y = -playerAngle` (or -ea / -aimAngle / -enemyAngle) detected. In Three.js with `atan2(dx, dz)` the rotation is the angle directly, NOT its negative. The 2026-05-03 c44763af trace shipped this exact bug through three snapshots; switch to `rotation.y = playerAngle` and re-run `playtest_game` to confirm the player faces the cursor.',
+      });
+    }
+  }
+
+  // Genre-gated difficulty escalation — a shooter/runner/survival/tower-defense
+  // that never ramps is a tech demo, not a game (anti-slop §pacing).
+  if (genre !== null && SHOULD_ESCALATE_GENRES.has(genre)) {
+    checked.push('escalation');
+    if (!anyMatch(source, ESCALATION_PATTERNS)) {
+      issues.push({
+        invariant: 'escalation',
+        severity: 'warn',
+        message:
+          'No difficulty escalation detected for a genre that must ramp. A wave that never gets harder reads as a tech demo — drift the spawn rate, enemy speed/HP, or enemy count up over time or per wave (e.g. difficulty = 1.15 ** wave), and SIGNAL the rising pressure (a wave counter, a "Wave N" banner). The bundled `wave-spawner` skill (view_game_feel({ name: "<engine>/wave-spawner.<js|jsx>" })) does this — escalating count/speed/hp per wave with a telegraphed countdown — and `enemy-ai` gives the enemies real behaviour to fight.',
       });
     }
   }

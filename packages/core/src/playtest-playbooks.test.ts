@@ -25,7 +25,7 @@ describe('getPlaytestPlaybook', () => {
     expect(pb).toBeNull();
   });
 
-  it('listSupportedGenres includes the bundled cases (original 6 + shmup/racing/rpg/roguelike/tps)', () => {
+  it('listSupportedGenres includes the bundled cases (original 6 + shmup/racing/rpg/roguelike/tps/tower_defense)', () => {
     const genres = listSupportedGenres();
     for (const g of [
       'platformer',
@@ -39,9 +39,21 @@ describe('getPlaytestPlaybook', () => {
       'rpg',
       'roguelike',
       'tps',
+      'tower_defense',
     ] as const) {
       expect(genres).toContain(g);
     }
+  });
+
+  it('returns the tower_defense playbook (spawn + escalation, place→kill loop)', () => {
+    const pb = getPlaytestPlaybook('tower_defense');
+    expect(pb).not.toBeNull();
+    expect(pb?.genre).toBe('tower_defense');
+    expect(pb?.steps.length).toBeGreaterThan(0);
+    const fields = (pb?.steps ?? []).flatMap((s) => (s.predicates ?? []).map((p) => p.field));
+    // spawn is verified (enemies appear) AND escalation is verified (wave rises).
+    expect(fields).toContain('enemiesAlive');
+    expect(fields).toContain('wave');
   });
 
   it('every bundled playbook predicate is well-formed (parses without throwing)', () => {

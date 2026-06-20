@@ -21,6 +21,7 @@
  *   - rpg        — cardinal moves → x/y deltas
  *   - roguelike  — grid steps → x/y deltas
  *   - tps        — strafe → x delta + forward → z delta
+ *   - tower_defense — enemies spawn + advance + waves escalate; place tower → kill
  *
  * The agent reads `getPlaytestPlaybook(genre)` and adapts the keycodes
  * + assertions to its own input bindings. The host's `playtest_game`
@@ -505,6 +506,52 @@ const TPS: PlaytestPlaybook = {
   watchFor: ['WASD does nothing (player frozen).', 'Camera moves but the character never does.'],
 };
 
+const TOWER_DEFENSE: PlaytestPlaybook = {
+  schemaVersion: 1,
+  genre: 'tower_defense',
+  intent:
+    'Tower defense: enemies spawn and advance along a path toward your base; you click buildable tiles to place towers (money drops) that auto-fire and kill advancing enemies (score/kills rise); waves escalate in count/speed/HP. Expose `enemiesAlive`, `towers`, `money`, `lives`, `wave`, and `score` (or `kills`) in window.__game.debug.snapshot(). Adapt the click position in step 2 to a buildable tile in YOUR map.',
+  steps: [
+    {
+      kind: 'wait',
+      durationFrames: 40,
+      assert: 'Enemies spawn from the path entrance and begin advancing toward the base.',
+      predicates: [
+        { field: 'enemiesAlive', op: 'increased', frame: { step: 0 }, against: 'baseline' },
+      ],
+    },
+    {
+      kind: 'mouse',
+      button: 0,
+      assert:
+        'Moving to a buildable tile and clicking places a tower: `towers` INCREASED and `money` DECREASED. (Translate to mouseMove(tileX,tileY)+mouseDown+mouseUp at a valid tile in your layout.)',
+      predicates: [{ field: 'towers', op: 'increased', frame: { step: 1 }, against: { step: 0 } }],
+    },
+    {
+      kind: 'wait',
+      durationFrames: 120,
+      // The keystone: proves the place→fire→kill→score loop, the "towers never
+      // actually kill anything" bug class made deterministic.
+      assert:
+        'A placed tower auto-fired and killed an advancing enemy — `score` rose (use `kills` if that is your field).',
+      predicates: [{ field: 'score', op: 'increased', frame: { step: 2 }, against: { step: 1 } }],
+    },
+    {
+      kind: 'wait',
+      durationFrames: 200,
+      assert:
+        'Pressure escalates — the next wave starts with more/faster/tougher enemies (`wave` advanced).',
+      predicates: [{ field: 'wave', op: 'increased', frame: { step: 3 }, against: 'baseline' }],
+    },
+  ],
+  watchFor: [
+    'Enemies spawn but never path to the base — there is no threat and `lives` is never at risk.',
+    'Towers place but never fire or never kill — `score`/`kills` stay 0 (the core loop is broken).',
+    'Clicking does nothing — no tower placed, `money` never spent.',
+    'Every wave is identical — difficulty never rises, so it reads as a tech demo, not a game.',
+  ],
+};
+
 const PLAYBOOKS: Partial<Record<GameGenre, PlaytestPlaybook>> = {
   platformer: PLATFORMER,
   fighting: FIGHTING,
@@ -517,6 +564,7 @@ const PLAYBOOKS: Partial<Record<GameGenre, PlaytestPlaybook>> = {
   rpg: RPG,
   roguelike: ROGUELIKE,
   tps: TPS,
+  tower_defense: TOWER_DEFENSE,
 };
 
 /** Return the canonical playbook for a genre, or null when no

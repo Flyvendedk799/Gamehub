@@ -124,4 +124,24 @@ describe('view_game_feel tool', () => {
       /Unknown game-feel snippet.*Available:/,
     );
   });
+
+  it('every registered skill begins with a // when_to_use: discovery header', () => {
+    for (const skill of GAME_SKILLS) {
+      expect(skill.source.slice(0, 200), skill.name).toMatch(/\/\/\s*when_to_use:/i);
+    }
+  });
+
+  it('registers the combat & difficulty skills (enemy-ai + wave-spawner) for both engines', () => {
+    const names = new Set(GAME_SKILLS.map((e) => e.name));
+    for (const name of [
+      'phaser/enemy-ai.js',
+      'phaser/wave-spawner.js',
+      'three/enemy-ai.jsx',
+      'three/wave-spawner.jsx',
+    ]) {
+      expect(names, name).toContain(name);
+      const entry = GAME_SKILLS.find((e) => e.name === name);
+      expect(entry?.category).toBe('engine');
+    }
+  });
 });
