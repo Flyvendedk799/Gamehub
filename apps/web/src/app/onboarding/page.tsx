@@ -1,5 +1,6 @@
 'use client';
 
+import { BrandMark, Wordmark } from '@/components/Logo';
 import {
   type AccountProvider,
   type AccountSettingsResponse,
@@ -115,12 +116,8 @@ function OnboardingForm() {
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
         <header className="flex items-center justify-between">
           <Link href="/" className="inline-flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#6366f1]">
-              <svg width="16" height="16" viewBox="0 0 22 22" fill="none" aria-hidden="true">
-                <polygon points="4,3 18,11 4,19" fill="white" />
-              </svg>
-            </div>
-            <span className="text-lg font-semibold text-[#f4f4f5]">Playforge</span>
+            <BrandMark size={32} />
+            <Wordmark className="text-lg font-semibold text-[#f4f4f5]" />
           </Link>
           <Link href="/" className="text-sm text-[#71717a] hover:text-[#f4f4f5]">
             Later

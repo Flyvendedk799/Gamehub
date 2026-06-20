@@ -75,7 +75,7 @@ describe('schema', () => {
     );
   });
 
-  it('runs carry resume state + token metering', () => {
+  it('runs carry resume state + token metering + ai-runtime timing', () => {
     expect(columnNames(runs)).toEqual(
       expect.arrayContaining([
         'status',
@@ -83,8 +83,14 @@ describe('schema', () => {
         'continuation',
         'input_tokens',
         'output_tokens',
+        'cached_input_tokens',
+        'cache_creation_input_tokens',
         'cost_usd',
         'credits_charged',
+        // Social-outro AI-runtime timing (docs/SOCIAL_OUTRO_PLAN.md).
+        'ai_started_at',
+        'ai_finished_at',
+        'ai_runtime_ms',
       ]),
     );
   });

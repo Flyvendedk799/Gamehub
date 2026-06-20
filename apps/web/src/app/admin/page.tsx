@@ -111,7 +111,7 @@ export default function AdminDashboard() {
           )}
         </div>
         <a href="/" className="text-xs text-[#52525b] hover:text-[#a1a1aa] transition-colors">
-          ← Back to Playforge
+          ← Back to PlayerZero
         </a>
       </div>
 

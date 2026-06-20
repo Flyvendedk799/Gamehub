@@ -29,8 +29,12 @@ import {
   readCodexAuthFile,
 } from '@playforge/providers';
 import {
+  BRAND_NAME,
   type ModelRef,
   PROVIDER_SHORTLIST,
+  SOCIAL_OUTRO_SCHEMA_VERSION,
+  type SocialOutroSummary,
+  SocialOutroSummarySchema,
   type WireApi,
   injectControlsRuntime,
   normalizeEngineCdnUrls,
@@ -899,7 +903,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           const platformModel = deps.platformModel ?? DEFAULT_PLATFORM_MODEL;
           return {
             provider,
-            label: 'Playforge credits',
+            label: 'PlayerZero credits',
             configured: true,
             last4: null,
             defaultModelId: platformModel.modelId,
@@ -2774,6 +2778,53 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
     const published = deps.publishRepo ? await deps.publishRepo.getByProject(id) : null;
     return reply.send({ published });
+  });
+
+  // GET /v1/projects/:id/social-outro — owner-only build-summary metrics for the
+  // animated "social outro" share card (docs/SOCIAL_OUTRO_PLAN.md). Returns ONLY
+  // aggregate counters (runtime/prompt-loops/tokens) + the public play link when
+  // the game is published live. NEVER prompts, run-event payloads, file paths, or
+  // generated code.
+  app.get('/v1/projects/:id/social-outro', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { id } = req.params as { id: string };
+    const project = await deps.repo.get(id);
+    if (!project || project.ownerId !== user.userId) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+
+    const metrics = await deps.runRepo.getProjectSocialMetrics(project.id);
+    const published = deps.publishRepo ? await deps.publishRepo.getByProject(project.id) : null;
+    const livePublished = published && published.status === 'live' ? published : null;
+
+    const summary: SocialOutroSummary = {
+      schemaVersion: SOCIAL_OUTRO_SCHEMA_VERSION,
+      brandName: BRAND_NAME,
+      project: {
+        id: project.id,
+        name: project.name,
+        engine: project.engine,
+        updatedAt: project.updatedAt,
+      },
+      share: {
+        publishUrl: livePublished ? `/v1/play/${livePublished.publishSlug}` : null,
+        thumbnailUrl: livePublished?.thumbnailUrl ?? null,
+      },
+      metrics: {
+        ...metrics,
+        totalTokens: metrics.inputTokens + metrics.outputTokens,
+      },
+    };
+
+    // Validate the response shape against the shared schema so API/web/tests can
+    // never drift; a violation is a server bug, not a client error.
+    const parsed = SocialOutroSummarySchema.safeParse(summary);
+    if (!parsed.success) {
+      req.log.error({ err: parsed.error.flatten() }, 'social-outro response failed schema');
+      return reply.code(500).send({ error: 'internal_error' });
+    }
+    return reply.send(parsed.data);
   });
 
   // ── public play endpoint ──────────────────────────────────────────────────

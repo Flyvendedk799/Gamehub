@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="width:{{ s }}px; height:{{ s }}px; border-radius:{{ rad }}px; background:{{ bg }}; border:1px solid {{ border }}; flex:none; display:flex; align-items:center; justify-content:center;">
+  <span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:{{ fs }}px; line-height:1; letter-spacing:{{ ls }}px; color:{{ tone }};">P<span style="color:{{ accent }};">0</span></span>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+&quot;$preview&quot;:{&quot;width&quot;:140,&quot;height&quot;:140},
+&quot;size&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:48,&quot;min&quot;:16,&quot;max&quot;:400,&quot;step&quot;:1,&quot;tsType&quot;:&quot;number&quot;},
+&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#46e6f0&quot;,&quot;tsType&quot;:&quot;string&quot;},
+&quot;tone&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#f4f5f7&quot;,&quot;tsType&quot;:&quot;string&quot;},
+&quot;bg&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#0a0a0c&quot;,&quot;tsType&quot;:&quot;string&quot;},
+&quot;border&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;rgba(255,255,255,0.1)&quot;,&quot;tsType&quot;:&quot;string&quot;}
+}">
+class Component extends DCLogic {
+  renderVals() {
+    const s = parseFloat(this.props.size) || 48;
+    return {
+      s,
+      bg: this.props.bg || '#0a0a0c',
+      border: this.props.border || 'rgba(255,255,255,0.1)',
+      tone: this.props.tone || '#f4f5f7',
+      accent: this.props.accent || '#46e6f0',
+      rad: +(s * 0.23).toFixed(1),
+      fs: +(s * 0.48).toFixed(1),
+      ls: +(s * -0.03).toFixed(2),
+    };
+  }
+}
+</script>
+</body>
+</html>

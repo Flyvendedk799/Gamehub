@@ -21,6 +21,20 @@ const securityHeaders = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // Workspace packages ship raw TypeScript (with .js import specifiers), so Next
+  // must transpile them + resolve their extensions during `next build`.
+  transpilePackages: ['@playforge/shared'],
+  webpack: (config) => {
+    // Resolve ESM-style ".js" import specifiers (e.g. './pricing.js') to their
+    // ".ts" source in the workspace packages; ".js" stays as a fallback so
+    // ordinary JS modules still resolve.
+    config.resolve.extensionAlias = {
+      ...(config.resolve.extensionAlias ?? {}),
+      '.js': ['.ts', '.tsx', '.js'],
+      '.mjs': ['.mts', '.mjs'],
+    };
+    return config;
+  },
   async headers() {
     return [
       {

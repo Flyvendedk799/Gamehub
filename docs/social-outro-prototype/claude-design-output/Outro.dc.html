@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+</style>
+</helmet>
+
+<div style="display:flex; flex-direction:column; gap:16px; width:{{ boxW }}px;">
+
+  <div style="position:relative; width:{{ boxW }}px; height:{{ boxH }}px;">
+    <div ref="{{ rootRef }}" style="position:absolute; top:0; left:0; width:{{ cardW }}px; height:{{ cardH }}px; transform:scale({{ scale }}); transform-origin:0 0; background:#0a0a0a; overflow:hidden; font-family:'Space Grotesk',sans-serif; color:#f4f5f7;">
+
+      <!-- background system -->
+      <div data-anim="grid" style="position:absolute; inset:0; opacity:0; background:linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px) 0 0/100% 92px, linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px) 0 0/92px 100%; -webkit-mask-image:radial-gradient(closest-side at 50% 36%, #000 50%, transparent 100%); mask-image:radial-gradient(closest-side at 50% 36%, #000 50%, transparent 100%);"></div>
+      <div data-anim="glow" style="position:absolute; top:{{ L.thumbTop }}px; left:50%; transform:translateX(-50%); width:780px; height:{{ L.thumbH }}px; opacity:0; pointer-events:none; background:radial-gradient(closest-side, rgba(70,230,240,.18), transparent 75%); filter:blur(46px);"></div>
+      <div style="position:absolute; inset:0; pointer-events:none; background:radial-gradient(closest-side at 50% 40%, transparent 58%, rgba(0,0,0,.6));"></div>
+
+      <!-- top brand chip (slot: brandName) -->
+      <div data-anim="chip" style="opacity:0; position:absolute; top:{{ L.chipTop }}px; left:80px; display:flex; align-items:center; gap:14px;">
+        <dc-import name="PZMark" size="46" hint-size="46px,46px"></dc-import>
+        <span style="font-family:'JetBrains Mono',monospace; font-size:19px; letter-spacing:4px; color:rgba(244,245,247,.55);">BUILT WITH {{ brandName }}</span>
+      </div>
+
+      <!-- HERO: gameplay frame / thumbnail slot -->
+      <div style="position:absolute; top:{{ L.thumbTop }}px; left:80px; width:920px; height:{{ L.thumbH }}px; border-radius:14px; overflow:hidden; border:1px solid rgba(255,255,255,.1); background:#111;">
+        <div data-anim="thumbInner" style="position:absolute; inset:0; transform:scale(1.06);">
+          <sc-if value="{{ hasThumb }}" hint-placeholder-val="{{ false }}">
+            <img src="{{ thumbnail }}" style="position:absolute; inset:0; width:100%; height:100%; object-fit:cover;" />
+          </sc-if>
+          <sc-if value="{{ noThumb }}" hint-placeholder-val="{{ true }}">
+            <div style="position:absolute; inset:0; background:repeating-linear-gradient(45deg, rgba(255,255,255,.045) 0 2px, transparent 2px 15px), #0d0d10; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px;">
+              <div style="font-family:'JetBrains Mono',monospace; font-size:23px; letter-spacing:5px; color:rgba(244,245,247,.42);">GAMEPLAY FRAME</div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:16px; color:rgba(244,245,247,.24);">drop game thumbnail &middot; slot: thumbnail</div>
+            </div>
+          </sc-if>
+        </div>
+
+        <div data-anim="scan" style="position:absolute; inset:0; opacity:.5; pointer-events:none; background:repeating-linear-gradient(0deg, rgba(0,0,0,.2) 0 1px, transparent 1px 4px);"></div>
+
+        <div data-anim="hud" style="position:absolute; top:20px; left:20px; display:flex; align-items:center; gap:9px; font-family:'JetBrains Mono',monospace; font-size:16px; letter-spacing:2px; color:rgba(255,255,255,.62);">
+          <span style="width:9px; height:9px; border-radius:50%; background:#ff5d57;"></span>BUILD CAPTURE
+        </div>
+
+        <div data-anim="play" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:118px; height:118px; border-radius:50%; background:rgba(10,10,10,.5); border:1.5px solid rgba(255,255,255,.75); display:flex; align-items:center; justify-content:center;">
+          <div style="width:0; height:0; border-left:36px solid #fff; border-top:23px solid transparent; border-bottom:23px solid transparent; margin-left:9px;"></div>
+        </div>
+
+        <div data-anim="vbar" style="position:absolute; left:26px; right:26px; bottom:26px; height:6px; border-radius:3px; background:rgba(255,255,255,.2);">
+          <div style="width:62%; height:100%; border-radius:3px; background:#46e6f0;"></div>
+        </div>
+
+        <div data-anim="c1" style="position:absolute; top:16px; left:16px; width:42px; height:42px; opacity:0; border-left:3px solid #46e6f0; border-top:3px solid #46e6f0;"></div>
+        <div data-anim="c2" style="position:absolute; top:16px; right:16px; width:42px; height:42px; opacity:0; border-right:3px solid #46e6f0; border-top:3px solid #46e6f0;"></div>
+        <div data-anim="c3" style="position:absolute; bottom:16px; left:16px; width:42px; height:42px; opacity:0; border-left:3px solid #46e6f0; border-bottom:3px solid #46e6f0;"></div>
+        <div data-anim="c4" style="position:absolute; bottom:16px; right:16px; width:42px; height:42px; opacity:0; border-right:3px solid #46e6f0; border-bottom:3px solid #46e6f0;"></div>
+      </div>
+
+      <!-- TITLE (slot: gameName) -->
+      <div style="position:absolute; top:{{ L.titleTop }}px; left:80px; width:920px;">
+        <div style="overflow:hidden; padding-bottom:8px;">
+          <div data-anim="title" style="transform:translateY(115%); font-weight:700; font-size:{{ L.titleSize }}px; line-height:1.0; letter-spacing:-2px; color:#f4f5f7;">{{ gameName }}</div>
+        </div>
+        <div data-anim="ul" style="transform:scaleX(0); transform-origin:left; margin-top:20px; height:5px; width:170px; background:#46e6f0;"></div>
+      </div>
+
+      <!-- METRICS (slots: aiRuntime / promptLoops / totalTokens) -->
+      <div style="position:absolute; top:{{ L.metricsTop }}px; left:80px; width:920px; display:flex; justify-content:space-between;">
+        <div data-anim="m1" style="opacity:0; flex:1; text-align:center;">
+          <div style="width:26px; height:3px; background:#46e6f0; margin:0 auto 16px;"></div>
+          <div data-num="run" style="font-family:'JetBrains Mono',monospace; font-weight:700; font-size:{{ L.metricSize }}px; line-height:1; letter-spacing:-1px; color:#46e6f0;">0:00</div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:17px; letter-spacing:3px; margin-top:14px; color:rgba(244,245,247,.5);">AI RUNTIME</div>
+        </div>
+        <div data-anim="m2" style="opacity:0; flex:1; text-align:center;">
+          <div style="width:26px; height:3px; background:#b6f24a; margin:0 auto 16px;"></div>
+          <div data-num="prompt" style="font-family:'JetBrains Mono',monospace; font-weight:700; font-size:{{ L.metricSize }}px; line-height:1; letter-spacing:-1px; color:#b6f24a;">0</div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:17px; letter-spacing:3px; margin-top:14px; color:rgba(244,245,247,.5);">PROMPTS</div>
+        </div>
+        <div data-anim="m3" style="opacity:0; flex:1; text-align:center;">
+          <div style="width:26px; height:3px; background:#ffb04d; margin:0 auto 16px;"></div>
+          <div data-num="token" style="font-family:'JetBrains Mono',monospace; font-weight:700; font-size:{{ L.metricSize }}px; line-height:1; letter-spacing:-1px; color:#ffb04d;">0K</div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:17px; letter-spacing:3px; margin-top:14px; color:rgba(244,245,247,.5);">TOKENS</div>
+        </div>
+      </div>
+
+      <!-- FINAL LOCKUP (slots: CTA + publishUrl + brandName) -->
+      <div data-anim="lockup" style="opacity:0; position:absolute; top:{{ L.lockupTop }}px; left:80px; width:920px; transform:translateY(40px);">
+        <div style="display:flex; gap:18px;">
+          <div style="flex:1; display:flex; align-items:center; justify-content:center; gap:13px; height:{{ L.ctaH }}px; background:#46e6f0; color:#06181a; font-weight:600; font-size:{{ L.ctaFont }}px; border-radius:9px;">
+            <span style="font-size:{{ L.ctaFont }}px; line-height:0;">&#9654;</span> Play it now
+          </div>
+          <div style="flex:1; display:flex; align-items:center; justify-content:center; gap:13px; height:{{ L.ctaH }}px; background:transparent; border:1.5px solid rgba(255,255,255,.28); color:#f4f5f7; font-weight:600; font-size:{{ L.ctaFont }}px; border-radius:9px;">
+            <span style="font-size:{{ L.ctaFont }}px; line-height:0;">&#8635;</span> Remix it
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:14px; margin-top:24px;">
+          <span style="display:flex; align-items:center; gap:11px; font-family:'JetBrains Mono',monospace; font-size:{{ L.urlSize }}px; color:rgba(244,245,247,.72);">
+            <span style="color:#7c83ff;">&#8599;</span>{{ publishUrl }}
+          </span>
+          <span style="margin-left:auto; display:flex; align-items:center; gap:13px;">
+            <dc-import name="PZMark" size="40" hint-size="40px,40px"></dc-import>
+            <span style="font-weight:700; font-size:30px; letter-spacing:-1px; color:#f4f5f7;">Player<span style="color:#46e6f0;">Zero</span></span>
+          </span>
+        </div>
+      </div>
+
+      <!-- BRAND BEAT overlay -->
+      <div data-anim="overlay" style="opacity:0; position:absolute; inset:0; background:rgba(8,8,9,.92); -webkit-backdrop-filter:blur(7px); backdrop-filter:blur(7px); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:50px;">
+        <div data-anim="overlayTxt" style="font-family:'JetBrains Mono',monospace; font-size:27px; letter-spacing:9px; color:rgba(244,245,247,.6);">THIS GAME WAS MADE BY</div>
+        <div data-anim="overlayX" style="transform:scale(.4); display:flex; align-items:center; gap:36px;">
+          <dc-import name="PZMark" size="180" hint-size="180px,180px"></dc-import>
+          <span style="font-weight:700; font-size:106px; letter-spacing:-3px; line-height:1; color:#f4f5f7;">Player<span style="color:#46e6f0;">Zero</span></span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <sc-if value="{{ showControls }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex; align-items:center; gap:12px; font-family:'JetBrains Mono',monospace;">
+      <button onClick="{{ onPlay }}" style="width:46px; height:44px; flex:none; background:#1a1a1a; border:1px solid #2c2c2c; color:#f4f5f7; border-radius:8px; cursor:pointer; font-size:15px;">{{ playLabel }}</button>
+      <button onClick="{{ onReplay }}" style="width:46px; height:44px; flex:none; background:#1a1a1a; border:1px solid #2c2c2c; color:#f4f5f7; border-radius:8px; cursor:pointer; font-size:18px;">&#8635;</button>
+      <input type="range" min="0" max="10" step="0.01" onInput="{{ onScrub }}" ref="{{ scrubRef }}" style="flex:1; accent-color:#46e6f0; height:4px;" />
+      <span ref="{{ timeLabelRef }}" style="flex:none; width:54px; text-align:right; font-size:14px; color:rgba(244,245,247,.6);">0.0s</span>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+&quot;$preview&quot;:{&quot;width&quot;:360,&quot;height&quot;:700},
+&quot;format&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;9x16&quot;,&quot;1x1&quot;],&quot;default&quot;:&quot;9x16&quot;,&quot;tsType&quot;:&quot;string&quot;},
+&quot;time&quot;:{&quot;editor&quot;:null,&quot;default&quot;:null,&quot;tsType&quot;:&quot;number|null&quot;},
+&quot;scale&quot;:{&quot;editor&quot;:&quot;float&quot;,&quot;default&quot;:0.3,&quot;min&quot;:0.1,&quot;max&quot;:1,&quot;step&quot;:0.02,&quot;tsType&quot;:&quot;number&quot;},
+&quot;gameName&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Neon Drift Arena&quot;,&quot;tsType&quot;:&quot;string&quot;},
+&quot;thumbnail&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},
+&quot;aiRuntime&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;2:17&quot;,&quot;tsType&quot;:&quot;string&quot;},
+&quot;promptLoops&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;3 prompts&quot;,&quot;tsType&quot;:&quot;string&quot;},
+&quot;totalTokens&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;428K tokens&quot;,&quot;tsType&quot;:&quot;string&quot;},
+&quot;publishUrl&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;playerzero.gg/p/neon-drift-arena&quot;,&quot;tsType&quot;:&quot;string&quot;},
+&quot;brandName&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;PlayerZero&quot;,&quot;tsType&quot;:&quot;string&quot;}
+}">
+class Component extends DCLogic {
+  rootRef = React.createRef();
+  scrubRef = React.createRef();
+  timeLabelRef = React.createRef();
+  state = { playing: true };
+  ease = {
+    outCubic: x => 1 - Math.pow(1 - x, 3),
+    outQuint: x => 1 - Math.pow(1 - x, 5),
+    outBack: x => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); },
+  };
+
+  seg(t, a, b) { return Math.max(0, Math.min(1, (t - a) / (b - a))); }
+  lerp(a, b, p) { return a + (b - a) * p; }
+
+  componentDidMount() {
+    this.parseTargets();
+    this.collect();
+    const tr = this.props.time;
+    if (tr != null && tr !== '' && !isNaN(parseFloat(tr))) {
+      this._t = parseFloat(tr);
+      this.apply(this._t);
+    } else {
+      this.play();
+    }
+  }
+  componentWillUnmount() { cancelAnimationFrame(this.raf); }
+
+  parseTargets() {
+    const r = String(this.props.aiRuntime || '2:17').split(':');
+    this.runSec = (parseInt(r[0]) || 0) * 60 + (parseInt(r[1]) || 0);
+    this.promptN = parseInt(this.props.promptLoops || '3') || 3;
+    const m = String(this.props.totalTokens || '428K tokens').match(/([\d.]+)\s*([KMB]?)/i);
+    this.tokN = m ? parseFloat(m[1]) : 428;
+    this.tokSuf = m && m[2] ? m[2].toUpperCase() : '';
+  }
+
+  collect() {
+    const r = this.rootRef.current;
+    if (!r) return;
+    this.els = {};
+    r.querySelectorAll('[data-anim]').forEach(e => { this.els[e.dataset.anim] = e; });
+    r.querySelectorAll('[data-num]').forEach(e => { this.els['num_' + e.dataset.num] = e; });
+  }
+  ensure() { if (!this.els || !this.els.title) this.collect(); }
+
+  play() {
+    if (this.raf) return;
+    this.ensure();
+    if (!this.state.playing) this.setState({ playing: true });
+    let last = performance.now();
+    const tick = (now) => {
+      const dt = (now - last) / 1000; last = now;
+      let t = (this._t || 0) + dt;
+      if (t >= 10) t -= 10;
+      this._t = t;
+      this.apply(t);
+      this.updateScrub(t);
+      this.raf = requestAnimationFrame(tick);
+    };
+    this.raf = requestAnimationFrame(tick);
+  }
+  pause() { cancelAnimationFrame(this.raf); this.raf = null; if (this.state.playing) this.setState({ playing: false }); }
+  toggle() { if (this.raf) this.pause(); else this.play(); }
+  replay() { this._t = 0; this.ensure(); this.apply(0); this.updateScrub(0); if (!this.raf) this.play(); }
+  scrubTo(v) { this.pause(); this._t = v; this.ensure(); this.apply(v); this.updateScrub(v); }
+
+  updateScrub(t) {
+    if (this.scrubRef.current && document.activeElement !== this.scrubRef.current) this.scrubRef.current.value = t;
+    if (this.timeLabelRef.current) this.timeLabelRef.current.textContent = t.toFixed(1) + 's';
+  }
+
+  num(name, p) {
+    const e = this.els['num_' + name]; if (!e) return;
+    p = Math.max(0, Math.min(1, p));
+    const E = this.ease;
+    if (name === 'run') { const s = Math.round(this.lerp(0, this.runSec, E.outCubic(p))); e.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+    if (name === 'prompt') { e.textContent = String(Math.round(this.lerp(0, this.promptN, p))); }
+    if (name === 'token') { e.textContent = Math.round(this.lerp(0, this.tokN, E.outCubic(p))) + this.tokSuf; }
+  }
+
+  apply(t) {
+    const els = this.els; if (!els) return;
+    const E = this.ease, seg = (a, b) => this.seg(t, a, b), L = this.lerp.bind(this);
+    const op = (n, o) => { const e = els[n]; if (e) e.style.opacity = Math.max(0, Math.min(1, o)); };
+    const set = (n, tr) => { const e = els[n]; if (e) e.style.transform = tr; };
+
+    // 0.0 - 1.5  gameplay freeze -> clean card
+    op('grid', seg(0, 1.2));
+    op('glow', seg(0, 1.4));
+    op('chip', seg(0.3, 1.0));
+    set('thumbInner', 'scale(' + L(1.06, 1.0, E.outCubic(seg(0, 1.5))) + ')');
+    const pf = seg(0, 0.9);
+    op('play', 1 - pf); set('play', 'translate(-50%,-50%) scale(' + L(1, 1.45, pf) + ')');
+    op('scan', L(0.5, 0, seg(0.2, 1.1)));
+    op('hud', 1 - seg(0.3, 1.1));
+    op('vbar', 1 - seg(0.5, 1.1));
+    ['c1', 'c2', 'c3', 'c4'].forEach((c, i) => {
+      const a = 0.6 + i * 0.07;
+      op(c, seg(a, a + 0.3));
+      set(c, 'scale(' + L(0.5, 1, E.outBack(seg(a, a + 0.55))) + ')');
+    });
+
+    // 1.5 - 3.0  title reveal
+    set('title', 'translateY(' + L(115, 0, E.outQuint(seg(1.5, 2.65))) + '%)');
+    set('ul', 'scaleX(' + E.outCubic(seg(2.3, 3.0)) + ')');
+
+    // 3.0 - 6.5  metrics snap + count
+    [['m1', 3.0], ['m2', 4.1], ['m3', 5.2]].forEach(([n, s]) => {
+      op(n, seg(s, s + 0.3));
+      set(n, 'translateY(' + L(42, 0, E.outBack(seg(s, s + 0.6))) + 'px) scale(' + L(0.9, 1, E.outBack(seg(s, s + 0.6))) + ')');
+    });
+    this.num('run', seg(3.0, 4.1));
+    this.num('prompt', seg(4.1, 4.9));
+    this.num('token', seg(5.2, 6.4));
+
+    // 6.5 - 8.5  brand beat
+    op('overlay', seg(6.4, 6.9) - seg(8.2, 8.7));
+    op('overlayTxt', seg(6.6, 7.1) - seg(8.2, 8.6));
+    set('overlayX', 'scale(' + L(0.4, 1, E.outBack(seg(6.55, 7.2))) + ') rotate(' + L(-10, 0, E.outCubic(seg(6.55, 7.4))) + 'deg)');
+
+    // 8.5 - 10.0  final lockup
+    op('lockup', seg(8.5, 8.95));
+    set('lockup', 'translateY(' + L(42, 0, E.outQuint(seg(8.5, 9.35))) + 'px)');
+  }
+
+  renderVals() {
+    const fmt = this.props.format === '1x1' ? '1x1' : '9x16';
+    const cardW = 1080, cardH = fmt === '1x1' ? 1080 : 1920;
+    const scale = parseFloat(this.props.scale) || (fmt === '1x1' ? 0.40 : 0.30);
+    const Lp = fmt === '1x1'
+      ? { chipTop: 56, thumbTop: 132, thumbH: 432, titleTop: 602, titleSize: 60, metricsTop: 720, metricSize: 46, lockupTop: 888, ctaH: 76, ctaFont: 27, urlSize: 21 }
+      : { chipTop: 122, thumbTop: 250, thumbH: 620, titleTop: 942, titleSize: 84, metricsTop: 1150, metricSize: 64, lockupTop: 1540, ctaH: 96, ctaFont: 32, urlSize: 26 };
+    const L = Object.assign({ cardW, cardH }, Lp);
+    const tr = this.props.time;
+    const hasTime = tr != null && tr !== '' && !isNaN(parseFloat(tr));
+    const hasThumb = !!this.props.thumbnail;
+    return {
+      L, scale, cardW, cardH, boxW: Math.round(cardW * scale), boxH: Math.round(cardH * scale),
+      gameName: this.props.gameName || 'Neon Drift Arena',
+      publishUrl: this.props.publishUrl || 'playerzero.gg/p/neon-drift-arena',
+      brandName: this.props.brandName || 'PlayerZero',
+      thumbnail: this.props.thumbnail || '',
+      hasThumb, noThumb: !hasThumb,
+      showControls: !hasTime,
+      rootRef: this.rootRef, scrubRef: this.scrubRef, timeLabelRef: this.timeLabelRef,
+      onScrub: (e) => this.scrubTo(parseFloat(e.target.value)),
+      onPlay: () => this.toggle(),
+      onReplay: () => this.replay(),
+      playLabel: this.state.playing ? '\u275A\u275A' : '\u25B6',
+    };
+  }
+}
+</script>
+</body>
+</html>

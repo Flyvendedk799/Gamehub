@@ -1,4 +1,5 @@
 import { InMemoryEventBus, runChannel } from '@playforge/bus';
+import { BRAND_NAME, SocialOutroSummarySchema } from '@playforge/shared';
 import { InMemoryBlobStore, SnapshotStore } from '@playforge/storage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InMemoryAccountRepo } from './account-repo';
@@ -3009,5 +3010,272 @@ describe('project files (Files tab)', () => {
       headers: AS_ALICE,
     });
     expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('social outro (GET /v1/projects/:id/social-outro)', () => {
+  /** Seed a completed run that produced a snapshot, with runtime + token usage. */
+  async function seedCompletedRun(
+    runRepo: InstanceType<typeof InMemoryRunRepo>,
+    projectId: string,
+    opts: {
+      runtimeMs: number;
+      inputTokens: number;
+      outputTokens: number;
+      cachedInputTokens?: number;
+      cacheCreationInputTokens?: number;
+    },
+  ) {
+    const run = await runRepo.create({ projectId, userId: 'alice' });
+    await runRepo.setSnapshot(run.id, `manifest_${run.id}`);
+    await runRepo.updateStatus(run.id, 'completed');
+    await runRepo.setRuntime(run.id, {
+      startedAt: new Date(),
+      finishedAt: new Date(),
+      runtimeMs: opts.runtimeMs,
+    });
+    await runRepo.setUsage?.(run.id, {
+      inputTokens: opts.inputTokens,
+      outputTokens: opts.outputTokens,
+      cachedInputTokens: opts.cachedInputTokens ?? 0,
+      cacheCreationInputTokens: opts.cacheCreationInputTokens ?? 0,
+    });
+    return run;
+  }
+
+  it('returns 200 with the canonical summary shape for the owner', async () => {
+    const repo = new InMemoryProjectRepo();
+    const runRepo = new InMemoryRunRepo();
+    const project = await repo.create({ ownerId: 'alice', name: 'Neon Drift', engine: 'phaser' });
+    await seedCompletedRun(runRepo, project.id, {
+      runtimeMs: 137_000,
+      inputTokens: 300_000,
+      outputTokens: 128_000,
+      cachedInputTokens: 50_000,
+      cacheCreationInputTokens: 20_000,
+    });
+    const app = makeApp({ repo, runRepo });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/social-outro`,
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    // The response must satisfy the shared schema (incl. brandName === BRAND_NAME).
+    expect(SocialOutroSummarySchema.safeParse(body).success).toBe(true);
+    expect(body).toMatchObject({
+      schemaVersion: 1,
+      brandName: BRAND_NAME,
+      project: { id: project.id, name: 'Neon Drift', engine: 'phaser' },
+      share: { publishUrl: null, thumbnailUrl: null },
+      metrics: {
+        aiRuntimeMs: 137_000,
+        promptLoops: 1,
+        inputTokens: 300_000,
+        outputTokens: 128_000,
+        cachedInputTokens: 50_000,
+        cacheCreationInputTokens: 20_000,
+        totalTokens: 428_000,
+      },
+    });
+  });
+
+  it('returns 404 to a non-owner', async () => {
+    const repo = new InMemoryProjectRepo();
+    const project = await repo.create({ ownerId: 'alice', name: 'Secret' });
+    const app = makeApp({ repo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/social-outro`,
+      headers: AS_BOB,
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('returns 401 when unauthenticated', async () => {
+    const repo = new InMemoryProjectRepo();
+    const project = await repo.create({ ownerId: 'alice', name: 'Secret' });
+    const app = makeApp({ repo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/social-outro`,
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('returns publishUrl null for an unpublished project', async () => {
+    const repo = new InMemoryProjectRepo();
+    const runRepo = new InMemoryRunRepo();
+    const publishRepo = new InMemoryPublishRepo();
+    const project = await repo.create({ ownerId: 'alice', name: 'Draft' });
+    const app = makeApp({ repo, runRepo, publishRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/social-outro`,
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().share).toEqual({ publishUrl: null, thumbnailUrl: null });
+  });
+
+  it('exposes /v1/play/:slug + thumbnail for a published live game', async () => {
+    const repo = new InMemoryProjectRepo();
+    const runRepo = new InMemoryRunRepo();
+    const publishRepo = new InMemoryPublishRepo();
+    const project = await repo.create({ ownerId: 'alice', name: 'Shipped' });
+    const published = await publishRepo.upsert({
+      projectId: project.id,
+      publishSlug: 'shipped-abc123',
+      title: 'Shipped',
+      bundleKey: 'k',
+    });
+    await publishRepo.setThumbnailUrl(published.id, 'https://cdn.test/thumb.png');
+    const app = makeApp({ repo, runRepo, publishRepo });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/social-outro`,
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().share).toEqual({
+      publishUrl: '/v1/play/shipped-abc123',
+      thumbnailUrl: 'https://cdn.test/thumb.png',
+    });
+  });
+
+  it('hides the play link once a published game is unpublished', async () => {
+    const repo = new InMemoryProjectRepo();
+    const publishRepo = new InMemoryPublishRepo();
+    const project = await repo.create({ ownerId: 'alice', name: 'Pulled' });
+    const published = await publishRepo.upsert({
+      projectId: project.id,
+      publishSlug: 'pulled-1',
+      title: 'Pulled',
+      bundleKey: 'k',
+    });
+    await publishRepo.setStatus(published.id, 'unpublished');
+    const app = makeApp({ repo, publishRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/social-outro`,
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().share).toEqual({ publishUrl: null, thumbnailUrl: null });
+  });
+
+  it('never leaks prompt text, file paths, or run-event payloads', async () => {
+    const repo = new InMemoryProjectRepo();
+    const runRepo = new InMemoryRunRepo();
+    const project = await repo.create({ ownerId: 'alice', name: 'Privacy' });
+    await seedCompletedRun(runRepo, project.id, {
+      runtimeMs: 1000,
+      inputTokens: 10,
+      outputTokens: 5,
+    });
+    const app = makeApp({ repo, runRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/social-outro`,
+      headers: AS_ALICE,
+    });
+    const raw = res.body;
+    // Allow-list: the response is EXACTLY these top-level keys (no prompt text,
+    // run-event payloads, continuation state, file paths, or generated code).
+    expect(Object.keys(res.json()).sort()).toEqual([
+      'brandName',
+      'metrics',
+      'project',
+      'schemaVersion',
+      'share',
+    ]);
+    // No internal identifiers leak: the snapshot manifest key / run id are
+    // private. (`promptLoops` is an aggregate count, not prompt content.)
+    expect(raw).not.toContain('manifest_');
+    expect(raw).not.toContain('continuation');
+    expect(raw).not.toContain('run_0');
+  });
+
+  describe('getProjectSocialMetrics aggregation', () => {
+    it('aggregates only completed snapshot runs and sums cached tokens separately', async () => {
+      const runRepo = new InMemoryRunRepo();
+      await seedCompletedRun(runRepo, 'proj_agg', {
+        runtimeMs: 1000,
+        inputTokens: 100,
+        outputTokens: 40,
+        cachedInputTokens: 10,
+        cacheCreationInputTokens: 5,
+      });
+      await seedCompletedRun(runRepo, 'proj_agg', {
+        runtimeMs: 2500,
+        inputTokens: 200,
+        outputTokens: 60,
+        cachedInputTokens: 30,
+        cacheCreationInputTokens: 15,
+      });
+      const m = await runRepo.getProjectSocialMetrics('proj_agg');
+      expect(m).toEqual({
+        aiRuntimeMs: 3500,
+        promptLoops: 2,
+        inputTokens: 300,
+        outputTokens: 100,
+        cachedInputTokens: 40,
+        cacheCreationInputTokens: 20,
+      });
+    });
+
+    it('excludes failed/canceled/queued/running/paused + snapshotless completed runs', async () => {
+      const runRepo = new InMemoryRunRepo();
+      // One valid completed snapshot run — the only one that should count.
+      await seedCompletedRun(runRepo, 'proj_x', {
+        runtimeMs: 500,
+        inputTokens: 50,
+        outputTokens: 20,
+      });
+      // A completed run with NO snapshot — excluded.
+      const noSnap = await runRepo.create({ projectId: 'proj_x', userId: 'alice' });
+      await runRepo.updateStatus(noSnap.id, 'completed');
+      await runRepo.setRuntime(noSnap.id, {
+        startedAt: new Date(),
+        finishedAt: new Date(),
+        runtimeMs: 9999,
+      });
+      // Non-completed runs (each with a snapshot) — all excluded.
+      for (const status of ['failed', 'canceled', 'queued', 'running', 'paused'] as const) {
+        const r = await runRepo.create({ projectId: 'proj_x', userId: 'alice' });
+        await runRepo.setSnapshot(r.id, `m_${r.id}`);
+        await runRepo.updateStatus(r.id, status);
+        await runRepo.setRuntime(r.id, {
+          startedAt: new Date(),
+          finishedAt: new Date(),
+          runtimeMs: 8888,
+        });
+      }
+      const m = await runRepo.getProjectSocialMetrics('proj_x');
+      expect(m).toEqual({
+        aiRuntimeMs: 500,
+        promptLoops: 1,
+        inputTokens: 50,
+        outputTokens: 20,
+        cachedInputTokens: 0,
+        cacheCreationInputTokens: 0,
+      });
+    });
+
+    it('returns zeros for a project with no completed runs', async () => {
+      const runRepo = new InMemoryRunRepo();
+      const m = await runRepo.getProjectSocialMetrics('proj_empty');
+      expect(m).toEqual({
+        aiRuntimeMs: 0,
+        promptLoops: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedInputTokens: 0,
+        cacheCreationInputTokens: 0,
+      });
+    });
   });
 });

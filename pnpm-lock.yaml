@@ -30,6 +30,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@playforge/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@playforge/templates':
         specifier: workspace:*
         version: link:../../packages/templates

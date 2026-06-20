@@ -106,7 +106,7 @@ function showcaseBundle(seed: ShowcaseSeed): string {
 </style></head>
 <body><div id="wrap">
   <canvas id="c" width="480" height="320"></canvas>
-  <div class="meta">${title} — click the canvas to score. A Playforge showcase.</div>
+  <div class="meta">${title} — click the canvas to score. A PlayerZero showcase.</div>
 </div>
 <script>
   (function(){

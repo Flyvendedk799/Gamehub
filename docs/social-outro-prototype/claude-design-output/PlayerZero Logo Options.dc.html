@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  body{margin:0; background:#0d0d0f;}
+  @keyframes pzblink{0%,48%{opacity:1;}49%,100%{opacity:0;}}
+</style>
+</helmet>
+
+<div style="background:#0d0d0f; padding:64px 56px; font-family:'Space Grotesk',sans-serif; color:#f4f5f7; min-width:1180px;">
+
+  <div style="font-family:'JetBrains Mono',monospace; font-size:13px; letter-spacing:4px; color:#46e6f0;">LOGO DIRECTIONS &middot; PICK ONE TO IMPLEMENT</div>
+  <div style="font-weight:700; font-size:32px; letter-spacing:-1px; margin-top:12px;">Four ways to mark PlayerZero</div>
+  <div style="font-family:'JetBrains Mono',monospace; font-size:14px; color:rgba(244,245,247,.5); margin-top:8px;">No play-button. Each works at favicon size and pairs with the wordmark.</div>
+
+  <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:24px; margin-top:48px;">
+
+    <!-- A: P0 monogram -->
+    <div style="background:#141417; border:1px solid #232327; border-radius:16px; padding:30px; display:flex; flex-direction:column; align-items:center;">
+      <div style="width:128px; height:128px; border-radius:30px; background:#0a0a0c; border:1px solid #2a2a2e; display:flex; align-items:center; justify-content:center;">
+        <span style="font-weight:700; font-size:62px; letter-spacing:-4px;">P<span style="color:#46e6f0;">0</span></span>
+      </div>
+      <div style="display:flex; align-items:center; gap:12px; margin-top:26px;">
+        <span style="width:40px; height:40px; border-radius:10px; background:#0a0a0c; border:1px solid #2a2a2e; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:20px; letter-spacing:-1.5px;">P<span style="color:#46e6f0;">0</span></span>
+        <span style="font-weight:700; font-size:26px; letter-spacing:-1.5px;">Player<span style="color:#46e6f0;">Zero</span></span>
+      </div>
+      <div style="margin-top:24px; text-align:center;">
+        <div style="font-family:'JetBrains Mono',monospace; font-size:13px; letter-spacing:2px; color:#46e6f0;">A &middot; P0 MONOGRAM</div>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:12px; line-height:1.7; color:rgba(244,245,247,.5); margin-top:8px;">Initials. Reads instantly, scales tiny, dead-simple to own. The 0 tells the story.</div>
+      </div>
+    </div>
+
+    <!-- B: prompt cursor -->
+    <div style="background:#141417; border:1px solid #232327; border-radius:16px; padding:30px; display:flex; flex-direction:column; align-items:center;">
+      <div style="width:128px; height:128px; border-radius:30px; background:#0a0a0c; border:1px solid #2a2a2e; display:flex; align-items:center; justify-content:center; gap:7px;">
+        <span style="font-family:'JetBrains Mono',monospace; font-weight:700; font-size:54px; color:#46e6f0; line-height:1;">&#10095;</span>
+        <span style="width:15px; height:48px; background:#b6f24a; animation:pzblink 1.1s steps(1) infinite;"></span>
+      </div>
+      <div style="display:flex; align-items:center; gap:12px; margin-top:26px;">
+        <span style="width:40px; height:40px; border-radius:10px; background:#0a0a0c; border:1px solid #2a2a2e; display:flex; align-items:center; justify-content:center; gap:3px;"><span style="font-family:'JetBrains Mono',monospace; font-weight:700; font-size:17px; color:#46e6f0;">&#10095;</span><span style="width:5px; height:16px; background:#b6f24a;"></span></span>
+        <span style="font-weight:700; font-size:26px; letter-spacing:-1.5px;">Player<span style="color:#46e6f0;">Zero</span></span>
+      </div>
+      <div style="margin-top:24px; text-align:center;">
+        <div style="font-family:'JetBrains Mono',monospace; font-size:13px; letter-spacing:2px; color:#46e6f0;">B &middot; PROMPT CURSOR</div>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:12px; line-height:1.7; color:rgba(244,245,247,.5); margin-top:8px;">A command prompt + blinking caret. &ldquo;Type a game into being.&rdquo; Most ownable, on-strategy.</div>
+      </div>
+    </div>
+
+    <!-- C: slashed zero -->
+    <div style="background:#141417; border:1px solid #232327; border-radius:16px; padding:30px; display:flex; flex-direction:column; align-items:center;">
+      <div style="width:128px; height:128px; border-radius:30px; background:#0a0a0c; border:1px solid #2a2a2e; display:flex; align-items:center; justify-content:center;">
+        <span style="position:relative; display:inline-block; width:74px; height:74px; border:9px solid #46e6f0; border-radius:50%;">
+          <span style="position:absolute; top:50%; left:-16%; width:132%; height:9px; background:#b6f24a; transform:translateY(-50%) rotate(-32deg);"></span>
+        </span>
+      </div>
+      <div style="display:flex; align-items:center; gap:12px; margin-top:26px;">
+        <span style="position:relative; display:inline-block; width:34px; height:34px; border:4px solid #46e6f0; border-radius:50%;">
+          <span style="position:absolute; top:50%; left:-16%; width:132%; height:4px; background:#b6f24a; transform:translateY(-50%) rotate(-32deg);"></span>
+        </span>
+        <span style="font-weight:700; font-size:26px; letter-spacing:-1.5px;">Player<span style="color:#46e6f0;">Zero</span></span>
+      </div>
+      <div style="margin-top:24px; text-align:center;">
+        <div style="font-family:'JetBrains Mono',monospace; font-size:13px; letter-spacing:2px; color:#46e6f0;">C &middot; SLASHED ZERO</div>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:12px; line-height:1.7; color:rgba(244,245,247,.5); margin-top:8px;">The coder&rsquo;s zero. Reads as &ldquo;0&rdquo;, nods to code, the slash is a launch vector.</div>
+      </div>
+    </div>
+
+    <!-- D: wordmark-forward -->
+    <div style="background:#141417; border:1px solid #232327; border-radius:16px; padding:30px; display:flex; flex-direction:column; align-items:center;">
+      <div style="width:100%; height:128px; border-radius:30px; background:#0a0a0c; border:1px solid #2a2a2e; display:flex; align-items:center; justify-content:center;">
+        <span style="font-weight:700; font-size:40px; letter-spacing:-2px; line-height:1;">PZ</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; margin-top:26px;">
+        <span style="font-weight:700; font-size:28px; letter-spacing:-2px;">PlayerZer</span>
+        <span style="position:relative; display:inline-block; width:24px; height:24px; border:4px solid #46e6f0; border-radius:50%; top:3px;"></span>
+      </div>
+      <div style="margin-top:24px; text-align:center;">
+        <div style="font-family:'JetBrains Mono',monospace; font-size:13px; letter-spacing:2px; color:#46e6f0;">D &middot; WORDMARK-FIRST</div>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:12px; line-height:1.7; color:rgba(244,245,247,.5); margin-top:8px;">No icon &mdash; the final &ldquo;o&rdquo; becomes a ring. &ldquo;PZ&rdquo; tile for the app icon. Minimal, Linear-ish.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="font-family:'JetBrains Mono',monospace; font-size:13px; color:rgba(244,245,247,.45); margin-top:44px;">My pick: <span style="color:#b6f24a;">B (prompt cursor)</span> for ownability, with <span style="color:#46e6f0;">A (P0)</span> as the safe, scalable choice. Tell me a letter and I&rsquo;ll thread it through the whole system.</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+&quot;$preview&quot;:{&quot;width&quot;:1240,&quot;height&quot;:620}
+}"></script>
+</body>
+</html>

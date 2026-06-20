@@ -20,6 +20,35 @@ export interface CreateRunInput {
   userId: string;
 }
 
+/** Active-generation timing recorded once the agent loop settles. */
+export interface RunRuntimeUpdate {
+  startedAt: Date;
+  finishedAt: Date;
+  runtimeMs: number;
+}
+
+/** Per-run token usage seeded into the in-memory repo for aggregation tests. */
+export interface RunUsageUpdate {
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  cacheCreationInputTokens: number;
+}
+
+/**
+ * Aggregated social-outro metrics for a project (docs/SOCIAL_OUTRO_PLAN.md).
+ * Summed over `completed` runs that produced a snapshot. `totalTokens` is
+ * derived (input + output) by the route, not stored here.
+ */
+export interface ProjectSocialMetrics {
+  aiRuntimeMs: number;
+  promptLoops: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  cacheCreationInputTokens: number;
+}
+
 export interface RunStats {
   total: number;
   completed: number;
@@ -41,12 +70,21 @@ export interface RunRepo {
   ): Promise<{ continuation: unknown; snapshotManifestKey: string | null } | null>;
   /** Aggregate run stats for build-health dashboard. */
   getStats(): Promise<RunStats>;
+  /** Persist the active-generation timing for a run (social-outro AI runtime). */
+  setRuntime(id: string, update: RunRuntimeUpdate): Promise<void>;
+  /** Aggregate social-outro metrics over a project's completed snapshot runs. */
+  getProjectSocialMetrics(projectId: string): Promise<ProjectSocialMetrics>;
   /** Mark a run as paused with a continuation payload (used in tests and Drizzle impl). */
   setPaused?(id: string, continuation: unknown, snapshotManifestKey?: string): Promise<void>;
+  /** Seed per-run token usage (in-memory only; the real path writes via finalizeRun). */
+  setUsage?(id: string, usage: RunUsageUpdate): Promise<void>;
 }
 
 export class InMemoryRunRepo implements RunRepo {
   private readonly byId = new Map<string, Run>();
+  /** Side maps for the social-outro aggregation (kept off the public Run shape). */
+  private readonly runtimeById = new Map<string, number>();
+  private readonly usageById = new Map<string, RunUsageUpdate>();
   private seq = 0;
 
   async create(input: CreateRunInput): Promise<Run> {
@@ -113,5 +151,44 @@ export class InMemoryRunRepo implements RunRepo {
     const active = runs.filter((r) => r.status === 'queued' || r.status === 'running').length;
     const successRate = total > 0 ? completed / total : 0;
     return { total, completed, failed, active, successRate };
+  }
+
+  async setRuntime(id: string, update: RunRuntimeUpdate): Promise<void> {
+    if (this.byId.has(id)) this.runtimeById.set(id, update.runtimeMs);
+  }
+
+  async setUsage(id: string, usage: RunUsageUpdate): Promise<void> {
+    if (this.byId.has(id)) this.usageById.set(id, { ...usage });
+  }
+
+  async getProjectSocialMetrics(projectId: string): Promise<ProjectSocialMetrics> {
+    const metrics: ProjectSocialMetrics = {
+      aiRuntimeMs: 0,
+      promptLoops: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+    };
+    for (const run of this.byId.values()) {
+      // Mirror the Drizzle filter: completed runs that produced a snapshot.
+      if (
+        run.projectId !== projectId ||
+        run.status !== 'completed' ||
+        run.snapshotManifestKey === undefined
+      ) {
+        continue;
+      }
+      metrics.promptLoops += 1;
+      metrics.aiRuntimeMs += this.runtimeById.get(run.id) ?? 0;
+      const usage = this.usageById.get(run.id);
+      if (usage) {
+        metrics.inputTokens += usage.inputTokens;
+        metrics.outputTokens += usage.outputTokens;
+        metrics.cachedInputTokens += usage.cachedInputTokens;
+        metrics.cacheCreationInputTokens += usage.cacheCreationInputTokens;
+      }
+    }
+    return metrics;
   }
 }

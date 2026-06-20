@@ -7,7 +7,9 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./fingerprint": "./src/fingerprint.ts"
+    "./fingerprint": "./src/fingerprint.ts",
+    "./brand": "./src/brand.ts",
+    "./social-outro": "./src/social-outro.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

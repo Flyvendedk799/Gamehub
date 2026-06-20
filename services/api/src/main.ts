@@ -1,3 +1,4 @@
+import { performance } from 'node:perf_hooks';
 import { type EventBus, InMemoryEventBus, RedisEventBus } from '@playforge/bus';
 import { createDb, schema } from '@playforge/db';
 /**
@@ -311,6 +312,23 @@ async function main() {
     // token usage — so on ServerHoster History/Restore/Remix silently broke and
     // run_quality_metrics stayed empty. finalizeRun fixes all three.
     const startedAt = Date.now();
+    // Bracket the active agent loop for the social-outro "AI runtime" metric
+    // (docs/SOCIAL_OUTRO_PLAN.md). Record the elapsed ms once enqueueRun settles
+    // (in BOTH the success and failure continuations, before finalizeRun runs so
+    // persistence/refund time isn't counted), via runRepo.setRuntime.
+    const aiStartedAt = new Date();
+    const aiStartMs = performance.now();
+    const persistAiRuntime = async (): Promise<void> => {
+      const aiFinishedAt = new Date();
+      const aiRuntimeMs = Math.max(0, Math.round(performance.now() - aiStartMs));
+      await runRepo
+        .setRuntime(runId, {
+          startedAt: aiStartedAt,
+          finishedAt: aiFinishedAt,
+          runtimeMs: aiRuntimeMs,
+        })
+        .catch((err: unknown) => console.error(`[run:${runId}] ai-runtime persist failed:`, err));
+    };
     console.log(
       `[run:${runId}] in-process generation started — project=${projectId} user=${userId}` +
         `${model ? ` model=${model.provider}/${model.modelId}` : ''}${isRemix ? ' (remix)' : ''}`,
@@ -352,6 +370,7 @@ async function main() {
       },
     )
       .then(async (result) => {
+        await persistAiRuntime();
         try {
           await finalizeRun(db, {
             runId,
@@ -369,6 +388,7 @@ async function main() {
         }
       })
       .catch(async (err: unknown) => {
+        await persistAiRuntime();
         console.error(`[run:${runId}] generation failed after ${Date.now() - startedAt}ms:`, err);
         await runRepo.updateStatus(runId, 'failed').catch(() => {});
         // Refund the enqueue-time reservation so a failed PLATFORM run costs

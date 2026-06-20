@@ -1,5 +1,6 @@
 'use client';
 
+import { BrandMark, Wordmark } from '@/components/Logo';
 import { getMe, logout } from '@/lib/api';
 import { clearToken, getToken } from '@/lib/auth';
 import Link from 'next/link';
@@ -59,12 +60,8 @@ export default function NavBar() {
         href="/"
         className="flex items-center gap-2 text-[#f4f4f5] hover:text-white transition-colors"
       >
-        <div className="w-6 h-6 rounded-md bg-[#6366f1] flex items-center justify-center flex-shrink-0">
-          <svg width="12" height="12" viewBox="0 0 22 22" fill="none" aria-hidden="true">
-            <polygon points="4,3 18,11 4,19" fill="white" />
-          </svg>
-        </div>
-        <span className="text-sm font-semibold">Playforge</span>
+        <BrandMark size={24} className="flex-shrink-0" />
+        <Wordmark className="text-sm font-semibold" />
       </Link>
 
       <div className="flex items-center gap-1">

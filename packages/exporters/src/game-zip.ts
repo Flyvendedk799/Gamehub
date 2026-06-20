@@ -40,7 +40,7 @@ function readme(opts: ExportGameZipOptions): string {
       : '## How to run\n\nDouble-click `index.html`, or serve with `python3 -m http.server`.';
   return `# ${name}
 
-Exported from Playforge — game-mode.
+Exported from PlayerZero — game-mode.
 
 - **Engine**: ${engineLabel}
 - **Generated**: ${new Date().toISOString()}
