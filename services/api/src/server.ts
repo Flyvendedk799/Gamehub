@@ -432,6 +432,33 @@ export function decideAffordability(
   return { ok: balance >= required, balance, required };
 }
 
+/**
+ * Refund a run's credit reservation — but ONLY if a 'reservation' row actually
+ * exists for it. A BYOK/subscription run is NOT platform-funded so it never
+ * reserves; a blind +CREDITS_PER_RUN refund there would PRINT credits the user
+ * never spent. Idempotent via the partial-unique 'credit_ledger_refund_key'.
+ * Shared by the API enqueue-failure + cancel paths and the worker finalize.
+ */
+export async function refundRunReservation(
+  db: import('@playforge/db').Db,
+  userId: string,
+  runId: string,
+): Promise<void> {
+  const { schema: s } = await import('@playforge/db');
+  const reserved = await db
+    .select({ runId: s.creditLedger.runId })
+    .from(s.creditLedger)
+    .where(
+      drizzleSql`${s.creditLedger.runId} = ${runId} AND ${s.creditLedger.reason} = 'reservation'`,
+    )
+    .limit(1);
+  if (reserved.length === 0) return; // not platform-funded — nothing was reserved
+  await db
+    .insert(s.creditLedger)
+    .values({ userId, delta: CREDITS_PER_RUN, reason: 'refund', runId })
+    .onConflictDoNothing();
+}
+
 /** SSE keep-alive comment frame. Ignored by EventSource (it's a comment, not a
  *  `data:` line) but keeps idle proxies from dropping a long, quiet build. */
 export const SSE_HEARTBEAT_FRAME = ': ping\n\n';
@@ -911,6 +938,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         apiKey?: string;
         wire?: WireApi;
         httpHeaders?: Record<string, string>;
+        /** True ONLY when the run draws on PLATFORM-funded compute (the platform
+         *  provider, incl. a subscription that fell back to platform). A BYOK key
+         *  or a connected subscription funds its own compute, so platform credits
+         *  must NOT be reserved/charged for it. Gates the credit ledger. */
+        platformFunded?: boolean;
       }
     | { ok: false; status: number; body: Record<string, unknown> }
   > {
@@ -920,7 +952,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     // provider API (same prompt + model, only the billing differs); resolved
     // ONCE here since the token outlives a single run.
     if (!deps.accountRepo) {
-      return { ok: true };
+      return { ok: true, platformFunded: true };
     }
     const settings = await deps.accountRepo.getSettings(userId);
     const provider: AccountProvider = settings?.defaultProvider ?? 'platform';
@@ -960,11 +992,19 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       } catch (err) {
         console.warn(`[${provider}] token unavailable, falling back to platform: ${String(err)}`);
       }
-      return { ok: true, model: deps.platformModel ?? DEFAULT_PLATFORM_MODEL };
+      return {
+        ok: true,
+        model: deps.platformModel ?? DEFAULT_PLATFORM_MODEL,
+        platformFunded: true,
+      };
     }
 
     if (!settings || provider === 'platform') {
-      return { ok: true, model: deps.platformModel ?? DEFAULT_PLATFORM_MODEL };
+      return {
+        ok: true,
+        model: deps.platformModel ?? DEFAULT_PLATFORM_MODEL,
+        platformFunded: true,
+      };
     }
 
     // BYOK (anthropic | openai) — needs a saved key.
@@ -1770,7 +1810,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     // negative 'reservation' row keyed on run.id (idempotent via the partial
     // unique 'credit_ledger_reservation_key'), so the cost is committed up front.
     // On success the worker does NOT debit again; on failure it refunds the row.
-    if (deps.authDb) {
+    //
+    // ONLY platform-funded runs reserve credits. A BYOK key or a connected
+    // subscription funds its own compute (the user's own provider bill), so
+    // platform credits must not gate or charge it — otherwise a subscription user
+    // hits insufficient_credits despite paying nothing to the platform.
+    if (deps.authDb && generationCredentials.platformFunded) {
       try {
         const { schema: s } = await import('@playforge/db');
         await deps.authDb.transaction(async (tx) => {
@@ -2106,14 +2151,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     // runId. The partial unique 'credit_ledger_refund_key' makes a re-cancel (or
     // a later 'failed' handler) a no-op via onConflictDoNothing.
     if (deps.authDb) {
-      const { schema: s } = await import('@playforge/db');
-      await deps.authDb
-        .insert(s.creditLedger)
-        .values({ userId: run.userId, delta: CREDITS_PER_RUN, reason: 'refund', runId: id })
-        .onConflictDoNothing()
-        .catch((refundErr: unknown) => {
-          console.error(`[cancel] credit refund failed for run ${id}:`, refundErr);
-        });
+      await refundRunReservation(deps.authDb, run.userId, id).catch((refundErr: unknown) => {
+        console.error(`[cancel] credit refund failed for run ${id}:`, refundErr);
+      });
     }
 
     return reply.code(200).send({ status: 'canceled', canceled: true });

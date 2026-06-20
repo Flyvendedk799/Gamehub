@@ -1859,20 +1859,31 @@ function makeFakeGenerateQueue(opts?: { jobId?: string; state?: string }) {
  * db.insert().values().onConflictDoNothing(), idempotent on (run_id) where
  * reason='refund'.
  */
-function makeFakeRefundDb(): {
+function makeFakeRefundDb(opts?: { reserved?: boolean }): {
   authDb: ServerDeps['authDb'];
   inserted: Array<{ reason: string; delta: number; runId?: string }>;
 } {
-  const inserted: Array<{ reason: string; delta: number; runId?: string }> = [];
+  // These tests model a PLATFORM run that reserved credits up front, so the
+  // cancel/fail path refunds it. refundRunReservation only refunds when a
+  // 'reservation' row exists; seed one (set reserved:false to model a BYOK/
+  // subscription run that never reserved → no refund).
+  const inserted: Array<{ reason: string; delta: number; runId?: string }> =
+    opts?.reserved === false ? [] : [{ reason: 'reservation', delta: -10, runId: 'seed' }];
   const authDb = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () =>
+            inserted.filter((r) => r.reason === 'reservation').map((r) => ({ runId: r.runId })),
+        }),
+      }),
+    }),
     insert: () => ({
       values: (row: { reason: string; delta: number; runId?: string }) => ({
-        onConflictDoNothing: () => ({
-          catch: async () => {
-            const dup = inserted.some((r) => r.reason === row.reason && r.runId === row.runId);
-            if (!dup) inserted.push(row);
-          },
-        }),
+        onConflictDoNothing: async () => {
+          const dup = inserted.some((r) => r.reason === row.reason && r.runId === row.runId);
+          if (!dup) inserted.push(row);
+        },
       }),
     }),
   } as unknown as ServerDeps['authDb'];
@@ -1928,6 +1939,26 @@ describe('run cancellation (2.7)', () => {
     const refunds = inserted.filter((r) => r.reason === 'refund');
     expect(refunds).toHaveLength(1);
     expect(refunds[0]).toMatchObject({ delta: 10, runId: run.id });
+  });
+
+  it('does NOT refund a non-platform run (BYOK/subscription never reserved → no credit printing)', async () => {
+    const runRepo = new InMemoryRunRepo();
+    const bus = new InMemoryEventBus();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+    const { queue } = makeFakeGenerateQueue({ jobId: run.id, state: 'waiting' });
+    const { authDb, inserted } = makeFakeRefundDb({ reserved: false });
+    const app = makeCancelApp({ runRepo, bus, queue, authDb });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/runs/${run.id}/cancel`,
+      headers: AS_ALICE,
+    });
+
+    expect(res.statusCode).toBe(200);
+    // No reservation existed (the run funded its own compute) → no refund row,
+    // which would otherwise hand the user free credits.
+    expect(inserted.filter((r) => r.reason === 'refund')).toHaveLength(0);
   });
 
   it('re-cancel is idempotent — second call is a no-op and inserts no second refund', async () => {
