@@ -55,6 +55,7 @@ export function ControlsPanel({
   onApply,
   storageKey,
   onMapWithAI,
+  onUserRebind,
 }: {
   manifest: ControlsManifest | null;
   /** Push the full binding set to the running game. */
@@ -67,6 +68,9 @@ export function ControlsPanel({
    *  controls layer into a game that didn't declare it. One click = one run; no
    *  polling. Undefined hides the button. */
   onMapWithAI?: () => void;
+  /** Fired on a USER-initiated bind change (not the initial seed) so the host can
+   *  cue a preview reload. */
+  onUserRebind?: () => void;
 }) {
   const defaults = useMemo(() => (manifest ? bindingsFromManifest(manifest) : {}), [manifest]);
   const [bindings, setBindings] = useState<Bindings>({});
@@ -88,13 +92,14 @@ export function ControlsPanel({
     (next: Bindings) => {
       setBindings(next);
       onApply(next);
+      onUserRebind?.();
       try {
         localStorage.setItem(storageKey, JSON.stringify(next));
       } catch {
         /* storage may be unavailable (private mode) — binds still apply live */
       }
     },
-    [onApply, storageKey],
+    [onApply, storageKey, onUserRebind],
   );
 
   // While capturing, the next keydown OR mouse button binds to the action.

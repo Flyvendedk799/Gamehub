@@ -255,4 +255,8 @@ export const CODE_HIGHLIGHT_CSS = `
 .pf-code .tok-tag { color: #e06c75; }
 .pf-code .tok-attr { color: #d19a66; }
 .pf-code .tok-punct { color: #abb2bf; }
+/* Edit mode: a transparent-text <textarea> sits over the highlighted <pre>, so
+   the code stays colored while typing. Only the caret + selection show through. */
+.pf-editor { color: transparent; caret-color: #f4f4f5; }
+.pf-editor::selection { background: rgba(129,140,248,0.35); color: transparent; }
 `;

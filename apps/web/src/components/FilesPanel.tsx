@@ -569,7 +569,9 @@ function FileViewer({ projectId, entry, onSaved, isBuilding, onDirtyChange }: Fi
               ●
             </span>
           )}
-          {savedFlash && <span className="ml-1 text-[#22c55e] text-[10px]">Saved ✓</span>}
+          {savedFlash && (
+            <span className="ml-1 text-[#22c55e] text-[10px]">Saved ✓ · preview updated</span>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -644,7 +646,7 @@ function FileViewer({ projectId, entry, onSaved, isBuilding, onDirtyChange }: Fi
         )}
         {load.kind === 'ready' &&
           (editing ? (
-            <CodeEditor value={draft} onChange={setDraft} />
+            <CodeSurface value={draft} path={entry.path} editable onChange={setDraft} />
           ) : (
             <FileBody entry={entry} data={load.data} />
           ))}
@@ -671,7 +673,7 @@ function FileBody({ entry, data }: { entry: ProjectFileEntry; data: ReadProjectF
   // execute in the builder origin — defense-in-depth even though <img> wouldn't
   // run it. (Raster images below render as inline data URLs, which is safe.)
   if (data.contentType === 'image/svg+xml' && data.content !== undefined) {
-    return <CodeView code={base64ToUtf8(data.content)} path={entry.path} />;
+    return <CodeSurface value={base64ToUtf8(data.content)} path={entry.path} editable={false} />;
   }
 
   const isImage = data.contentType.startsWith('image/');
@@ -716,7 +718,7 @@ function FileBody({ entry, data }: { entry: ProjectFileEntry; data: ReadProjectF
     );
   }
 
-  return <CodeView code={data.content ?? ''} path={entry.path} />;
+  return <CodeSurface value={data.content ?? ''} path={entry.path} editable={false} />;
 }
 
 function BinaryNotice({
@@ -736,49 +738,85 @@ function BinaryNotice({
   );
 }
 
-// ─── Read-only code view with line numbers ─────────────────────────────────────
+// ─── Code surface (syntax-highlighted, line-numbered; read-only OR editable) ──────
+//
+// Edit mode keeps the code COLORED by overlaying a transparent-text <textarea> on
+// the same highlighted <pre> the read-only view uses, scroll-synced so the caret
+// lines up with the colored text underneath.
 
-function CodeView({ code, path }: { code: string; path: string }) {
+function CodeSurface({
+  value,
+  path,
+  editable,
+  onChange,
+}: {
+  value: string;
+  path: string;
+  editable: boolean;
+  onChange?: (v: string) => void;
+}) {
   const lang = useMemo(() => langFromPath(path), [path]);
-  const html = useMemo(() => highlightToHtml(code, lang), [code, lang]);
-  const lineCount = useMemo(() => code.split('\n').length, [code]);
+  const html = useMemo(() => highlightToHtml(value, lang), [value, lang]);
+  const lineCount = useMemo(() => value.split('\n').length || 1, [value]);
 
-  return (
-    <div className="h-full overflow-auto scrollbar-thin">
-      <div className="flex min-w-full font-mono text-[12px] leading-[1.5]">
-        {/* Gutter */}
-        <div
-          aria-hidden="true"
-          className="flex-shrink-0 select-none text-right px-3 py-3 text-[#3f3f46] bg-[#0c0c0c] border-r border-[#1a1a1a]"
-        >
-          {Array.from({ length: lineCount }, (_, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: line numbers are positional and stable
-            <div key={i}>{i + 1}</div>
-          ))}
-        </div>
-        {/* Code */}
-        <pre className="pf-code flex-1 px-4 py-3 whitespace-pre overflow-visible">
-          {/* biome-ignore lint/security/noDangerouslySetInnerHtml: highlightToHtml HTML-escapes all input before adding token spans */}
-          <code dangerouslySetInnerHTML={{ __html: html }} />
-        </pre>
-      </div>
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const preRef = useRef<HTMLPreElement>(null);
+  const gutterRef = useRef<HTMLDivElement>(null);
+
+  // Keep the highlight layer + line-number gutter aligned with the textarea scroll.
+  const syncScroll = useCallback(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    if (preRef.current) {
+      preRef.current.scrollTop = ta.scrollTop;
+      preRef.current.scrollLeft = ta.scrollLeft;
+    }
+    if (gutterRef.current) gutterRef.current.scrollTop = ta.scrollTop;
+  }, []);
+
+  const gutter = (
+    <div
+      ref={gutterRef}
+      aria-hidden="true"
+      className="flex-shrink-0 select-none overflow-hidden text-right px-3 py-3 text-[#3f3f46] bg-[#0c0c0c] border-r border-[#1a1a1a]"
+    >
+      {Array.from({ length: lineCount }, (_, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: line numbers are positional and stable
+        <div key={i}>{i + 1}</div>
+      ))}
     </div>
   );
-}
 
-// ─── Editable textarea ─────────────────────────────────────────────────────────
+  if (!editable) {
+    return (
+      <div className="h-full overflow-auto scrollbar-thin">
+        <div className="flex min-w-full font-mono text-[12px] leading-[1.5]">
+          <div
+            aria-hidden="true"
+            className="flex-shrink-0 select-none text-right px-3 py-3 text-[#3f3f46] bg-[#0c0c0c] border-r border-[#1a1a1a]"
+          >
+            {Array.from({ length: lineCount }, (_, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: line numbers are positional and stable
+              <div key={i}>{i + 1}</div>
+            ))}
+          </div>
+          <pre className="pf-code flex-1 px-4 py-3 whitespace-pre overflow-visible">
+            {/* biome-ignore lint/security/noDangerouslySetInnerHtml: highlightToHtml HTML-escapes all input before adding token spans */}
+            <code dangerouslySetInnerHTML={{ __html: html }} />
+          </pre>
+        </div>
+      </div>
+    );
+  }
 
-function CodeEditor({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-
-  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (!onChange) return;
     if (e.key === 'Tab') {
       e.preventDefault();
       const ta = e.currentTarget;
       const start = ta.selectionStart;
       const end = ta.selectionEnd;
-      const next = `${value.slice(0, start)}  ${value.slice(end)}`;
-      onChange(next);
+      onChange(`${value.slice(0, start)}  ${value.slice(end)}`);
       requestAnimationFrame(() => {
         ta.selectionStart = ta.selectionEnd = start + 2;
       });
@@ -786,17 +824,35 @@ function CodeEditor({ value, onChange }: { value: string; onChange: (v: string) 
   }
 
   return (
-    <textarea
-      ref={ref}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      onKeyDown={onKeyDown}
-      spellCheck={false}
-      autoCapitalize="off"
-      autoCorrect="off"
-      aria-label="File content editor"
-      className="w-full h-full resize-none bg-[#0a0a0a] text-[#d4d4d8] font-mono text-[12px] leading-[1.5] px-4 py-3 outline-none border-0 scrollbar-thin"
-    />
+    <div className="h-full flex overflow-hidden font-mono text-[12px] leading-[1.5]">
+      {gutter}
+      <div className="relative flex-1 overflow-hidden">
+        {/* Colored layer (under the textarea). Trailing newline keeps the last
+            line from being clipped when scrolled to the bottom. */}
+        <pre
+          ref={preRef}
+          aria-hidden="true"
+          className="pf-code pointer-events-none absolute inset-0 m-0 overflow-hidden px-4 py-3 whitespace-pre"
+        >
+          {/* biome-ignore lint/security/noDangerouslySetInnerHtml: highlightToHtml HTML-escapes all input before adding token spans */}
+          <code dangerouslySetInnerHTML={{ __html: `${html}\n` }} />
+        </pre>
+        {/* Transparent-text textarea on top — only caret + selection are visible. */}
+        <textarea
+          ref={taRef}
+          value={value}
+          onChange={(e) => onChange?.(e.target.value)}
+          onScroll={syncScroll}
+          onKeyDown={handleKeyDown}
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          wrap="off"
+          aria-label="File content editor"
+          className="pf-editor absolute inset-0 resize-none bg-transparent px-4 py-3 whitespace-pre overflow-auto outline-none border-0 scrollbar-thin"
+        />
+      </div>
+    </div>
   );
 }
 

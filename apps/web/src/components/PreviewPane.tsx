@@ -63,6 +63,17 @@ export function PreviewPane({
   // Tracks unsaved edits in the Files tab so switching tabs can't silently
   // discard them (the FilesPanel bubbles this up via onDirtyChange).
   const [filesDirty, setFilesDirty] = useState(false);
+  // Manual preview reload. Bumping this re-keys the iframe src so the game
+  // restarts on demand (e.g. to test new key bindings, or just re-run it).
+  const [reloadNonce, setReloadNonce] = useState(0);
+  // True when a change was made that a reload would surface (e.g. controls were
+  // rebound) — drives a "refresh to see your changes" cue on the reload button.
+  const [previewStale, setPreviewStale] = useState(false);
+
+  const reloadPreview = useCallback(() => {
+    setReloadNonce((n) => n + 1);
+    setPreviewStale(false);
+  }, []);
 
   // Guarded tab switch: confirm before leaving the Files tab with unsaved edits.
   const switchView = useCallback(
@@ -89,6 +100,7 @@ export function PreviewPane({
     setShowTweaks(false);
     setControlsManifest(null);
     setView('preview');
+    setPreviewStale(false);
   }, [previewUrl]);
 
   // The owner-gated preview route accepts the session token via ?token= because
@@ -96,17 +108,21 @@ export function PreviewPane({
   // play URLs (/v1/play/...) are public and must NOT carry a token.
   const iframeSrc = useMemo(() => {
     if (!previewUrl) return null;
-    if (!previewUrl.includes('/preview')) return previewUrl;
-    const token = getToken();
-    if (!token) return previewUrl;
     try {
       const u = new URL(previewUrl);
-      u.searchParams.set('token', token);
+      // Owner-gated preview routes accept the session token via ?token= (an
+      // iframe can't set Authorization headers, #30). Public play URLs must not.
+      if (previewUrl.includes('/preview')) {
+        const token = getToken();
+        if (token) u.searchParams.set('token', token);
+      }
+      // Manual reload: a changing query param re-fetches the iframe.
+      if (reloadNonce > 0) u.searchParams.set('_r', String(reloadNonce));
       return u.toString();
     } catch {
       return previewUrl;
     }
-  }, [previewUrl]);
+  }, [previewUrl, reloadNonce]);
 
   // Validate inbound bridge messages: only trust the preview origin + a
   // well-formed `{ type }` payload (#20). We don't act on any message today
@@ -263,6 +279,34 @@ export function PreviewPane({
             </button>
           )}
           {previewUrl && (
+            <button
+              type="button"
+              onClick={reloadPreview}
+              aria-label="Reload preview"
+              title={
+                previewStale
+                  ? 'Changes were made — reload to see them in the game'
+                  : 'Reload the preview'
+              }
+              className={`
+                relative text-[10px] px-2 py-1 rounded border transition-colors font-mono
+                ${
+                  previewStale
+                    ? 'bg-[#6366f1]/20 text-[#818cf8] border-[#6366f1]/40'
+                    : 'bg-[#1a1a1a] text-[#52525b] border-[#222222] hover:text-[#a1a1aa]'
+                }
+              `}
+            >
+              ↻{previewStale ? ' refresh' : ''}
+              {previewStale && (
+                <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#6366f1] opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-[#818cf8]" />
+                </span>
+              )}
+            </button>
+          )}
+          {previewUrl && (
             <a
               href={previewUrl}
               target="_blank"
@@ -308,6 +352,9 @@ export function PreviewPane({
                 // Key per-RUN (previewUrl carries the runId) so a fresh generation
                 // reverts stale manual binds to the new game's declared defaults.
                 storageKey={`pf:controls:${previewUrl ?? projectId}`}
+                // A user rebind applies live, but cue a reload so they can restart
+                // the game and test the new bindings from a clean state.
+                onUserRebind={() => setPreviewStale(true)}
                 {...(onMapControls ? { onMapWithAI: onMapControls } : {})}
               />
             </div>
