@@ -799,6 +799,51 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     expect(result.repairRounds).toBeGreaterThanOrEqual(1);
   });
 
+  it('inlines a MULTI-FILE game before the browser-worker boots it (no false boot failure on external src)', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    let verifyHtml = '';
+    const browserJobs: BrowserJobsPort & { playtestCalls: number } = {
+      playtestCalls: 0,
+      async runtimeVerify(html) {
+        verifyHtml = html;
+        return { hasGameContract: true, fatalErrors: [] };
+      },
+      async playtest() {
+        this.playtestCalls += 1;
+        return null;
+      },
+    };
+    const agent: GenerateFn = async (_input, deps) => {
+      await deps.gameMode?.setEngine?.('phaser', 'multi-file game');
+      await deps.gameMode?.setSpec?.({ ...TOPDOWN_SPEC, genre: 'idle' } as unknown as GameSpec);
+      // The game references an EXTERNAL module the browser-worker can't fetch
+      // from a bare index.html string — pre-fix this booted as "false".
+      await deps.fs?.create(
+        'index.html',
+        '<!doctype html><html><head></head><body><canvas id="game"></canvas><script src="src/main.js"></script></body></html>',
+      );
+      await deps.fs?.create(
+        'src/main.js',
+        'window.__game = { debug: { snapshot: () => ({ score: 0 }) } };',
+      );
+      return emptyOutput('idle');
+    };
+
+    await runGeneration(
+      {
+        prompt: 'a multi-file game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: agent, browserJobs },
+    );
+
+    // The worker received a SELF-CONTAINED bundle — the external module is
+    // inlined, not a dangling <script src="src/main.js"> it can't load.
+    expect(verifyHtml.length).toBeGreaterThan(0);
+    expect(verifyHtml).not.toContain('src="src/main.js"');
+  });
+
   it('budget exhaustion (interrupted run) stops the loop early with budget_exhausted', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());
     const browserJobs = queuedBrowserJobs([invertedPlaytest()]);
