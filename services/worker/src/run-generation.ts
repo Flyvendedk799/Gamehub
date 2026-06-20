@@ -554,12 +554,21 @@ export async function runGeneration(
     const plan = selectGamePlaytestPlan(spec.genre);
     const hasPredicates = plan !== null && plan.predicates.length > 0;
 
+    // Inline the WHOLE project into one self-contained HTML before booting it in
+    // the browser-worker — exactly like `done`'s gate (inlineForVerify). Passing
+    // raw index.html made the worker unable to load a multi-file game's external
+    // `src/main.js`, so a perfectly-booting multi-file game reported booted=false
+    // with every snapshot field missing → wasted repair rounds + a misleading
+    // force-accept. The published game is inlined too, so this also matches what
+    // actually ships.
+    const verifyHtml = await inlineForVerify(entry.content);
+
     // The boot check runs REGARDLESS of whether the genre has playbook
     // predicates. Previously a genre with no playbook returned null here and
     // shipped 'no_verdict' — so a game that never booted (window.__game absent)
     // went out as if it were fine (the racing booted=0 case). Now a boot failure
     // always produces a verdict → the repair loop gets a round to fix it.
-    const rvVerdict = await browserJobs.runtimeVerify(entry.content);
+    const rvVerdict = await browserJobs.runtimeVerify(verifyHtml);
     if (rvVerdict !== null) {
       // Keep the eval observation current with this attempt's boot result so
       // the captured recording reflects the SHIPPED artifact, not a stale
@@ -580,7 +589,7 @@ export async function runGeneration(
     if (fatalErrors.length === 0 && !hasPredicates) return null;
 
     const playVerdict =
-      hasPredicates && plan !== null ? await browserJobs.playtest(entry.content, plan.steps) : null;
+      hasPredicates && plan !== null ? await browserJobs.playtest(verifyHtml, plan.steps) : null;
     const observation: AttemptObservation = {
       trace: playVerdict === null ? null : traceFromPlaytestResult(playVerdict),
       fatalErrors,
