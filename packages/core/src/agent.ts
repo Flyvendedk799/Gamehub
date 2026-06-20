@@ -85,6 +85,11 @@ import {
   makeChooseRemotionStyleTool,
 } from './tools/choose-remotion-style.js';
 import { type SetGameSpecFn, makeDeclareGameSpecTool } from './tools/declare-game-spec.js';
+import {
+  type GetGameContractFn,
+  type SetGameContractFn,
+  makeDeclarePlaytestContractTool,
+} from './tools/declare-playtest-contract.js';
 import { makeDeclareTweakSchemaTool } from './tools/declare-tweak-schema.js';
 import {
   type DoneRuntimeVerifier,
@@ -1013,6 +1018,13 @@ export interface GenerateViaAgentDeps {
          *  Both undefined ⇒ tools register but no-op (vitest paths). */
         setSpec?: SetGameSpecFn | undefined;
         getSpec?: GetGameSpecFn | undefined;
+        /** Agent-authored playtest contract for a genre-LESS game (no bundled
+         *  playbook). `setContract` persists the projected plan into the per-run
+         *  mutable; the boot-and-repair loop reads it as the deterministic verdict
+         *  source when `selectGamePlaytestPlan(genre)` is null. Both undefined ⇒
+         *  the tool registers but no-ops (vitest paths). */
+        setContract?: SetGameContractFn | undefined;
+        getContract?: GetGameContractFn | undefined;
       }
     | undefined;
 }
@@ -1152,6 +1164,16 @@ export async function generateViaAgent(
     );
     defaultTools.push(
       makeAmendGameSpecTool(deps.gameMode.getSpec, deps.gameMode.setSpec) as unknown as AgentTool<
+        TSchema,
+        unknown
+      >,
+    );
+    // declare_playtest_contract — the verifiable-contract path for genre-less
+    // games. The system prompt requires it right after declare_game_spec when no
+    // genre playbook fits, so a novel game is deterministically gated on its own
+    // declared input→state behaviour rather than shipping unverified.
+    defaultTools.push(
+      makeDeclarePlaytestContractTool(deps.gameMode.setContract) as unknown as AgentTool<
         TSchema,
         unknown
       >,

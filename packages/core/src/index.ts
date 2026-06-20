@@ -90,10 +90,13 @@ export {
 export {
   planPlaytest,
   selectGamePlaytestPlan,
+  planFromContract,
   type PlaytestPlan,
   type PlaytestStep as DesignPlaytestStep,
   type GamePlaytestPlan,
   type GamePlaytestStep,
+  type AuthoredContract,
+  type AuthoredContractCheck,
 } from './playtest-planner.js';
 export {
   getPlaytestPlaybook,
