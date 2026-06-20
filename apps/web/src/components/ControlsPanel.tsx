@@ -45,12 +45,19 @@ export function ControlsPanel({
   manifest,
   onApply,
   storageKey,
+  onMapWithAI,
 }: {
   manifest: ControlsManifest | null;
   /** Push the full binding set to the running game. */
   onApply: (bindings: Bindings) => void;
-  /** localStorage key (per project) for persisting custom binds. */
+  /** localStorage key (per RUN — see PreviewPane) for persisting custom binds.
+   *  Keyed per-run so a fresh generation reverts stale manual overrides to the
+   *  game's newly-declared defaults. */
   storageKey: string;
+  /** Legacy rescue: fire ONE scoped generation that wires the rebindable
+   *  controls layer into a game that didn't declare it. One click = one run; no
+   *  polling. Undefined hides the button. */
+  onMapWithAI?: () => void;
 }) {
   const defaults = useMemo(() => (manifest ? bindingsFromManifest(manifest) : {}), [manifest]);
   const [bindings, setBindings] = useState<Bindings>({});
@@ -105,10 +112,23 @@ export function ControlsPanel({
 
   if (!manifest) {
     return (
-      <div className="flex h-full items-center justify-center px-6 text-center">
-        <p className="text-sm text-[#52525b] max-w-xs leading-relaxed">
-          This game hasn't declared its controls yet. Newer games expose their key bindings here so
-          you can remap them — generate or rebuild the game to see them.
+      <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
+        <p className="text-sm text-[#71717a] max-w-xs leading-relaxed">
+          This game reads input directly, so its keys aren't mappable yet. Map them once and you can
+          rebind live from here — no AI needed after that.
+        </p>
+        {onMapWithAI && (
+          <button
+            type="button"
+            onClick={onMapWithAI}
+            className="rounded-lg bg-[#6366f1] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#4f46e5]"
+          >
+            Map controls with AI
+          </button>
+        )}
+        <p className="text-[11px] text-[#52525b] max-w-xs leading-relaxed">
+          Runs once to wire a rebindable controls layer (and fix any inverted keys). New games map
+          their controls automatically.
         </p>
       </div>
     );

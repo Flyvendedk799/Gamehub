@@ -65,6 +65,7 @@ export type GameInvariant =
   | 'fail-state'
   | 'score-or-state'
   | 'feedback'
+  | 'controls'
   | 'brawler-combo'
   | 'brawler-hitstop'
   | 'brawler-per-attack-limb'
@@ -144,6 +145,22 @@ const FEEDBACK_PATTERNS: readonly RegExp[] = [
   /\btween\.|camera\.shake\b|setShake\b/i,
 ];
 
+// WS-A controls contract — a keyboard game must DECLARE its scheme via
+// window.__game.controls.define(...) and read input through it, so the builder's
+// Controls tab populates and users can rebind keys live. These detect input read
+// DIRECTLY (bypassing the rebindable layer); the runtime layer is already present
+// in every game, so the only thing missing when these match without a
+// controls.define is the declaration + adoption.
+const KEYBOARD_INPUT_PATTERNS: readonly RegExp[] = [
+  /addEventListener\s*\(\s*['"]key(down|up|press)['"]/i,
+  /\.input\.keyboard/i,
+  /createCursorKeys\s*\(/i,
+  /\.addKey\s*\(/i,
+  /\bKeyboardEvent\b/,
+  /\bcursors?\s*\.\s*(left|right|up|down)/i,
+];
+const CONTROLS_DEFINE_PATTERN = /\bcontrols\s*\.\s*define\s*\(/;
+
 function anyMatch(source: string, patterns: readonly RegExp[]): boolean {
   return patterns.some((re) => re.test(source));
 }
@@ -220,7 +237,13 @@ export function assertGameInvariants(
 ): AssertGameInvariantsDetails {
   const source = gatherSource(deps);
   const issues: InvariantIssue[] = [];
-  const checked: GameInvariant[] = ['restart', 'fail-state', 'score-or-state', 'feedback'];
+  const checked: GameInvariant[] = [
+    'restart',
+    'fail-state',
+    'score-or-state',
+    'feedback',
+    'controls',
+  ];
 
   if (!anyMatch(source, RESTART_PATTERNS)) {
     issues.push({
@@ -252,6 +275,14 @@ export function assertGameInvariants(
       severity: 'warn',
       message:
         'No feedback cue detected. Hits / pickups / impacts need a visible AND audible response within 100 ms — a sound effect, particle burst, or screen shake. Silence reads as broken.',
+    });
+  }
+  if (anyMatch(source, KEYBOARD_INPUT_PATTERNS) && !CONTROLS_DEFINE_PATTERN.test(source)) {
+    issues.push({
+      invariant: 'controls',
+      severity: 'warn',
+      message:
+        'Keyboard input is read directly without declaring a controls scheme. The runtime layer is already present — call window.__game.controls.define({ actions: [{ id, label, keys: ["ArrowLeft","KeyA"] }, …] }) and read input via controls.isDown(id) / controls.on(id, fn). This populates the builder Controls tab and lets players rebind keys live; reading cursors/keydown directly bypasses it, so the controls are invisible and unmappable.',
     });
   }
 
@@ -467,11 +498,17 @@ export function makeAssertGameInvariantsTool(
     async execute(_id, params): Promise<AgentToolResult<AssertGameInvariantsDetails>> {
       const genre = params.genre as GameGenre | undefined;
       const result = assertGameInvariants(deps, genre !== undefined ? { genre } : {});
-      const baseInvariants = ['restart', 'fail-state', 'score-or-state', 'feedback'].join(', ');
+      const baseInvariants = [
+        'restart',
+        'fail-state',
+        'score-or-state',
+        'feedback',
+        'controls',
+      ].join(', ');
       const okHeadline =
         genre !== undefined
-          ? `All ${result.checked.length} invariants present for genre=${genre} (${baseInvariants}${result.checked.length > 4 ? ` + ${result.checked.slice(4).join(', ')}` : ''}). No follow-up needed.`
-          : `All four game invariants present (${baseInvariants}). No follow-up needed.`;
+          ? `All ${result.checked.length} invariants present for genre=${genre} (${baseInvariants}${result.checked.length > 5 ? ` + ${result.checked.slice(5).join(', ')}` : ''}). No follow-up needed.`
+          : `All ${result.checked.length} game invariants present (${baseInvariants}). No follow-up needed.`;
       const summary =
         result.issues.length === 0
           ? okHeadline

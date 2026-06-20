@@ -494,6 +494,17 @@ export default function BuilderPage() {
             errorMessage={errorMessage}
             tweakSchema={currentTweakSchema}
             projectId={projectId}
+            onMapControls={() => {
+              // One scoped generation (one click = one run, no polling) that wires
+              // the rebindable controls layer into a game that didn't declare it.
+              void handleSend(
+                'Make the controls rebindable: call window.__game.controls.define({ actions: [...] }) ' +
+                  'declaring every keyboard action (id, label, keys), and read ALL input through ' +
+                  'window.__game.controls.isDown(id) / .on(id, fn) instead of reading cursors/keydown directly — ' +
+                  'so the Controls tab populates and players can remap keys live. Also fix any inverted or ' +
+                  'wrong key mappings while you do this. Keep everything else the same.',
+              );
+            }}
           />
         </div>
 
