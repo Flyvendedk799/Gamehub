@@ -452,6 +452,33 @@ describe('SSE event relay', () => {
     expect(lines).toHaveLength(3);
   });
 
+  it('build report: 404 for a run the requester does not own', async () => {
+    const bus = new InMemoryEventBus();
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+    const app = makeApp({ bus, runRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/runs/${run.id}/report`,
+      headers: AS_BOB,
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('build report: 503 when the telemetry DB is not configured', async () => {
+    const bus = new InMemoryEventBus();
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+    const app = makeApp({ bus, runRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/runs/${run.id}/report`,
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(503);
+    expect(res.json()).toMatchObject({ error: 'report_unavailable' });
+  });
+
   it('adds CORS headers to hijacked SSE responses', async () => {
     const bus = new InMemoryEventBus();
     const runRepo = new InMemoryRunRepo();

@@ -348,7 +348,10 @@ const BUILTIN_PUBLIC_BASE_URLS: Record<string, string> = {
   openrouter: 'https://openrouter.ai/api/v1',
 };
 
-function buildPiModel(
+// Exported for the provider/wire smoke tests — asserts each provider resolves
+// to the right api/base/wire so a never-exercised path (the anthropic + codex
+// wire 404s we hit) can't silently regress.
+export function buildPiModel(
   model: ModelRef,
   wire: WireApi | undefined,
   baseUrl: string | undefined,
@@ -1881,6 +1884,12 @@ export async function generateViaAgent(
   const STUCK_REPEAT_THRESHOLD = 3;
   const STUCK_TURN_WINDOW = 5;
   const STUCK_REGION_RADIUS = 20;
+  // Per-PATH (bucket-agnostic) failure threshold: catches a thrash that varies
+  // its target as the file degrades — the per-bucket tracker never accumulates
+  // there (each retry hashes to a new bucket). 5 failures on one file is a clear
+  // death-spiral that ≥1 successful verify would have reset.
+  const STUCK_PATH_THRESHOLD = 5;
+  const stuckFailuresByPath = new Map<string, number[]>();
   const stuckRecent: Array<{ key: string; turn: number }> = [];
   // Per-(path, contentBucket) failure tracker. `contentBucket` is a
   // SHA-style hash of the first non-empty line of the source content
@@ -1978,14 +1987,19 @@ export async function generateViaAgent(
     return null;
   };
   const fireStuckSteer = (
-    reason: 'args_repeat' | 'region_repeat',
+    reason: 'args_repeat' | 'region_repeat' | 'file_thrash',
     meta: Record<string, unknown>,
   ) => {
     if (stuckSteerEmitted) return;
     stuckSteerEmitted = true;
     log.warn('[generate] step=stuck_detected', { ...ctx, reason, ...meta });
     let messageBody: string;
-    if (reason === 'region_repeat') {
+    if (reason === 'file_thrash') {
+      // The per-(path, bucket) tracker misses a thrash that VARIES its target as
+      // the file degrades (stale line numbers each retry). This catches it by
+      // path alone and forces a clean rewrite instead of more failing patches.
+      messageBody = `[system-reminder] You have failed ${meta['failures']} edits to \`${meta['path']}\` in the last few turns — the file is degrading and your line numbers are stale. STOP patching it. Run \`view\` on the WHOLE file to read its current content, then use the \`create\` command to rewrite \`${meta['path']}\` from scratch with the complete, corrected code. Do not issue another patch/str_replace against it until you have done a full \`view\`.`;
+    } else if (reason === 'region_repeat') {
       const range =
         meta['startLine'] !== undefined && meta['endLine'] !== undefined
           ? ` lines ${meta['startLine']}-${meta['endLine']}`
@@ -2069,7 +2083,23 @@ export async function generateViaAgent(
       if (callId.length === 0) return;
       const pending = stuckPendingByCallId.get(callId);
       stuckPendingByCallId.delete(callId);
-      if (!pending || !isError) return;
+      if (!pending) return;
+      // A SUCCESSFUL edit to a path = the model recovered; clear its per-path
+      // failure streak so legit multi-region work never trips the breaker.
+      if (!isError) {
+        stuckFailuresByPath.delete(pending.path);
+        return;
+      }
+      // Per-PATH failure streak (bucket-agnostic) — the breaker the per-bucket
+      // tracker misses when the file degrades and every retry hashes anew.
+      const pathFails = (stuckFailuresByPath.get(pending.path) ?? []).filter(
+        (t) => stuckTurnIndex - t <= STUCK_TURN_WINDOW,
+      );
+      pathFails.push(stuckTurnIndex);
+      stuckFailuresByPath.set(pending.path, pathFails);
+      if (pathFails.length >= STUCK_PATH_THRESHOLD) {
+        fireStuckSteer('file_thrash', { path: pending.path, failures: pathFails.length });
+      }
       // Bucket key combines path + content hash. Same path + same
       // first-line content (across str_replace, patch, insert) =
       // same logical target.

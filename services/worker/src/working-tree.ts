@@ -90,8 +90,10 @@ export class WorkingTree {
     const content = this.requireFile(path);
     const first = content.indexOf(oldStr);
     if (first === -1) {
+      // Actionable error: a bare "no match" makes models re-guess the same way
+      // and thrash. Tell them WHY + the recovery path.
       throw new PlayforgeError(
-        `str_replace: no match for the given text in ${path}`,
+        `str_replace: no match for the given text in ${path} (${content.split('\n').length} lines). old_str must match the file content EXACTLY (whitespace + indentation included) and it does not. Recover: \`view\` ${path} and copy the exact snippet, OR \`create\` to rewrite the whole file, OR \`patch\` by line range.`,
         ERROR_CODES.IPC_BAD_INPUT,
       );
     }
@@ -164,7 +166,9 @@ export class WorkingTree {
       const original = lines.slice(h.startLine - 1, h.endLine).join('\n');
       if (h.expectedOriginal !== undefined && h.expectedOriginal !== original) {
         throw new PlayforgeError(
-          `patch: expectedOriginal mismatch at [${h.startLine}-${h.endLine}] in ${path}`,
+          `patch: expectedOriginal at [${h.startLine}-${h.endLine}] in ${path} does not match the file's current content there ` +
+            `(the file likely changed since you last viewed it; it now has ${lines.length} lines). ` +
+            `Recover: \`view\` ${path} to get the CURRENT line numbers + text, then re-issue the patch.`,
           ERROR_CODES.IPC_BAD_INPUT,
         );
       }

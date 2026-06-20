@@ -353,7 +353,7 @@ const ACCOUNT_PROVIDERS: AccountProvider[] = [
   'claude-subscription',
   'codex-subscription',
 ];
-const DEFAULT_PLATFORM_MODEL: ModelRef = { provider: 'openai', modelId: 'o4-mini' };
+const DEFAULT_PLATFORM_MODEL: ModelRef = { provider: 'anthropic', modelId: 'claude-sonnet-4-6' };
 const DEFAULT_BYOK_MODELS: Record<ByokProvider, string> = {
   anthropic: PROVIDER_SHORTLIST.anthropic.defaultPrimary,
   openai: PROVIDER_SHORTLIST.openai.defaultPrimary,
@@ -2138,6 +2138,55 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   // ── game preview file serving ─────────────────────────────────────────────
+  // Build report — per-run quality telemetry surfaced in-product (not just in
+  // logs): boot result, repair rounds, ship reason, genre-playbook pass count,
+  // juice, force-accept, + token usage. Owner-only.
+  app.get('/v1/runs/:id/report', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { id } = req.params as { id: string };
+    const run = await deps.runRepo.get(id);
+    if (!run || run.userId !== user.userId) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    if (!deps.authDb) return reply.code(503).send({ error: 'report_unavailable' });
+    const { schema: s } = await import('@playforge/db');
+    const [r] = await deps.authDb
+      .select({
+        inputTokens: s.runs.inputTokens,
+        outputTokens: s.runs.outputTokens,
+        createdAt: s.runs.createdAt,
+        finishedAt: s.runs.finishedAt,
+      })
+      .from(s.runs)
+      .where(drizzleEq(s.runs.id, id))
+      .limit(1);
+    const [q] = await deps.authDb
+      .select()
+      .from(s.runQualityMetrics)
+      .where(drizzleEq(s.runQualityMetrics.runId, id))
+      .limit(1);
+    const durationMs =
+      r?.finishedAt && r?.createdAt ? r.finishedAt.getTime() - r.createdAt.getTime() : null;
+    return reply.send({
+      runId: id,
+      status: run.status,
+      durationMs,
+      tokens: { input: r?.inputTokens ?? 0, output: r?.outputTokens ?? 0 },
+      quality: q
+        ? {
+            genre: q.genre,
+            booted: q.runtimeBooted,
+            repairRounds: q.repairRounds,
+            shipReason: q.shipReason,
+            forceAccept: q.forceAccept,
+            playbook: { pass: q.playbookPass, total: q.playbookTotal },
+            juiceScore: q.juiceScore !== null ? Number(q.juiceScore) : null,
+          }
+        : null,
+    });
+  });
+
   // Serves files from a run's snapshot manifest so the iframe can load the game.
   // Route: GET /v1/runs/:id/preview/           → index.html
   //        GET /v1/runs/:id/preview/assets/...  → asset files
