@@ -21,8 +21,19 @@ import type { EventBus } from '@playforge/bus';
 import { runChannel } from '@playforge/bus';
 import { type ExportGameHtmlOptions, buildGameHtml } from '@playforge/exporters';
 import { exportGameZip } from '@playforge/exporters/game-zip';
-import { type StoredClaudeAuth, readClaudeCodeKeychainCredentials } from '@playforge/providers';
-import { type ModelRef, PROVIDER_SHORTLIST, normalizeEngineCdnUrls } from '@playforge/shared';
+import {
+  type StoredClaudeAuth,
+  type StoredCodexAuth,
+  decodeJwtClaims,
+  readClaudeCodeKeychainCredentials,
+  readCodexAuthFile,
+} from '@playforge/providers';
+import {
+  type ModelRef,
+  PROVIDER_SHORTLIST,
+  type WireApi,
+  normalizeEngineCdnUrls,
+} from '@playforge/shared';
 import { type SnapshotStore, contentTypeFor } from '@playforge/storage';
 import {
   and as drizzleAnd,
@@ -223,6 +234,10 @@ export type EnqueueFn = (input: {
   model?: ModelRef;
   /** Decrypted BYOK API key override. Undefined means platform key. */
   apiKey?: string;
+  /** Wire-format override (e.g. 'openai-codex-responses' for a Codex subscription). */
+  wire?: WireApi;
+  /** Extra HTTP headers for the model call (e.g. chatgpt-account-id for Codex). */
+  httpHeaders?: Record<string, string>;
   /** Manifest key of the project's current snapshot — seeds the new generation with existing files. */
   parentManifestKey?: string;
   /** Hard token ceiling for this run — worker aborts if exceeded. */
@@ -287,6 +302,11 @@ export interface ServerDeps {
   claudeAuthStore?: import('@playforge/providers').ClaudeTokenStore;
   /** Claude model used when the subscription is the active credential. */
   claudeSubscriptionModel?: string;
+  /** Optional: Codex / ChatGPT subscription credential store. When connected,
+   *  generation runs on it over the openai-codex-responses wire + account header. */
+  codexAuthStore?: import('@playforge/providers').CodexTokenStore;
+  /** Codex model used when the Codex subscription is the active credential. */
+  codexSubscriptionModel?: string;
   /** Optional: server-side envelope secret for encrypted BYOK keys. */
   apiKeyEncryptionSecret?: string;
   /**
@@ -846,10 +866,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     return null;
   }
 
-  async function resolveGenerationCredentials(
-    userId: string,
-  ): Promise<
-    | { ok: true; model?: ModelRef; apiKey?: string }
+  async function resolveGenerationCredentials(userId: string): Promise<
+    | {
+        ok: true;
+        model?: ModelRef;
+        apiKey?: string;
+        wire?: WireApi;
+        httpHeaders?: Record<string, string>;
+      }
     | { ok: false; status: number; body: Record<string, unknown> }
   > {
     // Claude subscription takes precedence when connected — generation runs on
@@ -875,6 +899,29 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       } catch (err) {
         console.warn(
           `[claude-sub] token unavailable, falling back to configured credential: ${String(err)}`,
+        );
+      }
+    }
+    // Codex / ChatGPT subscription — same once-per-run resolution, over the
+    // openai-codex-responses wire with the chatgpt-account-id header.
+    if (deps.codexAuthStore) {
+      try {
+        const current = await deps.codexAuthStore.read();
+        if (current) {
+          const apiKey = await deps.codexAuthStore.getValidAccessToken();
+          const headers: Record<string, string> = {};
+          if (current.accountId) headers['chatgpt-account-id'] = current.accountId;
+          return {
+            ok: true,
+            model: { provider: 'openai', modelId: deps.codexSubscriptionModel ?? 'gpt-5-codex' },
+            apiKey,
+            wire: 'openai-codex-responses',
+            ...(Object.keys(headers).length > 0 ? { httpHeaders: headers } : {}),
+          };
+        }
+      } catch (err) {
+        console.warn(
+          `[codex-sub] token unavailable, falling back to configured credential: ${String(err)}`,
         );
       }
     }
@@ -1310,6 +1357,69 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     return reply.send({ connected: false });
   });
 
+  // ── Codex / ChatGPT subscription (OAuth) ─────────────────────────────────────
+  // Symmetric to Claude — Connect / Re-auth harvest the local `codex` CLI login
+  // from ~/.codex/auth.json (re-harvest, not OAuth refresh, so the CLI's session
+  // is never broken). When connected, generation runs over the
+  // openai-codex-responses wire with the chatgpt-account-id header.
+  function codexStatusBody(auth: StoredCodexAuth | null): Record<string, unknown> {
+    if (!auth) return { connected: false };
+    return { connected: true, email: auth.email, expiresAt: auth.expiresAt };
+  }
+
+  async function connectCodexFromAuthFile(reply: FastifyReply): Promise<void> {
+    const store = deps.codexAuthStore;
+    if (!store) {
+      await reply.code(503).send({ error: 'codex_auth_unavailable' });
+      return;
+    }
+    const creds = await readCodexAuthFile();
+    if (!creds) {
+      await reply.code(400).send({ error: 'codex_cli_not_logged_in' });
+      return;
+    }
+    const claims = creds.idToken ? decodeJwtClaims(creds.idToken) : null;
+    const email = typeof claims?.['email'] === 'string' ? (claims['email'] as string) : null;
+    await store.write({
+      schemaVersion: 1,
+      accessToken: creds.accessToken,
+      refreshToken: creds.refreshToken,
+      idToken: creds.idToken,
+      expiresAt: creds.expiresAt,
+      accountId: creds.accountId,
+      email,
+      updatedAt: Date.now(),
+    });
+    await reply.send(codexStatusBody(await store.read()));
+  }
+
+  app.get('/v1/auth/codex/status', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    if (!deps.codexAuthStore) return reply.code(503).send({ error: 'codex_auth_unavailable' });
+    return reply.send(codexStatusBody(await deps.codexAuthStore.read()));
+  });
+
+  app.post('/v1/auth/codex/connect', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    return connectCodexFromAuthFile(reply);
+  });
+
+  app.post('/v1/auth/codex/reauth', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    return connectCodexFromAuthFile(reply);
+  });
+
+  app.delete('/v1/auth/codex', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    if (!deps.codexAuthStore) return reply.code(503).send({ error: 'codex_auth_unavailable' });
+    await deps.codexAuthStore.clear();
+    return reply.send({ connected: false });
+  });
+
   // ── password reset (6.2) ────────────────────────────────────────────────────
   // POST /v1/auth/forgot-password {email} — ALWAYS 202 (no account enumeration).
   //   If the email maps to a live account, mint a single-use, short-TTL token,
@@ -1680,6 +1790,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       ...(generationCredentials.model !== undefined ? { model: generationCredentials.model } : {}),
       ...(generationCredentials.apiKey !== undefined
         ? { apiKey: generationCredentials.apiKey }
+        : {}),
+      ...(generationCredentials.wire !== undefined ? { wire: generationCredentials.wire } : {}),
+      ...(generationCredentials.httpHeaders !== undefined
+        ? { httpHeaders: generationCredentials.httpHeaders }
         : {}),
       ...(paused?.snapshotManifestKey !== null && paused?.snapshotManifestKey !== undefined
         ? { parentManifestKey: paused.snapshotManifestKey }

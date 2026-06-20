@@ -648,6 +648,9 @@ export {
   parseKeychainBlob,
   type ClaudeKeychainCredentials,
 } from './claude/keychain';
+export { CodexTokenStore, type StoredCodexAuth } from './codex/token-store';
+export { type TokenSet, decodeJwtClaims, extractAccountId } from './codex/oauth';
+export { readCodexAuthFile } from './codex/auth-file';
 export type {
   RefreshClaudeCodeTokenInput,
   RefreshClaudeCodeTokenResult,

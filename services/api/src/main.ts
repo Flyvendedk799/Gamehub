@@ -22,7 +22,12 @@ import { createDb, schema } from '@playforge/db';
  *   BLOB_DIR            local blob-store root (default: .playforge-blobs)
  *   API_KEY_ENCRYPTION_SECRET  Secret for BYOK key encryption (falls back to PLATFORM_API_KEY)
  */
-import { ClaudeTokenStore, readClaudeCodeKeychainCredentials } from '@playforge/providers';
+import {
+  ClaudeTokenStore,
+  CodexTokenStore,
+  readClaudeCodeKeychainCredentials,
+  readCodexAuthFile,
+} from '@playforge/providers';
 import { ERROR_CODES, PlayforgeError } from '@playforge/shared';
 import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
 import { Queue } from 'bullmq';
@@ -164,6 +169,26 @@ async function main() {
   });
   const claudeSubscriptionModel = process.env['CLAUDE_SUBSCRIPTION_MODEL'] ?? 'claude-sonnet-4-6';
 
+  // Codex / ChatGPT subscription credential — symmetric to Claude, harvested
+  // from the `codex` CLI's ~/.codex/auth.json. "Refresh" re-reads that file
+  // (the CLI keeps its own token fresh) so Gamehub never rotates the token out
+  // from under the `codex` CLI. Generation runs over the openai-codex-responses
+  // wire with the chatgpt-account-id header (wired in server.ts).
+  const codexAuthStore = new CodexTokenStore({
+    filePath: `${blobDir}/codex-auth.json`,
+    refreshFn: async () => {
+      const creds = await readCodexAuthFile();
+      if (!creds) {
+        throw new PlayforgeError(
+          'Codex CLI is not logged in on this machine — reconnect required.',
+          ERROR_CODES.CODEX_TOKEN_NOT_LOGGED_IN,
+        );
+      }
+      return creds;
+    },
+  });
+  const codexSubscriptionModel = process.env['CODEX_SUBSCRIPTION_MODEL'] ?? 'gpt-5-codex';
+
   const projectRepo = new DrizzleProjectRepo(db);
   const runRepo = new DrizzleRunRepo(db);
   const chatRepo = new DrizzleChatRepo(db);
@@ -242,6 +267,8 @@ async function main() {
     isRemix,
     model,
     apiKey,
+    wire,
+    httpHeaders,
   }) => {
     if (queue) {
       try {
@@ -254,6 +281,8 @@ async function main() {
             prompt,
             model: model ?? platformModel,
             ...(apiKey !== undefined ? { apiKey } : {}),
+            ...(wire !== undefined ? { wire } : {}),
+            ...(httpHeaders !== undefined ? { httpHeaders } : {}),
             ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
             ...(maxTokens !== undefined ? { maxTokens } : {}),
             ...(continuation !== undefined ? { continuation } : {}),
@@ -300,6 +329,8 @@ async function main() {
         prompt,
         model: model ?? platformModel,
         apiKey: apiKey ?? platformApiKey,
+        ...(wire !== undefined ? { wire } : {}),
+        ...(httpHeaders !== undefined ? { httpHeaders } : {}),
         ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
         ...(maxTokens !== undefined ? { maxTokens } : {}),
         ...(isRemix === true ? { isRemix } : {}),
@@ -402,6 +433,8 @@ async function main() {
     platformModel,
     claudeAuthStore,
     claudeSubscriptionModel,
+    codexAuthStore,
+    codexSubscriptionModel,
     apiKeyEncryptionSecret,
     ...(adminToken !== undefined ? { adminToken } : {}),
     maxConcurrentRunsPerUser,
