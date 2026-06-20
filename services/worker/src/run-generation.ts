@@ -72,6 +72,10 @@ export interface GenerationRequest {
   prompt: string;
   model: ModelRef;
   apiKey: string;
+  /** Wire-format override (e.g. 'openai-codex-responses' for a Codex subscription). */
+  wire?: import('@playforge/shared').WireApi;
+  /** Extra HTTP headers for the model call (e.g. chatgpt-account-id for Codex). */
+  httpHeaders?: Record<string, string>;
   /** Optional pre-pick; when omitted the agent calls choose_engine itself. */
   engine?: WebEngine;
   /** Seed the working tree (e.g. a remix's parent snapshot). */
@@ -497,6 +501,8 @@ export async function runGeneration(
     prompt,
     model: req.model,
     apiKey: req.apiKey,
+    ...(req.wire !== undefined ? { wire: req.wire } : {}),
+    ...(req.httpHeaders !== undefined ? { httpHeaders: req.httpHeaders } : {}),
     history,
     artifactType: 'game',
     agentBudget: { maxToolCalls, maxWallClockMs },

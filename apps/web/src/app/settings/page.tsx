@@ -4,11 +4,15 @@ import {
   type AccountProvider,
   type AccountSettingsResponse,
   type ClaudeSubscriptionStatus,
+  type CodexSubscriptionStatus,
   connectClaude,
+  connectCodex,
   deleteAccountProvider,
   disconnectClaude,
+  disconnectCodex,
   getAccountSettings,
   getClaudeAuthStatus,
+  getCodexAuthStatus,
   saveAccountProvider,
   updateAccountProfile,
 } from '@/lib/api';
@@ -389,6 +393,7 @@ export default function SettingsPage() {
         )}
 
         <ClaudeSubscriptionCard />
+        <CodexSubscriptionCard />
 
         {notice && (
           <div className="rounded-lg border border-[#22c55e]/20 bg-[#22c55e]/10 px-4 py-3 text-sm text-[#86efac]">
@@ -488,6 +493,100 @@ function ClaudeSubscriptionCard() {
               type="button"
               disabled={busy}
               onClick={() => run(disconnectClaude)}
+              className="rounded-lg border border-[#222222] px-4 py-2 text-sm text-[#a1a1aa] transition-colors hover:bg-[#1a1a1a] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Disconnect
+            </button>
+          </>
+        )}
+      </div>
+      {err && <p className="text-sm text-[#fca5a5]">{err}</p>}
+    </section>
+  );
+}
+
+function CodexSubscriptionCard() {
+  const [status, setStatus] = useState<CodexSubscriptionStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    void getCodexAuthStatus()
+      .then((s) => {
+        if (!cancelled) setStatus(s);
+      })
+      .catch(() => {
+        /* status is best-effort */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const run = async (fn: () => Promise<CodexSubscriptionStatus>) => {
+    setBusy(true);
+    setErr('');
+    try {
+      setStatus(await fn());
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Action failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const connected = status?.connected ?? false;
+  const expires = status?.expiresAt ? new Date(status.expiresAt).toLocaleString() : null;
+
+  return (
+    <section className="space-y-4 rounded-lg border border-[#222222] bg-[#111111] p-6">
+      <div>
+        <h2 className="text-lg font-semibold text-[#f4f4f5]">Codex / ChatGPT subscription</h2>
+        <p className="text-sm text-[#a1a1aa]">
+          Generate on your ChatGPT/Codex subscription — the real OpenAI Codex API, your prompt,
+          billed to the subscription. Reads the local codex CLI login on this machine.
+        </p>
+      </div>
+      <div className="flex items-center gap-2 text-sm">
+        <span
+          className={`inline-block h-2 w-2 rounded-full ${connected ? 'bg-[#22c55e]' : 'bg-[#52525b]'}`}
+        />
+        {connected ? (
+          <span className="text-[#86efac]">
+            Connected
+            {status?.email ? ` as ${status.email}` : ''}
+            {expires ? ` · token valid until ${expires}` : ''}
+          </span>
+        ) : (
+          <span className="text-[#a1a1aa]">Not connected</span>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {!connected && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => run(() => connectCodex(false))}
+            className="rounded-lg bg-[#22c55e] px-4 py-2 text-sm font-medium text-[#0a0a0a] transition-colors hover:bg-[#16a34a] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {busy ? 'Connecting…' : 'Connect'}
+          </button>
+        )}
+        {connected && (
+          <>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(() => connectCodex(true))}
+              className="rounded-lg border border-[#22c55e]/40 bg-[#22c55e]/10 px-4 py-2 text-sm font-medium text-[#86efac] transition-colors hover:bg-[#22c55e]/20 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {busy ? 'Re-authing…' : 'Re-auth'}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(disconnectCodex)}
               className="rounded-lg border border-[#222222] px-4 py-2 text-sm text-[#a1a1aa] transition-colors hover:bg-[#1a1a1a] disabled:cursor-not-allowed disabled:opacity-40"
             >
               Disconnect

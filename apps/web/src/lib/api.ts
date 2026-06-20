@@ -761,6 +761,28 @@ export async function disconnectClaude(): Promise<ClaudeSubscriptionStatus> {
   return apiFetch<ClaudeSubscriptionStatus>('/v1/auth/claude', { method: 'DELETE' });
 }
 
+// ─── Codex / ChatGPT subscription (OAuth) ─────────────────────────────────────
+
+export interface CodexSubscriptionStatus {
+  connected: boolean;
+  email?: string | null;
+  expiresAt?: number;
+}
+
+export async function getCodexAuthStatus(): Promise<CodexSubscriptionStatus> {
+  return apiFetch<CodexSubscriptionStatus>('/v1/auth/codex/status');
+}
+
+export async function connectCodex(reauth = false): Promise<CodexSubscriptionStatus> {
+  return apiFetch<CodexSubscriptionStatus>(`/v1/auth/codex/${reauth ? 'reauth' : 'connect'}`, {
+    method: 'POST',
+  });
+}
+
+export async function disconnectCodex(): Promise<CodexSubscriptionStatus> {
+  return apiFetch<CodexSubscriptionStatus>('/v1/auth/codex', { method: 'DELETE' });
+}
+
 // ─── Hub search ────────────────────────────────────────────────────────────────
 
 export async function searchHub(

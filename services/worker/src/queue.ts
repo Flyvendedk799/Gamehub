@@ -40,6 +40,10 @@ export interface EnqueueInput {
   prompt: string;
   model: ModelRef;
   apiKey: string;
+  /** Wire-format override (e.g. 'openai-codex-responses' for a Codex subscription). */
+  wire?: import('@playforge/shared').WireApi;
+  /** Extra HTTP headers for the model call (e.g. chatgpt-account-id for Codex). */
+  httpHeaders?: Record<string, string>;
   engine?: WebEngine;
   /** Manifest key of the previous snapshot to seed the working tree for iteration. */
   parentManifestKey?: string;
@@ -147,6 +151,8 @@ export async function enqueueRun(input: EnqueueInput, ports: QueuePorts): Promis
         model: input.model,
         apiKey: input.apiKey,
         provider: input.model.provider,
+        ...(input.wire !== undefined ? { wire: input.wire } : {}),
+        ...(input.httpHeaders !== undefined ? { httpHeaders: input.httpHeaders } : {}),
         ...(input.engine !== undefined ? { engine: input.engine } : {}),
         ...(initialFiles !== undefined ? { initialFiles } : {}),
       },
