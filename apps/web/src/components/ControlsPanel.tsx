@@ -3,8 +3,17 @@
 import type { ControlsManifest } from '@/lib/iframe-bridge';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-/** Friendly label for a KeyboardEvent.code (e.g. 'ArrowUp' → '↑', 'KeyW' → 'W'). */
+/** Friendly label for a bound input — a KeyboardEvent.code ('ArrowUp' → '↑',
+ *  'KeyW' → 'W') or a mouse button ('Mouse0' → 'Left Click'). */
 export function keyLabel(code: string): string {
+  if (code.startsWith('Mouse')) {
+    const m: Record<string, string> = {
+      Mouse0: 'Left Click',
+      Mouse1: 'Middle Click',
+      Mouse2: 'Right Click',
+    };
+    return m[code] ?? `Mouse ${code.slice(5)}`;
+  }
   if (code.startsWith('Key')) return code.slice(3);
   if (code.startsWith('Digit')) return code.slice(5);
   const map: Record<string, string> = {
@@ -88,21 +97,37 @@ export function ControlsPanel({
     [onApply, storageKey],
   );
 
-  // While capturing, the next keydown binds that key to the action.
+  // While capturing, the next keydown OR mouse button binds to the action.
   useEffect(() => {
     if (capturing === null) return;
+    const bind = (code: string) => {
+      const current = bindings[capturing] ?? [];
+      if (!current.includes(code)) commit({ ...bindings, [capturing]: [...current, code] });
+      setCapturing(null);
+    };
     const onKey = (e: KeyboardEvent) => {
       e.preventDefault();
       if (e.code === 'Escape') {
         setCapturing(null);
         return;
       }
-      const current = bindings[capturing] ?? [];
-      if (!current.includes(e.code)) commit({ ...bindings, [capturing]: [...current, e.code] });
-      setCapturing(null);
+      bind(e.code);
     };
+    const onMouse = (e: MouseEvent) => {
+      e.preventDefault();
+      bind(`Mouse${e.button}`);
+    };
+    // Suppress the context menu while capturing so a right-click binds cleanly;
+    // the mousedown above is what actually records the button.
+    const onCtx = (e: MouseEvent) => e.preventDefault();
     window.addEventListener('keydown', onKey, { capture: true });
-    return () => window.removeEventListener('keydown', onKey, { capture: true });
+    window.addEventListener('mousedown', onMouse, { capture: true });
+    window.addEventListener('contextmenu', onCtx, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', onKey, { capture: true });
+      window.removeEventListener('mousedown', onMouse, { capture: true });
+      window.removeEventListener('contextmenu', onCtx, { capture: true });
+    };
   }, [capturing, bindings, commit]);
 
   const removeKey = (id: string, code: string) => {
@@ -161,36 +186,48 @@ export function ControlsPanel({
                   </p>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={() => setCapturing(action.id)}
-                className="flex-shrink-0 text-[11px] px-2.5 py-1 rounded-lg border border-[#6366f1]/30 text-[#818cf8] hover:bg-[#6366f1]/10 transition-colors"
-              >
-                {capturing === action.id ? 'Press a key…' : '+ Add key'}
-              </button>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {(bindings[action.id] ?? []).length === 0 ? (
-                <span className="text-[11px] text-[#52525b] italic">unbound</span>
+              {action.pointer ? (
+                <span className="flex-shrink-0 text-[11px] px-2.5 py-1 rounded-lg bg-[#18181b] border border-[#27272a] text-[#a1a1aa] capitalize">
+                  Mouse · {action.pointer}
+                </span>
               ) : (
-                (bindings[action.id] ?? []).map((code) => (
-                  <span
-                    key={code}
-                    className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-1 rounded-md bg-[#18181b] border border-[#27272a] text-[#d4d4d8]"
-                  >
-                    {keyLabel(code)}
-                    <button
-                      type="button"
-                      onClick={() => removeKey(action.id, code)}
-                      className="text-[#52525b] hover:text-[#ef4444] transition-colors"
-                      aria-label={`Remove ${keyLabel(code)} from ${action.label}`}
-                    >
-                      ✕
-                    </button>
-                  </span>
-                ))
+                <button
+                  type="button"
+                  onClick={() => setCapturing(action.id)}
+                  className="flex-shrink-0 text-[11px] px-2.5 py-1 rounded-lg border border-[#6366f1]/30 text-[#818cf8] hover:bg-[#6366f1]/10 transition-colors"
+                >
+                  {capturing === action.id ? 'Press a key or click…' : '+ Add bind'}
+                </button>
               )}
             </div>
+            {action.pointer ? (
+              <p className="mt-2 text-[11px] text-[#52525b] italic">
+                Move the mouse to {action.pointer} — drag, or click to capture the pointer.
+              </p>
+            ) : (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {(bindings[action.id] ?? []).length === 0 ? (
+                  <span className="text-[11px] text-[#52525b] italic">unbound</span>
+                ) : (
+                  (bindings[action.id] ?? []).map((code) => (
+                    <span
+                      key={code}
+                      className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-1 rounded-md bg-[#18181b] border border-[#27272a] text-[#d4d4d8]"
+                    >
+                      {keyLabel(code)}
+                      <button
+                        type="button"
+                        onClick={() => removeKey(action.id, code)}
+                        className="text-[#52525b] hover:text-[#ef4444] transition-colors"
+                        aria-label={`Remove ${keyLabel(code)} from ${action.label}`}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))
+                )}
+              </div>
+            )}
           </li>
         ))}
       </ul>

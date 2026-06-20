@@ -44,8 +44,10 @@ export interface ControlAction {
   id: string;
   label: string;
   description?: string;
-  /** KeyboardEvent.code values bound to this action. */
+  /** KeyboardEvent.code values AND/OR mouse buttons ('Mouse0'/'Mouse1'/'Mouse2'). */
   keys: string[];
+  /** Set for a mouse-axis control (camera look / aim / drag) — shown, not rebound. */
+  pointer?: 'look' | 'aim' | 'drag';
 }
 export interface ControlsManifest {
   actions: ControlAction[];
@@ -69,11 +71,13 @@ export function parseControlsManifestMessage(
     const keys = Array.isArray(o['keys'])
       ? o['keys'].filter((k): k is string => typeof k === 'string')
       : [];
+    const pointer = o['pointer'];
     actions.push({
       id,
       label: typeof o['label'] === 'string' ? o['label'] : id,
       keys,
       ...(typeof o['description'] === 'string' ? { description: o['description'] } : {}),
+      ...(pointer === 'look' || pointer === 'aim' || pointer === 'drag' ? { pointer } : {}),
     });
   }
   return { actions };
