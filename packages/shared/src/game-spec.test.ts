@@ -257,3 +257,14 @@ describe('validateCapabilities — capability reconciliation (P4)', () => {
     expect(conflicts).toEqual([]);
   });
 });
+
+describe('validateCapabilities — P10 networking guidance', () => {
+  it('flags requiresNetworking with honest local-scoping guidance (no demotion)', () => {
+    const { corrected, conflicts } = validateCapabilities({
+      genre: 'shmup',
+      capabilities: GameCapabilities.parse({ requiresNetworking: true, hasEnemies: true }),
+    });
+    expect(conflicts.some((c) => /local|decline|single-origin/i.test(c))).toBe(true);
+    expect(corrected?.requiresNetworking).toBe(true); // guidance, not a demotion
+  });
+});

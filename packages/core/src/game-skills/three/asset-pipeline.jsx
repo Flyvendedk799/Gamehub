@@ -46,11 +46,7 @@ async function getGLTFLoader() {
  *  Each call to loadModel returns an independent clone so transforms are safe.
  */
 export function createAssetLoader(opts = {}) {
-  const {
-    onProgress,
-    placeholderColor = 0x7c6d9e,
-    placeholderSize = 1,
-  } = opts;
+  const { onProgress, placeholderColor = 0x7c6d9e, placeholderSize = 1 } = opts;
 
   // url → { proto: THREE.Object3D (source), promise: Promise }
   const cache = new Map();
@@ -148,11 +144,7 @@ export function makeInstancedField(geometry, material, transforms) {
     dummy.position.set(t.position.x, t.position.y, t.position.z);
 
     if (t.rotation) {
-      dummy.rotation.set(
-        t.rotation.x ?? 0,
-        t.rotation.y ?? 0,
-        t.rotation.z ?? 0,
-      );
+      dummy.rotation.set(t.rotation.x ?? 0, t.rotation.y ?? 0, t.rotation.z ?? 0);
     } else {
       dummy.rotation.set(0, 0, 0);
     }

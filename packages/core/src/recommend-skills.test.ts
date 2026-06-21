@@ -172,3 +172,21 @@ describe('recommendSkills — genre-driven (Phase 3 / Loop-2 fixes)', () => {
     expect(recommendSkills({}, 'phaser')).toHaveLength(0);
   });
 });
+
+describe('recommendSkills — P9 asset substrates', () => {
+  it('rhythm genre recommends music-sync alongside rhythm-clock', () => {
+    const skills = recommendSkills({}, 'phaser', 'rhythm').map((r) => r.skill);
+    expect(skills).toContain('phaser/music-sync.js');
+    expect(skills).toContain('phaser/rhythm-clock.js');
+  });
+
+  it('asset-pipeline is recommended for a 3D combat game on three, NOT on phaser', () => {
+    expect(recommendSkills({ hasEnemies: true }, 'three', 'tps').map((r) => r.skill)).toContain(
+      'three/asset-pipeline.jsx',
+    );
+    // phaser has no asset-pipeline skill — must never be recommended there.
+    expect(
+      recommendSkills({ hasEnemies: true }, 'phaser', 'tps').map((r) => r.skill),
+    ).not.toContain('phaser/asset-pipeline.js');
+  });
+});

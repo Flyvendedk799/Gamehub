@@ -43,6 +43,7 @@ const AmendGameSpecParams = Type.Object({
       hasEconomy: Type.Optional(Type.Boolean()),
       hasPhysics: Type.Optional(Type.Boolean()),
       procedural: Type.Optional(Type.Boolean()),
+      requiresNetworking: Type.Optional(Type.Boolean()),
     }),
   ),
   features: Type.Optional(Type.Record(Type.String(), FeatureRecord)),

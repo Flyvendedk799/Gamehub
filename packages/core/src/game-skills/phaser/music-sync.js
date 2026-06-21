@@ -36,8 +36,8 @@ export function createMusicSync(opts = {}) {
   let sourceNode = null;
 
   // Playback tracking.
-  let startAt = 0;    // audioContext.currentTime when play() was last called
-  let pausedAt = 0;   // elapsed seconds when paused
+  let startAt = 0; // audioContext.currentTime when play() was last called
+  let pausedAt = 0; // elapsed seconds when paused
   let playing = false;
   let loaded = false;
 

@@ -129,6 +129,11 @@ export const GameCapabilities = z.object({
   hasPhysics: z.boolean().default(false),
   /** Procedurally / randomly generated content. */
   procedural: z.boolean().default(false),
+  /** The idea implies networked / online multiplayer (co-op, versus, .io). The
+   *  sandbox is single-origin (CSP connect-src 'self'), so this is a signal to
+   *  scope honestly to local multiplayer (split-screen / hotseat) — see
+   *  validateCapabilities (Engine Evolution v2 P10). */
+  requiresNetworking: z.boolean().default(false),
 });
 export type GameCapabilities = z.infer<typeof GameCapabilities>;
 
@@ -148,6 +153,7 @@ export const GameCapabilitiesPatch = z.object({
   hasEconomy: z.boolean().optional(),
   hasPhysics: z.boolean().optional(),
   procedural: z.boolean().optional(),
+  requiresNetworking: z.boolean().optional(),
 });
 export type GameCapabilitiesPatch = z.infer<typeof GameCapabilitiesPatch>;
 
@@ -285,6 +291,15 @@ export function validateCapabilities(spec: {
         'escalates demoted to false: a pointer/drag game with no enemies is not a difficulty-ramp game. Re-declare if you meant rising spawn/speed pressure.',
       );
     }
+  }
+  // P10 — honest multiplayer scoping. The sandbox is single-origin (CSP
+  // connect-src 'self'); a networked idea must be scoped to LOCAL multiplayer
+  // (split-screen / hotseat / shared-keyboard) or explicitly decline the online
+  // part — never silently ship single-player. This is guidance, not a demotion.
+  if (caps.requiresNetworking === true) {
+    conflicts.push(
+      'requiresNetworking: online/networked play is not available in the sandbox (single-origin). Scope to LOCAL multiplayer (split-screen / hotseat / shared-keyboard) and say so, or explicitly decline the online part — do not silently ship single-player.',
+    );
   }
   if (escalates === caps.escalates) return { corrected: caps, conflicts };
   return { corrected: { ...caps, escalates }, conflicts };

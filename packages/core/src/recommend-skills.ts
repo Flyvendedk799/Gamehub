@@ -117,6 +117,7 @@ export function recommendSkills(
   ];
   if (rhythmKeywords.some((kw) => mechanicsLower.some((m) => m.includes(kw)))) {
     push('rhythm-clock', "rhythm/beat mechanics need a precision clock — don't hand-roll timing");
+    push('music-sync', 'lock timing to a REAL audio track (bpm/beatmap), not a synthetic clock');
   }
 
   const animKeywords = ['animate', 'animation', 'cutscene', 'sequence', 'choreograph', 'scripted'];
@@ -128,7 +129,10 @@ export function recommendSkills(
   // signal the capability phrasing can miss, so fire the genre's canonical skills
   // even when the mechanic keywords didn't match. push() de-dupes.
   const GENRE_SKILLS: Record<string, ReadonlyArray<readonly [string, string]>> = {
-    rhythm: [['rhythm-clock', 'rhythm games need a precision music clock + judgment windows']],
+    rhythm: [
+      ['rhythm-clock', 'rhythm games need a precision music clock + judgment windows'],
+      ['music-sync', 'sync to a real audio track so notes line up with the music'],
+    ],
     tower_defense: [
       ['economy-system', 'tower-defense needs currency + buildable/upgrade costs'],
       ['wave-spawner', 'tower-defense waves must escalate'],
@@ -148,6 +152,18 @@ export function recommendSkills(
   const genreEntries = genre ? GENRE_SKILLS[genre] : undefined;
   if (genreEntries) {
     for (const [base, reason] of genreEntries) push(base, reason);
+  }
+
+  // asset-pipeline is Three-only (glTF models + instanced geometry). Recommend it
+  // for 3D games that would otherwise be boxes-and-spheres (combat/3rd-/1st-person).
+  if (
+    engine === 'three' &&
+    (capabilities.hasEnemies === true ||
+      genre === 'tps' ||
+      genre === 'fps' ||
+      genre === 'roguelike')
+  ) {
+    push('asset-pipeline', 'load real glTF models + instanced geometry instead of primitives');
   }
 
   return recs;

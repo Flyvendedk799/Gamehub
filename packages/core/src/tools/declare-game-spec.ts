@@ -55,6 +55,9 @@ const CapabilitiesSchema = Type.Object({
   hasEconomy: Type.Optional(Type.Boolean()),
   hasPhysics: Type.Optional(Type.Boolean()),
   procedural: Type.Optional(Type.Boolean()),
+  requiresNetworking: Type.Optional(
+    Type.Boolean({ description: 'Online/networked multiplayer is implied (co-op/versus/.io).' }),
+  ),
 });
 
 const DeclareGameSpecParams = Type.Object({
