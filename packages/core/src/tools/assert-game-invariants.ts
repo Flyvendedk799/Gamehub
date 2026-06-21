@@ -150,26 +150,29 @@ function findStagedUnusedSkills(deps: AssertGameInvariantsDeps): string[] {
   const files = deps.listFiles();
   const engineFiles = files.filter((f) => /(^|\/)src\/engine\/[^/]+\.(jsx?|mjs)$/.test(f.path));
   if (engineFiles.length === 0) return [];
-  const engineSet = new Set(engineFiles.map((f) => f.path));
-  const outside = files
-    .filter(
-      (f) =>
-        !engineSet.has(f.path) &&
-        SOURCE_EXTENSIONS.some((ext) => f.path.toLowerCase().endsWith(ext)) &&
-        !f.content.startsWith('data:'),
-    )
-    .map((f) => f.content)
-    .join('\n');
+  const sourceFiles = files.filter(
+    (f) =>
+      SOURCE_EXTENSIONS.some((ext) => f.path.toLowerCase().endsWith(ext)) &&
+      !f.content.startsWith('data:'),
+  );
   const dead: string[] = [];
   for (const ef of engineFiles) {
     const base = (ef.path.split('/').pop() ?? '').replace(/\.(jsx?|mjs)$/, '');
-    const imported = new RegExp(`from\\s+['"][./]*(?:.*/)?engine/${base}(?:\\.\\w+)?['"]`).test(
-      outside,
-    );
+    // Scan EVERY other source file (incl. other engine modules — a skill may be
+    // wired engine→engine) for an import edge (static `from` OR dynamic `import(`)
+    // and a call to one of its exports. Excludes the skill's own file so its own
+    // definition can't count as usage.
+    const others = sourceFiles
+      .filter((f) => f.path !== ef.path)
+      .map((f) => f.content)
+      .join('\n');
+    const imported = new RegExp(
+      `(?:from|import\\s*\\()\\s*['"][./]*(?:.*/)?engine/${base}(?:\\.\\w+)?['"]`,
+    ).test(others);
     const exportNames = [...ef.content.matchAll(/export\s+function\s+([A-Za-z_$][\w$]*)/g)].map(
       (m) => m[1],
     );
-    const called = exportNames.some((ex) => ex && new RegExp(`\\b${ex}\\s*\\(`).test(outside));
+    const called = exportNames.some((ex) => ex && new RegExp(`\\b${ex}\\s*\\(`).test(others));
     if (!(imported && called)) dead.push(base);
   }
   return dead;

@@ -26,13 +26,14 @@ export function createCloudSave(opts = {}) {
   // Bridge detection
   // ---------------------------------------------------------------------------
 
-  /** Returns true when the Playforge host cloud bridge is available. */
+  /** Returns true only when the HOST advertised a real per-account cloud relay
+   *  (hosted===true). The shim defaults hosted=false (localStorage-backed) until
+   *  a host listener lands, so this never falsely claims cross-device sync. */
   function isCloud() {
     return (
       typeof window !== 'undefined' &&
-      typeof window.__game?.cloudSave?.get === 'function' &&
-      typeof window.__game?.cloudSave?.set === 'function' &&
-      typeof window.__game?.cloudSave?.clear === 'function'
+      window.__game?.cloudSave?.hosted === true &&
+      typeof window.__game?.cloudSave?.get === 'function'
     );
   }
 

@@ -27,11 +27,14 @@ export function createCloudSave(opts = {}) {
 
   /** Returns true when the Playforge host cloud bridge is available. */
   function isCloud() {
+    // Only report cloud when the HOST has advertised a real per-account relay
+    // (window.__game.cloudSave.hosted === true). The bootstrap shim exposes
+    // get/set/clear but defaults hosted=false (localStorage-backed) until a host
+    // listener lands — so this never falsely claims cross-device persistence.
     return (
       typeof window !== 'undefined' &&
-      typeof window.__game?.cloudSave?.get === 'function' &&
-      typeof window.__game?.cloudSave?.set === 'function' &&
-      typeof window.__game?.cloudSave?.clear === 'function'
+      window.__game?.cloudSave?.hosted === true &&
+      typeof window.__game?.cloudSave?.get === 'function'
     );
   }
 

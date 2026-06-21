@@ -242,6 +242,9 @@ window.__game.cloudSave = window.__game.cloudSave || (function () {
   function lsSet(key, value) { try { localStorage.setItem(PREFIX + key, JSON.stringify(value)); } catch (e) {} }
   function relay(op, key, value) { try { if (window.parent && window.parent !== window) window.parent.postMessage({ type: ${cloudSaveType}, op: op, key: key, value: value }, '*'); } catch (e) {} }
   return {
+    // hosted=false until a real host listener advertises per-account cloud relay;
+    // the cloud-save skill reads this so isCloud() never falsely claims sync.
+    hosted: false,
     get: function (key) { return Promise.resolve(lsGet(key)); },
     set: function (key, value) { lsSet(key, value); relay('set', key, value); return Promise.resolve(); },
     clear: function (key) { try { if (key) { localStorage.removeItem(PREFIX + key); } } catch (e) {} relay('clear', key || null, null); return Promise.resolve(); }
