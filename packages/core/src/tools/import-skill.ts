@@ -76,9 +76,12 @@ function canonicalImportPath(name: string): string {
   return `src/engine/${base}`;
 }
 
-/** import_skill only reads + writes whole files, so it needs just this slice of
- *  the editor FS — keeps it trivially mockable + decoupled from edit ops. */
-type ImportSkillFs = Pick<TextEditorFsCallbacks, 'view' | 'create'>;
+/** import_skill reads + writes whole files and (v3 P3) inserts a commented import
+ *  stub into the entry — just this slice of the editor FS, kept mockable. */
+type ImportSkillFs = Pick<TextEditorFsCallbacks, 'view' | 'create' | 'insert'>;
+
+/** Candidate entry files to auto-wire the import stub into (first that exists). */
+const ENTRY_CANDIDATES = ['src/main.js', 'src/main.jsx', 'src/game.js', 'main.js'] as const;
 
 export function makeImportSkillTool(
   fs: ImportSkillFs,
@@ -114,8 +117,39 @@ export function makeImportSkillTool(
         exports.length > 0
           ? `import { ${exports.join(', ')} } from '${importFrom}';`
           : `import '${importFrom}';`;
+
+      // v3 P3 — auto-wire: drop a COMMENTED import stub at the top of the entry
+      // file so the agent uncomments + calls it, instead of (per loop-3) writing
+      // the module to disk and forgetting to wire it. A COMMENT can never break a
+      // boot even if we guessed the wrong entry; we only touch a file that exists
+      // and doesn't already import this module.
+      let wiredInto: string | null = null;
+      if (!alreadyPresent && typeof fs.insert === 'function') {
+        for (const cand of ENTRY_CANDIDATES) {
+          const file = fs.view(cand);
+          if (file === null) continue;
+          if (file.content.includes(importFrom)) {
+            wiredInto = cand;
+            break;
+          } // already wired
+          const callHint = exports[0] ? `${exports[0]}(/* ... */)` : 'its exports';
+          const stub = `// v3 import_skill: uncomment + call ${callHint}\n// ${importLine}\n`;
+          try {
+            await fs.insert(cand, 0, stub);
+            wiredInto = cand;
+          } catch {
+            /* entry not writable — fall back to text guidance */
+          }
+          break;
+        }
+      }
+
       const verb = alreadyPresent ? 'already present' : 'written';
-      const text = `Skill module ${verb} at ${path}. Add this import to your entry file and CALL the exports — do NOT reimplement them:\n  ${importLine}\n${usage ? `\nHow to wire it:\n${usage}\n` : ''}\nThe module is vetted + tested; call its functions directly.`;
+      const wireLine =
+        wiredInto !== null
+          ? `A commented import stub was added to the top of ${wiredInto} — UNCOMMENT it and call the exports.`
+          : 'Add this import to your entry file and CALL the exports — do NOT reimplement them.';
+      const text = `Skill module ${verb} at ${path}. ${wireLine}\n  ${importLine}\n${usage ? `\nHow to wire it:\n${usage}\n` : ''}\nThe module is vetted + tested; call its functions directly.`;
       return {
         content: [{ type: 'text', text }],
         details: { name: entry.name, path, exports, alreadyPresent },

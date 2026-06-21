@@ -39,7 +39,7 @@ import {
 // browser/Vite-only vendor assets (?raw) that have no business in the
 // game-gen worker and won't resolve under its tsconfig.
 import { GAME_ENGINE_ADAPTERS } from '@playforge/runtime/engines';
-import { normalizeEngineCdnUrls } from '@playforge/shared';
+import { computeImpliedCost, normalizeEngineCdnUrls } from '@playforge/shared';
 import type { ChatMessage } from '@playforge/shared';
 import type { GameSpec, ModelRef } from '@playforge/shared';
 import type { SnapshotStore, WriteResult } from '@playforge/storage';
@@ -48,6 +48,7 @@ import type { SnapshotStore, WriteResult } from '@playforge/storage';
 import { buildGameHtml } from '../../../packages/exporters/src/index';
 import { makeAssetGenerator } from './asset-generator';
 import { createRunSignalAggregator } from './run-signal';
+import { analyzeSkillUsage } from './skill-usage-grep.js';
 import { assertGeneratedJavaScriptSyntax } from './syntax-check';
 import { WorkingTree } from './working-tree';
 
@@ -729,10 +730,34 @@ export async function runGeneration(
     state.spec?.capabilities && state.engine && state.engine !== 'canvas2d'
       ? recommendSkills(state.spec.capabilities, state.engine, state.spec.genre)
       : [];
+  // v3 P1 — count a skill as adopted if it was EITHER viewed (view_game_feel) OR
+  // imported (import_skill). Pre-v3 this only checked skillsViewed, so every
+  // imported skill was mis-counted "unused" (the metric went blind to P1).
+  const adopted = new Set([...sig.skillsViewed, ...sig.skillsImported]);
+  // v3 P5 — only the "import now" core tier (first 3, emitted core-first) counts
+  // as missed adoption; the long "also available" tail shouldn't penalise a run
+  // for a skipped polish skill.
   const recommendedButUnused = recommended
-    .filter((r) => !sig.skillsViewed.includes(r.skill))
+    .slice(0, 3)
+    .filter((r) => !adopted.has(r.skill))
     .map((r) => r.skill);
   const engineEscaped = sig.invariantWarnings.includes('decoy-engine');
+  // v3 P2 — code-usage signals (was hand-greped): did the imported skills get
+  // imported + CALLED, or written to disk and abandoned?
+  const usage = analyzeSkillUsage(tree.toTextFiles());
+  // v3 P10a — cache-weighted cost. usedInputTokens is FRESH (uncached) input, so
+  // the total input for pricing is fresh + cacheRead + cacheWrite. totalTokens
+  // (uncached input + output) is kept for back-compat but cost should rank by USD.
+  const costUsd = computeImpliedCost(
+    {
+      inputTokens: usedInputTokens + usedCacheReadTokens + usedCacheWriteTokens,
+      outputTokens: usedOutputTokens,
+      cachedInputTokens: usedCacheReadTokens,
+      cacheCreationInputTokens: usedCacheWriteTokens,
+    },
+    req.model?.modelId ?? null,
+  );
+  const billedInput = usedInputTokens + usedCacheReadTokens + usedCacheWriteTokens;
   const buildReport = {
     genre: state.spec?.genre ?? null,
     engine: state.engine,
@@ -750,6 +775,18 @@ export async function runGeneration(
     inputTokens: usedInputTokens,
     outputTokens: usedOutputTokens,
     totalTokens: usedInputTokens + usedOutputTokens,
+    // v3 P10a cost telemetry
+    costUsd,
+    cachedInputTokens: usedCacheReadTokens,
+    cacheCreationInputTokens: usedCacheWriteTokens,
+    cacheHitRate: billedInput > 0 ? usedCacheReadTokens / billedInput : 0,
+    // v3 P2 code-usage signals
+    engineFilesWritten: usage.engineFilesWritten,
+    engineImports: usage.engineImports,
+    usesSkillFns: usage.usesSkillFns,
+    debugWired: usage.debugWired,
+    skillImportedNotCalled: usage.skillImportedNotCalled,
+    importWithoutUse: sig.skillsImported.length > 0 && usage.engineImports === 0,
     recommendedButUnused,
     engineEscaped,
     ...sig,

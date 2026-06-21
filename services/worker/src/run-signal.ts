@@ -17,6 +17,11 @@ export interface RunSignal {
   toolCallTotal: number;
   /** Skills the agent actually opened via view_game_feel (e.g. phaser/wave-spawner.js). */
   skillsViewed: string[];
+  /** Skills the agent wrote to disk via import_skill (v3 P1). Distinct from
+   *  skillsViewed — post-v2 the agent IMPORTS skills rather than viewing them, so
+   *  adoption metrics must union both or they under-report (recommendedButUnused
+   *  was blind to import_skill entirely). */
+  skillsImported: string[];
   /** Invariant ids the FINAL assert_game_invariants pass flagged (e.g. escalation). */
   invariantWarnings: string[];
   /** True when the agent committed a declare_playtest_contract — the genre-less /
@@ -38,6 +43,7 @@ function toolNameOf(event: AgentEvent): string | undefined {
 export function createRunSignalAggregator() {
   const toolCalls: Record<string, number> = {};
   const skills = new Set<string>();
+  const imported = new Set<string>();
   let invariantWarnings: string[] = [];
   let contractAuthored = false;
   let tweakSchemaDeclared = false;
@@ -51,9 +57,13 @@ export function createRunSignalAggregator() {
         toolCalls[name] = (toolCalls[name] ?? 0) + 1;
         if (name === 'declare_playtest_contract') contractAuthored = true;
         if (name === 'declare_tweak_schema') tweakSchemaDeclared = true;
-        if (name === 'view_game_feel') {
+        if (name === 'view_game_feel' || name === 'import_skill') {
+          // import_skill capture is finalised on tool_execution_end (details.name
+          // is guaranteed); this start-event arg is a best-effort fallback.
           const args = (event as { args?: { name?: unknown } }).args;
-          if (args && typeof args.name === 'string') skills.add(args.name);
+          if (args && typeof args.name === 'string') {
+            (name === 'import_skill' ? imported : skills).add(args.name);
+          }
         }
         return;
       }
@@ -62,8 +72,12 @@ export function createRunSignalAggregator() {
         if (!name) return;
         const result = (event as { result?: { details?: unknown } }).result;
         const details = result?.details as
-          | { issues?: Array<{ invariant?: unknown }>; ok?: boolean }
+          | { issues?: Array<{ invariant?: unknown }>; ok?: boolean; name?: unknown }
           | undefined;
+        if (name === 'import_skill' && details && typeof details.name === 'string') {
+          // PRIMARY capture (ImportSkillDetails.name is always populated).
+          imported.add(details.name);
+        }
         if (name === 'assert_game_invariants' && details && Array.isArray(details.issues)) {
           // Keep the LAST pass — that's the state the run shipped with.
           invariantWarnings = details.issues
@@ -83,6 +97,7 @@ export function createRunSignalAggregator() {
         toolCalls: { ...toolCalls },
         toolCallTotal,
         skillsViewed: [...skills].sort(),
+        skillsImported: [...imported].sort(),
         invariantWarnings: [...invariantWarnings],
         contractAuthored,
         tweakSchemaDeclared,

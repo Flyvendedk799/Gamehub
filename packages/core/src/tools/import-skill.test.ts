@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { makeImportSkillTool } from './import-skill.js';
 
-function mockFs() {
-  const files = new Map<string, string>();
+function mockFs(seed: Record<string, string> = {}) {
+  const files = new Map<string, string>(Object.entries(seed));
   const fs = {
     view: (path: string) => {
       const content = files.get(path);
@@ -11,6 +11,10 @@ function mockFs() {
     create: (path: string, content: string) => {
       files.set(path, content);
       return { path };
+    },
+    insert: (path: string, _line: number, text: string) => {
+      files.set(path, text + (files.get(path) ?? ''));
+      return { path, ok: true as const };
     },
   };
   return { fs, files };
@@ -52,5 +56,28 @@ describe('makeImportSkillTool', () => {
     const { fs } = mockFs();
     const tool = makeImportSkillTool(fs);
     await expect(tool.execute('c', { name: 'phaser/nope.js' })).rejects.toThrow(/Unknown skill/);
+  });
+
+  it('P3: auto-wires a COMMENTED import stub into src/main.js when it exists', async () => {
+    const { fs, files } = mockFs({ 'src/main.js': 'const x = 1;\n' });
+    const tool = makeImportSkillTool(fs);
+    const res = await tool.execute('c', { name: 'phaser/wave-spawner.js' });
+    const main = files.get('src/main.js') ?? '';
+    // The stub is COMMENTED (boot-safe) and references the canonical .js path.
+    expect(main).toContain('// import { createWaveSystem');
+    expect(main).toContain("from './engine/wave-spawner.js'");
+    expect(main.startsWith('//')).toBe(true); // prepended at the top
+    // The active code below the stub is untouched.
+    expect(main).toContain('const x = 1;');
+    const text = res.content?.[0]?.type === 'text' ? res.content[0].text : '';
+    expect(text).toContain('src/main.js');
+  });
+
+  it('P3: no entry file → falls back to text guidance, no throw', async () => {
+    const { fs } = mockFs(); // no src/main.js
+    const tool = makeImportSkillTool(fs);
+    const res = await tool.execute('c', { name: 'phaser/wave-spawner.js' });
+    const text = res.content?.[0]?.type === 'text' ? res.content[0].text : '';
+    expect(text).toContain('Add this import to your entry file');
   });
 });

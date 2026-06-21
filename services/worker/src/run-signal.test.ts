@@ -61,12 +61,25 @@ describe('createRunSignalAggregator', () => {
     expect(agg.snapshot().strReplaceFailures).toBe(2);
   });
 
+  it('captures skills imported via import_skill (v3 P1 — primary via tool_execution_end)', () => {
+    const agg = createRunSignalAggregator();
+    // PRIMARY: end-event carries result.details.name.
+    agg.observe(end('import_skill', { details: { name: 'phaser/wave-spawner.js' } }));
+    // FALLBACK: start-event args.name (older shape).
+    agg.observe(start('import_skill', { name: 'phaser/enemy-ai.js' }));
+    agg.observe(end('import_skill', { details: { name: 'phaser/enemy-ai.js' } })); // dup
+    const s = agg.snapshot();
+    expect(s.skillsImported).toEqual(['phaser/enemy-ai.js', 'phaser/wave-spawner.js']);
+    expect(s.skillsViewed).toEqual([]); // import is NOT a view
+  });
+
   it('defaults are empty/false for a no-op run', () => {
     const s = createRunSignalAggregator().snapshot();
     expect(s).toEqual({
       toolCalls: {},
       toolCallTotal: 0,
       skillsViewed: [],
+      skillsImported: [],
       invariantWarnings: [],
       contractAuthored: false,
       tweakSchemaDeclared: false,

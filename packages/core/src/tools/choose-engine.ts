@@ -120,12 +120,19 @@ export function makeChooseEngineTool(
           : [];
       const recBlock = formatRecommendationsForPrompt(recs);
       const recSuffix = recBlock.length > 0 ? `\n\n${recBlock}` : '';
+      // v3 P8 — canvas2d has NO genre playbook, so the ONLY way it earns a real
+      // play-verdict (instead of shipping unverified) is an agent-authored
+      // contract. Make that a hard directive at pin time.
+      const canvas2dSuffix =
+        engine === 'canvas2d'
+          ? '\n\nREQUIRED for canvas2d: it has no genre playbook, so you MUST call declare_playtest_contract (2-6 input→state checks against window.__game.debug.snapshot()) and wire debug.track(...) — otherwise the game ships unverified. See the canvas2d engine guide.'
+          : '';
 
       return {
         content: [
           {
             type: 'text',
-            text: `${warningPrefix}Engine pinned: ${engine}.${rationaleSuffix}${recSuffix}`,
+            text: `${warningPrefix}Engine pinned: ${engine}.${rationaleSuffix}${recSuffix}${canvas2dSuffix}`,
           },
         ],
         details: { engine, rationale, fitVerdict },

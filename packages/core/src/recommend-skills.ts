@@ -78,7 +78,12 @@ export function recommendSkills(
 
   if (capabilities.hasProgression === true) {
     push('level-orchestrator', 'levels/stages/unlocks require an orchestrator to sequence them');
-    push('save-state', "persistent progress needs serialised save/load — don't hand-roll");
+    // v3 P10b — prefer cloud-save: projects are cloud-native, so meta-progression
+    // should persist per-account/cross-device, not in device-local localStorage.
+    push(
+      'cloud-save',
+      'persistent progress should persist per-account/cross-device, not device-local',
+    );
   }
 
   if (capabilities.procedural === true) {
@@ -146,7 +151,10 @@ export function recommendSkills(
     ],
     idle: [
       ['economy-system', 'idle/incremental is an economy at its core'],
-      ['save-state', 'idle progress must persist'],
+      [
+        'cloud-save',
+        'idle progress must persist per-account/cross-device (cloud-native), not device-local',
+      ],
     ],
   };
   const genreEntries = genre ? GENRE_SKILLS[genre] : undefined;
@@ -174,10 +182,21 @@ export function recommendSkills(
  * system prompt. Returns an empty string when there are no recommendations so
  * the caller can gate on truthiness.
  */
+/** How many recommendations are presented as "import now" (core) before the rest
+ *  drop to an "also available" tier. v3 P5: a long flat list invites
+ *  stage-everything-then-wire-nothing; the recs are emitted core-first. */
+export const IMPORT_NOW_TIER_SIZE = 3;
+
 export function formatRecommendationsForPrompt(recs: SkillRecommendation[]): string {
   if (recs.length === 0) return '';
-  const bullets = recs
-    .map((r) => `- import_skill({ name: '${r.skill}' }) — ${r.reason}`)
-    .join('\n');
-  return `Recommended skills for this game's capabilities — IMPORT each with import_skill, then call its exports (do NOT hand-roll these systems):\n${bullets}`;
+  const fmt = (r: SkillRecommendation) => `- import_skill({ name: '${r.skill}' }) — ${r.reason}`;
+  const importNow = recs.slice(0, IMPORT_NOW_TIER_SIZE);
+  const also = recs.slice(IMPORT_NOW_TIER_SIZE);
+  let out = `Recommended skills for this game's capabilities — IMPORT these core systems now with import_skill, then call their exports (do NOT hand-roll them):\n${importNow
+    .map(fmt)
+    .join('\n')}`;
+  if (also.length > 0) {
+    out += `\n\nAlso available (import if you build that system):\n${also.map(fmt).join('\n')}`;
+  }
+  return out;
 }

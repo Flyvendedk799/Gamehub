@@ -1986,6 +1986,211 @@ Every item below is a hard fail in production motion runs. The validator catches
 // Section maps (used by drift tests and tooling)
 // ---------------------------------------------------------------------------
 
+const CANVAS2D_ENGINE_GUIDE = `# Canvas 2D engine guide (scaffold version 1.0.0)
+
+canvas2d is a raw \`<canvas>\` 2D context driven by your own \`requestAnimationFrame\` loop. There is NO vendor library — no Phaser scene graph, no Three.js renderer. Use it for games whose look-and-feel is inseparable from the drawing API itself: particle fields, fluid simulations, generative/procedural visuals, physics toys, top-down pixel painters, abstract arcade loops, ambient experiences. Do **not** use canvas2d for text-heavy (visual novel) or UI-heavy (idle/tycoon) games — Phaser handles those better.
+
+The bootstrap already provides \`index.html\` with a \`<canvas id="game">\`, the \`window.__game\` global shim, and \`<script type="module" src="src/main.js">\`. There is **no import-map** — canvas2d games need no CDN vendor, so the iframe boots faster and the locked CSP has no third-party origin to allow. You author the draw loop entirely in \`src/main.js\` (and any modules it imports).
+
+## File layout (single-mechanic)
+
+\`\`\`
+index.html       # provided by the engine starter — do NOT recreate it
+src/main.js      # canvas setup + RAF loop + all game logic
+assets/          # images, audio (optional)
+\`\`\`
+
+## File layout (multi-module)
+
+\`\`\`
+index.html
+src/main.js          # entry — sets up canvas, starts RAF loop, imports modules
+src/entities.js      # player, enemies, projectiles
+src/particles.js     # particle system
+src/audio.js         # WebAudio helpers
+assets/sprites/
+assets/audio/
+\`\`\`
+
+## Skeleton
+
+\`\`\`js
+// src/main.js
+
+// --- Canvas + context setup ---
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  canvas.width  = canvas.clientWidth  * devicePixelRatio;
+  canvas.height = canvas.clientHeight * devicePixelRatio;
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+}
+resize();
+window.addEventListener('resize', resize);
+
+// --- Controls ---
+window.__game.controls.define({ actions: [
+  { id: 'left',  label: 'Move left',  keys: ['ArrowLeft',  'KeyA'] },
+  { id: 'right', label: 'Move right', keys: ['ArrowRight', 'KeyD'] },
+  { id: 'up',    label: 'Move up',    keys: ['ArrowUp',    'KeyW'] },
+  { id: 'down',  label: 'Move down',  keys: ['ArrowDown',  'KeyS'] },
+  { id: 'fire',  label: 'Fire',       keys: ['Space', 'Mouse0']    },
+] });
+
+// --- Game state ---
+let score = 0;
+let progress = 0;
+const player = { x: 200, y: 200, r: 16 };
+
+// --- Debug contract (REQUIRED — see below) ---
+window.__game.debug.track({
+  score:    () => score,
+  progress: () => progress,
+  player:   () => player,   // reflectPos() extracts .x/.y automatically
+});
+
+// --- RAF loop ---
+let lastT = 0;
+function frame(t) {
+  const dt = Math.min((t - lastT) / 1000, 0.05); // cap at 50 ms (20 fps floor)
+  lastT = t;
+
+  // Read live tweaks
+  const speed = window.__game.params.player_speed ?? 180;
+
+  // Update
+  if (window.__game.controls.isDown('left'))  player.x -= speed * dt;
+  if (window.__game.controls.isDown('right')) player.x += speed * dt;
+  if (window.__game.controls.isDown('up'))    player.y -= speed * dt;
+  if (window.__game.controls.isDown('down'))  player.y += speed * dt;
+
+  // Draw — clear first, always
+  const W = canvas.clientWidth;
+  const H = canvas.clientHeight;
+  ctx.clearRect(0, 0, W, H);
+
+  ctx.fillStyle = '#4af';
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, player.r, 0, Math.PI * 2);
+  ctx.fill();
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+\`\`\`
+
+## MANDATORY: debug contract (declare_playtest_contract required)
+
+canvas2d has no built-in scene graph or genre playbook, so the playtest harness has nothing to read unless you wire it. **You MUST call \`window.__game.debug.track({ ... })\`** at startup with live getters for every field the playtest scenario will assert on. Without it every run returns \`no_debug_contract\` and earns no real verdict.
+
+Minimal wiring (put this before the first \`requestAnimationFrame\` call):
+
+\`\`\`js
+window.__game.debug.track({
+  score:    () => score,
+  progress: () => progress,
+  player:   () => player,    // object with .x / .y — reflectPos() handles it
+});
+\`\`\`
+
+For more fields (\`hp\`, \`wave\`, \`lives\`, \`elapsed\`, …) just add them to the same object:
+
+\`\`\`js
+window.__game.debug.track({ score: () => score, hp: () => player.hp, wave: () => wave });
+\`\`\`
+
+You must also call \`declare_playtest_contract\` with a \`fields\` list that matches what you passed to \`debug.track\`, so the eval harness knows what to assert on.
+
+## Controls (rebindable)
+
+Declare every player action at startup so the Controls tab can list and rebind them. Read input through the layer — never add raw \`keydown\` listeners for game actions:
+
+\`\`\`js
+window.__game.controls.define({ actions: [
+  { id: 'jump', label: 'Jump', keys: ['Space'] },
+  { id: 'shoot', label: 'Shoot', keys: ['KeyZ', 'Mouse0'] },
+] });
+
+// Held (in RAF loop):  if (window.__game.controls.isDown('jump')) { ... }
+// Pressed once:        window.__game.controls.on('jump', () => { player.jump(); });
+\`\`\`
+
+Keys are \`KeyboardEvent.code\` strings (\`ArrowUp\`, \`KeyW\`, \`Space\`, \`ShiftLeft\`, …). Mouse buttons are \`Mouse0\` (left), \`Mouse1\` (middle), \`Mouse2\` (right) — they work in the same \`keys\` array as keyboard codes.
+
+## Skills (engine-agnostic)
+
+You can \`import_skill\` any engine-agnostic skill. Example:
+
+\`\`\`js
+// import_skill: procedural-gen
+// The skill's exported functions are available after the import resolves.
+import { generateLevel } from './skills/procedural-gen.js';
+const level = generateLevel({ seed: 42, width: 30, height: 20 });
+\`\`\`
+
+Other compatible skills: \`save-state\`, \`economy-system\`. Skills author their own JS modules under \`src/skills/\`; your main loop calls into them normally.
+
+## Feedback and juice
+
+**Flash / hit-freeze** — briefly change \`globalAlpha\` or \`fillStyle\` to signal a hit:
+\`\`\`js
+ctx.save();
+ctx.globalAlpha = 0.6;
+ctx.fillStyle = '#f44';
+ctx.fillRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+ctx.restore();
+\`\`\`
+
+**Particles** — maintain an array of \`{ x, y, vx, vy, life }\` objects, update + draw each frame, splice out dead ones:
+\`\`\`js
+particles.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; });
+particles = particles.filter(p => p.life > 0);
+// draw in the same frame:
+for (const p of particles) { ctx.globalAlpha = p.life; ctx.fillRect(p.x, p.y, 4, 4); }
+ctx.globalAlpha = 1;
+\`\`\`
+
+**SFX via WebAudio** — construct once (on a user gesture if \`window.__game.config.startMuted\` is true):
+\`\`\`js
+let audioCtx;
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new AudioContext();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+function playBeep(freq = 440, duration = 0.08) {
+  ensureAudio();
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  osc.start(); osc.stop(audioCtx.currentTime + duration);
+}
+\`\`\`
+
+## Tweak parameters
+
+Read live via \`window.__game.params.<key>\` anywhere in the RAF loop. Declare the schema via \`declare_tweak_schema\` with \`kind: 'param'\`. Common canvas2d knobs: \`player_speed\`, \`spawn_rate\`, \`gravity\`, \`particle_count\`.
+
+## Pitfalls
+
+- **Do NOT declare Phaser or Three.js and fake a scene.** If the game only makes sense with canvas2d, set \`engine: 'canvas2d'\` honestly. Declaring \`Phaser.Game\` inside a canvas2d file imports a library that was never loaded — the iframe throws immediately and the run is dead before frame one.
+- **Clear the canvas every frame.** Forgetting \`ctx.clearRect(0, 0, W, H)\` at the top of your draw pass leaves ghost trails on every moving object.
+- **Cap delta-time.** Clamp \`dt\` to a max of \`0.05\` s (50 ms). Without a cap, a tab that was backgrounded for 10 s resumes with a 10-second \`dt\` and teleports everything across the screen.
+- **Scale by \`dt\`, not frame count.** Movement must be \`position += speed * dt\`, not \`position += speed\`. Frame rate is not guaranteed.
+- **No \`eval\` / \`new Function\`.** The iframe sandbox CSP blocks these; the validator flags them as errors.
+- **Resize handling.** Set \`canvas.width\` / \`canvas.height\` to \`clientWidth * devicePixelRatio\` (not the CSS pixel size), or drawings will be blurry on HiDPI displays. Re-apply \`ctx.scale(dpr, dpr)\` after each resize so coordinates stay in CSS pixels.
+
+## Forbidden
+
+- \`eval\` / \`new Function\` — sandbox CSP rejects these and the validator errors.
+- Frame-rate-dependent movement (always scale by \`dt\`).
+- Declaring a Phaser or Three.js \`Game\` / renderer inside a canvas2d project (the decoy anti-pattern).
+- Omitting \`debug.track(...)\` + \`declare_playtest_contract\` — the run will report \`no_debug_contract\`.
+`;
+
 export const PROMPT_SECTIONS: Record<string, string> = {
   identity: IDENTITY,
   workflow: WORKFLOW,
@@ -2010,6 +2215,7 @@ export const PROMPT_SECTIONS: Record<string, string> = {
   gameArtifactsWorkflow: GAME_ARTIFACTS_WORKFLOW,
   threeEngineGuide: THREE_ENGINE_GUIDE,
   phaserEngineGuide: PHASER_ENGINE_GUIDE,
+  canvas2dEngineGuide: CANVAS2D_ENGINE_GUIDE,
   gameAntiSlop: GAME_ANTI_SLOP,
   gameMultiFileGuide: GAME_MULTI_FILE_GUIDE,
   // motion-graphics-plan §3
@@ -2040,6 +2246,7 @@ export const PROMPT_SECTION_FILES: Record<keyof typeof PROMPT_SECTIONS, string> 
   gameArtifactsWorkflow: 'game-artifacts-workflow.v1.txt',
   threeEngineGuide: 'three-engine-guide.v1.txt',
   phaserEngineGuide: 'phaser-engine-guide.v1.txt',
+  canvas2dEngineGuide: 'canvas2d-engine-guide.v1.txt',
   gameAntiSlop: 'game-anti-slop.v1.txt',
   gameMultiFileGuide: 'game-multi-file-guide.v1.txt',
   motionWorkflow: 'motion-workflow.v1.txt',
@@ -2235,6 +2442,7 @@ function composeGame(engine: PromptComposeOptions['engine']): string[] {
   ];
   if (engine === 'three') sections.push(THREE_ENGINE_GUIDE);
   else if (engine === 'phaser') sections.push(PHASER_ENGINE_GUIDE);
+  else if (engine === 'canvas2d') sections.push(CANVAS2D_ENGINE_GUIDE);
 
   // Generic multi-file guide for both engines.
   sections.push(GAME_MULTI_FILE_GUIDE);

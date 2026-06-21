@@ -83,6 +83,7 @@ export type GameInvariant =
   | 'escalation'
   | 'decoy-engine'
   | 'debug-snapshot'
+  | 'skill-staged-unused'
   | 'brawler-combo'
   | 'brawler-hitstop'
   | 'brawler-per-attack-limb'
@@ -138,6 +139,43 @@ function gatherSource(deps: AssertGameInvariantsDeps): string {
     sources.push(f.content);
   }
   return sources.join('\n\n');
+}
+
+/** v3 P4 — base names of skill modules under src/engine/ that were written by
+ *  import_skill but are never BOTH imported and called in the rest of the source
+ *  (dead code the agent paid for and then hand-rolled around). Self-contained
+ *  grep over the project tree (mirrors services/worker skill-usage-grep, which
+ *  lives in a different layer). */
+function findStagedUnusedSkills(deps: AssertGameInvariantsDeps): string[] {
+  const files = deps.listFiles();
+  const engineFiles = files.filter((f) => /(^|\/)src\/engine\/[^/]+\.(jsx?|mjs)$/.test(f.path));
+  if (engineFiles.length === 0) return [];
+  const sourceFiles = files.filter(
+    (f) =>
+      SOURCE_EXTENSIONS.some((ext) => f.path.toLowerCase().endsWith(ext)) &&
+      !f.content.startsWith('data:'),
+  );
+  const dead: string[] = [];
+  for (const ef of engineFiles) {
+    const base = (ef.path.split('/').pop() ?? '').replace(/\.(jsx?|mjs)$/, '');
+    // Scan EVERY other source file (incl. other engine modules — a skill may be
+    // wired engine→engine) for an import edge (static `from` OR dynamic `import(`)
+    // and a call to one of its exports. Excludes the skill's own file so its own
+    // definition can't count as usage.
+    const others = sourceFiles
+      .filter((f) => f.path !== ef.path)
+      .map((f) => f.content)
+      .join('\n');
+    const imported = new RegExp(
+      `(?:from|import\\s*\\()\\s*['"][./]*(?:.*/)?engine/${base}(?:\\.\\w+)?['"]`,
+    ).test(others);
+    const exportNames = [...ef.content.matchAll(/export\s+function\s+([A-Za-z_$][\w$]*)/g)].map(
+      (m) => m[1],
+    );
+    const called = exportNames.some((ex) => ex && new RegExp(`\\b${ex}\\s*\\(`).test(others));
+    if (!(imported && called)) dead.push(base);
+  }
+  return dead;
 }
 
 /** Restart binding — any of: an explicit reset()/restart() function,
@@ -447,10 +485,16 @@ export function assertGameInvariants(
   // mutation or a fail state) that never exposes window.__game.debug.snapshot
   // can't be play-verified and ships no_verdict. Pointer/static toys with no
   // state are exempt. Imported skills wire their getState() here automatically.
-  // Gated on the DECLARED capability (present on real runs via the spec), so a
-  // game that commits to a fail state — i.e. wants a real play verdict — is held
-  // to exposing one. Standalone invariant calls without capabilities are exempt.
-  const wantsVerdict = caps?.hasFailState === true;
+  // Gated on the DECLARED capabilities (present on real runs via the spec), so a
+  // game that commits to ANY measurable gameplay — i.e. wants a real play verdict
+  // — is held to exposing a snapshot. v3 P8: broadened beyond hasFailState so
+  // ambient/no-fail canvas2d toys that still have state (enemies/escalation/
+  // progression) aren't exempt. Standalone calls without capabilities stay exempt.
+  const wantsVerdict =
+    caps?.hasFailState === true ||
+    caps?.hasEnemies === true ||
+    caps?.escalates === true ||
+    caps?.hasProgression === true;
   if (wantsVerdict && !anyMatch(source, SNAPSHOT_WIRING_PATTERNS)) {
     issues.push({
       invariant: 'debug-snapshot',
@@ -468,6 +512,19 @@ export function assertGameInvariants(
       severity: 'warn',
       message:
         'Decoy engine entry detected — dead/placeholder framework code (e.g. `if (false && window.Phaser)` or an empty `extends Phaser.Scene {}`) that exists only to satisfy validate_game_scene while the real game runs in another file. Build honestly: if a raw <canvas> + requestAnimationFrame loop fits the idea better than the declared engine, write that as the actual entry (it is allowed) and wire window.__game from it — do NOT fake a scene.',
+    });
+  }
+
+  // Skill-staged-unused (v3 P4) — a module imported via import_skill but never
+  // wired (no import + call in the rest of the source). Backstops the
+  // entry-not-found / multi-entry case the P3 auto-wire stub can't reach.
+  const deadSkills = findStagedUnusedSkills(deps);
+  if (deadSkills.length > 0) {
+    checked.push('skill-staged-unused');
+    issues.push({
+      invariant: 'skill-staged-unused',
+      severity: 'warn',
+      message: `You imported skill module(s) to src/engine/ but never use them: ${deadSkills.join(', ')}. Uncomment the import stub at the top of your entry file and CALL the exports — shipping the module unused means you paid for it AND are likely hand-rolling the same system.`,
     });
   }
   if (anyMatch(source, IS_3D_PATTERNS)) {

@@ -69,13 +69,14 @@ describe('recommendSkills', () => {
   });
 
   it('de-duplicates: multiple triggers for same skill only yield one entry', () => {
-    // hasProgression yields level-orchestrator + save-state (both unique, no dup)
+    // hasProgression yields level-orchestrator + cloud-save (v3 P10b prefers
+    // cloud-save over device-local save-state for cloud-native progression).
     const recs = recommendSkills({ hasProgression: true }, 'phaser');
     const skills = recs.map((r) => r.skill);
     const unique = new Set(skills);
     expect(skills.length).toBe(unique.size);
     expect(skills).toContain('phaser/level-orchestrator.js');
-    expect(skills).toContain('phaser/save-state.js');
+    expect(skills).toContain('phaser/cloud-save.js');
   });
 
   it('every recommendation carries a non-empty reason', () => {

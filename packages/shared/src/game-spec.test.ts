@@ -11,6 +11,7 @@ import {
   GameSpec,
   applyGameSpecPatch,
   checkEngineFit,
+  recommendEngine,
   validateCapabilities,
 } from './game-spec';
 
@@ -266,5 +267,53 @@ describe('validateCapabilities — P10 networking guidance', () => {
     });
     expect(conflicts.some((c) => /local|decline|single-origin/i.test(c))).toBe(true);
     expect(corrected?.requiresNetworking).toBe(true); // guidance, not a demotion
+  });
+});
+
+describe('recommendEngine — v3 P6 (no over-steer to canvas2d)', () => {
+  const base = {
+    dimensions: '2d' as const,
+    perspective: 'fixed_screen' as const,
+    cameraKind: 'static' as const,
+    primaryInputs: ['mouse' as const],
+    numActors: 1,
+    winCondition: 'Win somehow.',
+    loseCondition: 'Lose somehow.',
+  };
+  it('steers a genuinely ambient drag toy (guide mechanic) to canvas2d', () => {
+    const spec = GameSpec.parse({
+      ...base,
+      genre: 'other',
+      capabilities: { controlScheme: 'drag', mechanics: ['guide boats home'], hasFailState: true },
+    });
+    expect(recommendEngine(spec)?.engine).toBe('canvas2d');
+  });
+  it('does NOT steer a visual novel to canvas2d (text/DOM genre)', () => {
+    const spec = GameSpec.parse({
+      ...base,
+      genre: 'visual_novel',
+      capabilities: {
+        controlScheme: 'pointer',
+        mechanics: ['dialogue', 'choose'],
+        hasNarrative: true,
+      },
+    });
+    expect(recommendEngine(spec)).toBeNull();
+  });
+  it('does NOT steer an idle game to canvas2d', () => {
+    const spec = GameSpec.parse({
+      ...base,
+      genre: 'idle',
+      capabilities: { controlScheme: 'pointer', mechanics: ['click', 'buy'], hasEconomy: true },
+    });
+    expect(recommendEngine(spec)).toBeNull();
+  });
+  it('does NOT steer a pointer game with no ambient mechanic to canvas2d', () => {
+    const spec = GameSpec.parse({
+      ...base,
+      genre: 'puzzle',
+      capabilities: { controlScheme: 'pointer', mechanics: ['swap', 'match'] },
+    });
+    expect(recommendEngine(spec)).toBeNull();
   });
 });
