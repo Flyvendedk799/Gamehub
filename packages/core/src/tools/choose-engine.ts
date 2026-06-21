@@ -26,7 +26,7 @@ import { Type } from '@sinclair/typebox';
 import { formatRecommendationsForPrompt, recommendSkills } from '../recommend-skills.js';
 
 const ChooseEngineParams = Type.Object({
-  engine: Type.Union([Type.Literal('three'), Type.Literal('phaser')]),
+  engine: Type.Union([Type.Literal('three'), Type.Literal('phaser'), Type.Literal('canvas2d')]),
   rationale: Type.String({
     description:
       'One sentence on WHY this engine fits the brief — referenced in the chat to ' +
@@ -34,7 +34,7 @@ const ChooseEngineParams = Type.Object({
   }),
 });
 
-export type ChooseEngineEngine = 'three' | 'phaser';
+export type ChooseEngineEngine = 'three' | 'phaser' | 'canvas2d';
 
 export interface ChooseEngineDetails {
   engine: ChooseEngineEngine;
@@ -62,9 +62,10 @@ export function makeChooseEngineTool(
     description:
       'Pick the game engine for this run AFTER declare_game_spec. ' +
       'Match to the brief: 3D / WebGL / parallax / first-person → three; ' +
-      '2D arcade / platformer / top-down / puzzle / runner / retro → phaser. ' +
+      '2D arcade / platformer / top-down / puzzle / runner / retro → phaser; ' +
+      'a bespoke/ambient/abstract 2D idea that does NOT fit a scene framework (fluid, drag-to-guide, generative art toys) → canvas2d (a raw <canvas> + your own loop — build it HONESTLY, never declare phaser and fake a scene). ' +
       'The host validates (genre, dimensions, perspective) against the engine via checkEngineFit; obvious ' +
-      'misfits (e.g. fps + phaser, or 3d + phaser) are warned. The choice is persisted on the next snapshot.',
+      'misfits (e.g. fps + phaser, or 3d + phaser/canvas2d) are warned. The choice is persisted on the next snapshot.',
     parameters: ChooseEngineParams,
     async execute(_toolCallId, params): Promise<AgentToolResult<ChooseEngineDetails>> {
       const engine = params.engine;
@@ -111,7 +112,12 @@ export function makeChooseEngineTool(
       // systems so the agent reviews them with view_game_feel BEFORE hand-rolling
       // enemy AI / waves / progression / dialogue from scratch (the re-derivation
       // gap the probe runs exposed).
-      const recs = spec?.capabilities ? recommendSkills(spec.capabilities, engine, spec.genre) : [];
+      // Skills are phaser/three modules; canvas2d is a bespoke raw-canvas runtime
+      // with no engine-specific skill library, so it gets no recommendations.
+      const recs =
+        spec?.capabilities && engine !== 'canvas2d'
+          ? recommendSkills(spec.capabilities, engine, spec.genre)
+          : [];
       const recBlock = formatRecommendationsForPrompt(recs);
       const recSuffix = recBlock.length > 0 ? `\n\n${recBlock}` : '';
 

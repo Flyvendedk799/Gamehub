@@ -153,7 +153,7 @@ export const GameArtifact = z.object({
   slug: z.string(),
   promptAlias: z.string(),
   status: GameArtifactStatus,
-  engine: z.enum(['three', 'phaser']).nullable(),
+  engine: z.enum(['three', 'phaser', 'canvas2d']).nullable(),
   primaryFilePath: z.string().nullable(),
   previewFilePath: z.string().nullable(),
   thumbnailPath: z.string().nullable(),
@@ -189,7 +189,7 @@ export const GameArtifactCreateInput = z.object({
   name: z.string(),
   slug: z.string().optional(),
   promptAlias: z.string().optional(),
-  engine: z.enum(['three', 'phaser']).optional(),
+  engine: z.enum(['three', 'phaser', 'canvas2d']).optional(),
   primaryFilePath: z.string().optional(),
   previewFilePath: z.string().optional(),
   thumbnailPath: z.string().optional(),
@@ -257,7 +257,7 @@ export type GameArtifactListResult = z.infer<typeof GameArtifactListResult>;
 export interface GameArtifactPreviewManifest {
   schemaVersion: 1;
   designId: string;
-  engine: 'three' | 'phaser';
+  engine: 'three' | 'phaser' | 'canvas2d';
   mode: 'sprite' | 'animation';
   sprite?: {
     id: string;

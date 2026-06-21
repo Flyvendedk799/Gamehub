@@ -5,7 +5,7 @@
  * pulling in the registry side-effects in the entry module.
  */
 
-export type GameEngineId = 'three' | 'phaser';
+export type GameEngineId = 'three' | 'phaser' | 'canvas2d';
 
 /**
  * Cross-origin postMessage protocol constant for the host→iframe live-tweak

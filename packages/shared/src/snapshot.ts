@@ -351,7 +351,7 @@ export interface SnapshotCreateInput {
   artifactSource: string;
   message?: string;
   /** Game-mode only — engine pin for the snapshot. (gameplan §6) */
-  engine?: 'three' | 'phaser' | null;
+  engine?: 'three' | 'phaser' | 'canvas2d' | null;
   engineVersion?: string | null;
   /** may9 Phase 4 — serialized GameSpec JSON. Persisted alongside the
    *  snapshot so the next follow-up turn can re-inject the spec into

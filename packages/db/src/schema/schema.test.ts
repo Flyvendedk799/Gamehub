@@ -164,8 +164,8 @@ describe('schema', () => {
     expect(hashKey?.config.unique).toBe(true);
   });
 
-  it('engine enum is web-only (three + phaser)', () => {
-    expect(engineKind.enumValues).toEqual(['three', 'phaser']);
+  it('engine enum is web-only (three + phaser + canvas2d)', () => {
+    expect(engineKind.enumValues).toEqual(['three', 'phaser', 'canvas2d']);
   });
 
   it('game_scores carries the leaderboard columns + a (game, score) index (Phase 3.8)', () => {

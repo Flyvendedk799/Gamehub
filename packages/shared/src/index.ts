@@ -533,6 +533,7 @@ export {
   GameSpecPatch,
   applyGameSpecPatch,
   checkEngineFit,
+  recommendEngine,
   validateCapabilities,
 } from './game-spec';
 export type {

@@ -175,6 +175,9 @@ const FEEDBACK_PATTERNS: readonly RegExp[] = [
   /\bcontext\.fillRect\b|\bdrawRect\b/i,
   // Tween / camera shake
   /\btween\.|camera\.shake\b|setShake\b/i,
+  // WebAudio (canvas2d games synthesize SFX) + raw-canvas flash/draw feedback.
+  /\b(AudioContext|createOscillator|createGain)\b/,
+  /\b(globalAlpha|fillStyle|strokeStyle)\b/,
 ];
 
 // WS-A controls contract — a keyboard game must DECLARE its scheme via

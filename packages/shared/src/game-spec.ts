@@ -322,9 +322,25 @@ export interface EngineFit {
   reason: string;
 }
 
-export type GameEngineId = 'three' | 'phaser';
+export type GameEngineId = 'three' | 'phaser' | 'canvas2d';
 
 export function checkEngineFit(spec: GameSpec, engine: GameEngineId): EngineFit {
+  // canvas2d (v2 P8) — the honest custom-2D runtime for bespoke ideas that don't
+  // fit a scene framework (ambient/fluid/drag/abstract toys). Reject real 3D
+  // (needs a WebGL scene graph → three); otherwise it's a clean 2D fit.
+  if (engine === 'canvas2d') {
+    if (spec.dimensions === '3d') {
+      return {
+        verdict: 'reject',
+        reason: 'canvas2d is a 2D drawing surface. Real 3D needs three.',
+      };
+    }
+    return {
+      verdict: 'ok',
+      reason: 'Raw 2D canvas + custom loop — a clean fit for bespoke/ambient 2D ideas.',
+    };
+  }
+
   // 3D briefs: phaser is 2.5D-only, so real 3D belongs on three.
   if (spec.dimensions === '3d' && engine === 'phaser') {
     return {
@@ -351,4 +367,31 @@ export function checkEngineFit(spec: GameSpec, engine: GameEngineId): EngineFit 
   }
 
   return { verdict: 'ok', reason: 'Engine fits the spec.' };
+}
+
+/**
+ * Soft engine PREFERENCE from capabilities (v2 P8) — surfaced alongside the skill
+ * recommendations so an ambient/abstract/drag 2D idea is steered to canvas2d
+ * instead of being force-fit into phaser/three (the box-escape the garden run
+ * exposed). Returns null when no strong preference applies. Never a hard gate.
+ */
+export function recommendEngine(spec: GameSpec): { engine: GameEngineId; reason: string } | null {
+  const caps = spec.capabilities;
+  if (spec.dimensions === '3d')
+    return { engine: 'three', reason: 'real 3D needs a WebGL scene graph' };
+  // The ambient fingerprint: a 2D pointer/drag toy with no enemies/physics fits a
+  // raw canvas better than a scene framework.
+  if (
+    spec.dimensions === '2d' &&
+    (caps?.controlScheme === 'drag' || caps?.controlScheme === 'pointer') &&
+    caps?.hasEnemies !== true &&
+    caps?.hasPhysics !== true
+  ) {
+    return {
+      engine: 'canvas2d',
+      reason:
+        'an ambient/abstract 2D pointer/drag idea fits a raw canvas — build it honestly, no decoy scene',
+    };
+  }
+  return null;
 }

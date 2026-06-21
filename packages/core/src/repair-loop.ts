@@ -242,9 +242,7 @@ export function buildRepairInstruction(verdict: RepairVerdict): string | null {
     const mostlyMissing = missingCount >= Math.ceil(failures.length / 2);
     if (mostlyMissing) {
       lines.push(
-        'ROOT CAUSE — MISSING DEBUG CONTRACT: these fields are absent from window.__game.debug.snapshot(), so the playtest reads nothing. This is NOT an input or sign bug — do NOT touch your input handlers. Expose the fields in one line: ' +
-          `window.__game.debug.track({ ${snapshotTrackHint(failures.map((f) => f.field))} }) (or set window.__game.state). ` +
-          'If you imported a skill (import_skill), pass its getState() into debug.track. Then re-run playtest_game.',
+        `ROOT CAUSE — MISSING DEBUG CONTRACT: these fields are absent from window.__game.debug.snapshot(), so the playtest reads nothing. This is NOT an input or sign bug — do NOT touch your input handlers. Expose the fields in one line: window.__game.debug.track({ ${snapshotTrackHint(failures.map((f) => f.field))} }) (or set window.__game.state). If you imported a skill (import_skill), pass its getState() into debug.track. Then re-run playtest_game.`,
       );
     } else {
       lines.push(

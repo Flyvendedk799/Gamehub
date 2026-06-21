@@ -109,11 +109,7 @@ export function makeImportSkillTool(
           ? `import { ${exports.join(', ')} } from '${importFrom}';`
           : `import '${importFrom}';`;
       const verb = alreadyPresent ? 'already present' : 'written';
-      const text =
-        `Skill module ${verb} at ${path}. Add this import to your entry file and CALL the exports — do NOT reimplement them:\n` +
-        `  ${importLine}\n` +
-        (usage ? `\nHow to wire it:\n${usage}\n` : '') +
-        `\nThe module is vetted + tested; call its functions directly.`;
+      const text = `Skill module ${verb} at ${path}. Add this import to your entry file and CALL the exports — do NOT reimplement them:\n  ${importLine}\n${usage ? `\nHow to wire it:\n${usage}\n` : ''}\nThe module is vetted + tested; call its functions directly.`;
       return {
         content: [{ type: 'text', text }],
         details: { name: entry.name, path, exports, alreadyPresent },
