@@ -283,18 +283,25 @@ const RUNNER: PlaytestPlaybook = {
   schemaVersion: 1,
   genre: 'runner',
   intent:
-    'Endless-runner: player auto-advances along the run axis; jump key affects only y, never the run axis.',
+    'Endless-runner: player auto-advances along the run axis; jump key affects only y, never the run axis. Expose `score` (distance/survival) and `playerPos` in window.__game.debug.snapshot().',
   steps: [
     {
       kind: 'wait',
       durationFrames: 60,
-      assert: 'Player x (or z) ADVANCED automatically along the run axis with no input.',
+      assert: 'Distance accrued automatically with no input — `score` INCREASED.',
+      // v2 P6 — RUNNER previously shipped ZERO predicates → hasPredicates=false →
+      // no_verdict (the faller probe). Distance-as-score is the universal runner
+      // signal; the jump step proves input affects y.
+      predicates: [{ field: 'score', op: 'increased', frame: { step: 0 }, against: 'baseline' }],
     },
     {
       kind: 'key',
       code: 'Space',
       frames: 5,
-      assert: 'Player y RISES while the run-axis position keeps advancing.',
+      assert: 'Jump moved the player on the vertical axis — `playerPos.y` CHANGED.',
+      predicates: [
+        { field: 'playerPos.y', op: 'changed', frame: { step: 1 }, against: { step: 0 } },
+      ],
     },
   ],
   watchFor: [
@@ -552,6 +559,111 @@ const TOWER_DEFENSE: PlaytestPlaybook = {
   ],
 };
 
+// v2 P6 — backfill the no-playbook genres that shipped no_verdict in the data
+// (visual_novel, rhythm, idle, sandbox). Each carries machine-checkable
+// predicates so the genre reaches a real pass/fail instead of shipping unverified.
+
+const VISUAL_NOVEL: PlaytestPlaybook = {
+  schemaVersion: 1,
+  genre: 'visual_novel',
+  intent:
+    'Visual novel: advancing dialogue increments the line/node index; choices change the route/flags. Expose `dialogueIndex` (and a `route`/flag) in window.__game.debug.snapshot(). Adapt the advance binding to a click if your VN advances on click.',
+  steps: [
+    { kind: 'wait', durationFrames: 20, assert: 'The first line of dialogue is shown.' },
+    {
+      kind: 'key',
+      code: 'Space',
+      frames: 5,
+      assert: 'Pressing advance moves to the next line — `dialogueIndex` INCREASED.',
+      predicates: [
+        { field: 'dialogueIndex', op: 'increased', frame: { step: 1 }, against: { step: 0 } },
+      ],
+    },
+    {
+      kind: 'key',
+      code: 'Enter',
+      frames: 5,
+      assert: 'Advancing again continues the script — `dialogueIndex` keeps rising.',
+      predicates: [
+        { field: 'dialogueIndex', op: 'increased', frame: { step: 2 }, against: { step: 1 } },
+      ],
+    },
+  ],
+  watchFor: [
+    'Advance does nothing — dialogueIndex frozen (the script is not wired).',
+    'Choices do not branch — route/flags never change.',
+  ],
+};
+
+const RHYTHM: PlaytestPlaybook = {
+  schemaVersion: 1,
+  genre: 'rhythm',
+  intent:
+    'Rhythm: notes scroll to a hit line; pressing the correct lane key as a note arrives scores a hit (score/combo rise); a miss breaks the combo. Expose `score` and `combo` in window.__game.debug.snapshot().',
+  steps: [
+    { kind: 'wait', durationFrames: 30, assert: 'Notes are scrolling toward the hit line.' },
+    {
+      kind: 'key',
+      code: 'KeyJ',
+      frames: 90,
+      assert:
+        'Tapping a lane key over a window registers hits — `score` INCREASED. (Adapt the key to one of your lanes; the long window tolerates timing.)',
+      predicates: [{ field: 'score', op: 'increased', frame: { step: 1 }, against: { step: 0 } }],
+    },
+  ],
+  watchFor: [
+    'Lane keys never score — note/hit detection is not wired.',
+    'Score rises with NO key press — autoplay, not input-driven.',
+  ],
+};
+
+const IDLE: PlaytestPlaybook = {
+  schemaVersion: 1,
+  genre: 'idle',
+  intent:
+    'Idle/incremental: clicking the main earner increases currency; buying a producer raises the per-second rate. Expose `credits` (or `score`/`money`) in window.__game.debug.snapshot().',
+  steps: [
+    {
+      kind: 'mouse',
+      button: 0,
+      assert:
+        'Clicking the main earner increases currency — `credits` INCREASED. (Translate to mouseMove to your button + mouseDown/up.)',
+      predicates: [{ field: 'credits', op: 'increased', frame: { step: 0 }, against: 'baseline' }],
+    },
+    {
+      kind: 'wait',
+      durationFrames: 180,
+      assert: 'Currency keeps accruing from passive producers (if any were bought).',
+    },
+  ],
+  watchFor: [
+    'Clicking does nothing — credits never rise (the core earn loop is broken).',
+    'No way to spend / no producers — a pure number with no decisions.',
+  ],
+};
+
+const SANDBOX: PlaytestPlaybook = {
+  schemaVersion: 1,
+  genre: 'sandbox',
+  intent:
+    'Physics sandbox / toy: the player spawns or places objects with the mouse; the object count rises and physics acts on them. Expose `entityCount` (or `objects`) in window.__game.debug.snapshot().',
+  steps: [
+    {
+      kind: 'mouse',
+      button: 0,
+      assert:
+        'Clicking spawns/places an object — `entityCount` INCREASED. (Translate to mouseMove + mouseDown/up at a spawn point.)',
+      predicates: [
+        { field: 'entityCount', op: 'increased', frame: { step: 0 }, against: 'baseline' },
+      ],
+    },
+  ],
+  watchFor: [
+    'Clicking spawns nothing — entityCount stays flat.',
+    'Spawned objects are static — gravity/physics never act (a placement grid, not a sandbox).',
+  ],
+};
+
 const PLAYBOOKS: Partial<Record<GameGenre, PlaytestPlaybook>> = {
   platformer: PLATFORMER,
   fighting: FIGHTING,
@@ -565,6 +677,10 @@ const PLAYBOOKS: Partial<Record<GameGenre, PlaytestPlaybook>> = {
   roguelike: ROGUELIKE,
   tps: TPS,
   tower_defense: TOWER_DEFENSE,
+  visual_novel: VISUAL_NOVEL,
+  rhythm: RHYTHM,
+  idle: IDLE,
+  sandbox: SANDBOX,
 };
 
 /** Return the canonical playbook for a genre, or null when no

@@ -9,7 +9,12 @@
  */
 
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
-import { GameSpec, GameSpecPatch, applyGameSpecPatch } from '@playforge/shared';
+import {
+  GameSpec,
+  GameSpecPatch,
+  applyGameSpecPatch,
+  validateCapabilities,
+} from '@playforge/shared';
 import { Type } from '@sinclair/typebox';
 
 const FeatureValue = Type.Union([
@@ -43,6 +48,7 @@ const AmendGameSpecParams = Type.Object({
       hasEconomy: Type.Optional(Type.Boolean()),
       hasPhysics: Type.Optional(Type.Boolean()),
       procedural: Type.Optional(Type.Boolean()),
+      requiresNetworking: Type.Optional(Type.Boolean()),
     }),
   ),
   features: Type.Optional(Type.Record(Type.String(), FeatureRecord)),
@@ -104,7 +110,14 @@ export function makeAmendGameSpecTool(
         };
       }
       const patch = GameSpecPatch.parse(params);
-      const after = applyGameSpecPatch(prior, patch);
+      const merged = applyGameSpecPatch(prior, patch);
+      // v2 P4 — reconcile on amend too, so amending escalates:true onto a
+      // handcrafted-level platformer is demoted just like it is on declare.
+      const { corrected, conflicts } = validateCapabilities(merged);
+      const after =
+        corrected !== undefined && corrected !== merged.capabilities
+          ? { ...merged, capabilities: corrected }
+          : merged;
       if (setSpec !== undefined) {
         await setSpec(after);
       }
@@ -112,11 +125,12 @@ export function makeAmendGameSpecTool(
       const featureKeys = Object.keys(after.features);
       const reasonLine = patch.reason !== undefined ? `Reason: ${patch.reason}. ` : '';
       const activeLine = featureKeys.length > 0 ? featureKeys.join(', ') : '(none)';
+      const conflictLine = conflicts.length > 0 ? ` Capability check: ${conflicts.join(' ')}` : '';
       return {
         content: [
           {
             type: 'text',
-            text: `Spec amended: ${changedKeys.join(', ')}. ${reasonLine}Active features: ${activeLine}.`,
+            text: `Spec amended: ${changedKeys.join(', ')}. ${reasonLine}Active features: ${activeLine}.${conflictLine}`,
           },
         ],
         details: { changedKeys, featureKeys },

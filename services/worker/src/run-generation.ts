@@ -51,7 +51,7 @@ import { createRunSignalAggregator } from './run-signal';
 import { assertGeneratedJavaScriptSyntax } from './syntax-check';
 import { WorkingTree } from './working-tree';
 
-export type WebEngine = 'three' | 'phaser';
+export type WebEngine = 'three' | 'phaser' | 'canvas2d';
 export type GenerateFn = (
   input: GenerateInput,
   deps: GenerateViaAgentDeps,
@@ -67,9 +67,9 @@ export interface SceneIssue {
 
 /** Engine scene validator (host delegates to the @playforge/runtime adapter). */
 export type SceneValidator = (
-  engine: 'three' | 'phaser',
+  engine: WebEngine,
   files: ReadonlyArray<{ path: string; content: string }>,
-) => { ok: boolean; engine: 'three' | 'phaser'; issues: SceneIssue[] };
+) => { ok: boolean; engine: WebEngine; issues: SceneIssue[] };
 
 export interface GenerationRequest {
   prompt: string;
@@ -510,13 +510,17 @@ export async function runGeneration(
     ...(runtimeVerify !== undefined ? { runtimeVerify } : {}),
     gameMode: {
       setEngine: (engine) => {
-        if (engine === 'three' || engine === 'phaser') state.engine = engine;
+        // Accept every supported engine incl. canvas2d (v2 P8) — the old guard
+        // silently dropped canvas2d, persisting engine: null.
+        if (engine === 'three' || engine === 'phaser' || engine === 'canvas2d') {
+          state.engine = engine;
+        }
       },
       getCurrentEngine: () => state.engine,
-      validate: (engine, files) =>
-        engine === 'three' || engine === 'phaser'
-          ? validateScene(engine, files)
-          : { ok: true, engine: 'phaser', issues: [] },
+      // Route through the real validator (ENGINE_SCENE_VALIDATOR handles canvas2d
+      // too) so a canvas2d game runs its own scene lint instead of being skipped
+      // and mislabeled as phaser.
+      validate: (engine, files) => validateScene(engine, files),
       setSpec: (spec) => {
         state.spec = spec;
       },
@@ -722,8 +726,8 @@ export async function runGeneration(
   // its declared capabilities (re-derivation), and did it escape the declared
   // engine with a decoy entry? These feed the run-report analyzer.
   const recommended =
-    state.spec?.capabilities && state.engine
-      ? recommendSkills(state.spec.capabilities, state.engine)
+    state.spec?.capabilities && state.engine && state.engine !== 'canvas2d'
+      ? recommendSkills(state.spec.capabilities, state.engine, state.spec.genre)
       : [];
   const recommendedButUnused = recommended
     .filter((r) => !sig.skillsViewed.includes(r.skill))

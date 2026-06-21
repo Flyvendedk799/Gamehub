@@ -119,7 +119,7 @@ describe('formatRecommendationsForPrompt', () => {
     const recs = recommendSkills({ hasEnemies: true, escalates: true }, 'phaser');
     const output = formatRecommendationsForPrompt(recs);
     expect(output).toContain("Recommended skills for this game's capabilities");
-    expect(output).toContain('view_game_feel');
+    expect(output).toContain('import_skill');
     expect(output).toContain('phaser/enemy-ai.js');
     expect(output).toContain('phaser/wave-spawner.js');
     // Each entry is a bullet
@@ -130,8 +130,63 @@ describe('formatRecommendationsForPrompt', () => {
   it('each bullet contains the skill name and reason separated by " — "', () => {
     const recs = recommendSkills({ hasNarrative: true }, 'phaser');
     const output = formatRecommendationsForPrompt(recs);
-    const bullet = output.split('\n').find((l) => l.startsWith('- phaser/dialog-flow.js'));
+    const bullet = output
+      .split('\n')
+      .find((l) => l.startsWith('-') && l.includes('phaser/dialog-flow.js'));
     expect(bullet).toBeDefined();
     expect(bullet).toContain(' — ');
+  });
+});
+
+describe('recommendSkills — genre-driven (Phase 3 / Loop-2 fixes)', () => {
+  it('genre=rhythm with NON-keyword mechanics still recommends rhythm-clock', () => {
+    // The Loop-2 miss: mechanics phrased as "hit timed notes" dodged the keyword list.
+    const recs = recommendSkills(
+      { mechanics: ['hit timed notes', 'judge accuracy'] },
+      'phaser',
+      'rhythm',
+    );
+    expect(recs.map((r) => r.skill)).toContain('phaser/rhythm-clock.js');
+  });
+
+  it('genre=racing does NOT recommend enemy-ai for its AI opponents (false-positive fix)', () => {
+    const recs = recommendSkills({ hasEnemies: true }, 'phaser', 'racing');
+    expect(recs.map((r) => r.skill)).not.toContain('phaser/enemy-ai.js');
+  });
+
+  it('genre=tower_defense pulls economy + wave + enemy skills from the genre table', () => {
+    const recs = recommendSkills({}, 'phaser', 'tower_defense');
+    const skills = recs.map((r) => r.skill);
+    expect(skills).toContain('phaser/economy-system.js');
+    expect(skills).toContain('phaser/wave-spawner.js');
+    expect(skills).toContain('phaser/enemy-ai.js');
+  });
+
+  it('genre=visual_novel → dialog-flow even with empty capabilities', () => {
+    expect(recommendSkills({}, 'three', 'visual_novel').map((r) => r.skill)).toContain(
+      'three/dialog-flow.jsx',
+    );
+  });
+
+  it('no genre passed → behaves as before (capabilities-only)', () => {
+    expect(recommendSkills({}, 'phaser')).toHaveLength(0);
+  });
+});
+
+describe('recommendSkills — P9 asset substrates', () => {
+  it('rhythm genre recommends music-sync alongside rhythm-clock', () => {
+    const skills = recommendSkills({}, 'phaser', 'rhythm').map((r) => r.skill);
+    expect(skills).toContain('phaser/music-sync.js');
+    expect(skills).toContain('phaser/rhythm-clock.js');
+  });
+
+  it('asset-pipeline is recommended for a 3D combat game on three, NOT on phaser', () => {
+    expect(recommendSkills({ hasEnemies: true }, 'three', 'tps').map((r) => r.skill)).toContain(
+      'three/asset-pipeline.jsx',
+    );
+    // phaser has no asset-pipeline skill — must never be recommended there.
+    expect(
+      recommendSkills({ hasEnemies: true }, 'phaser', 'tps').map((r) => r.skill),
+    ).not.toContain('phaser/asset-pipeline.js');
   });
 });

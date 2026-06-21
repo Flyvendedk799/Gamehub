@@ -736,10 +736,11 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     const store = new SnapshotStore(new InMemoryBlobStore());
     const browserJobs = queuedBrowserJobs([invertedPlaytest()]);
     const agent: GenerateFn = async (_input, deps) => {
-      // 'idle' has no bundled playbook → selectGamePlaytestPlan returns null.
-      // (The game still BOOTS in the mock, so the boot-gate has nothing to flag
-      // and the run ships an honest no_verdict.)
-      await deps.gameMode?.setSpec?.({ ...TOPDOWN_SPEC, genre: 'idle' } as unknown as GameSpec);
+      // 'tycoon' has no bundled playbook → selectGamePlaytestPlan returns null.
+      // (idle/sandbox/rhythm/visual_novel gained playbooks in v2 P6; tycoon did not.)
+      // The game still BOOTS in the mock, so the boot-gate has nothing to flag
+      // and the run ships an honest no_verdict.
+      await deps.gameMode?.setSpec?.({ ...TOPDOWN_SPEC, genre: 'tycoon' } as unknown as GameSpec);
       await deps.fs?.create('index.html', RED_SQUARE);
       return emptyOutput('idle');
     };

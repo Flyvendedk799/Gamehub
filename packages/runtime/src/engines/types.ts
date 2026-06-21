@@ -5,7 +5,7 @@
  * pulling in the registry side-effects in the entry module.
  */
 
-export type GameEngineId = 'three' | 'phaser';
+export type GameEngineId = 'three' | 'phaser' | 'canvas2d';
 
 /**
  * Cross-origin postMessage protocol constant for the host→iframe live-tweak
@@ -193,7 +193,40 @@ window.__game = window.__game || {};
 window.__game.engine = ${JSON.stringify(opts.engine)};
 window.__game.params = ${params};
 window.__game.config = ${config};
-window.__game.debug = window.__game.debug || { snapshot: function () { return null; } };
+// v2 P2 — a live debug contract the deterministic verdict layer can actually
+// read. The old default returned null, so EVERY predicate reported "field
+// missing" and known-genre games could never earn a play verdict. Now the agent
+// (or an imported skill) wires real values in ONE line — debug.track({ player,
+// score: () => score, wave: () => wave }) — or sets window.__game.state.*, and
+// snapshot() merges them. It still returns null when NOTHING is wired, so the
+// no_debug_contract outcome is preserved (we don't fake a contract).
+window.__game.debug = window.__game.debug || (function () {
+  var tracked = {};
+  function read(v) { try { return typeof v === 'function' ? v() : v; } catch (e) { return null; } }
+  function reflectPos(o) {
+    if (!o) return undefined;
+    var x = o.x, y = o.y;
+    if ((x === undefined || y === undefined) && o.position) { x = o.position.x; y = o.position.y; }
+    if (x === undefined && y === undefined) return undefined;
+    return { x: x, y: y };
+  }
+  function track(spec) { if (spec && typeof spec === 'object') { for (var k in spec) tracked[k] = spec[k]; } return api; }
+  function snapshot() {
+    var st = window.__game.state;
+    var hasState = st && typeof st === 'object' && Object.keys(st).length > 0;
+    var hasTracked = Object.keys(tracked).length > 0;
+    if (!hasState && !hasTracked) return null; // nothing wired → honest no_debug_contract
+    var out = {};
+    if (hasState) { for (var k in st) out[k] = read(st[k]); }
+    for (var t in tracked) {
+      if (t === 'player') { var p = reflectPos(read(tracked.player)); if (p) out.playerPos = p; }
+      else { out[t] = read(tracked[t]); }
+    }
+    return out;
+  }
+  var api = { track: track, snapshot: snapshot };
+  return api;
+})();
 // WS-A — rebindable input layer. The game DECLARES its controls via
 // window.__game.controls.define({ actions:[{id,label,description,keys:[...]}] })
 // and reads input via controls.isDown(id) (held) / controls.on(id, fn) (pressed).

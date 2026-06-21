@@ -25,7 +25,7 @@ const SHOWCASE_PREFIX = 'showcase';
 interface ShowcaseSeed {
   slug: string;
   name: string;
-  engine: 'three' | 'phaser';
+  engine: 'three' | 'phaser' | 'canvas2d';
   genre: string;
   brief: string;
 }

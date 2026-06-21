@@ -118,6 +118,7 @@ import {
   makeGenerateImageAssetTool,
 } from './tools/generate-image-asset.js';
 import { makeGetPlaytestPlaybookTool } from './tools/get-playtest-playbook.js';
+import { makeImportSkillTool } from './tools/import-skill.js';
 import { makeListFilesTool } from './tools/list-files.js';
 import {
   type MotionCompositionRegistryDeps,
@@ -1242,6 +1243,11 @@ export async function generateViaAgent(
         unknown
       >,
     );
+    // v2 P1 — import a vetted skill module ON DISK so the agent imports + calls
+    // the tested code instead of retyping it (needs fs, hence this block).
+    if (isGameMode) {
+      defaultTools.push(makeImportSkillTool(deps.fs) as unknown as AgentTool<TSchema, unknown>);
+    }
     defaultTools.push(makeListFilesTool(deps.fs) as unknown as AgentTool<TSchema, unknown>);
     defaultTools.push(
       makeDeclareTweakSchemaTool(deps.fs) as unknown as AgentTool<TSchema, unknown>,

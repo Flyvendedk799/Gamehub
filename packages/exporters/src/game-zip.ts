@@ -21,7 +21,7 @@ export interface ExportGameZipOptions {
   /** UI-friendly name written into the README banner. */
   designName?: string;
   /** Engine pinned for the project. Drives the README "how to run" hint. */
-  engine?: 'three' | 'phaser';
+  engine?: 'three' | 'phaser' | 'canvas2d';
   /** Optional engine version pin to surface in the README. */
   engineVersion?: string;
 }

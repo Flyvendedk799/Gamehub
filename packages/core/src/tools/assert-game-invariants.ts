@@ -68,6 +68,7 @@ const AssertGameInvariantsParams = Type.Object({
       escalates: Type.Optional(Type.Boolean()),
       hasFailState: Type.Optional(Type.Boolean()),
       hasEnemies: Type.Optional(Type.Boolean()),
+      hasProgression: Type.Optional(Type.Boolean()),
     }),
   ),
 });
@@ -81,6 +82,7 @@ export type GameInvariant =
   | 'camera-relative'
   | 'escalation'
   | 'decoy-engine'
+  | 'debug-snapshot'
   | 'brawler-combo'
   | 'brawler-hitstop'
   | 'brawler-per-attack-limb'
@@ -98,6 +100,7 @@ export interface InvariantCapabilities {
   escalates?: boolean | undefined;
   hasFailState?: boolean | undefined;
   hasEnemies?: boolean | undefined;
+  hasProgression?: boolean | undefined;
 }
 
 export interface InvariantIssue {
@@ -172,6 +175,9 @@ const FEEDBACK_PATTERNS: readonly RegExp[] = [
   /\bcontext\.fillRect\b|\bdrawRect\b/i,
   // Tween / camera shake
   /\btween\.|camera\.shake\b|setShake\b/i,
+  // WebAudio (canvas2d games synthesize SFX) + raw-canvas flash/draw feedback.
+  /\b(AudioContext|createOscillator|createGain)\b/,
+  /\b(globalAlpha|fillStyle|strokeStyle)\b/,
 ];
 
 // WS-A controls contract — a keyboard game must DECLARE its scheme via
@@ -189,6 +195,19 @@ const KEYBOARD_INPUT_PATTERNS: readonly RegExp[] = [
   /\bcursors?\s*\.\s*(left|right|up|down)/i,
 ];
 const CONTROLS_DEFINE_PATTERN = /\bcontrols\s*\.\s*define\s*\(/;
+
+// v2 P2 — the deterministic verdict layer (playbooks + contracts) reads
+// window.__game.debug.snapshot(); a game with gameplay state that never wires it
+// can't be play-verified and ships no_verdict. These match AUTHORED wiring only —
+// a debug.track({...}) CALL, a debug.snapshot ASSIGNMENT, or a __game.state
+// ASSIGNMENT. Crucially they do NOT match the bootstrap shim's own internal
+// `var st = window.__game.state` READ (the shim is scanned as part of index.html),
+// which would otherwise make this check always-pass and a no-op.
+const SNAPSHOT_WIRING_PATTERNS: readonly RegExp[] = [
+  /\bdebug\s*\.\s*track\s*\(/,
+  /\bdebug\s*\.\s*snapshot\s*=[^=]/,
+  /__game\s*\.\s*state\s*=[^=]/,
+];
 
 // Camera-relative movement (3D's #1 recurring bug). A 3D game with a MOVING
 // camera (follow / first-person / third-person) that applies movement input to
@@ -294,6 +313,18 @@ const ESCALATION_PATTERNS: readonly RegExp[] = [
   /\b(speed|hp|health|count|enemies?)\b[^\n;]{0,30}\*[^\n;]{0,20}\b(wave|level|elapsed|time|difficulty)\b/i,
 ];
 
+/** LEVEL-RAMP escalation signals (v2 P5) — a progression game (platformer,
+ *  puzzle-with-stages) that legitimately gets harder via HANDCRAFTED LEVELS has
+ *  none of the wave/spawn signals above, so judging it by ESCALATION_PATTERNS
+ *  alone is a false "no escalation" (the Loop-1 platformer). These match the
+ *  level-advance vocabulary + use of the level-orchestrator skill. */
+const LEVEL_RAMP_PATTERNS: readonly RegExp[] = [
+  /\b(nextLevel|loadLevel|advanceLevel|gotoLevel|setLevel)\b/i,
+  /\blevel(Index|Num|Number)?\s*(\+\+|\+=)/i,
+  /\b(createLevelOrchestrator|levelOrchestrator|LEVELS\s*\[)/,
+  /\bunlock(Level|Stage|Next)\b/i,
+];
+
 /** GameGenre tokens (game-workflow §2 menu) whose games MUST get harder over
  *  time to feel like a game rather than a demo. Survival/arcade/runner/TD all
  *  ramp; brawler/puzzle/racer/rhythm/platformer pace differently (handcrafted
@@ -359,6 +390,7 @@ export function assertGameInvariants(
     'feedback',
     'controls',
     'decoy-engine',
+    'debug-snapshot',
   ];
 
   if (!anyMatch(source, RESTART_PATTERNS)) {
@@ -408,6 +440,23 @@ export function assertGameInvariants(
       severity: 'warn',
       message:
         'Keyboard input is read directly without declaring a controls scheme. The runtime layer is already present — call window.__game.controls.define({ actions: [{ id, label, keys: ["ArrowLeft","KeyA"] }, …] }) and read input via controls.isDown(id) / controls.on(id, fn). This populates the builder Controls tab and lets players rebind keys live; reading cursors/keydown directly bypasses it, so the controls are invisible and unmappable.',
+    });
+  }
+
+  // Debug-snapshot wiring (v2 P2) — a game with gameplay state (a score/state
+  // mutation or a fail state) that never exposes window.__game.debug.snapshot
+  // can't be play-verified and ships no_verdict. Pointer/static toys with no
+  // state are exempt. Imported skills wire their getState() here automatically.
+  // Gated on the DECLARED capability (present on real runs via the spec), so a
+  // game that commits to a fail state — i.e. wants a real play verdict — is held
+  // to exposing one. Standalone invariant calls without capabilities are exempt.
+  const wantsVerdict = caps?.hasFailState === true;
+  if (wantsVerdict && !anyMatch(source, SNAPSHOT_WIRING_PATTERNS)) {
+    issues.push({
+      invariant: 'debug-snapshot',
+      severity: 'warn',
+      message:
+        'No debug snapshot wired, so the deterministic playtest can read nothing and the run ships unverified (no_verdict). Expose your state in ONE line: window.__game.debug.track({ player: thePlayerSprite, score: () => score, wave: () => wave }) — or set window.__game.state = { score, wave }. Imported skills (import_skill) expose a getState() you can pass straight into debug.track.',
     });
   }
 
@@ -486,12 +535,22 @@ export function assertGameInvariants(
   // slip the escalation check entirely.
   if ((genre !== null && SHOULD_ESCALATE_GENRES.has(genre)) || caps?.escalates === true) {
     checked.push('escalation');
-    if (!anyMatch(source, ESCALATION_PATTERNS)) {
+    // Mode (v2 P5): a progression game with no combat ramps via LEVELS, not
+    // waves — accept the level-ramp vocabulary so it isn't false-flagged for
+    // lacking spawn-rate signals. (The garden/rhythm/platformer mis-declarations
+    // are already demoted upstream by validateCapabilities, so this only sees
+    // games that genuinely should escalate.)
+    const levelRampMode = caps?.hasProgression === true && caps?.hasEnemies !== true;
+    const escalationPatterns = levelRampMode
+      ? [...ESCALATION_PATTERNS, ...LEVEL_RAMP_PATTERNS]
+      : ESCALATION_PATTERNS;
+    if (!anyMatch(source, escalationPatterns)) {
       issues.push({
         invariant: 'escalation',
         severity: 'warn',
-        message:
-          'No difficulty escalation detected for a genre that must ramp. A wave that never gets harder reads as a tech demo — drift the spawn rate, enemy speed/HP, or enemy count up over time or per wave (e.g. difficulty = 1.15 ** wave), and SIGNAL the rising pressure (a wave counter, a "Wave N" banner). The bundled `wave-spawner` skill (view_game_feel({ name: "<engine>/wave-spawner.<js|jsx>" })) does this — escalating count/speed/hp per wave with a telegraphed countdown — and `enemy-ai` gives the enemies real behaviour to fight.',
+        message: levelRampMode
+          ? 'No escalation detected for a progression game. Make later levels/stages genuinely harder and advance them (nextLevel / a level-orchestrator), or ramp a difficulty value — a game that never gets harder reads as a tech demo. The bundled `level-orchestrator` skill (import_skill) sequences escalating levels.'
+          : 'No difficulty escalation detected for a genre that must ramp. A wave that never gets harder reads as a tech demo — drift the spawn rate, enemy speed/HP, or enemy count up over time or per wave (e.g. difficulty = 1.15 ** wave), and SIGNAL the rising pressure (a wave counter, a "Wave N" banner). Import the bundled `wave-spawner` skill (import_skill({ name: "<engine>/wave-spawner.<js|jsx>" })) — escalating count/speed/hp per wave with a telegraphed countdown — and `enemy-ai` gives the enemies real behaviour to fight.',
       });
     }
   }

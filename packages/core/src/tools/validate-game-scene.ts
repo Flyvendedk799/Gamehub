@@ -22,10 +22,12 @@ import { Type } from '@sinclair/typebox';
 import type { TextEditorFsCallbacks } from './text-editor.js';
 
 const ValidateGameSceneParams = Type.Object({
-  engine: Type.Optional(Type.Union([Type.Literal('three'), Type.Literal('phaser')])),
+  engine: Type.Optional(
+    Type.Union([Type.Literal('three'), Type.Literal('phaser'), Type.Literal('canvas2d')]),
+  ),
 });
 
-export type ValidateEngine = 'three' | 'phaser';
+export type ValidateEngine = 'three' | 'phaser' | 'canvas2d';
 
 export interface ValidateIssue {
   path: string;

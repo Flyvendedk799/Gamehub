@@ -275,6 +275,7 @@ describe('assertGameInvariants brawler-specific checks (Sequence 6)', () => {
       'feedback',
       'controls',
       'decoy-engine',
+      'debug-snapshot',
     ]);
     expect(result.genre).toBeNull();
   });
@@ -494,5 +495,90 @@ describe('assertGameInvariants — capability-aware (Engine Evolution P4/P5/P6)'
     `;
     const result = assertGameInvariants(deps([{ path: 'src/main.js', content: honest }]));
     expect(result.issues.map((i) => i.invariant)).not.toContain('decoy-engine');
+  });
+});
+
+describe('assertGameInvariants — v2 P2 debug-snapshot + P5 level-ramp', () => {
+  const COMPLETE = `
+    let score = 0; let lives = 3;
+    function onHit(){ score += 1; new Audio('x.wav').play(); }
+    function tick(){ if (lives <= 0) restart(); }
+    function restart(){ score = 0; lives = 3; }
+  `;
+
+  it('P2: a fail-state game with no snapshot wiring warns debug-snapshot', () => {
+    const r = assertGameInvariants(deps([{ path: 'src/main.js', content: COMPLETE }]), {
+      capabilities: { hasFailState: true },
+    });
+    expect(r.checked).toContain('debug-snapshot');
+    expect(r.issues.map((i) => i.invariant)).toContain('debug-snapshot');
+  });
+
+  it('P2: wiring debug.track clears the debug-snapshot warning', () => {
+    const wired = `${COMPLETE}\n window.__game.debug.track({ score: () => score });`;
+    const r = assertGameInvariants(deps([{ path: 'src/main.js', content: wired }]), {
+      capabilities: { hasFailState: true },
+    });
+    expect(r.issues.map((i) => i.invariant)).not.toContain('debug-snapshot');
+  });
+
+  it('P5: a progression game ramping via levels (loadLevel) does NOT warn escalation', () => {
+    const lvl = `${COMPLETE}\n function next(){ loadLevel(levelIndex + 1); }`;
+    const r = assertGameInvariants(deps([{ path: 'src/main.js', content: lvl }]), {
+      capabilities: { escalates: true, hasProgression: true, hasEnemies: false },
+    });
+    expect(r.checked).toContain('escalation');
+    expect(r.issues.map((i) => i.invariant)).not.toContain('escalation');
+  });
+
+  it('P5: a progression game with NO ramp of any kind still warns escalation', () => {
+    const r = assertGameInvariants(deps([{ path: 'src/main.js', content: COMPLETE }]), {
+      capabilities: { escalates: true, hasProgression: true, hasEnemies: false },
+    });
+    expect(r.issues.map((i) => i.invariant)).toContain('escalation');
+  });
+});
+
+describe('assertGameInvariants — P2 snapshot-wiring is authored-only (not the shim read)', () => {
+  const BASE = `
+    let score = 0; let lives = 3;
+    function onHit(){ score += 1; new Audio('x.wav').play(); }
+    function tick(){ if (lives <= 0) restart(); }
+    function restart(){ score = 0; lives = 3; }
+  `;
+  const caps = { capabilities: { hasFailState: true } };
+
+  it('the bootstrap shim READING window.__game.state does NOT count as wiring', () => {
+    // The shim (scanned as part of index.html) contains `var st = window.__game.state`.
+    // A READ must not satisfy the check, or the invariant is a permanent no-op.
+    const shimRead = `${BASE}\n var st = window.__game.state; var v = st && st.score;`;
+    const r = assertGameInvariants(deps([{ path: 'index.html', content: shimRead }]), caps);
+    expect(r.issues.map((i) => i.invariant)).toContain('debug-snapshot');
+  });
+
+  it('ASSIGNING window.__game.state clears the warning', () => {
+    const r = assertGameInvariants(
+      deps([{ path: 'src/main.js', content: `${BASE}\n window.__game.state = { score };` }]),
+      caps,
+    );
+    expect(r.issues.map((i) => i.invariant)).not.toContain('debug-snapshot');
+  });
+
+  it('calling debug.track clears the warning; equality (==) does not', () => {
+    const tracked = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: `${BASE}\n window.__game.debug.track({ score: () => score });`,
+        },
+      ]),
+      caps,
+    );
+    expect(tracked.issues.map((i) => i.invariant)).not.toContain('debug-snapshot');
+    const eq = assertGameInvariants(
+      deps([{ path: 'src/main.js', content: `${BASE}\n if (window.__game.state == null) {}` }]),
+      caps,
+    );
+    expect(eq.issues.map((i) => i.invariant)).toContain('debug-snapshot');
   });
 });

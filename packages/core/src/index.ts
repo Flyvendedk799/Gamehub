@@ -130,6 +130,7 @@ export {
   type TextEditorFsCallbacks,
   type TextEditorDetails,
 } from './tools/text-editor.js';
+export { makeImportSkillTool, type ImportSkillDetails } from './tools/import-skill.js';
 export { makeSetTodosTool, type SetTodosDetails } from './tools/set-todos.js';
 export type {
   CompactArtifact,
@@ -253,7 +254,7 @@ export interface GenerateInput {
   /** gameplan §A6 — engine pin for game-mode runs (set by the New-design
    *  dialog or carried from a prior snapshot). When omitted on a game run
    *  the agent calls `choose_engine` first. */
-  engine?: 'three' | 'phaser' | undefined;
+  engine?: 'three' | 'phaser' | 'canvas2d' | undefined;
   /** motion-graphics-plan §1.1 — style pin for motion-mode runs. When
    *  omitted on a motion run the agent calls `choose_remotion_style` first. */
   motionStyle?: '2d' | '3d' | 'kinetic-text' | 'data-viz' | 'mixed' | undefined;

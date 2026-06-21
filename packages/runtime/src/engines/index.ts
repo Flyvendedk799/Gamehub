@@ -11,6 +11,7 @@
  * `window.__game` postMessage bridge.
  */
 
+import { canvas2dAdapter } from './canvas2d';
 import { phaserAdapter } from './phaser';
 import { threeAdapter } from './three';
 import type { GameEngineAdapter, GameEngineId } from './types';
@@ -27,6 +28,7 @@ export type { ScoreMessage, ScoreMessageType } from './types';
 const ADAPTERS: Record<GameEngineId, GameEngineAdapter> = {
   three: threeAdapter,
   phaser: phaserAdapter,
+  canvas2d: canvas2dAdapter,
 };
 
 export const GAME_ENGINE_ADAPTERS: ReadonlyMap<GameEngineId, GameEngineAdapter> = new Map(

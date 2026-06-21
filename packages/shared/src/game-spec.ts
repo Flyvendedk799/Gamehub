@@ -129,6 +129,11 @@ export const GameCapabilities = z.object({
   hasPhysics: z.boolean().default(false),
   /** Procedurally / randomly generated content. */
   procedural: z.boolean().default(false),
+  /** The idea implies networked / online multiplayer (co-op, versus, .io). The
+   *  sandbox is single-origin (CSP connect-src 'self'), so this is a signal to
+   *  scope honestly to local multiplayer (split-screen / hotseat) — see
+   *  validateCapabilities (Engine Evolution v2 P10). */
+  requiresNetworking: z.boolean().default(false),
 });
 export type GameCapabilities = z.infer<typeof GameCapabilities>;
 
@@ -148,6 +153,7 @@ export const GameCapabilitiesPatch = z.object({
   hasEconomy: z.boolean().optional(),
   hasPhysics: z.boolean().optional(),
   procedural: z.boolean().optional(),
+  requiresNetworking: z.boolean().optional(),
 });
 export type GameCapabilitiesPatch = z.infer<typeof GameCapabilitiesPatch>;
 
@@ -233,6 +239,72 @@ export function applyGameSpecPatch(prior: GameSpec, patch: GameSpecPatch): GameS
   return GameSpec.parse(merged);
 }
 
+/** Genres whose difficulty does NOT ramp in the wave/spawn sense — they pace via
+ *  handcrafted levels (platformer/puzzle), fixed beatmaps (rhythm), story
+ *  (visual_novel), or open-ended play (sandbox/idle). Declaring `escalates:true`
+ *  for these drove the Loop-2 escalation false-positives. */
+const NON_ESCALATING_GENRES: ReadonlySet<string> = new Set<string>([
+  'platformer',
+  'puzzle',
+  'visual_novel',
+  'sandbox',
+  'idle',
+  'rhythm',
+]);
+
+export interface CapabilityReconciliation {
+  /** The capabilities after demoting flags the genre/scheme contradicts. Same
+   *  reference as the input when nothing changed. */
+  corrected: GameCapabilities | undefined;
+  /** Human-readable demotions, surfaced to the agent so it can amend or justify. */
+  conflicts: string[];
+}
+
+/**
+ * Capability reconciliation (Engine Evolution v2 P4) — cross-check self-declared
+ * capability flags against the genre + control scheme and DEMOTE the ones that
+ * contradict, rather than trusting them raw. Pure; returns corrected caps +
+ * the conflicts so `declare_game_spec` can apply the correction AND tell the
+ * agent what it changed. Today it focuses on `escalates`, the one noisy flag
+ * that feeds BOTH the escalation invariant and the wave-spawner recommendation.
+ */
+export function validateCapabilities(spec: {
+  genre: GameGenre;
+  capabilities?: GameCapabilities | undefined;
+}): CapabilityReconciliation {
+  const caps = spec.capabilities;
+  if (caps === undefined) return { corrected: undefined, conflicts: [] };
+  const conflicts: string[] = [];
+  let escalates = caps.escalates;
+  if (escalates === true) {
+    if (NON_ESCALATING_GENRES.has(spec.genre)) {
+      escalates = false;
+      conflicts.push(
+        `escalates demoted to false: ${spec.genre} games pace via handcrafted content / fixed structure, not a wave-style difficulty ramp. If you genuinely ramp spawn pressure, re-declare it.`,
+      );
+    } else if (
+      (caps.controlScheme === 'drag' || caps.controlScheme === 'pointer') &&
+      caps.hasEnemies !== true
+    ) {
+      escalates = false;
+      conflicts.push(
+        'escalates demoted to false: a pointer/drag game with no enemies is not a difficulty-ramp game. Re-declare if you meant rising spawn/speed pressure.',
+      );
+    }
+  }
+  // P10 — honest multiplayer scoping. The sandbox is single-origin (CSP
+  // connect-src 'self'); a networked idea must be scoped to LOCAL multiplayer
+  // (split-screen / hotseat / shared-keyboard) or explicitly decline the online
+  // part — never silently ship single-player. This is guidance, not a demotion.
+  if (caps.requiresNetworking === true) {
+    conflicts.push(
+      'requiresNetworking: online/networked play is not available in the sandbox (single-origin). Scope to LOCAL multiplayer (split-screen / hotseat / shared-keyboard) and say so, or explicitly decline the online part — do not silently ship single-player.',
+    );
+  }
+  if (escalates === caps.escalates) return { corrected: caps, conflicts };
+  return { corrected: { ...caps, escalates }, conflicts };
+}
+
 /**
  * Engine ↔ spec capability matrix. Returns a fit verdict:
  *   - 'ok'   — engine is a natural fit for this spec
@@ -250,9 +322,25 @@ export interface EngineFit {
   reason: string;
 }
 
-export type GameEngineId = 'three' | 'phaser';
+export type GameEngineId = 'three' | 'phaser' | 'canvas2d';
 
 export function checkEngineFit(spec: GameSpec, engine: GameEngineId): EngineFit {
+  // canvas2d (v2 P8) — the honest custom-2D runtime for bespoke ideas that don't
+  // fit a scene framework (ambient/fluid/drag/abstract toys). Reject real 3D
+  // (needs a WebGL scene graph → three); otherwise it's a clean 2D fit.
+  if (engine === 'canvas2d') {
+    if (spec.dimensions === '3d') {
+      return {
+        verdict: 'reject',
+        reason: 'canvas2d is a 2D drawing surface. Real 3D needs three.',
+      };
+    }
+    return {
+      verdict: 'ok',
+      reason: 'Raw 2D canvas + custom loop — a clean fit for bespoke/ambient 2D ideas.',
+    };
+  }
+
   // 3D briefs: phaser is 2.5D-only, so real 3D belongs on three.
   if (spec.dimensions === '3d' && engine === 'phaser') {
     return {
@@ -279,4 +367,31 @@ export function checkEngineFit(spec: GameSpec, engine: GameEngineId): EngineFit 
   }
 
   return { verdict: 'ok', reason: 'Engine fits the spec.' };
+}
+
+/**
+ * Soft engine PREFERENCE from capabilities (v2 P8) — surfaced alongside the skill
+ * recommendations so an ambient/abstract/drag 2D idea is steered to canvas2d
+ * instead of being force-fit into phaser/three (the box-escape the garden run
+ * exposed). Returns null when no strong preference applies. Never a hard gate.
+ */
+export function recommendEngine(spec: GameSpec): { engine: GameEngineId; reason: string } | null {
+  const caps = spec.capabilities;
+  if (spec.dimensions === '3d')
+    return { engine: 'three', reason: 'real 3D needs a WebGL scene graph' };
+  // The ambient fingerprint: a 2D pointer/drag toy with no enemies/physics fits a
+  // raw canvas better than a scene framework.
+  if (
+    spec.dimensions === '2d' &&
+    (caps?.controlScheme === 'drag' || caps?.controlScheme === 'pointer') &&
+    caps?.hasEnemies !== true &&
+    caps?.hasPhysics !== true
+  ) {
+    return {
+      engine: 'canvas2d',
+      reason:
+        'an ambient/abstract 2D pointer/drag idea fits a raw canvas — build it honestly, no decoy scene',
+    };
+  }
+  return null;
 }

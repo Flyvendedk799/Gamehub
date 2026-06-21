@@ -53,6 +53,7 @@ function skillPath(engine: Engine, base: string): string {
 export function recommendSkills(
   capabilities: PartialCapabilities,
   engine: Engine,
+  genre?: string,
 ): SkillRecommendation[] {
   const seen = new Set<string>();
   const recs: SkillRecommendation[] = [];
@@ -65,7 +66,9 @@ export function recommendSkills(
     }
   }
 
-  if (capabilities.hasEnemies === true) {
+  // enemy-ai for combat actors — but NOT racing, whose "enemies" are AI opponents
+  // that follow the track, not chase the player (a Loop-2 false-positive).
+  if (capabilities.hasEnemies === true && genre !== 'racing') {
     push('enemy-ai', "hostile actors need behaviour — don't hand-roll chase/patrol/charge");
   }
 
@@ -98,14 +101,69 @@ export function recommendSkills(
   const mechanics = capabilities.mechanics ?? [];
   const mechanicsLower = mechanics.map((m) => m.toLowerCase());
 
-  const rhythmKeywords = ['rhythm', 'beat', 'music', 'timing'];
+  // Widened synonym/stem sets (Loop-2: rhythm games phrase mechanics as "hit
+  // timed notes"/"judge accuracy" and dodged the narrow keyword list).
+  const rhythmKeywords = [
+    'rhythm',
+    'beat',
+    'music',
+    'timing',
+    'tempo',
+    'note',
+    'combo',
+    'judge',
+    'lane',
+    'sync',
+  ];
   if (rhythmKeywords.some((kw) => mechanicsLower.some((m) => m.includes(kw)))) {
     push('rhythm-clock', "rhythm/beat mechanics need a precision clock — don't hand-roll timing");
+    push('music-sync', 'lock timing to a REAL audio track (bpm/beatmap), not a synthetic clock');
   }
 
-  const animKeywords = ['animate', 'animation', 'cutscene'];
+  const animKeywords = ['animate', 'animation', 'cutscene', 'sequence', 'choreograph', 'scripted'];
   if (animKeywords.some((kw) => mechanicsLower.some((m) => m.includes(kw)))) {
     push('animation-sequencer', "animation/cutscene mechanics need a sequencer — don't hand-roll");
+  }
+
+  // Genre-driven canonical skills (Phase 3) — the declared genre is a strong
+  // signal the capability phrasing can miss, so fire the genre's canonical skills
+  // even when the mechanic keywords didn't match. push() de-dupes.
+  const GENRE_SKILLS: Record<string, ReadonlyArray<readonly [string, string]>> = {
+    rhythm: [
+      ['rhythm-clock', 'rhythm games need a precision music clock + judgment windows'],
+      ['music-sync', 'sync to a real audio track so notes line up with the music'],
+    ],
+    tower_defense: [
+      ['economy-system', 'tower-defense needs currency + buildable/upgrade costs'],
+      ['wave-spawner', 'tower-defense waves must escalate'],
+      ['enemy-ai', 'creeps need pathing/behaviour'],
+    ],
+    visual_novel: [['dialog-flow', 'visual novels need a branching dialogue runner']],
+    roguelike: [['procedural-gen', 'roguelikes need seeded procedural layout']],
+    shmup: [
+      ['enemy-ai', 'shmup enemies need movement patterns'],
+      ['wave-spawner', 'shmup difficulty must ramp in waves'],
+    ],
+    idle: [
+      ['economy-system', 'idle/incremental is an economy at its core'],
+      ['save-state', 'idle progress must persist'],
+    ],
+  };
+  const genreEntries = genre ? GENRE_SKILLS[genre] : undefined;
+  if (genreEntries) {
+    for (const [base, reason] of genreEntries) push(base, reason);
+  }
+
+  // asset-pipeline is Three-only (glTF models + instanced geometry). Recommend it
+  // for 3D games that would otherwise be boxes-and-spheres (combat/3rd-/1st-person).
+  if (
+    engine === 'three' &&
+    (capabilities.hasEnemies === true ||
+      genre === 'tps' ||
+      genre === 'fps' ||
+      genre === 'roguelike')
+  ) {
+    push('asset-pipeline', 'load real glTF models + instanced geometry instead of primitives');
   }
 
   return recs;
@@ -118,6 +176,8 @@ export function recommendSkills(
  */
 export function formatRecommendationsForPrompt(recs: SkillRecommendation[]): string {
   if (recs.length === 0) return '';
-  const bullets = recs.map((r) => `- ${r.skill} — ${r.reason}`).join('\n');
-  return `Recommended skills for this game's capabilities — review with view_game_feel before hand-rolling:\n${bullets}`;
+  const bullets = recs
+    .map((r) => `- import_skill({ name: '${r.skill}' }) — ${r.reason}`)
+    .join('\n');
+  return `Recommended skills for this game's capabilities — IMPORT each with import_skill, then call its exports (do NOT hand-roll these systems):\n${bullets}`;
 }

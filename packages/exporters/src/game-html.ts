@@ -35,8 +35,10 @@ import type { ZipAsset } from './zip';
 
 export interface ExportGameHtmlOptions {
   files: ZipAsset[];
-  /** Engine pinned for the project. Drives engine-library fetch. */
-  engine: 'three' | 'phaser';
+  /** Engine pinned for the project. Drives engine-library fetch. canvas2d has no
+   *  CDN engine to vendor (it's a raw <canvas> game), so its export inlines only
+   *  the local modules/assets. */
+  engine: 'three' | 'phaser' | 'canvas2d';
   /** Pinned engine version. Defaults: three@0.170.0, phaser@3.88.0. */
   engineVersion?: string;
   /**
@@ -420,9 +422,9 @@ function referenceVariants(path: string): string[] {
 }
 
 export async function buildGameHtml(opts: ExportGameHtmlOptions): Promise<string> {
-  if (opts.engine !== 'three' && opts.engine !== 'phaser') {
+  if (opts.engine !== 'three' && opts.engine !== 'phaser' && opts.engine !== 'canvas2d') {
     throw new PlayforgeError(
-      `game-html exporter only supports browser engines (three / phaser). Got "${opts.engine}".`,
+      `game-html exporter only supports browser engines (three / phaser / canvas2d). Got "${opts.engine}".`,
       ERROR_CODES.EXPORTER_FORMAT_REJECTED,
     );
   }
@@ -435,26 +437,25 @@ export async function buildGameHtml(opts: ExportGameHtmlOptions): Promise<string
   }
   let html = contentToString(indexEntry.content);
 
-  const version = opts.engineVersion ?? DEFAULT_VERSIONS[opts.engine];
-  const engineUrl = ENGINE_CDN_URLS[opts.engine](version);
-
-  // 1. Fetch the engine library + inline as a data: URL.
-  const engineSource = await fetchText(engineUrl, opts.engine);
-  const engineDataUrl = jsDataUrl(engineSource);
-
-  // 2. Inline every JS module (recursive static + dynamic import rewrite).
+  // Inline every local JS module (engine-agnostic — all engines need this).
   const jsFiles = opts.files.filter((f) => isJsPath(f.path) && f.path !== 'index.html');
   const jsDataUrlByPath = buildJsDataUrls(jsFiles);
 
-  // 3. Rewrite the importmap so EVERY entry (engine + addon prefixes + any
-  //    other remote entry) resolves to an inlined source. Done before the
-  //    bare-URL fallback so a structured rewrite always wins.
-  const importedSpecifiers = collectSpecifiers(jsFiles.map((f) => contentToString(f.content)));
-  html = await inlineImportMap(html, opts.engine, engineUrl, engineDataUrl, importedSpecifiers);
-
-  // Belt-and-braces: if the engine URL still appears anywhere (e.g. a
-  // hard-coded reference outside the importmap), swap it for the data URL.
-  html = html.replace(new RegExp(escapeRegExp(engineUrl), 'g'), engineDataUrl);
+  // Engine-library vendoring — three/phaser fetch their CDN engine + rewrite the
+  // importmap so every entry resolves to an inlined source. canvas2d ships no CDN
+  // engine and no importmap, so this whole step is skipped for it (only its local
+  // modules/assets get inlined below).
+  if (opts.engine !== 'canvas2d') {
+    const version = opts.engineVersion ?? DEFAULT_VERSIONS[opts.engine];
+    const engineUrl = ENGINE_CDN_URLS[opts.engine](version);
+    const engineSource = await fetchText(engineUrl, opts.engine);
+    const engineDataUrl = jsDataUrl(engineSource);
+    const importedSpecifiers = collectSpecifiers(jsFiles.map((f) => contentToString(f.content)));
+    html = await inlineImportMap(html, opts.engine, engineUrl, engineDataUrl, importedSpecifiers);
+    // Belt-and-braces: if the engine URL still appears anywhere (e.g. a
+    // hard-coded reference outside the importmap), swap it for the data URL.
+    html = html.replace(new RegExp(escapeRegExp(engineUrl), 'g'), engineDataUrl);
+  }
 
   // 4. Rewrite the entry `<script type="module" src="…">` tags to the
   //    recursively-inlined data: URLs. Match any src whose value contains

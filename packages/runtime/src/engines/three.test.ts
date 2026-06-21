@@ -59,8 +59,11 @@ describe('threeAdapter.bootstrap (gameplan §3 + §7.3)', () => {
 
   it('declares the playtest debug contract with a default snapshot getter', () => {
     const html = threeAdapter.bootstrap(opts);
-    expect(html).toContain('window.__game.debug = window.__game.debug || {');
-    expect(html).toContain('snapshot: function () { return null; }');
+    expect(html).toContain('window.__game.debug = window.__game.debug ||');
+    // v2 P2 — a live, trackable contract (still returns null until wired).
+    expect(html).toContain('function track(spec)');
+    expect(html).toContain('function snapshot()');
+    expect(html).toContain('return null;');
   });
 
   it('#47 — neutralises quotes/angle-brackets in gameBaseUrl', () => {

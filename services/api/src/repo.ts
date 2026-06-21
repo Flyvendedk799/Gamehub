@@ -3,7 +3,7 @@
  * so they're testable against an in-memory impl. A Drizzle-backed impl over
  * @playforge/db lands when we wire Postgres in CI/dev.
  */
-export type Engine = 'three' | 'phaser';
+export type Engine = 'three' | 'phaser' | 'canvas2d';
 export type Visibility = 'private' | 'unlisted' | 'public';
 
 export interface Project {

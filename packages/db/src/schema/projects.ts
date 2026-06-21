@@ -21,7 +21,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { users } from './identity';
 
-export const engineKind = pgEnum('engine_kind', ['three', 'phaser']);
+export const engineKind = pgEnum('engine_kind', ['three', 'phaser', 'canvas2d']);
 export const projectVisibility = pgEnum('project_visibility', ['private', 'unlisted', 'public']);
 export const snapshotType = pgEnum('snapshot_type', ['initial', 'edit', 'fork', 'remix', 'revert']);
 

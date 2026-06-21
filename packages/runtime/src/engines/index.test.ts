@@ -7,22 +7,25 @@ import { GAME_ENGINE_ADAPTERS, getEngineAdapter, listLivePreviewEngines } from '
 import { SCORE_MESSAGE_TYPE, gameGlobalSetupSnippet, isScoreMessage } from './types';
 
 describe('GAME_ENGINE_ADAPTERS registry', () => {
-  it('registers exactly the two supported web engines (three + phaser)', () => {
+  it('registers the supported web engines (three + phaser + canvas2d)', () => {
     expect(GAME_ENGINE_ADAPTERS.has('three')).toBe(true);
     expect(GAME_ENGINE_ADAPTERS.has('phaser')).toBe(true);
-    expect(GAME_ENGINE_ADAPTERS.size).toBe(2);
+    expect(GAME_ENGINE_ADAPTERS.has('canvas2d')).toBe(true);
+    expect(GAME_ENGINE_ADAPTERS.size).toBe(3);
   });
 
   it('returns the adapter via getEngineAdapter for every registered id', () => {
     expect(getEngineAdapter('three')?.id).toBe('three');
     expect(getEngineAdapter('phaser')?.id).toBe('phaser');
+    expect(getEngineAdapter('canvas2d')?.id).toBe('canvas2d');
   });
 
-  it('listLivePreviewEngines covers three + phaser', () => {
+  it('listLivePreviewEngines covers three + phaser + canvas2d', () => {
     const live = listLivePreviewEngines();
     expect(live).toContain('three');
     expect(live).toContain('phaser');
-    expect(live).toHaveLength(2);
+    expect(live).toContain('canvas2d');
+    expect(live).toHaveLength(3);
   });
 });
 
