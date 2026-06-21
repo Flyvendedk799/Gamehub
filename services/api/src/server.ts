@@ -366,7 +366,7 @@ export interface ServerDeps {
   email?: EmailPort;
 }
 
-const ENGINES: Engine[] = ['three', 'phaser'];
+const ENGINES: Engine[] = ['three', 'phaser', 'canvas2d'];
 const VISIBILITIES: Visibility[] = ['private', 'unlisted', 'public'];
 const ACCOUNT_PROVIDERS: AccountProvider[] = [
   'platform',
@@ -2566,7 +2566,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(409).send({ error: 'no_snapshot', message: 'Generate a game first.' });
     }
 
-    const engine = (project.engine ?? 'phaser') as 'phaser' | 'three';
+    const engine = (project.engine ?? 'phaser') as 'phaser' | 'three' | 'canvas2d';
     const manifest = await deps.store.readManifest(project.currentManifestKey);
 
     // Build ZipAsset[] from the manifest — text files as strings, binary as Buffers.
@@ -2748,7 +2748,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       await exportGameZip(dest, {
         files,
         designName: project.name,
-        engine: (project.engine as 'three' | 'phaser') ?? 'phaser',
+        engine: (project.engine as 'three' | 'phaser' | 'canvas2d') ?? 'phaser',
       });
       const zipBytes = await readFile(dest);
       const safeName =
@@ -3007,7 +3007,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       await exportGameArtifact('game-zip', tmpPath, {
         files,
         designName: project.name,
-        engine: (project.engine ?? 'phaser') as 'phaser' | 'three',
+        engine: (project.engine ?? 'phaser') as 'phaser' | 'three' | 'canvas2d',
       });
       const { readFile } = await import('node:fs/promises');
       const zipBytes = await readFile(tmpPath);

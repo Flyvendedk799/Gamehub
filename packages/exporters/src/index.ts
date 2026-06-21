@@ -42,7 +42,7 @@ export async function exportGameArtifact(
   opts: {
     files: import('./zip').ZipAsset[];
     designName?: string;
-    engine?: 'three' | 'phaser';
+    engine?: 'three' | 'phaser' | 'canvas2d';
     engineVersion?: string;
     /** Optional explicit HTML source for the markdown README. */
     htmlForMarkdown?: string;

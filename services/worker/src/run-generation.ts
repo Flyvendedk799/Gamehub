@@ -510,13 +510,17 @@ export async function runGeneration(
     ...(runtimeVerify !== undefined ? { runtimeVerify } : {}),
     gameMode: {
       setEngine: (engine) => {
-        if (engine === 'three' || engine === 'phaser') state.engine = engine;
+        // Accept every supported engine incl. canvas2d (v2 P8) — the old guard
+        // silently dropped canvas2d, persisting engine: null.
+        if (engine === 'three' || engine === 'phaser' || engine === 'canvas2d') {
+          state.engine = engine;
+        }
       },
       getCurrentEngine: () => state.engine,
-      validate: (engine, files) =>
-        engine === 'three' || engine === 'phaser'
-          ? validateScene(engine, files)
-          : { ok: true, engine: 'phaser', issues: [] },
+      // Route through the real validator (ENGINE_SCENE_VALIDATOR handles canvas2d
+      // too) so a canvas2d game runs its own scene lint instead of being skipped
+      // and mislabeled as phaser.
+      validate: (engine, files) => validateScene(engine, files),
       setSpec: (spec) => {
         state.spec = spec;
       },

@@ -538,3 +538,47 @@ describe('assertGameInvariants — v2 P2 debug-snapshot + P5 level-ramp', () => 
     expect(r.issues.map((i) => i.invariant)).toContain('escalation');
   });
 });
+
+describe('assertGameInvariants — P2 snapshot-wiring is authored-only (not the shim read)', () => {
+  const BASE = `
+    let score = 0; let lives = 3;
+    function onHit(){ score += 1; new Audio('x.wav').play(); }
+    function tick(){ if (lives <= 0) restart(); }
+    function restart(){ score = 0; lives = 3; }
+  `;
+  const caps = { capabilities: { hasFailState: true } };
+
+  it('the bootstrap shim READING window.__game.state does NOT count as wiring', () => {
+    // The shim (scanned as part of index.html) contains `var st = window.__game.state`.
+    // A READ must not satisfy the check, or the invariant is a permanent no-op.
+    const shimRead = `${BASE}\n var st = window.__game.state; var v = st && st.score;`;
+    const r = assertGameInvariants(deps([{ path: 'index.html', content: shimRead }]), caps);
+    expect(r.issues.map((i) => i.invariant)).toContain('debug-snapshot');
+  });
+
+  it('ASSIGNING window.__game.state clears the warning', () => {
+    const r = assertGameInvariants(
+      deps([{ path: 'src/main.js', content: `${BASE}\n window.__game.state = { score };` }]),
+      caps,
+    );
+    expect(r.issues.map((i) => i.invariant)).not.toContain('debug-snapshot');
+  });
+
+  it('calling debug.track clears the warning; equality (==) does not', () => {
+    const tracked = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: `${BASE}\n window.__game.debug.track({ score: () => score });`,
+        },
+      ]),
+      caps,
+    );
+    expect(tracked.issues.map((i) => i.invariant)).not.toContain('debug-snapshot');
+    const eq = assertGameInvariants(
+      deps([{ path: 'src/main.js', content: `${BASE}\n if (window.__game.state == null) {}` }]),
+      caps,
+    );
+    expect(eq.issues.map((i) => i.invariant)).toContain('debug-snapshot');
+  });
+});

@@ -16,7 +16,7 @@ export const SOCIAL_OUTRO_SCHEMA_VERSION = 1 as const;
 export const SocialOutroProjectSchema = z.object({
   id: z.string(),
   name: z.string(),
-  engine: z.enum(['phaser', 'three']).nullable(),
+  engine: z.enum(['phaser', 'three', 'canvas2d']).nullable(),
   updatedAt: z.string(),
 });
 export type SocialOutroProject = z.infer<typeof SocialOutroProjectSchema>;

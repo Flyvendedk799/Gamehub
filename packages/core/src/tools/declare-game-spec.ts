@@ -14,7 +14,12 @@
  */
 
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
-import { GAME_SPEC_SCHEMA_VERSION, GameSpec, validateCapabilities } from '@playforge/shared';
+import {
+  GAME_SPEC_SCHEMA_VERSION,
+  GameSpec,
+  recommendEngine,
+  validateCapabilities,
+} from '@playforge/shared';
 import { Type } from '@sinclair/typebox';
 
 const FeatureValue = Type.Union([
@@ -168,11 +173,19 @@ export function makeDeclareGameSpecTool(
           ? `Features pinned: ${featureNames.join(', ')}.`
           : 'No per-feature invariants yet.';
       const conflictLine = conflicts.length > 0 ? ` Capability check: ${conflicts.join(' ')}` : '';
+      // v2 P8 — soft engine preference from capabilities (e.g. an ambient drag toy
+      // → canvas2d), surfaced BEFORE choose_engine so the agent isn't forced into
+      // phaser/three and then tempted to fake a scene.
+      const engineHint = recommendEngine(spec);
+      const engineLine =
+        engineHint !== null
+          ? ` Suggested engine: ${engineHint.engine} — ${engineHint.reason} (choose_engine is yours to confirm).`
+          : '';
       return {
         content: [
           {
             type: 'text',
-            text: `Spec recorded: ${spec.genre}/${spec.dimensions} (${spec.perspective}, camera=${spec.cameraKind}). ${spec.numActors} actor(s), inputs=${spec.primaryInputs.join('+')}. ${featuresLine}${conflictLine} Now call choose_engine.`,
+            text: `Spec recorded: ${spec.genre}/${spec.dimensions} (${spec.perspective}, camera=${spec.cameraKind}). ${spec.numActors} actor(s), inputs=${spec.primaryInputs.join('+')}. ${featuresLine}${conflictLine}${engineLine} Now call choose_engine.`,
           },
         ],
         details: {

@@ -53,13 +53,19 @@ function parseExports(source: string): string[] {
 function parseUsageBlock(source: string): string {
   const idx = source.search(/\n\/\/\s*Usage:/i);
   if (idx === -1) return '';
-  return source
-    .slice(idx)
-    .split('\n')
-    .filter((l) => l.trim().startsWith('//'))
-    .map((l) => l.replace(/^\s*\/\/ ?/, ''))
-    .join('\n')
-    .trim();
+  return (
+    source
+      .slice(idx)
+      .split('\n')
+      .filter((l) => l.trim().startsWith('//'))
+      .map((l) => l.replace(/^\s*\/\/ ?/, ''))
+      // Drop the example's own `import … from '…'` lines: they reference the skill's
+      // source path (e.g. './engine/x.jsx'), which contradicts the canonical import
+      // line this tool already returns (src/engine/x.js). Keep the wiring example.
+      .filter((l) => !/^\s*import\b.*\bfrom\b/.test(l))
+      .join('\n')
+      .trim()
+  );
 }
 
 /** `phaser/wave-spawner.js` / `three/enemy-ai.jsx` → `src/engine/wave-spawner.js`.

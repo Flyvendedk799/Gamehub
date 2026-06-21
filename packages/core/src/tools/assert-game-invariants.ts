@@ -198,12 +198,15 @@ const CONTROLS_DEFINE_PATTERN = /\bcontrols\s*\.\s*define\s*\(/;
 
 // v2 P2 — the deterministic verdict layer (playbooks + contracts) reads
 // window.__game.debug.snapshot(); a game with gameplay state that never wires it
-// can't be play-verified and ships no_verdict. Any of these counts as wired:
-// debug.track({...}), an explicit debug.snapshot assignment, or window.__game.state.
+// can't be play-verified and ships no_verdict. These match AUTHORED wiring only —
+// a debug.track({...}) CALL, a debug.snapshot ASSIGNMENT, or a __game.state
+// ASSIGNMENT. Crucially they do NOT match the bootstrap shim's own internal
+// `var st = window.__game.state` READ (the shim is scanned as part of index.html),
+// which would otherwise make this check always-pass and a no-op.
 const SNAPSHOT_WIRING_PATTERNS: readonly RegExp[] = [
   /\bdebug\s*\.\s*track\s*\(/,
-  /\bdebug\s*\.\s*snapshot\s*=/,
-  /__game\s*\.\s*state\b/,
+  /\bdebug\s*\.\s*snapshot\s*=[^=]/,
+  /__game\s*\.\s*state\s*=[^=]/,
 ];
 
 // Camera-relative movement (3D's #1 recurring bug). A 3D game with a MOVING

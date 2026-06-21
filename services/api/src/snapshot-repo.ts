@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { GameSpec } from '@playforge/shared';
 
-export type SnapshotEngine = 'three' | 'phaser';
+export type SnapshotEngine = 'three' | 'phaser' | 'canvas2d';
 
 export interface SnapshotEntry {
   id: string;
