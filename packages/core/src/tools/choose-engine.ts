@@ -23,6 +23,7 @@
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import { type GameSpec, checkEngineFit } from '@playforge/shared';
 import { Type } from '@sinclair/typebox';
+import { formatRecommendationsForPrompt, recommendSkills } from '../recommend-skills.js';
 
 const ChooseEngineParams = Type.Object({
   engine: Type.Union([Type.Literal('three'), Type.Literal('phaser')]),
@@ -73,8 +74,9 @@ export function makeChooseEngineTool(
       // path) or when no spec has been declared yet (vitest path).
       let fitVerdict: 'ok' | 'warn' | 'reject' = 'ok';
       let fitReason = '';
+      let spec: GameSpec | undefined;
       if (getSpec !== undefined) {
-        const spec = await getSpec();
+        spec = await getSpec();
         if (spec !== undefined) {
           const fit = checkEngineFit(spec, engine);
           fitVerdict = fit.verdict;
@@ -103,11 +105,21 @@ export function makeChooseEngineTool(
         fitVerdict === 'warn'
           ? `WARNING from checkEngineFit: ${fitReason} Proceeding anyway. `
           : '';
+
+      // Phase 3 — push-model skill recommendation. From the declared capabilities
+      // + the chosen engine, surface the vetted skills that implement this game's
+      // systems so the agent reviews them with view_game_feel BEFORE hand-rolling
+      // enemy AI / waves / progression / dialogue from scratch (the re-derivation
+      // gap the probe runs exposed).
+      const recs = spec?.capabilities ? recommendSkills(spec.capabilities, engine) : [];
+      const recBlock = formatRecommendationsForPrompt(recs);
+      const recSuffix = recBlock.length > 0 ? `\n\n${recBlock}` : '';
+
       return {
         content: [
           {
             type: 'text',
-            text: `${warningPrefix}Engine pinned: ${engine}.${rationaleSuffix}`,
+            text: `${warningPrefix}Engine pinned: ${engine}.${rationaleSuffix}${recSuffix}`,
           },
         ],
         details: { engine, rationale, fitVerdict },

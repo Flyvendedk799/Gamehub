@@ -30,6 +30,7 @@ import {
   buildRepairVerdict,
   decideRepairAction,
   generateViaAgent,
+  recommendSkills,
   resolveMaxRepairRounds,
   selectGamePlaytestPlan,
   traceFromPlaytestResult,
@@ -717,11 +718,23 @@ export async function runGeneration(
   // to run_quality_metrics.report.
   const sig = signal.snapshot();
   const reportScore = shippedVerdict?.score ?? null;
+  // Phase 3/4/9 telemetry — did the agent ignore the skills we recommended for
+  // its declared capabilities (re-derivation), and did it escape the declared
+  // engine with a decoy entry? These feed the run-report analyzer.
+  const recommended =
+    state.spec?.capabilities && state.engine
+      ? recommendSkills(state.spec.capabilities, state.engine)
+      : [];
+  const recommendedButUnused = recommended
+    .filter((r) => !sig.skillsViewed.includes(r.skill))
+    .map((r) => r.skill);
+  const engineEscaped = sig.invariantWarnings.includes('decoy-engine');
   const buildReport = {
     genre: state.spec?.genre ?? null,
     engine: state.engine,
     dimensions: state.spec?.dimensions ?? null,
     winCondition: state.spec?.winCondition ?? null,
+    capabilities: state.spec?.capabilities ?? null,
     fileCount: tree.size,
     shipReason,
     forceAccept: shippedVerdict !== null && !shippedVerdict.pass,
@@ -733,6 +746,8 @@ export async function runGeneration(
     inputTokens: usedInputTokens,
     outputTokens: usedOutputTokens,
     totalTokens: usedInputTokens + usedOutputTokens,
+    recommendedButUnused,
+    engineEscaped,
     ...sig,
   };
   console.log(`[build-report] ${JSON.stringify(buildReport)}`);
