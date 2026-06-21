@@ -36,6 +36,11 @@ export function createMobileControls(scene, config = {}) {
   const alpha = config.alpha ?? 0.55;
   const hideOnDesktop = config.hideOnDesktop !== false;
 
+  // Phaser tracks ONE active pointer by default; a virtual stick + action button
+  // pressed at once need a second. Without this, hold-stick + tap-button (the
+  // whole point of on-screen controls) silently never registers the 2nd touch.
+  scene.input.addPointer(2);
+
   // Visibility: hide on desktop unless forced.
   const shouldShow = !hideOnDesktop || isTouchDevice();
 

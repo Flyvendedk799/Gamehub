@@ -173,8 +173,10 @@ export function roomsAndCorridors(gridW, gridH, rng, opts = {}) {
 //   const grid = generateGrid(32, 20, rng, { noiseChance: 0.1 });
 //   // BSP dungeon:
 //   const { rooms, corridors } = roomsAndCorridors(32, 20, rng);
-//   // Scatter coins into the first room:
-//   const coinPositions = scatterEntities(8, rooms[0], rng, { minDist: 32 });
+//   // Scatter coins into the first room (rooms use {x,y,w,h}; scatterEntities
+//   // wants {x,y,width,height} — adapt the keys):
+//   const r0 = rooms[0];
+//   const coinPositions = scatterEntities(8, { x: r0.x, y: r0.y, width: r0.w, height: r0.h }, rng, { minDist: 32 });
 //   coinPositions.forEach(({ x, y }) => this.coins.create(x * 16, y * 16, 'coin'));
 //   // Weighted loot drop:
 //   const drop = pickWeighted(rng, [{item:'coin',weight:10},{item:'gem',weight:2},{item:'key',weight:1}]);

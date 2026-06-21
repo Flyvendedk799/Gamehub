@@ -109,6 +109,33 @@ describe('applyGameSpecPatch — feature carry-forward (FPS vault case)', () => 
     expect(after.features['jump']?.['height']).toBe(5);
     expect(after.features['dash']?.['distance']).toBe(3);
   });
+
+  it('deep-merges a partial capabilities amend (does NOT reset un-restated traits)', () => {
+    const prior = GameSpec.parse({
+      genre: 'topdown_arcade',
+      capabilities: {
+        mechanics: ['shoot'],
+        controlScheme: 'twin_stick',
+        hasEnemies: true,
+        escalates: true,
+      },
+      dimensions: '2d',
+      perspective: 'top_down',
+      cameraKind: 'follow_2d',
+      primaryInputs: ['keyboard', 'mouse'],
+      numActors: 6,
+      winCondition: 'Survive 10 waves.',
+      loseCondition: 'Shield hits zero.',
+      features: {},
+    });
+    // Amend ONLY hasProgression — every other capability must survive.
+    const after = applyGameSpecPatch(prior, { capabilities: { hasProgression: true } });
+    expect(after.capabilities?.hasProgression).toBe(true);
+    expect(after.capabilities?.hasEnemies).toBe(true); // NOT reset to false
+    expect(after.capabilities?.escalates).toBe(true); // NOT reset to false
+    expect(after.capabilities?.controlScheme).toBe('twin_stick');
+    expect(after.capabilities?.mechanics).toEqual(['shoot']);
+  });
 });
 
 describe('checkEngineFit — gating matrix', () => {

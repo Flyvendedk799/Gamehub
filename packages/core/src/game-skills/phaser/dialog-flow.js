@@ -65,6 +65,7 @@ export function createDialogFlow(scene, nodes = [], config = {}) {
 
   const choiceButtons = [];
   let typeTimer = null;
+  let doneTimer = null;
   let currentNode = null;
   let fullText = '';
   let revealed = '';
@@ -117,6 +118,7 @@ export function createDialogFlow(scene, nodes = [], config = {}) {
 
   function _typewrite(text, onDone) {
     typeTimer?.remove(false);
+    doneTimer?.remove(false); // cancel any prior node's pending completion
     revealed = '';
     fullText = text;
     let charIdx = 0;
@@ -129,7 +131,7 @@ export function createDialogFlow(scene, nodes = [], config = {}) {
       },
       callbackScope: null,
     });
-    scene.time.delayedCall(cfg.typespeedMs * text.length + 10, onDone);
+    doneTimer = scene.time.delayedCall(cfg.typespeedMs * text.length + 10, onDone);
   }
 
   function _gotoNode(nodeId) {
@@ -172,6 +174,7 @@ export function createDialogFlow(scene, nodes = [], config = {}) {
 
   function hide() {
     typeTimer?.remove(false);
+    doneTimer?.remove(false);
     _clearChoices();
     box.setVisible(false);
     nameText.setVisible(false);

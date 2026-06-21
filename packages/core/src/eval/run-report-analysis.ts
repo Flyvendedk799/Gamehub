@@ -109,7 +109,7 @@ export function isBoxEscape(r: BuildReport): boolean {
  *  positive because the other-genre path has no canonical contract to check
  *  against. */
 export function isFalseWarningRisk(r: BuildReport): boolean {
-  return r.genre === 'other' && r.invariantWarnings.length > 0;
+  return r.genre === 'other' && (r.invariantWarnings?.length ?? 0) > 0;
 }
 
 /** The run shipped without a deterministic verdict or without the artifact
@@ -120,7 +120,7 @@ export function isUnverified(r: BuildReport): boolean {
 
 /** The run consumed more tokens than the supplied p90 threshold. */
 export function isCostly(r: BuildReport, p90Tokens: number): boolean {
-  return r.totalTokens > p90Tokens;
+  return (r.totalTokens ?? 0) > p90Tokens;
 }
 
 // ---------------------------------------------------------------------------
@@ -218,10 +218,19 @@ export function analyzeReports(reports: BuildReport[]): RunAnalysis {
   const juiceScores: number[] = [];
 
   for (const r of reports) {
+    // Defensive against sparse/legacy JSONB rows (fields added by later phases
+    // may be absent on old run_quality_metrics rows). Coerce before use so one
+    // partial row can't NaN a percentile or throw on a missing array.
+    const invariantWarnings = r.invariantWarnings ?? [];
+    const skillsViewed = r.skillsViewed ?? [];
     // Token / tool-call arrays (to be sorted later for percentiles)
-    tokensSorted.push(r.totalTokens);
-    toolCallsSorted.push(r.toolCallTotal);
-    if (r.juiceScore !== null) juiceScores.push(r.juiceScore);
+    if (typeof r.totalTokens === 'number' && Number.isFinite(r.totalTokens)) {
+      tokensSorted.push(r.totalTokens);
+    }
+    if (typeof r.toolCallTotal === 'number' && Number.isFinite(r.toolCallTotal)) {
+      toolCallsSorted.push(r.toolCallTotal);
+    }
+    if (typeof r.juiceScore === 'number') juiceScores.push(r.juiceScore);
 
     // Contract coverage
     if (r.contractAuthored) contractCount += 1;
@@ -244,11 +253,11 @@ export function analyzeReports(reports: BuildReport[]): RunAnalysis {
     // False warning risk — only counts over genre==='other'
     if (r.genre === 'other') {
       otherGenreCount += 1;
-      if (r.invariantWarnings.length > 0) falseWarningCount += 1;
+      if (invariantWarnings.length > 0) falseWarningCount += 1;
     }
 
     // Invariant warning frequency
-    for (const w of r.invariantWarnings) {
+    for (const w of invariantWarnings) {
       invariantWarningFreq[w] = (invariantWarningFreq[w] ?? 0) + 1;
     }
 
@@ -264,7 +273,7 @@ export function analyzeReports(reports: BuildReport[]): RunAnalysis {
     const expectedSubstrings = expectedSkillSubstrings(r);
     if (expectedSubstrings.length > 0) {
       adoptionQualifying += 1;
-      if (agentAdoptedSkill(r.skillsViewed, expectedSubstrings)) {
+      if (agentAdoptedSkill(skillsViewed, expectedSubstrings)) {
         adoptionHit += 1;
       }
     }

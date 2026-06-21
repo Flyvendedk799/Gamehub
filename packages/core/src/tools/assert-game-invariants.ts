@@ -316,12 +316,16 @@ const NON_KEYBOARD_SCHEMES: ReadonlySet<string> = new Set<string>(['pointer', 'd
  *  in the entry file (`if (false && window.Phaser) { class … extends Phaser.Scene {} }`)
  *  purely to pass validate_game_scene. Detect that dishonesty so the engine
  *  validates the REAL game, not a decoy. Build raw-canvas games honestly instead. */
+// Tightened to the UNAMBIGUOUS decoy signature so honest code isn't flagged: a
+// dead branch that constructs the declared engine ONLY to be seen by the
+// validator (`if (false && window.Phaser)` / `if (false && THREE)`), or an entry
+// file that openly states the real game runs elsewhere. We deliberately do NOT
+// match a bare empty subclass (`class Boot extends Phaser.Scene {}` — a legit
+// skeleton) or a generic disabled feature flag (`if (false && debug)`).
 const DECOY_ENGINE_PATTERNS: readonly RegExp[] = [
-  /if\s*\(\s*false\s*&&/,
+  /if\s*\(\s*false\s*&&[^)]*\b(Phaser|THREE)\b/i,
   /sandbox-safe\s+entry\s+placeholder/i,
   /the\s+(playable|real|actual)\b[^\n]*\bis\s+loaded\s+by\b/i,
-  /class\s+\w+\s+extends\s+(Phaser\.Scene|THREE\.\w+)\s*\{\s*\}/,
-  /\/\/\s*(decoy|placeholder|dummy)\s+(scene|entry|game)/i,
 ];
 
 const ROTATION_NEGATED_ANGLE: readonly RegExp[] = [

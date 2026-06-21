@@ -29,7 +29,9 @@ export function createWallet(config = {}) {
 
     /** Add `amount` to the wallet (clamps to max). Returns new balance. */
     earn(amount) {
-      const delta = Math.min(amount, max - balance);
+      // Clamp to the cap headroom, but never go negative if balance already
+      // exceeds a lowered finite cap (a positive earn must not subtract coins).
+      const delta = Math.max(0, Math.min(amount, max - balance));
       balance += delta;
       _emit(delta);
       return balance;

@@ -158,8 +158,9 @@ export function generateGrid(cols, rows, tileset, rng, opts = {}) {
 // ---------------------------------------------------------------------------
 
 /** Pick one item from `table` where table is [{ item, weight }, ...].
- *  Returns item (or undefined if table is empty). */
-export function pickWeighted(table, rng) {
+ *  Returns item (or undefined if table is empty). Arg order matches the Phaser
+ *  procedural-gen skill: pickWeighted(rng, table). */
+export function pickWeighted(rng, table) {
   if (table.length === 0) return undefined;
   const total = table.reduce((s, e) => s + e.weight, 0);
   let r = rng() * total;
@@ -264,9 +265,9 @@ export function noiseField(w, h, seed, opts = {}) {
 //   const grid = generateGrid(32, 32, { 0: 60, 1: 30, 2: 10 }, rng, { smooth: true });
 //
 //   // Weighted loot drop.
-//   const loot = pickWeighted([
+//   const loot = pickWeighted(rng, [
 //     { item: 'coin', weight: 60 }, { item: 'gem', weight: 30 }, { item: 'key', weight: 10 },
-//   ], rng);
+//   ]);
 //
 //   // Height field driving terrain Y.
 //   const hf = noiseField(32, 32, SEED, { scale: 0.08, octaves: 4 });

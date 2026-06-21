@@ -102,13 +102,18 @@ export function spriteFlash(scene, sprite, opts = {}) {
   const color = opts.color ?? 0xffffff;
   const count = opts.count ?? 3;
   const halfMs = opts.halfMs ?? 60; // time on each half-cycle
-  const originalTint = sprite.tintTopLeft; // preserve existing tint
+  // Preserve the sprite's ORIGINAL tint state. On an untinted sprite tintTopLeft
+  // is 0xffffff, so restoring via setTint(originalTint) would leave it stuck
+  // solid white — restore by clearing instead when it was never tinted.
+  const wasTinted = sprite.isTinted;
+  const originalTint = sprite.tintTopLeft;
 
   return new Promise((resolve) => {
     let flashes = 0;
     function flash() {
       if (flashes >= count * 2) {
-        sprite.setTint(originalTint);
+        if (wasTinted) sprite.setTint(originalTint);
+        else sprite.clearTint();
         resolve();
         return;
       }
@@ -195,4 +200,4 @@ export function bounceIn(scene, sprite, durationMs = 400) {
 //     squashStretch(this, player, { scaleX: 1.3, scaleY: 0.7, duration: 220 });
 //   }
 //
-//   //   window.__game.debug.snapshot = () => ({ tweensActive: this.tweens.getAllTweens().length });
+//   //   window.__game.debug.snapshot = () => ({ tweensActive: this.tweens.getTweens().length });

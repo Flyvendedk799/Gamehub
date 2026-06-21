@@ -132,6 +132,25 @@ export const GameCapabilities = z.object({
 });
 export type GameCapabilities = z.infer<typeof GameCapabilities>;
 
+/** Patch shape for `amend_game_spec` capabilities — every field optional with NO
+ *  defaults, so a partial amend carries ONLY the fields the agent restated and
+ *  `applyGameSpecPatch` deep-merges them onto the prior capabilities. (Using the
+ *  defaulting GameCapabilities here would silently reset every un-restated trait
+ *  to false/[] on a partial amend.) */
+export const GameCapabilitiesPatch = z.object({
+  mechanics: z.array(z.string()).optional(),
+  controlScheme: GameControlScheme.optional(),
+  escalates: z.boolean().optional(),
+  hasEnemies: z.boolean().optional(),
+  hasFailState: z.boolean().optional(),
+  hasProgression: z.boolean().optional(),
+  hasNarrative: z.boolean().optional(),
+  hasEconomy: z.boolean().optional(),
+  hasPhysics: z.boolean().optional(),
+  procedural: z.boolean().optional(),
+});
+export type GameCapabilitiesPatch = z.infer<typeof GameCapabilitiesPatch>;
+
 export const GameSpec = z.object({
   schemaVersion: z.literal(GAME_SPEC_SCHEMA_VERSION).default(GAME_SPEC_SCHEMA_VERSION),
   genre: GameGenre,
@@ -169,7 +188,7 @@ export type GameSpec = z.infer<typeof GameSpec>;
  *  it, so partial-update bugs can't quietly drop invariants). */
 export const GameSpecPatch = z.object({
   genre: GameGenre.optional(),
-  capabilities: GameCapabilities.optional(),
+  capabilities: GameCapabilitiesPatch.optional(),
   dimensions: GameDimensions.optional(),
   perspective: GamePerspective.optional(),
   cameraKind: GameCameraKind.optional(),
@@ -190,10 +209,18 @@ export type GameSpecPatch = z.infer<typeof GameSpecPatch>;
  *  from the prior turn. Returns a freshly validated GameSpec or throws.
  */
 export function applyGameSpecPatch(prior: GameSpec, patch: GameSpecPatch): GameSpec {
+  // Capabilities deep-merge onto the prior set — a partial amend restates only
+  // the traits that changed; the rest pass through (NOT reset to defaults). The
+  // cast is for TS only; GameSpec.parse(merged) below re-validates + fills any
+  // genuinely-missing defaults when the prior had no capabilities.
+  const mergedCapabilities: GameCapabilities | undefined =
+    patch.capabilities !== undefined
+      ? ({ ...(prior.capabilities ?? {}), ...patch.capabilities } as GameCapabilities)
+      : prior.capabilities;
   const merged: GameSpec = {
     ...prior,
     ...(patch.genre !== undefined ? { genre: patch.genre } : {}),
-    ...(patch.capabilities !== undefined ? { capabilities: patch.capabilities } : {}),
+    ...(mergedCapabilities !== undefined ? { capabilities: mergedCapabilities } : {}),
     ...(patch.dimensions !== undefined ? { dimensions: patch.dimensions } : {}),
     ...(patch.perspective !== undefined ? { perspective: patch.perspective } : {}),
     ...(patch.cameraKind !== undefined ? { cameraKind: patch.cameraKind } : {}),
