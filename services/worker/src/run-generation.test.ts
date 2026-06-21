@@ -702,6 +702,85 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     expect(rounds).toBe(1);
   });
 
+  // v3.1 — staged-unused (import→use gap) driver: a skill written to src/engine/
+  // but never imported+called must force one wire-or-delete round before shipping.
+  const wireAgent = (wireOnRound: number | null) => {
+    let rounds = 0;
+    const fn: GenerateFn = async (_input, deps) => {
+      rounds += 1;
+      await deps.gameMode?.setSpec?.(TOPDOWN_SPEC);
+      await deps.fs?.create('index.html', RED_SQUARE);
+      await deps.fs?.create(
+        'src/engine/wave-spawner.js',
+        'export function createWaveSystem(){ return { update(){} }; }',
+      );
+      const wired = wireOnRound !== null && rounds >= wireOnRound;
+      await deps.fs?.create(
+        'src/main.js',
+        wired
+          ? "import { createWaveSystem } from './engine/wave-spawner.js';\nconst w = createWaveSystem();\nw.update();"
+          : 'let score = 0; // hand-rolled, never imports the skill',
+      );
+      return emptyOutput(`round ${rounds}`);
+    };
+    return { fn, rounds: () => rounds };
+  };
+
+  it('v3.1: a staged-unused skill forces ONE wire-or-delete round, then ships passed', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = queuedBrowserJobs([passingPlaytest(), passingPlaytest()]);
+    const agent = wireAgent(2); // unwired on round 1, wired on the repair round
+    const result = await runGeneration(
+      {
+        prompt: 'topdown',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: agent.fn, browserJobs },
+    );
+    expect(agent.rounds()).toBe(2); // the staged-unused round re-invoked the agent
+    expect(result.repairRounds).toBe(1);
+    expect(result.shipReason).toBe('passed');
+  });
+
+  it('v3.1: a properly-wired skill does NOT trigger an extra round (no false-fire)', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = queuedBrowserJobs([passingPlaytest()]);
+    const agent = wireAgent(1); // wired from the first round
+    const result = await runGeneration(
+      {
+        prompt: 'topdown',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: agent.fn, browserJobs },
+    );
+    expect(agent.rounds()).toBe(1);
+    expect(result.repairRounds).toBe(0);
+    expect(result.shipReason).toBe('passed');
+  });
+
+  it('v3.1: a persistently staged skill is capped at ONE wiring round, then ships', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = queuedBrowserJobs([
+      passingPlaytest(),
+      passingPlaytest(),
+      passingPlaytest(),
+    ]);
+    const agent = wireAgent(null); // never wires
+    const result = await runGeneration(
+      {
+        prompt: 'topdown',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: agent.fn, browserJobs },
+    );
+    expect(agent.rounds()).toBe(2); // exactly one staged-unused round (one-shot cap)
+    expect(result.repairRounds).toBe(1);
+    expect(result.shipReason).toBe('passed');
+  });
+
   it('v3 P9: a non-completable spec whose bundled playbook PASSES earns a real verdict (not skipped)', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());
     // Pre-v3 a non-completable spec (loseCondition —) took the skipped_non_completable

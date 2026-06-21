@@ -33,14 +33,17 @@ function getBaseName(path: string): string {
   return dotIdx === -1 ? file : file.slice(0, dotIdx);
 }
 
-function isImportedInOutside(outside: string, base: string): boolean {
-  const re = new RegExp(`from\\s+['"]\\.\\.?/(?:.*/)?engine/${base}(?:\\.\\w+)?['"]`);
-  return re.test(outside);
+function isImported(haystack: string, base: string): boolean {
+  // Static `from '…/engine/<base>'` OR dynamic `import('…/engine/<base>')`.
+  const re = new RegExp(
+    `(?:from|import\\s*\\()\\s*['"][./]*(?:.*/)?engine/${base}(?:\\.\\w+)?['"]`,
+  );
+  return re.test(haystack);
 }
 
-function countCallsInOutside(outside: string, name: string): number {
+function countCalls(haystack: string, name: string): number {
   const re = new RegExp(`\\b${name}\\s*\\(`, 'g');
-  return (outside.match(re) ?? []).length;
+  return (haystack.match(re) ?? []).length;
 }
 
 function countDebugWirings(allContent: string): number {
@@ -59,50 +62,39 @@ export function analyzeSkillUsage(
   const engineFiles = files.filter((f) => ENGINE_PATH_RE.test(f.path));
   const engineFilesWritten = engineFiles.length;
 
-  const engineMeta = engineFiles.map((f) => ({
-    base: getBaseName(f.path),
-    exports: parseExportNames(f.content),
-  }));
-
-  const outsideParts: string[] = [];
-  const allParts: string[] = [];
-
-  for (const f of files) {
+  // All source files (incl. engine modules — a skill may be wired engine→engine).
+  const sourceFiles = files.filter((f) => {
     const lower = f.path.toLowerCase();
-    const isSource = SOURCE_EXTS.some((ext) => lower.endsWith(ext));
-    if (!isSource) continue;
-    if (f.content.startsWith('data:')) continue;
-    allParts.push(f.content);
-    if (!ENGINE_PATH_RE.test(f.path)) {
-      outsideParts.push(f.content);
-    }
-  }
-
-  for (const f of engineFiles) {
-    allParts.push(f.content);
-  }
-
-  const outside = outsideParts.join('\n\n');
-  const allContent = allParts.join('\n\n');
+    return SOURCE_EXTS.some((ext) => lower.endsWith(ext)) && !f.content.startsWith('data:');
+  });
+  const allContent = sourceFiles.map((f) => f.content).join('\n\n');
 
   let engineImports = 0;
   let usesSkillFns = 0;
   const skillImportedNotCalled: string[] = [];
 
-  for (const meta of engineMeta) {
-    const imported = isImportedInOutside(outside, meta.base);
+  for (const ef of engineFiles) {
+    const base = getBaseName(ef.path);
+    const exports = parseExportNames(ef.content);
+    // Scan every OTHER source file (excludes the skill's own file so its own
+    // definition can't count as usage) for an import edge + a call.
+    const others = sourceFiles
+      .filter((f) => f.path !== ef.path)
+      .map((f) => f.content)
+      .join('\n\n');
+    const imported = isImported(others, base);
     if (imported) engineImports += 1;
 
     let callCount = 0;
     if (imported) {
-      for (const name of meta.exports) {
-        callCount += countCallsInOutside(outside, name);
+      for (const name of exports) {
+        callCount += countCalls(others, name);
       }
     }
     usesSkillFns += callCount;
 
     if (!imported || callCount === 0) {
-      skillImportedNotCalled.push(meta.base);
+      skillImportedNotCalled.push(base);
     }
   }
 

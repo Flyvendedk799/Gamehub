@@ -288,6 +288,26 @@ export const ENGINE_SCENE_VALIDATOR: SceneValidator = (engine, files) => {
   return { ok: false, engine, issues: result.issues };
 };
 
+/** v3.1 — the repair instruction for staged-unused skills (imported to
+ *  src/engine/ but never imported + called). Tells the agent to wire OR delete
+ *  each, so the import→use gap is closed deterministically before shipping. */
+function buildStagedUnusedInstruction(staged: string[]): string {
+  const list = staged.join(', ');
+  const lines = staged
+    .map(
+      (b) =>
+        `  - ${b}: \`import { ... } from './engine/${b}.js'\` in src/main.js and CALL its exports`,
+    )
+    .join('\n');
+  return [
+    `SKILL WIRING REPAIR — you ran import_skill to write these vetted modules to src/engine/ but never import + call them: ${list}.`,
+    'They are tested systems — do NOT ship them dead while hand-rolling the same behaviour. For EACH module, do ONE of:',
+    lines,
+    '  ...OR delete src/engine/<name>.js if you genuinely do not use it.',
+    'Then re-run validate_game_scene + playtest_game and call done. Change nothing unrelated.',
+  ].join('\n');
+}
+
 export async function runGeneration(
   req: GenerationRequest,
   ports: GenerationPorts,
@@ -641,6 +661,12 @@ export async function runGeneration(
   // telemetry write below can read its predicate pass/total. Null when no
   // deterministic verdict was obtainable (no port / no spec / no predicates).
   let shippedVerdict: RepairVerdict | null = null;
+  // v3.1 — one-shot guard: at ship time, if the agent imported skill modules to
+  // src/engine/ but never wired them (the import→use gap P3's auto-wire couldn't
+  // close because import_skill runs before the entry file exists), spend ONE
+  // bounded repair round forcing wire-or-delete. Capped at one attempt so a
+  // stubborn agent can't burn the whole repair budget on it.
+  let stagedUnusedRepairDone = false;
 
   for (;;) {
     const verdict = await observeVerdict();
@@ -669,6 +695,29 @@ export async function runGeneration(
       budgetExhausted,
       contractAuthored,
     });
+    // v3.1 — before shipping, force one wire-or-delete round for staged-unused
+    // skills (imported to disk but never imported+called → dead code the agent
+    // paid for while hand-rolling the same system). Only when we'd otherwise ship,
+    // have budget + rounds left, and haven't already tried.
+    if (
+      action.kind === 'ship' &&
+      !stagedUnusedRepairDone &&
+      !budgetExhausted &&
+      repairRounds < maxRepairRounds
+    ) {
+      const staged = analyzeSkillUsage(tree.toTextFiles()).skillImportedNotCalled;
+      if (staged.length > 0) {
+        stagedUnusedRepairDone = true;
+        history.push(
+          { role: 'user', content: nextPrompt },
+          { role: 'assistant', content: output.message },
+        );
+        nextPrompt = buildStagedUnusedInstruction(staged);
+        repairRounds += 1;
+        output = await generate(buildInput(nextPrompt, history), deps);
+        continue;
+      }
+    }
     if (action.kind === 'ship') {
       shipReason = action.reason;
       break;
