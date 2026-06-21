@@ -37,6 +37,17 @@ export interface BuildReport {
   tweakSchemaDeclared: boolean;
   strReplaceFailures: number;
   // OPTIONAL fields added by later phases — present when available:
+  skillsImported?: string[]; // v3 P1 — skills written via import_skill (union with skillsViewed = real adoption)
+  // v3 P2 — code-usage signals (skill modules actually imported + called):
+  engineFilesWritten?: number;
+  engineImports?: number;
+  usesSkillFns?: number;
+  debugWired?: number;
+  skillImportedNotCalled?: string[];
+  importWithoutUse?: boolean;
+  // v3 P10a — cache-weighted cost:
+  costUsd?: number;
+  cacheHitRate?: number;
   recommendedButUnused?: string[]; // skills the engine recommended but the agent never opened
   engineEscaped?: boolean; // declared an engine but built with a different runtime (decoy)
   capabilities?: {
@@ -143,11 +154,17 @@ function expectedSkillSubstrings(r: BuildReport): string[] {
   return expected;
 }
 
-/** True when the agent opened ≥1 skill whose path contains at least one of
- *  the expected substrings. */
-function agentAdoptedSkill(skillsViewed: string[], expectedSubstrings: string[]): boolean {
+/** True when the agent adopted ≥1 skill (viewed OR imported) whose path contains
+ *  at least one expected substring. v3 P1: must union skillsViewed + skillsImported
+ *  — post-v2 the agent IMPORTS skills, so viewing-only under-reports adoption. */
+function agentAdoptedSkill(adoptedSkills: string[], expectedSubstrings: string[]): boolean {
   if (expectedSubstrings.length === 0) return false;
-  return skillsViewed.some((skill) => expectedSubstrings.some((sub) => skill.includes(sub)));
+  return adoptedSkills.some((skill) => expectedSubstrings.some((sub) => skill.includes(sub)));
+}
+
+/** v3 P2 — a run that wrote skill modules to disk but never imported them. */
+export function isImportWithoutUse(r: BuildReport): boolean {
+  return r.importWithoutUse === true;
 }
 
 // ---------------------------------------------------------------------------
@@ -222,7 +239,8 @@ export function analyzeReports(reports: BuildReport[]): RunAnalysis {
     // may be absent on old run_quality_metrics rows). Coerce before use so one
     // partial row can't NaN a percentile or throw on a missing array.
     const invariantWarnings = r.invariantWarnings ?? [];
-    const skillsViewed = r.skillsViewed ?? [];
+    // v3 P1 — adoption = viewed OR imported.
+    const adoptedSkills = [...(r.skillsViewed ?? []), ...(r.skillsImported ?? [])];
     // Token / tool-call arrays (to be sorted later for percentiles)
     if (typeof r.totalTokens === 'number' && Number.isFinite(r.totalTokens)) {
       tokensSorted.push(r.totalTokens);
@@ -273,7 +291,7 @@ export function analyzeReports(reports: BuildReport[]): RunAnalysis {
     const expectedSubstrings = expectedSkillSubstrings(r);
     if (expectedSubstrings.length > 0) {
       adoptionQualifying += 1;
-      if (agentAdoptedSkill(skillsViewed, expectedSubstrings)) {
+      if (agentAdoptedSkill(adoptedSkills, expectedSubstrings)) {
         adoptionHit += 1;
       }
     }

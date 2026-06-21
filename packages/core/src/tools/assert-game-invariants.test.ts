@@ -582,3 +582,35 @@ describe('assertGameInvariants — P2 snapshot-wiring is authored-only (not the 
     expect(eq.issues.map((i) => i.invariant)).toContain('debug-snapshot');
   });
 });
+
+describe('assertGameInvariants — v3 P4 skill-staged-unused', () => {
+  it('warns when a src/engine module is imported to disk but never used', () => {
+    const r = assertGameInvariants(
+      deps([
+        { path: 'src/engine/wave-spawner.js', content: 'export function createWaveSystem(){}' },
+        { path: 'src/main.js', content: 'let score = 0; function tick(){ score += 1; }' },
+      ]),
+    );
+    expect(r.checked).toContain('skill-staged-unused');
+    expect(r.issues.map((i) => i.invariant)).toContain('skill-staged-unused');
+  });
+
+  it('does NOT warn when the module is imported AND called', () => {
+    const r = assertGameInvariants(
+      deps([
+        { path: 'src/engine/wave-spawner.js', content: 'export function createWaveSystem(){}' },
+        {
+          path: 'src/main.js',
+          content:
+            "import { createWaveSystem } from './engine/wave-spawner.js';\nconst w = createWaveSystem();",
+        },
+      ]),
+    );
+    expect(r.issues.map((i) => i.invariant)).not.toContain('skill-staged-unused');
+  });
+
+  it('does not run when there are no src/engine modules', () => {
+    const r = assertGameInvariants(deps([{ path: 'src/main.js', content: 'const x = 1;' }]));
+    expect(r.checked).not.toContain('skill-staged-unused');
+  });
+});
