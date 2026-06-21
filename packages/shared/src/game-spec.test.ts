@@ -6,7 +6,13 @@
  * verbatim).
  */
 import { describe, expect, it } from 'vitest';
-import { GameSpec, applyGameSpecPatch, checkEngineFit } from './game-spec';
+import {
+  GameCapabilities,
+  GameSpec,
+  applyGameSpecPatch,
+  checkEngineFit,
+  validateCapabilities,
+} from './game-spec';
 
 describe('GameSpec — Zod round-trip', () => {
   it('parses a complete spec', () => {
@@ -210,5 +216,44 @@ describe('checkEngineFit — gating matrix', () => {
     });
     expect(checkEngineFit(spec, 'phaser').verdict).toBe('ok');
     expect(checkEngineFit(spec, 'three').verdict).toBe('ok');
+  });
+});
+
+describe('validateCapabilities — capability reconciliation (P4)', () => {
+  it('demotes escalates for a handcrafted-level genre (platformer)', () => {
+    const { corrected, conflicts } = validateCapabilities({
+      genre: 'platformer',
+      capabilities: GameCapabilities.parse({ escalates: true, hasProgression: true }),
+    });
+    expect(corrected?.escalates).toBe(false);
+    expect(conflicts.length).toBeGreaterThan(0);
+  });
+
+  it('demotes escalates for an ambient pointer/drag toy with no enemies (garden)', () => {
+    const { corrected, conflicts } = validateCapabilities({
+      genre: 'other',
+      capabilities: GameCapabilities.parse({
+        escalates: true,
+        controlScheme: 'drag',
+        hasEnemies: false,
+      }),
+    });
+    expect(corrected?.escalates).toBe(false);
+    expect(conflicts.length).toBeGreaterThan(0);
+  });
+
+  it('leaves a real wave-shooter escalates flag intact', () => {
+    const { corrected, conflicts } = validateCapabilities({
+      genre: 'shmup',
+      capabilities: GameCapabilities.parse({ escalates: true, hasEnemies: true }),
+    });
+    expect(corrected?.escalates).toBe(true);
+    expect(conflicts).toEqual([]);
+  });
+
+  it('no capabilities → no-op', () => {
+    const { corrected, conflicts } = validateCapabilities({ genre: 'platformer' });
+    expect(corrected).toBeUndefined();
+    expect(conflicts).toEqual([]);
   });
 });

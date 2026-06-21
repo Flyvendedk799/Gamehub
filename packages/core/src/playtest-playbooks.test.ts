@@ -21,7 +21,8 @@ describe('getPlaytestPlaybook', () => {
   });
 
   it('returns null for an un-bundled genre', () => {
-    const pb = getPlaytestPlaybook('idle');
+    // idle/rhythm/visual_novel/sandbox are now bundled (v2 P6); tycoon is not.
+    const pb = getPlaytestPlaybook('tycoon');
     expect(pb).toBeNull();
   });
 

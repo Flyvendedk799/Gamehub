@@ -170,6 +170,44 @@ describe('buildRepairInstruction', () => {
     const verdict: RepairVerdict = { pass: true, score: null, fatalErrors: [], noEvidence: true };
     expect(buildRepairInstruction(verdict)).toBeNull();
   });
+
+  it('P7: classifies MISSING fields as a snapshot-contract problem, not a sign error', () => {
+    const pred = (field: string) =>
+      ({ field, op: 'increased', frame: 'final', against: 'baseline' }) as const;
+    const verdict = {
+      pass: false,
+      score: {
+        pass: false,
+        failures: 2,
+        results: [
+          {
+            predicate: pred('score'),
+            pass: false,
+            reason: 'field "score" is missing from snapshot',
+          },
+          { predicate: pred('wave'), pass: false, reason: 'field "wave" is missing from snapshot' },
+        ],
+      },
+      fatalErrors: [],
+      noEvidence: false,
+    } as unknown as RepairVerdict;
+    const instruction = buildRepairInstruction(verdict);
+    expect(instruction).not.toBeNull();
+    expect(instruction!).toContain('MISSING DEBUG CONTRACT');
+    expect(instruction!).toContain('debug.track');
+    // It must NOT misdiagnose a missing field as an input/sign bug.
+    expect(instruction!).not.toContain('mis-wired or sign-flipped');
+  });
+
+  it('P7: classifies a present-but-wrong value as a sign/mapping error', () => {
+    const verdict = buildRepairVerdict(
+      { trace: INVERTED_TOPDOWN_TRACE, fatalErrors: [] },
+      predicatesFor('topdown_arcade'),
+    );
+    const instruction = buildRepairInstruction(verdict);
+    expect(instruction!).toContain('WRONG VALUE');
+    expect(instruction!).toContain('mis-wired or sign-flipped');
+  });
 });
 
 describe('decideRepairAction', () => {
@@ -316,8 +354,9 @@ describe('selectGamePlaytestPlan (planner glue)', () => {
   });
 
   it('returns null for a genre with no bundled playbook', () => {
-    expect(selectGamePlaytestPlan('idle')).toBeNull();
-    expect(selectGamePlaytestPlan('sandbox')).toBeNull();
+    // idle/sandbox/rhythm/visual_novel are now bundled (v2 P6); tycoon + other are not.
+    expect(selectGamePlaytestPlan('tycoon')).toBeNull();
+    expect(selectGamePlaytestPlan('other')).toBeNull();
   });
 
   it('the fps playbook projects mouse + key steps (look + move)', () => {

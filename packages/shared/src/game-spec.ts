@@ -233,6 +233,63 @@ export function applyGameSpecPatch(prior: GameSpec, patch: GameSpecPatch): GameS
   return GameSpec.parse(merged);
 }
 
+/** Genres whose difficulty does NOT ramp in the wave/spawn sense — they pace via
+ *  handcrafted levels (platformer/puzzle), fixed beatmaps (rhythm), story
+ *  (visual_novel), or open-ended play (sandbox/idle). Declaring `escalates:true`
+ *  for these drove the Loop-2 escalation false-positives. */
+const NON_ESCALATING_GENRES: ReadonlySet<string> = new Set<string>([
+  'platformer',
+  'puzzle',
+  'visual_novel',
+  'sandbox',
+  'idle',
+  'rhythm',
+]);
+
+export interface CapabilityReconciliation {
+  /** The capabilities after demoting flags the genre/scheme contradicts. Same
+   *  reference as the input when nothing changed. */
+  corrected: GameCapabilities | undefined;
+  /** Human-readable demotions, surfaced to the agent so it can amend or justify. */
+  conflicts: string[];
+}
+
+/**
+ * Capability reconciliation (Engine Evolution v2 P4) — cross-check self-declared
+ * capability flags against the genre + control scheme and DEMOTE the ones that
+ * contradict, rather than trusting them raw. Pure; returns corrected caps +
+ * the conflicts so `declare_game_spec` can apply the correction AND tell the
+ * agent what it changed. Today it focuses on `escalates`, the one noisy flag
+ * that feeds BOTH the escalation invariant and the wave-spawner recommendation.
+ */
+export function validateCapabilities(spec: {
+  genre: GameGenre;
+  capabilities?: GameCapabilities | undefined;
+}): CapabilityReconciliation {
+  const caps = spec.capabilities;
+  if (caps === undefined) return { corrected: undefined, conflicts: [] };
+  const conflicts: string[] = [];
+  let escalates = caps.escalates;
+  if (escalates === true) {
+    if (NON_ESCALATING_GENRES.has(spec.genre)) {
+      escalates = false;
+      conflicts.push(
+        `escalates demoted to false: ${spec.genre} games pace via handcrafted content / fixed structure, not a wave-style difficulty ramp. If you genuinely ramp spawn pressure, re-declare it.`,
+      );
+    } else if (
+      (caps.controlScheme === 'drag' || caps.controlScheme === 'pointer') &&
+      caps.hasEnemies !== true
+    ) {
+      escalates = false;
+      conflicts.push(
+        'escalates demoted to false: a pointer/drag game with no enemies is not a difficulty-ramp game. Re-declare if you meant rising spawn/speed pressure.',
+      );
+    }
+  }
+  if (escalates === caps.escalates) return { corrected: caps, conflicts };
+  return { corrected: { ...caps, escalates }, conflicts };
+}
+
 /**
  * Engine ↔ spec capability matrix. Returns a fit verdict:
  *   - 'ok'   — engine is a natural fit for this spec

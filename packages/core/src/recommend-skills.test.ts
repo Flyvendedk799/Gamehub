@@ -137,3 +137,38 @@ describe('formatRecommendationsForPrompt', () => {
     expect(bullet).toContain(' — ');
   });
 });
+
+describe('recommendSkills — genre-driven (Phase 3 / Loop-2 fixes)', () => {
+  it('genre=rhythm with NON-keyword mechanics still recommends rhythm-clock', () => {
+    // The Loop-2 miss: mechanics phrased as "hit timed notes" dodged the keyword list.
+    const recs = recommendSkills(
+      { mechanics: ['hit timed notes', 'judge accuracy'] },
+      'phaser',
+      'rhythm',
+    );
+    expect(recs.map((r) => r.skill)).toContain('phaser/rhythm-clock.js');
+  });
+
+  it('genre=racing does NOT recommend enemy-ai for its AI opponents (false-positive fix)', () => {
+    const recs = recommendSkills({ hasEnemies: true }, 'phaser', 'racing');
+    expect(recs.map((r) => r.skill)).not.toContain('phaser/enemy-ai.js');
+  });
+
+  it('genre=tower_defense pulls economy + wave + enemy skills from the genre table', () => {
+    const recs = recommendSkills({}, 'phaser', 'tower_defense');
+    const skills = recs.map((r) => r.skill);
+    expect(skills).toContain('phaser/economy-system.js');
+    expect(skills).toContain('phaser/wave-spawner.js');
+    expect(skills).toContain('phaser/enemy-ai.js');
+  });
+
+  it('genre=visual_novel → dialog-flow even with empty capabilities', () => {
+    expect(recommendSkills({}, 'three', 'visual_novel').map((r) => r.skill)).toContain(
+      'three/dialog-flow.jsx',
+    );
+  });
+
+  it('no genre passed → behaves as before (capabilities-only)', () => {
+    expect(recommendSkills({}, 'phaser')).toHaveLength(0);
+  });
+});

@@ -533,8 +533,14 @@ export {
   GameSpecPatch,
   applyGameSpecPatch,
   checkEngineFit,
+  validateCapabilities,
 } from './game-spec';
-export type { EngineFit, EngineFitVerdict, GameEngineId } from './game-spec';
+export type {
+  CapabilityReconciliation,
+  EngineFit,
+  EngineFitVerdict,
+  GameEngineId,
+} from './game-spec';
 
 export { classifyAbortKind, isNeutralAbort, suggestsTokenReimport } from './abort-kind';
 export type { AbortKind } from './abort-kind';

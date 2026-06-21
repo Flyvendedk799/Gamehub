@@ -14,7 +14,7 @@
  */
 
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
-import { GAME_SPEC_SCHEMA_VERSION, GameSpec } from '@playforge/shared';
+import { GAME_SPEC_SCHEMA_VERSION, GameSpec, validateCapabilities } from '@playforge/shared';
 import { Type } from '@sinclair/typebox';
 
 const FeatureValue = Type.Union([
@@ -147,7 +147,15 @@ export function makeDeclareGameSpecTool(
         ...params,
         features: params.features ?? {},
       };
-      const spec = GameSpec.parse(candidate);
+      const parsed = GameSpec.parse(candidate);
+      // v2 P4 — reconcile self-declared capability flags against genre/scheme and
+      // demote the ones they contradict (e.g. escalates on a handcrafted-level
+      // platformer), so the escalation invariant + recommender act on clean flags.
+      const { corrected, conflicts } = validateCapabilities(parsed);
+      const spec =
+        corrected !== undefined && corrected !== parsed.capabilities
+          ? { ...parsed, capabilities: corrected }
+          : parsed;
       if (setSpec !== undefined) {
         await setSpec(spec);
       }
@@ -156,11 +164,12 @@ export function makeDeclareGameSpecTool(
         featureNames.length > 0
           ? `Features pinned: ${featureNames.join(', ')}.`
           : 'No per-feature invariants yet.';
+      const conflictLine = conflicts.length > 0 ? ` Capability check: ${conflicts.join(' ')}` : '';
       return {
         content: [
           {
             type: 'text',
-            text: `Spec recorded: ${spec.genre}/${spec.dimensions} (${spec.perspective}, camera=${spec.cameraKind}). ${spec.numActors} actor(s), inputs=${spec.primaryInputs.join('+')}. ${featuresLine} Now call choose_engine.`,
+            text: `Spec recorded: ${spec.genre}/${spec.dimensions} (${spec.perspective}, camera=${spec.cameraKind}). ${spec.numActors} actor(s), inputs=${spec.primaryInputs.join('+')}. ${featuresLine}${conflictLine} Now call choose_engine.`,
           },
         ],
         details: {

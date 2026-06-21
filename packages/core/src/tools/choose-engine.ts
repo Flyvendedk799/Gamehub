@@ -111,7 +111,7 @@ export function makeChooseEngineTool(
       // systems so the agent reviews them with view_game_feel BEFORE hand-rolling
       // enemy AI / waves / progression / dialogue from scratch (the re-derivation
       // gap the probe runs exposed).
-      const recs = spec?.capabilities ? recommendSkills(spec.capabilities, engine) : [];
+      const recs = spec?.capabilities ? recommendSkills(spec.capabilities, engine, spec.genre) : [];
       const recBlock = formatRecommendationsForPrompt(recs);
       const recSuffix = recBlock.length > 0 ? `\n\n${recBlock}` : '';
 

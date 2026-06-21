@@ -68,6 +68,7 @@ const AssertGameInvariantsParams = Type.Object({
       escalates: Type.Optional(Type.Boolean()),
       hasFailState: Type.Optional(Type.Boolean()),
       hasEnemies: Type.Optional(Type.Boolean()),
+      hasProgression: Type.Optional(Type.Boolean()),
     }),
   ),
 });
@@ -99,6 +100,7 @@ export interface InvariantCapabilities {
   escalates?: boolean | undefined;
   hasFailState?: boolean | undefined;
   hasEnemies?: boolean | undefined;
+  hasProgression?: boolean | undefined;
 }
 
 export interface InvariantIssue {
@@ -303,6 +305,18 @@ const ESCALATION_PATTERNS: readonly RegExp[] = [
   /Math\.max\([^)]*spawn(Interval|Delay|Rate|Cooldown)/i, // clamped shrinking interval
   /\b(enemySpeed|enemyHp|enemyHealth|enemyCount|maxEnemies|spawnCount)\b[^\n;]{0,40}[*+]/i,
   /\b(speed|hp|health|count|enemies?)\b[^\n;]{0,30}\*[^\n;]{0,20}\b(wave|level|elapsed|time|difficulty)\b/i,
+];
+
+/** LEVEL-RAMP escalation signals (v2 P5) — a progression game (platformer,
+ *  puzzle-with-stages) that legitimately gets harder via HANDCRAFTED LEVELS has
+ *  none of the wave/spawn signals above, so judging it by ESCALATION_PATTERNS
+ *  alone is a false "no escalation" (the Loop-1 platformer). These match the
+ *  level-advance vocabulary + use of the level-orchestrator skill. */
+const LEVEL_RAMP_PATTERNS: readonly RegExp[] = [
+  /\b(nextLevel|loadLevel|advanceLevel|gotoLevel|setLevel)\b/i,
+  /\blevel(Index|Num|Number)?\s*(\+\+|\+=)/i,
+  /\b(createLevelOrchestrator|levelOrchestrator|LEVELS\s*\[)/,
+  /\bunlock(Level|Stage|Next)\b/i,
 ];
 
 /** GameGenre tokens (game-workflow §2 menu) whose games MUST get harder over
@@ -515,12 +529,22 @@ export function assertGameInvariants(
   // slip the escalation check entirely.
   if ((genre !== null && SHOULD_ESCALATE_GENRES.has(genre)) || caps?.escalates === true) {
     checked.push('escalation');
-    if (!anyMatch(source, ESCALATION_PATTERNS)) {
+    // Mode (v2 P5): a progression game with no combat ramps via LEVELS, not
+    // waves — accept the level-ramp vocabulary so it isn't false-flagged for
+    // lacking spawn-rate signals. (The garden/rhythm/platformer mis-declarations
+    // are already demoted upstream by validateCapabilities, so this only sees
+    // games that genuinely should escalate.)
+    const levelRampMode = caps?.hasProgression === true && caps?.hasEnemies !== true;
+    const escalationPatterns = levelRampMode
+      ? [...ESCALATION_PATTERNS, ...LEVEL_RAMP_PATTERNS]
+      : ESCALATION_PATTERNS;
+    if (!anyMatch(source, escalationPatterns)) {
       issues.push({
         invariant: 'escalation',
         severity: 'warn',
-        message:
-          'No difficulty escalation detected for a genre that must ramp. A wave that never gets harder reads as a tech demo — drift the spawn rate, enemy speed/HP, or enemy count up over time or per wave (e.g. difficulty = 1.15 ** wave), and SIGNAL the rising pressure (a wave counter, a "Wave N" banner). The bundled `wave-spawner` skill (view_game_feel({ name: "<engine>/wave-spawner.<js|jsx>" })) does this — escalating count/speed/hp per wave with a telegraphed countdown — and `enemy-ai` gives the enemies real behaviour to fight.',
+        message: levelRampMode
+          ? 'No escalation detected for a progression game. Make later levels/stages genuinely harder and advance them (nextLevel / a level-orchestrator), or ramp a difficulty value — a game that never gets harder reads as a tech demo. The bundled `level-orchestrator` skill (import_skill) sequences escalating levels.'
+          : 'No difficulty escalation detected for a genre that must ramp. A wave that never gets harder reads as a tech demo — drift the spawn rate, enemy speed/HP, or enemy count up over time or per wave (e.g. difficulty = 1.15 ** wave), and SIGNAL the rising pressure (a wave counter, a "Wave N" banner). Import the bundled `wave-spawner` skill (import_skill({ name: "<engine>/wave-spawner.<js|jsx>" })) — escalating count/speed/hp per wave with a telegraphed countdown — and `enemy-ai` gives the enemies real behaviour to fight.',
       });
     }
   }

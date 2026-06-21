@@ -723,7 +723,7 @@ export async function runGeneration(
   // engine with a decoy entry? These feed the run-report analyzer.
   const recommended =
     state.spec?.capabilities && state.engine
-      ? recommendSkills(state.spec.capabilities, state.engine)
+      ? recommendSkills(state.spec.capabilities, state.engine, state.spec.genre)
       : [];
   const recommendedButUnused = recommended
     .filter((r) => !sig.skillsViewed.includes(r.skill))

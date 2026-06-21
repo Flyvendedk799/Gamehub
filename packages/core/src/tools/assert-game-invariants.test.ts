@@ -497,3 +497,44 @@ describe('assertGameInvariants — capability-aware (Engine Evolution P4/P5/P6)'
     expect(result.issues.map((i) => i.invariant)).not.toContain('decoy-engine');
   });
 });
+
+describe('assertGameInvariants — v2 P2 debug-snapshot + P5 level-ramp', () => {
+  const COMPLETE = `
+    let score = 0; let lives = 3;
+    function onHit(){ score += 1; new Audio('x.wav').play(); }
+    function tick(){ if (lives <= 0) restart(); }
+    function restart(){ score = 0; lives = 3; }
+  `;
+
+  it('P2: a fail-state game with no snapshot wiring warns debug-snapshot', () => {
+    const r = assertGameInvariants(deps([{ path: 'src/main.js', content: COMPLETE }]), {
+      capabilities: { hasFailState: true },
+    });
+    expect(r.checked).toContain('debug-snapshot');
+    expect(r.issues.map((i) => i.invariant)).toContain('debug-snapshot');
+  });
+
+  it('P2: wiring debug.track clears the debug-snapshot warning', () => {
+    const wired = `${COMPLETE}\n window.__game.debug.track({ score: () => score });`;
+    const r = assertGameInvariants(deps([{ path: 'src/main.js', content: wired }]), {
+      capabilities: { hasFailState: true },
+    });
+    expect(r.issues.map((i) => i.invariant)).not.toContain('debug-snapshot');
+  });
+
+  it('P5: a progression game ramping via levels (loadLevel) does NOT warn escalation', () => {
+    const lvl = `${COMPLETE}\n function next(){ loadLevel(levelIndex + 1); }`;
+    const r = assertGameInvariants(deps([{ path: 'src/main.js', content: lvl }]), {
+      capabilities: { escalates: true, hasProgression: true, hasEnemies: false },
+    });
+    expect(r.checked).toContain('escalation');
+    expect(r.issues.map((i) => i.invariant)).not.toContain('escalation');
+  });
+
+  it('P5: a progression game with NO ramp of any kind still warns escalation', () => {
+    const r = assertGameInvariants(deps([{ path: 'src/main.js', content: COMPLETE }]), {
+      capabilities: { escalates: true, hasProgression: true, hasEnemies: false },
+    });
+    expect(r.issues.map((i) => i.invariant)).toContain('escalation');
+  });
+});

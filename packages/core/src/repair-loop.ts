@@ -230,14 +230,46 @@ export function buildRepairInstruction(verdict: RepairVerdict): string | null {
       lines.push(`  - playtest: ${f.reason} [field: ${f.field}]`);
     }
     lines.push('');
-    lines.push(
-      'These are MACHINE-CHECKED facts from the real running game, not opinions. ' +
-        'A field that "did NOT increase/decrease/change" means the input is mis-wired or sign-flipped ' +
-        '(the c44763af class). Trace the keydown/pointer handler for each named field and correct it.',
-    );
+    // v2 P7 — classify the ROOT CAUSE. A MISSING field means the debug contract
+    // isn't wired (the playtest can read nothing) — a different bug from a
+    // present-but-wrong value (a sign/mapping error). The old instruction always
+    // said "trace the keydown handler," so a snapshot-less game (the tower-defense
+    // probe) edited fine input handlers round after round and burned to the
+    // ceiling. Branch on the failure reason so the fix matches the cause.
+    const missingCount = failures.filter((f) =>
+      /missing|undefined|not found/i.test(f.reason),
+    ).length;
+    const mostlyMissing = missingCount >= Math.ceil(failures.length / 2);
+    if (mostlyMissing) {
+      lines.push(
+        'ROOT CAUSE — MISSING DEBUG CONTRACT: these fields are absent from window.__game.debug.snapshot(), so the playtest reads nothing. This is NOT an input or sign bug — do NOT touch your input handlers. Expose the fields in one line: ' +
+          `window.__game.debug.track({ ${snapshotTrackHint(failures.map((f) => f.field))} }) (or set window.__game.state). ` +
+          'If you imported a skill (import_skill), pass its getState() into debug.track. Then re-run playtest_game.',
+      );
+    } else {
+      lines.push(
+        'ROOT CAUSE — WRONG VALUE: these fields EXIST but did not change as required, so the input is mis-wired or sign-flipped ' +
+          '(the c44763af class). These are MACHINE-CHECKED facts from the real running game. Trace the keydown/pointer handler for each named field and correct the mapping/sign.',
+      );
+    }
   }
 
   return lines.join('\n');
+}
+
+/** Build a debug.track({...}) hint from the failing field names: playerPos.* →
+ *  `player: yourPlayerObject`, everything else → `field: () => field`. Distinct
+ *  top-level fields only. */
+function snapshotTrackHint(fields: string[]): string {
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  for (const f of fields) {
+    const top = f.split('.')[0] ?? f;
+    if (top.length === 0 || seen.has(top)) continue;
+    seen.add(top);
+    parts.push(top === 'playerPos' ? 'player: yourPlayerObject' : `${top}: () => ${top}`);
+  }
+  return parts.join(', ');
 }
 
 /** The next thing the worker should do after scoring an attempt. */
