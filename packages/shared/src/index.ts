@@ -521,6 +521,8 @@ export type {
 export {
   GAME_SPEC_SCHEMA_VERSION,
   GameCameraKind,
+  GameCapabilities,
+  GameControlScheme,
   GameDimensions,
   GameFeatureSpec,
   GameGenre,

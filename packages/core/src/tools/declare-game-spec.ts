@@ -26,6 +26,37 @@ const FeatureValue = Type.Union([
 ]);
 const FeatureRecord = Type.Record(Type.String(), FeatureValue);
 
+/** Capability/trait model (Engine Evolution Phase 1) — the genre-agnostic
+ *  description of what the game DOES. Drives skill recommendation + verification.
+ *  All fields optional; declare the ones that describe your idea. */
+const CapabilitiesSchema = Type.Object({
+  mechanics: Type.Optional(
+    Type.Array(Type.String(), {
+      description:
+        'What the player DOES — open vocabulary: shoot, place, dodge, collect, build, guide, grow, solve, race, dialogue, manage…',
+    }),
+  ),
+  controlScheme: Type.Optional(
+    Type.Union([
+      Type.Literal('keyboard'),
+      Type.Literal('pointer'),
+      Type.Literal('twin_stick'),
+      Type.Literal('touch'),
+      Type.Literal('drag'),
+      Type.Literal('gamepad'),
+      Type.Literal('hybrid'),
+    ]),
+  ),
+  escalates: Type.Optional(Type.Boolean({ description: 'Difficulty ramps over time/waves.' })),
+  hasEnemies: Type.Optional(Type.Boolean()),
+  hasFailState: Type.Optional(Type.Boolean()),
+  hasProgression: Type.Optional(Type.Boolean({ description: 'Levels / stages / unlocks.' })),
+  hasNarrative: Type.Optional(Type.Boolean()),
+  hasEconomy: Type.Optional(Type.Boolean()),
+  hasPhysics: Type.Optional(Type.Boolean()),
+  procedural: Type.Optional(Type.Boolean()),
+});
+
 const DeclareGameSpecParams = Type.Object({
   genre: Type.Union([
     Type.Literal('platformer'),
@@ -80,6 +111,7 @@ const DeclareGameSpecParams = Type.Object({
   numActors: Type.Integer({ minimum: 1, maximum: 64 }),
   winCondition: Type.String({ minLength: 3, maxLength: 280 }),
   loseCondition: Type.String({ minLength: 3, maxLength: 280 }),
+  capabilities: Type.Optional(CapabilitiesSchema),
   features: Type.Optional(Type.Record(Type.String(), FeatureRecord)),
 });
 

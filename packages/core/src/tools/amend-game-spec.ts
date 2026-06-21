@@ -30,6 +30,21 @@ const AmendGameSpecParams = Type.Object({
   numActors: Type.Optional(Type.Integer({ minimum: 1, maximum: 64 })),
   winCondition: Type.Optional(Type.String({ minLength: 3, maxLength: 280 })),
   loseCondition: Type.Optional(Type.String({ minLength: 3, maxLength: 280 })),
+  // Capabilities are replace-whole on amend — restate the full set when changing it.
+  capabilities: Type.Optional(
+    Type.Object({
+      mechanics: Type.Optional(Type.Array(Type.String())),
+      controlScheme: Type.Optional(Type.String()),
+      escalates: Type.Optional(Type.Boolean()),
+      hasEnemies: Type.Optional(Type.Boolean()),
+      hasFailState: Type.Optional(Type.Boolean()),
+      hasProgression: Type.Optional(Type.Boolean()),
+      hasNarrative: Type.Optional(Type.Boolean()),
+      hasEconomy: Type.Optional(Type.Boolean()),
+      hasPhysics: Type.Optional(Type.Boolean()),
+      procedural: Type.Optional(Type.Boolean()),
+    }),
+  ),
   features: Type.Optional(Type.Record(Type.String(), FeatureRecord)),
   reason: Type.Optional(
     Type.String({
