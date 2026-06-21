@@ -81,6 +81,7 @@ export type GameInvariant =
   | 'camera-relative'
   | 'escalation'
   | 'decoy-engine'
+  | 'debug-snapshot'
   | 'brawler-combo'
   | 'brawler-hitstop'
   | 'brawler-per-attack-limb'
@@ -189,6 +190,16 @@ const KEYBOARD_INPUT_PATTERNS: readonly RegExp[] = [
   /\bcursors?\s*\.\s*(left|right|up|down)/i,
 ];
 const CONTROLS_DEFINE_PATTERN = /\bcontrols\s*\.\s*define\s*\(/;
+
+// v2 P2 — the deterministic verdict layer (playbooks + contracts) reads
+// window.__game.debug.snapshot(); a game with gameplay state that never wires it
+// can't be play-verified and ships no_verdict. Any of these counts as wired:
+// debug.track({...}), an explicit debug.snapshot assignment, or window.__game.state.
+const SNAPSHOT_WIRING_PATTERNS: readonly RegExp[] = [
+  /\bdebug\s*\.\s*track\s*\(/,
+  /\bdebug\s*\.\s*snapshot\s*=/,
+  /__game\s*\.\s*state\b/,
+];
 
 // Camera-relative movement (3D's #1 recurring bug). A 3D game with a MOVING
 // camera (follow / first-person / third-person) that applies movement input to
@@ -359,6 +370,7 @@ export function assertGameInvariants(
     'feedback',
     'controls',
     'decoy-engine',
+    'debug-snapshot',
   ];
 
   if (!anyMatch(source, RESTART_PATTERNS)) {
@@ -408,6 +420,23 @@ export function assertGameInvariants(
       severity: 'warn',
       message:
         'Keyboard input is read directly without declaring a controls scheme. The runtime layer is already present — call window.__game.controls.define({ actions: [{ id, label, keys: ["ArrowLeft","KeyA"] }, …] }) and read input via controls.isDown(id) / controls.on(id, fn). This populates the builder Controls tab and lets players rebind keys live; reading cursors/keydown directly bypasses it, so the controls are invisible and unmappable.',
+    });
+  }
+
+  // Debug-snapshot wiring (v2 P2) — a game with gameplay state (a score/state
+  // mutation or a fail state) that never exposes window.__game.debug.snapshot
+  // can't be play-verified and ships no_verdict. Pointer/static toys with no
+  // state are exempt. Imported skills wire their getState() here automatically.
+  // Gated on the DECLARED capability (present on real runs via the spec), so a
+  // game that commits to a fail state — i.e. wants a real play verdict — is held
+  // to exposing one. Standalone invariant calls without capabilities are exempt.
+  const wantsVerdict = caps?.hasFailState === true;
+  if (wantsVerdict && !anyMatch(source, SNAPSHOT_WIRING_PATTERNS)) {
+    issues.push({
+      invariant: 'debug-snapshot',
+      severity: 'warn',
+      message:
+        'No debug snapshot wired, so the deterministic playtest can read nothing and the run ships unverified (no_verdict). Expose your state in ONE line: window.__game.debug.track({ player: thePlayerSprite, score: () => score, wave: () => wave }) — or set window.__game.state = { score, wave }. Imported skills (import_skill) expose a getState() you can pass straight into debug.track.',
     });
   }
 

@@ -275,6 +275,7 @@ describe('assertGameInvariants brawler-specific checks (Sequence 6)', () => {
       'feedback',
       'controls',
       'decoy-engine',
+      'debug-snapshot',
     ]);
     expect(result.genre).toBeNull();
   });

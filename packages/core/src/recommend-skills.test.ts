@@ -119,7 +119,7 @@ describe('formatRecommendationsForPrompt', () => {
     const recs = recommendSkills({ hasEnemies: true, escalates: true }, 'phaser');
     const output = formatRecommendationsForPrompt(recs);
     expect(output).toContain("Recommended skills for this game's capabilities");
-    expect(output).toContain('view_game_feel');
+    expect(output).toContain('import_skill');
     expect(output).toContain('phaser/enemy-ai.js');
     expect(output).toContain('phaser/wave-spawner.js');
     // Each entry is a bullet
@@ -130,7 +130,9 @@ describe('formatRecommendationsForPrompt', () => {
   it('each bullet contains the skill name and reason separated by " — "', () => {
     const recs = recommendSkills({ hasNarrative: true }, 'phaser');
     const output = formatRecommendationsForPrompt(recs);
-    const bullet = output.split('\n').find((l) => l.startsWith('- phaser/dialog-flow.js'));
+    const bullet = output
+      .split('\n')
+      .find((l) => l.startsWith('-') && l.includes('phaser/dialog-flow.js'));
     expect(bullet).toBeDefined();
     expect(bullet).toContain(' — ');
   });

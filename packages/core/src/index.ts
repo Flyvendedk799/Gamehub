@@ -130,6 +130,7 @@ export {
   type TextEditorFsCallbacks,
   type TextEditorDetails,
 } from './tools/text-editor.js';
+export { makeImportSkillTool, type ImportSkillDetails } from './tools/import-skill.js';
 export { makeSetTodosTool, type SetTodosDetails } from './tools/set-todos.js';
 export type {
   CompactArtifact,

@@ -118,6 +118,8 @@ export function recommendSkills(
  */
 export function formatRecommendationsForPrompt(recs: SkillRecommendation[]): string {
   if (recs.length === 0) return '';
-  const bullets = recs.map((r) => `- ${r.skill} — ${r.reason}`).join('\n');
-  return `Recommended skills for this game's capabilities — review with view_game_feel before hand-rolling:\n${bullets}`;
+  const bullets = recs
+    .map((r) => `- import_skill({ name: '${r.skill}' }) — ${r.reason}`)
+    .join('\n');
+  return `Recommended skills for this game's capabilities — IMPORT each with import_skill, then call its exports (do NOT hand-roll these systems):\n${bullets}`;
 }
