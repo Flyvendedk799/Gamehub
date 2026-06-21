@@ -84,9 +84,78 @@ export const GameFeatureSpec = z.record(
 );
 export type GameFeatureSpec = z.infer<typeof GameFeatureSpec>;
 
+/**
+ * Capability/trait model (Engine Evolution Phase 1) — the genre-AGNOSTIC,
+ * composable description of what a game actually DOES. This is the primary axis
+ * the engine reasons about (skill recommendation, escalation/feedback checks,
+ * engine fit); `genre` becomes a derived hint, not a gate. A user's novel idea
+ * ("you are the tide guiding boats") has no genre but DOES have capabilities
+ * ({ controlScheme: 'drag', mechanics: ['guide'], hasFailState: true }), so the
+ * engine can serve it without forcing it into a box.
+ *
+ * Optional on GameSpec for back-compat; when omitted, helpers fall back to the
+ * genre heuristics. Booleans drive verification + push-model skill recommendation.
+ */
+export const GameControlScheme = z.enum([
+  'keyboard',
+  'pointer',
+  'twin_stick',
+  'touch',
+  'drag',
+  'gamepad',
+  'hybrid',
+]);
+export type GameControlScheme = z.infer<typeof GameControlScheme>;
+
+export const GameCapabilities = z.object({
+  /** Open mechanic vocabulary — what the player DOES (shoot/place/dodge/collect/
+   *  build/guide/grow/solve/race/dialogue/manage…). Drives skill recommendation. */
+  mechanics: z.array(z.string()).default([]),
+  /** How the player provides input — the source of truth for controls scaffolding. */
+  controlScheme: GameControlScheme.optional(),
+  /** Difficulty ramps over time/waves (the anti-flat-game trait). */
+  escalates: z.boolean().default(false),
+  /** Has hostile actors with behaviour (drives enemy-ai recommendation). */
+  hasEnemies: z.boolean().default(false),
+  /** The player can lose. */
+  hasFailState: z.boolean().default(false),
+  /** Levels / stages / unlocks / persistent progress. */
+  hasProgression: z.boolean().default(false),
+  /** Story / dialogue / cutscenes. */
+  hasNarrative: z.boolean().default(false),
+  /** Currency / resources / shop / placement cost. */
+  hasEconomy: z.boolean().default(false),
+  /** Physics-driven motion (gravity, collisions, forces). */
+  hasPhysics: z.boolean().default(false),
+  /** Procedurally / randomly generated content. */
+  procedural: z.boolean().default(false),
+});
+export type GameCapabilities = z.infer<typeof GameCapabilities>;
+
+/** Patch shape for `amend_game_spec` capabilities — every field optional with NO
+ *  defaults, so a partial amend carries ONLY the fields the agent restated and
+ *  `applyGameSpecPatch` deep-merges them onto the prior capabilities. (Using the
+ *  defaulting GameCapabilities here would silently reset every un-restated trait
+ *  to false/[] on a partial amend.) */
+export const GameCapabilitiesPatch = z.object({
+  mechanics: z.array(z.string()).optional(),
+  controlScheme: GameControlScheme.optional(),
+  escalates: z.boolean().optional(),
+  hasEnemies: z.boolean().optional(),
+  hasFailState: z.boolean().optional(),
+  hasProgression: z.boolean().optional(),
+  hasNarrative: z.boolean().optional(),
+  hasEconomy: z.boolean().optional(),
+  hasPhysics: z.boolean().optional(),
+  procedural: z.boolean().optional(),
+});
+export type GameCapabilitiesPatch = z.infer<typeof GameCapabilitiesPatch>;
+
 export const GameSpec = z.object({
   schemaVersion: z.literal(GAME_SPEC_SCHEMA_VERSION).default(GAME_SPEC_SCHEMA_VERSION),
   genre: GameGenre,
+  /** Composable capabilities — the primary genre-agnostic description (Phase 1). */
+  capabilities: GameCapabilities.optional(),
   dimensions: GameDimensions,
   perspective: GamePerspective,
   cameraKind: GameCameraKind,
@@ -119,6 +188,7 @@ export type GameSpec = z.infer<typeof GameSpec>;
  *  it, so partial-update bugs can't quietly drop invariants). */
 export const GameSpecPatch = z.object({
   genre: GameGenre.optional(),
+  capabilities: GameCapabilitiesPatch.optional(),
   dimensions: GameDimensions.optional(),
   perspective: GamePerspective.optional(),
   cameraKind: GameCameraKind.optional(),
@@ -139,9 +209,18 @@ export type GameSpecPatch = z.infer<typeof GameSpecPatch>;
  *  from the prior turn. Returns a freshly validated GameSpec or throws.
  */
 export function applyGameSpecPatch(prior: GameSpec, patch: GameSpecPatch): GameSpec {
+  // Capabilities deep-merge onto the prior set — a partial amend restates only
+  // the traits that changed; the rest pass through (NOT reset to defaults). The
+  // cast is for TS only; GameSpec.parse(merged) below re-validates + fills any
+  // genuinely-missing defaults when the prior had no capabilities.
+  const mergedCapabilities: GameCapabilities | undefined =
+    patch.capabilities !== undefined
+      ? ({ ...(prior.capabilities ?? {}), ...patch.capabilities } as GameCapabilities)
+      : prior.capabilities;
   const merged: GameSpec = {
     ...prior,
     ...(patch.genre !== undefined ? { genre: patch.genre } : {}),
+    ...(mergedCapabilities !== undefined ? { capabilities: mergedCapabilities } : {}),
     ...(patch.dimensions !== undefined ? { dimensions: patch.dimensions } : {}),
     ...(patch.perspective !== undefined ? { perspective: patch.perspective } : {}),
     ...(patch.cameraKind !== undefined ? { cameraKind: patch.cameraKind } : {}),

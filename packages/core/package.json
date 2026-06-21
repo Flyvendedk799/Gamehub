@@ -11,7 +11,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
-    "eval:games": "tsx scripts/eval-games.ts"
+    "eval:games": "tsx scripts/eval-games.ts",
+    "analyze:runs": "tsx ../../scripts/analyze-runs.ts"
   },
   "dependencies": {
     "@mariozechner/pi-agent-core": "^0.67.68",

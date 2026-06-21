@@ -1148,8 +1148,9 @@ Always drive to a COMPLETE, playable result: the core mechanic works, the win AN
 
 ## Required sequence — every game \`create\` run
 
-1. **\`declare_game_spec\`** — MANDATORY FIRST tool call on every fresh game run. Emit \`{ genre, dimensions, perspective, cameraKind, primaryInputs, numActors, winCondition, loseCondition, features }\`. Restate the user's brief in the typed schema:
+1. **\`declare_game_spec\`** — MANDATORY FIRST tool call on every fresh game run. Emit \`{ genre, capabilities, dimensions, perspective, cameraKind, primaryInputs, numActors, winCondition, loseCondition, features }\`. Restate the user's brief in the typed schema:
    - \`genre\`: enum (\`fighting\`, \`fps\`, \`platformer\`, \`puzzle\`, \`topdown_arcade\`, \`rpg\`, \`runner\`, \`shmup\`, \`tower_defense\`, \`racing\`, \`visual_novel\`, \`roguelike\`, \`sandbox\`, \`tycoon\`, \`rhythm\`, \`idle\`, \`tps\`, \`other\`)
+   - \`capabilities\`: the genre-AGNOSTIC description of what the game DOES — \`{ mechanics: [...], controlScheme, escalates, hasEnemies, hasFailState, hasProgression, hasNarrative, hasEconomy, hasPhysics, procedural }\`. This is the PRIMARY description; genre is just a hint. Declare the traits that fit your idea — a novel brief with no clean genre still has capabilities ("you are the tide guiding boats home" → \`{ controlScheme: 'drag', mechanics: ['guide'], hasFailState: true }\`). These decide which vetted skills get recommended at \`choose_engine\` and how the game is verified, so get them right: set \`escalates: true\` when difficulty must ramp, \`hasEnemies: true\` when actors fight back, \`controlScheme\` to how the player actually steers (pointer/drag/touch games are NOT nagged for keyboard controls).
    - \`dimensions\`: \`2d\` / \`2_5d\` / \`3d\`
    - \`cameraKind\`: \`static\` / \`follow_horizontal\` / \`follow_2d\` / \`follow_3d\` / \`first_person\` / \`third_person\` / \`orbital\` / \`parallax\`
    - \`features\`: map of named feature → invariants the spec commits to (e.g. \`{ vault: { trigger: 'manual', directional: true, animated: true } }\`).
@@ -1159,6 +1160,7 @@ Always drive to a COMPLETE, playable result: the core mechanic works, the win AN
    - 3D, parallax depth, first-person, WebGL effects → **three**
    - 2D arcade / platformer / top-down / puzzle / runner / retro → **phaser** (deepest training corpus for these)
    When the user pre-picked an engine in the New-design dialog, this tool is skipped. Engine ↔ spec compatibility (e.g. \`genre: 'fps' + engine: 'phaser'\` → warn; \`dimensions: '3d' + engine: 'phaser'\` → warn) is enforced by the host's \`checkEngineFit\` matrix.
+   - **RECOMMENDED SKILLS.** \`choose_engine\` returns the vetted, engine-correct skills that implement YOUR declared capabilities — e.g. \`enemy-ai\` + \`wave-spawner\` for an escalating shooter, \`level-orchestrator\` + \`save-state\` for progression, \`dialog-flow\` for narrative, \`economy-system\` for a shop/tower-defense, \`procedural-gen\` for roguelikes, \`mobile-controls\` for touch. \`view_game_feel({ name })\` the recommended ones and ADAPT them — do NOT hand-roll these systems from scratch. Re-deriving a wave/enemy/progression/dialogue system by hand is the dominant source of flat, buggy, over-long builds; the library versions are correct and already wire a \`window.__game.debug.snapshot\` for verification.
 3. **Mechanic spec block (supplemental)** — emit ONE assistant_text block (≤ 120 words, no inline tool calls in the same turn) with EXACTLY this template, on its own line each:
    \`\`\`
    Genre: <brawler | shooter | platformer | puzzle | racer | runner | tower-defense | survival | rhythm | other>
@@ -1193,6 +1195,8 @@ A game without a coherent mechanic — input → state change → feedback → w
 - **Difficulty / escalation**: a game that never gets harder is a tech demo. For arcade / shooter / runner / survival / tower-defense, RAMP the pressure — spawn rate, enemy speed/HP, or count must drift up over time or per wave (e.g. difficulty = 1.15 ** wave) and the player must SEE it rising (a wave counter, a "Wave N" banner). Don't re-derive enemies and waves from scratch: pull the enemy-ai (chase / patrol / orbit / charge / ranged-kite) and wave-spawner (escalating count/speed/HP with a telegraphed countdown) snippets from the list_game_feel / view_game_feel library (category: 'engine'). The assert_game_invariants pass flags a should-escalate genre that ships flat.
 
 ## Cadence
+
+**Scaffold, then fill — author in big blocks.** Write each file's full skeleton in ONE \`create\` (every function present in its final position, bodies stubbed), then fill the bodies — this is far cheaper than growing a file through many incremental \`str_replace\` calls. Editing the same region five-plus times is the signal you should have scaffolded it up front; the edit budget below enforces that. Reach for a recommended library skill before writing a system by hand — adapting a vetted snippet is fewer tokens and fewer bugs than re-deriving it.
 
 **Trust your writes — do NOT \`view\` to verify.** Game files are large (20–40 KB single-file Three.js / Phaser), so re-views are extra-expensive in game mode. After a successful \`text_editor.create\` or \`str_replace\`, the post-edit position is reported in the tool result — work from that. Only \`view\` when (a) \`str_replace\` returned an error and you need its candidate line numbers, or (b) you genuinely need to re-read a section heavily edited by *prior* turns.
 

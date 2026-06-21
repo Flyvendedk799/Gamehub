@@ -12,7 +12,8 @@
       "**/node_modules/**",
       "**/coverage/**",
       "**/.turbo/**",
-      "**/vendor/**"
+      "**/vendor/**",
+      "**/claude-design-output/**"
     ]
   },
   "formatter": {

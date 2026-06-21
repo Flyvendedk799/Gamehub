@@ -65,6 +65,16 @@ const PHASER_SKILLS: ReadonlyArray<GameSkillSpec> = [
   // Combat & difficulty (enemies + escalating waves — the anti-flat-game set).
   { name: 'phaser/enemy-ai.js', engine: 'phaser', category: 'engine' },
   { name: 'phaser/wave-spawner.js', engine: 'phaser', category: 'engine' },
+  // Capability systems (Engine Evolution P8) — composable building blocks the
+  // capability recommender (recommend-skills.ts) pushes per game's declared traits.
+  { name: 'phaser/level-orchestrator.js', engine: 'phaser', category: 'engine' },
+  { name: 'phaser/procedural-gen.js', engine: 'phaser', category: 'engine' },
+  { name: 'phaser/animation-sequencer.js', engine: 'phaser', category: 'engine' },
+  { name: 'phaser/save-state.js', engine: 'phaser', category: 'engine' },
+  { name: 'phaser/dialog-flow.js', engine: 'phaser', category: 'engine' },
+  { name: 'phaser/mobile-controls.js', engine: 'phaser', category: 'engine' },
+  { name: 'phaser/economy-system.js', engine: 'phaser', category: 'engine' },
+  { name: 'phaser/rhythm-clock.js', engine: 'phaser', category: 'engine' },
 ];
 
 // ── Three.js ────────────────────────────────────────────────────────────────
@@ -88,6 +98,16 @@ const THREE_SKILLS: ReadonlyArray<GameSkillSpec> = [
   // Combat & difficulty (enemies + escalating waves — the anti-flat-game set).
   { name: 'three/enemy-ai.jsx', engine: 'three', category: 'engine' },
   { name: 'three/wave-spawner.jsx', engine: 'three', category: 'engine' },
+  // Capability systems (Engine Evolution P8) — composable building blocks the
+  // capability recommender (recommend-skills.ts) pushes per game's declared traits.
+  { name: 'three/level-orchestrator.jsx', engine: 'three', category: 'engine' },
+  { name: 'three/procedural-gen.jsx', engine: 'three', category: 'engine' },
+  { name: 'three/animation-sequencer.jsx', engine: 'three', category: 'engine' },
+  { name: 'three/save-state.jsx', engine: 'three', category: 'engine' },
+  { name: 'three/dialog-flow.jsx', engine: 'three', category: 'engine' },
+  { name: 'three/mobile-controls.jsx', engine: 'three', category: 'engine' },
+  { name: 'three/economy-system.jsx', engine: 'three', category: 'engine' },
+  { name: 'three/rhythm-clock.jsx', engine: 'three', category: 'engine' },
 ];
 
 const ALL_SPECS: ReadonlyArray<GameSkillSpec> = [...PHASER_SKILLS, ...THREE_SKILLS];

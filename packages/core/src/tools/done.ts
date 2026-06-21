@@ -798,11 +798,10 @@ export function makeDoneTool(
               },
             };
             const invariantGenre = mapSpecGenreToInvariantGenre(spec.genre);
-            const floor = evaluateCompletabilityFloor(
-              invariantDeps,
-              spec,
-              invariantGenre !== undefined ? { genre: invariantGenre } : {},
-            );
+            const floor = evaluateCompletabilityFloor(invariantDeps, spec, {
+              ...(invariantGenre !== undefined ? { genre: invariantGenre } : {}),
+              ...(spec.capabilities !== undefined ? { capabilities: spec.capabilities } : {}),
+            });
             for (const issue of floor.fatal) {
               errors.push({
                 message: issue.message,

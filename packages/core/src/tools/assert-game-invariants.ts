@@ -58,6 +58,18 @@ const AssertGameInvariantsParams = Type.Object({
       Type.Literal('other'),
     ]),
   ),
+  /** Declared capabilities (Phase 1) — when supplied, the pass reflects the
+   *  game's intent: pointer/drag/touch schemes skip the keyboard-controls
+   *  warning, `escalates` enforces difficulty ramp regardless of genre, and
+   *  `hasFailState: false` exempts a deliberately-endless toy. */
+  capabilities: Type.Optional(
+    Type.Object({
+      controlScheme: Type.Optional(Type.String()),
+      escalates: Type.Optional(Type.Boolean()),
+      hasFailState: Type.Optional(Type.Boolean()),
+      hasEnemies: Type.Optional(Type.Boolean()),
+    }),
+  ),
 });
 
 export type GameInvariant =
@@ -68,10 +80,25 @@ export type GameInvariant =
   | 'controls'
   | 'camera-relative'
   | 'escalation'
+  | 'decoy-engine'
   | 'brawler-combo'
   | 'brawler-hitstop'
   | 'brawler-per-attack-limb'
   | 'brawler-aim-hitbox-parity';
+
+/** Engine Evolution Phase 1 — the capability slice this module reasons about.
+ *  Structural (not the zod type) so the module stays dependency-free; the host
+ *  passes the declared GameSpec.capabilities, a superset. When present these make
+ *  the checks reflect the game's DECLARED intent instead of a genre/regex guess:
+ *  pointer-only games don't get a keyboard-controls warning, a game that declares
+ *  escalation is held to it regardless of genre token, and a game that declares
+ *  no fail state isn't nagged for one. */
+export interface InvariantCapabilities {
+  controlScheme?: string | undefined;
+  escalates?: boolean | undefined;
+  hasFailState?: boolean | undefined;
+  hasEnemies?: boolean | undefined;
+}
 
 export interface InvariantIssue {
   invariant: GameInvariant;
@@ -278,6 +305,29 @@ const SHOULD_ESCALATE_GENRES: ReadonlySet<GameGenre> = new Set<GameGenre>([
   'survival',
 ]);
 
+/** Control schemes that do NOT drive the keyboard-controls contract. A game the
+ *  player steers entirely by mouse/touch (Phase 5) should not be nagged to call
+ *  controls.define just because it binds a stray R-to-restart keydown — that was
+ *  a false positive on the tide/boats probe run. */
+const NON_KEYBOARD_SCHEMES: ReadonlySet<string> = new Set<string>(['pointer', 'drag', 'touch']);
+
+/** Decoy-engine honesty check (Phase 4). The tide/boats probe run declared
+ *  engine `phaser` but shipped a vanilla-canvas game, leaving a dead Phaser shim
+ *  in the entry file (`if (false && window.Phaser) { class … extends Phaser.Scene {} }`)
+ *  purely to pass validate_game_scene. Detect that dishonesty so the engine
+ *  validates the REAL game, not a decoy. Build raw-canvas games honestly instead. */
+// Tightened to the UNAMBIGUOUS decoy signature so honest code isn't flagged: a
+// dead branch that constructs the declared engine ONLY to be seen by the
+// validator (`if (false && window.Phaser)` / `if (false && THREE)`), or an entry
+// file that openly states the real game runs elsewhere. We deliberately do NOT
+// match a bare empty subclass (`class Boot extends Phaser.Scene {}` — a legit
+// skeleton) or a generic disabled feature flag (`if (false && debug)`).
+const DECOY_ENGINE_PATTERNS: readonly RegExp[] = [
+  /if\s*\(\s*false\s*&&[^)]*\b(Phaser|THREE)\b/i,
+  /sandbox-safe\s+entry\s+placeholder/i,
+  /the\s+(playable|real|actual)\b[^\n]*\bis\s+loaded\s+by\b/i,
+];
+
 const ROTATION_NEGATED_ANGLE: readonly RegExp[] = [
   /rotation\.y\s*=\s*-\s*playerAngle/i,
   /rotation\.y\s*=\s*-\s*aimAngle/i,
@@ -297,9 +347,10 @@ export function parseGenreFromTranscript(text: string): GameGenre | null {
 
 export function assertGameInvariants(
   deps: AssertGameInvariantsDeps,
-  opts: { genre?: GameGenre } = {},
+  opts: { genre?: GameGenre; capabilities?: InvariantCapabilities } = {},
 ): AssertGameInvariantsDetails {
   const source = gatherSource(deps);
+  const caps = opts.capabilities;
   const issues: InvariantIssue[] = [];
   const checked: GameInvariant[] = [
     'restart',
@@ -307,6 +358,7 @@ export function assertGameInvariants(
     'score-or-state',
     'feedback',
     'controls',
+    'decoy-engine',
   ];
 
   if (!anyMatch(source, RESTART_PATTERNS)) {
@@ -317,7 +369,7 @@ export function assertGameInvariants(
         'No restart binding detected. Wire R or Space to reset state without a page reload — losing without restart is a hard fail per the gameplan §3.',
     });
   }
-  if (!anyMatch(source, FAIL_PATTERNS)) {
+  if (caps?.hasFailState !== false && !anyMatch(source, FAIL_PATTERNS)) {
     issues.push({
       invariant: 'fail-state',
       severity: 'warn',
@@ -341,12 +393,32 @@ export function assertGameInvariants(
         'No feedback cue detected. Hits / pickups / impacts need a visible AND audible response within 100 ms — a sound effect, particle burst, or screen shake. Silence reads as broken.',
     });
   }
-  if (anyMatch(source, KEYBOARD_INPUT_PATTERNS) && !CONTROLS_DEFINE_PATTERN.test(source)) {
+  // Controls contract — only for keyboard-driven games. A pointer/drag/touch
+  // scheme (Phase 5) steers by mouse/touch, so a stray restart keydown must not
+  // trip this (the tide/boats false positive).
+  const isKeyboardScheme =
+    caps?.controlScheme === undefined || !NON_KEYBOARD_SCHEMES.has(caps.controlScheme);
+  if (
+    isKeyboardScheme &&
+    anyMatch(source, KEYBOARD_INPUT_PATTERNS) &&
+    !CONTROLS_DEFINE_PATTERN.test(source)
+  ) {
     issues.push({
       invariant: 'controls',
       severity: 'warn',
       message:
         'Keyboard input is read directly without declaring a controls scheme. The runtime layer is already present — call window.__game.controls.define({ actions: [{ id, label, keys: ["ArrowLeft","KeyA"] }, …] }) and read input via controls.isDown(id) / controls.on(id, fn). This populates the builder Controls tab and lets players rebind keys live; reading cursors/keydown directly bypasses it, so the controls are invisible and unmappable.',
+    });
+  }
+
+  // Decoy-engine honesty (Phase 4) — a faked engine entry that exists only to
+  // pass validate_game_scene while the real game runs elsewhere.
+  if (anyMatch(source, DECOY_ENGINE_PATTERNS)) {
+    issues.push({
+      invariant: 'decoy-engine',
+      severity: 'warn',
+      message:
+        'Decoy engine entry detected — dead/placeholder framework code (e.g. `if (false && window.Phaser)` or an empty `extends Phaser.Scene {}`) that exists only to satisfy validate_game_scene while the real game runs in another file. Build honestly: if a raw <canvas> + requestAnimationFrame loop fits the idea better than the declared engine, write that as the actual entry (it is allowed) and wire window.__game from it — do NOT fake a scene.',
     });
   }
   if (anyMatch(source, IS_3D_PATTERNS)) {
@@ -407,9 +479,12 @@ export function assertGameInvariants(
     }
   }
 
-  // Genre-gated difficulty escalation — a shooter/runner/survival/tower-defense
-  // that never ramps is a tech demo, not a game (anti-slop §pacing).
-  if (genre !== null && SHOULD_ESCALATE_GENRES.has(genre)) {
+  // Difficulty escalation — a game that must ramp but never gets harder is a tech
+  // demo (anti-slop §pacing). Triggered by EITHER the genre token OR the declared
+  // capability `escalates` — the latter closes the genre-vocabulary gap that let
+  // the survival-shooter probe (declared genre 'topdown_arcade', not 'shooter')
+  // slip the escalation check entirely.
+  if ((genre !== null && SHOULD_ESCALATE_GENRES.has(genre)) || caps?.escalates === true) {
     checked.push('escalation');
     if (!anyMatch(source, ESCALATION_PATTERNS)) {
       issues.push({
@@ -486,6 +561,7 @@ export interface CompletabilitySpec {
   genre: string;
   winCondition?: string | undefined;
   loseCondition?: string | undefined;
+  capabilities?: InvariantCapabilities | undefined;
 }
 
 /**
@@ -544,7 +620,7 @@ export interface CompletabilityFloorResult {
 export function evaluateCompletabilityFloor(
   deps: AssertGameInvariantsDeps,
   spec: CompletabilitySpec,
-  opts: { genre?: GameGenre } = {},
+  opts: { genre?: GameGenre; capabilities?: InvariantCapabilities } = {},
 ): CompletabilityFloorResult {
   const result = assertGameInvariants(deps, opts);
   const completable = isCompletableSpec(spec);
@@ -590,7 +666,11 @@ export function makeAssertGameInvariantsTool(
     parameters: AssertGameInvariantsParams,
     async execute(_id, params): Promise<AgentToolResult<AssertGameInvariantsDetails>> {
       const genre = params.genre as GameGenre | undefined;
-      const result = assertGameInvariants(deps, genre !== undefined ? { genre } : {});
+      const capabilities = params.capabilities as InvariantCapabilities | undefined;
+      const result = assertGameInvariants(deps, {
+        ...(genre !== undefined ? { genre } : {}),
+        ...(capabilities !== undefined ? { capabilities } : {}),
+      });
       const baseInvariants = [
         'restart',
         'fail-state',

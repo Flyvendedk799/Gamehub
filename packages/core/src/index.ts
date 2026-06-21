@@ -165,6 +165,11 @@ export {
   type InvariantIssue,
 } from './tools/assert-game-invariants.js';
 export {
+  recommendSkills,
+  formatRecommendationsForPrompt,
+  type SkillRecommendation,
+} from './recommend-skills.js';
+export {
   makeRenderPreviewTool,
   type RenderPreviewer,
   type RenderPreviewerInput,

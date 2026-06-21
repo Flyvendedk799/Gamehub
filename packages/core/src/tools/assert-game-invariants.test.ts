@@ -274,6 +274,7 @@ describe('assertGameInvariants brawler-specific checks (Sequence 6)', () => {
       'score-or-state',
       'feedback',
       'controls',
+      'decoy-engine',
     ]);
     expect(result.genre).toBeNull();
   });
@@ -396,7 +397,10 @@ describe('assertGameInvariants — difficulty escalation (genre-gated)', () => {
       const result = assertGameInvariants(deps([{ path: 'src/main.js', content: COMPLETE_BASE }]), {
         genre,
       });
-      expect(result.issues.map((i) => i.invariant), genre).toContain('escalation');
+      expect(
+        result.issues.map((i) => i.invariant),
+        genre,
+      ).toContain('escalation');
     }
   });
 
@@ -423,7 +427,72 @@ describe('assertGameInvariants — difficulty escalation (genre-gated)', () => {
         genre,
       });
       expect(result.checked, genre).not.toContain('escalation');
-      expect(result.issues.map((i) => i.invariant), genre).not.toContain('escalation');
+      expect(
+        result.issues.map((i) => i.invariant),
+        genre,
+      ).not.toContain('escalation');
     }
+  });
+});
+
+describe('assertGameInvariants — capability-aware (Engine Evolution P4/P5/P6)', () => {
+  const POINTER_GAME = `
+    // a drag/pointer game with a stray restart keydown
+    canvas.addEventListener('pointermove', onDrag);
+    window.addEventListener('keydown', (e) => { if (e.code === 'KeyR') restart(); });
+    let boatsSaved = 0;
+    function onArrive() { boatsSaved += 1; new Audio('chime.wav').play(); }
+    function restart() { boatsSaved = 0; }
+  `;
+
+  it('P5: a pointer/drag scheme does NOT get the keyboard-controls warning', () => {
+    const withCap = assertGameInvariants(deps([{ path: 'src/main.js', content: POINTER_GAME }]), {
+      capabilities: { controlScheme: 'drag' },
+    });
+    expect(withCap.issues.map((i) => i.invariant)).not.toContain('controls');
+    // …but the same source WITHOUT the capability still warns (back-compat).
+    const noCap = assertGameInvariants(deps([{ path: 'src/main.js', content: POINTER_GAME }]));
+    expect(noCap.issues.map((i) => i.invariant)).toContain('controls');
+  });
+
+  it('P6: capabilities.escalates enforces the escalation check regardless of genre token', () => {
+    // genre topdown_arcade is NOT in SHOULD_ESCALATE_GENRES, but the capability is set.
+    const flat = `${POINTER_GAME}\n const cursors = this.input.keyboard.createCursorKeys();`;
+    const result = assertGameInvariants(deps([{ path: 'src/main.js', content: flat }]), {
+      capabilities: { escalates: true },
+    });
+    expect(result.checked).toContain('escalation');
+    expect(result.issues.map((i) => i.invariant)).toContain('escalation');
+  });
+
+  it('P6: hasFailState:false exempts a deliberately-endless toy from the fail-state warning', () => {
+    const noFail = `let score = 0; function tick(){ score += 1; new Audio('x.wav').play(); } function reset(){ score = 0; }`;
+    const result = assertGameInvariants(deps([{ path: 'src/main.js', content: noFail }]), {
+      capabilities: { hasFailState: false },
+    });
+    expect(result.issues.map((i) => i.invariant)).not.toContain('fail-state');
+  });
+
+  it('P4: flags a decoy engine entry (fake Phaser shim while the real game runs elsewhere)', () => {
+    const decoy = `
+      // Sandbox-safe entry placeholder; the playable canvas game is loaded by src/main-vanilla.js.
+      if (false && window.Phaser) {
+        class PhaserValidationScene extends Phaser.Scene {}
+        new Phaser.Game({ scene: PhaserValidationScene });
+      }
+    `;
+    const result = assertGameInvariants(deps([{ path: 'src/main.js', content: decoy }]));
+    expect(result.checked).toContain('decoy-engine');
+    expect(result.issues.map((i) => i.invariant)).toContain('decoy-engine');
+  });
+
+  it('P4: an honest game produces no decoy-engine warning', () => {
+    const honest = `
+      const game = new Phaser.Game({ scene: { create, update } });
+      function create() { this.add.text(10, 10, 'hi'); }
+      function update() {}
+    `;
+    const result = assertGameInvariants(deps([{ path: 'src/main.js', content: honest }]));
+    expect(result.issues.map((i) => i.invariant)).not.toContain('decoy-engine');
   });
 });
