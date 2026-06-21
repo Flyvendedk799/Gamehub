@@ -7,11 +7,11 @@ describe('analyzeSkillUsage', () => {
     const files = [
       {
         path: 'src/engine/enemy-ai.js',
-        content: `export function makeEnemyBrain(config) { return {}; }`,
+        content: 'export function makeEnemyBrain(config) { return {}; }',
       },
       {
         path: 'src/engine/wave-spawner.js',
-        content: `export function createWaveSystem(opts) { return {}; }`,
+        content: 'export function createWaveSystem(opts) { return {}; }',
       },
       {
         path: 'src/main.js',
@@ -38,15 +38,15 @@ const wave3 = createWaveSystem({ count: 8 });
     const files = [
       {
         path: 'src/engine/procedural-gen.js',
-        content: `export function generateDungeon(seed) { return []; }`,
+        content: 'export function generateDungeon(seed) { return []; }',
       },
       {
         path: 'src/engine/dialog-flow.js',
-        content: `export function createDialogFlow(nodes) { return {}; }`,
+        content: 'export function createDialogFlow(nodes) { return {}; }',
       },
       {
         path: 'src/engine/economy-system.js',
-        content: `export function makeEconomySystem() { return {}; }`,
+        content: 'export function makeEconomySystem() { return {}; }',
       },
       {
         path: 'src/main.js',
@@ -68,11 +68,11 @@ const dungeon = [];
     const files = [
       {
         path: 'src/engine/level-orchestrator.js',
-        content: `export function createLevelOrchestrator(levels) { return {}; }`,
+        content: 'export function createLevelOrchestrator(levels) { return {}; }',
       },
       {
         path: 'src/engine/save-state.js',
-        content: `export function createSaveState(key) { return {}; }`,
+        content: 'export function createSaveState(key) { return {}; }',
       },
       {
         path: 'src/main.js',
@@ -129,7 +129,7 @@ debug.snapshot = function() { return state; };
     const files = [
       {
         path: 'src/engine/wave-spawner.js',
-        content: `export function createWaveSystem(opts) { return {}; }`,
+        content: 'export function createWaveSystem(opts) { return {}; }',
       },
       {
         path: 'src/main.js',
@@ -164,7 +164,7 @@ const ws2 = createWaveSystem({ count: 10 });
     const files = [
       {
         path: 'src/engine/enemy-ai.js',
-        content: `export function makeEnemyBrain() { return {}; }`,
+        content: 'export function makeEnemyBrain() { return {}; }',
       },
     ];
 
@@ -179,7 +179,7 @@ const ws2 = createWaveSystem({ count: 10 });
     const files = [
       {
         path: 'src/engine/wave-spawner.js',
-        content: `export function createWaveSystem() { return {}; }`,
+        content: 'export function createWaveSystem() { return {}; }',
       },
       {
         path: 'src/assets/sprite.js',
@@ -199,7 +199,7 @@ const ws2 = createWaveSystem({ count: 10 });
     const files = [
       {
         path: 'src/engine/wave-spawner.js',
-        content: `export function createWaveSystem(opts) { return {}; }`,
+        content: 'export function createWaveSystem(opts) { return {}; }',
       },
       {
         path: 'src/systems/combat.ts',

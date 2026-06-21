@@ -46,7 +46,7 @@ function countCallsInOutside(outside: string, name: string): number {
 function countDebugWirings(allContent: string): number {
   let total = 0;
   for (const re of DEBUG_WIRING_PATTERNS) {
-    const flags = re.flags.includes('g') ? re.flags : re.flags + 'g';
+    const flags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
     const global = new RegExp(re.source, flags);
     total += (allContent.match(global) ?? []).length;
   }

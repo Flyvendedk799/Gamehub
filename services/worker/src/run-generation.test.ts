@@ -702,10 +702,13 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     expect(rounds).toBe(1);
   });
 
-  it('a NON-COMPLETABLE spec (loseCondition —) ships with skipped_non_completable, no repair', async () => {
+  it('v3 P9: a non-completable spec whose bundled playbook PASSES earns a real verdict (not skipped)', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());
-    // Even though the playtest fails, a no-fail-state spec skips the gate.
-    const browserJobs = queuedBrowserJobs([invertedPlaytest()]);
+    // Pre-v3 a non-completable spec (loseCondition —) took the skipped_non_completable
+    // escape EVEN when its genre playbook scored — discarding a real verdict. v3 P9:
+    // if the playbook actually scored (here, a clean pass), honour it. The topdown
+    // playbook ran + passed, so this endless toy ships a genuine 'passed'.
+    const browserJobs = queuedBrowserJobs([passingPlaytest()]);
     let rounds = 0;
     const agent: GenerateFn = async (_input, deps) => {
       rounds += 1;
@@ -728,7 +731,7 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     );
 
     expect(result.repairRounds).toBe(0);
-    expect(result.shipReason).toBe('skipped_non_completable');
+    expect(result.shipReason).toBe('passed');
     expect(rounds).toBe(1);
   });
 
