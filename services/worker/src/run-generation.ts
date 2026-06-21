@@ -734,7 +734,13 @@ export async function runGeneration(
   // imported (import_skill). Pre-v3 this only checked skillsViewed, so every
   // imported skill was mis-counted "unused" (the metric went blind to P1).
   const adopted = new Set([...sig.skillsViewed, ...sig.skillsImported]);
-  const recommendedButUnused = recommended.filter((r) => !adopted.has(r.skill)).map((r) => r.skill);
+  // v3 P5 — only the "import now" core tier (first 3, emitted core-first) counts
+  // as missed adoption; the long "also available" tail shouldn't penalise a run
+  // for a skipped polish skill.
+  const recommendedButUnused = recommended
+    .slice(0, 3)
+    .filter((r) => !adopted.has(r.skill))
+    .map((r) => r.skill);
   const engineEscaped = sig.invariantWarnings.includes('decoy-engine');
   // v3 P2 — code-usage signals (was hand-greped): did the imported skills get
   // imported + CALLED, or written to disk and abandoned?

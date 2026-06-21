@@ -58,6 +58,10 @@ export interface ScoreMessage {
 export const CONTROLS_MANIFEST_MESSAGE_TYPE = 'playforge:controls:manifest' as const;
 export const CONTROLS_REBIND_MESSAGE_TYPE = 'playforge:controls:rebind' as const;
 export const CONTROLS_REQUEST_MESSAGE_TYPE = 'playforge:controls:request' as const;
+/** v3 P10b — the game posts cloud-save mutations to the host so a per-account
+ *  store can mirror them cross-device (the in-iframe shim persists to localStorage
+ *  for the device-local baseline; the host relay is the cloud seam). */
+export const CLOUD_SAVE_MESSAGE_TYPE = 'playforge:cloudsave' as const;
 
 /** One rebindable action a game declares (id + human label + bound inputs). */
 export interface ControlAction {
@@ -188,6 +192,7 @@ export function gameGlobalSetupSnippet(opts: {
   const ctrlManifestType = JSON.stringify(CONTROLS_MANIFEST_MESSAGE_TYPE);
   const ctrlRebindType = JSON.stringify(CONTROLS_REBIND_MESSAGE_TYPE);
   const ctrlRequestType = JSON.stringify(CONTROLS_REQUEST_MESSAGE_TYPE);
+  const cloudSaveType = JSON.stringify(CLOUD_SAVE_MESSAGE_TYPE);
   return `<script>
 window.__game = window.__game || {};
 window.__game.engine = ${JSON.stringify(opts.engine)};
@@ -226,6 +231,21 @@ window.__game.debug = window.__game.debug || (function () {
   }
   var api = { track: track, snapshot: snapshot };
   return api;
+})();
+// v3 P10b — cloud-save bridge. The cloud-save skill (import_skill) calls
+// window.__game.cloudSave.get/set/clear. This shim persists to localStorage for a
+// device-local baseline AND posts a cloud-save message to the host so a per-account
+// store can mirror it cross-device (CSP connect-src 'self' safe — no direct net).
+window.__game.cloudSave = window.__game.cloudSave || (function () {
+  var PREFIX = 'pf:cloud:';
+  function lsGet(key) { try { var v = localStorage.getItem(PREFIX + key); return v === null ? null : JSON.parse(v); } catch (e) { return null; } }
+  function lsSet(key, value) { try { localStorage.setItem(PREFIX + key, JSON.stringify(value)); } catch (e) {} }
+  function relay(op, key, value) { try { if (window.parent && window.parent !== window) window.parent.postMessage({ type: ${cloudSaveType}, op: op, key: key, value: value }, '*'); } catch (e) {} }
+  return {
+    get: function (key) { return Promise.resolve(lsGet(key)); },
+    set: function (key, value) { lsSet(key, value); relay('set', key, value); return Promise.resolve(); },
+    clear: function (key) { try { if (key) { localStorage.removeItem(PREFIX + key); } } catch (e) {} relay('clear', key || null, null); return Promise.resolve(); }
+  };
 })();
 // WS-A — rebindable input layer. The game DECLARES its controls via
 // window.__game.controls.define({ actions:[{id,label,description,keys:[...]}] })
