@@ -335,6 +335,12 @@ export function checkEngineFit(spec: GameSpec, engine: GameEngineId): EngineFit 
         reason: 'canvas2d is a 2D drawing surface. Real 3D needs three.',
       };
     }
+    if (NON_CANVAS2D_GENRES.has(spec.genre)) {
+      return {
+        verdict: 'warn',
+        reason: `${spec.genre} is text/UI-heavy — a raw canvas is awkward for flowing text / HTML panels. Prefer phaser (it has this genre's playbook).`,
+      };
+    }
     return {
       verdict: 'ok',
       reason: 'Raw 2D canvas + custom loop — a clean fit for bespoke/ambient 2D ideas.',
@@ -375,22 +381,54 @@ export function checkEngineFit(spec: GameSpec, engine: GameEngineId): EngineFit 
  * instead of being force-fit into phaser/three (the box-escape the garden run
  * exposed). Returns null when no strong preference applies. Never a hard gate.
  */
+/** Genres that are DOM/text/UI-heavy — a raw canvas is the wrong tool (a VN wants
+ *  flowing text, idle/tycoon want HTML buttons + number panels). v3 P6: these
+ *  must NOT be steered to canvas2d even when the pointer/no-enemies fingerprint
+ *  matches; they keep phaser (which has their bundled playbooks). */
+const NON_CANVAS2D_GENRES: ReadonlySet<string> = new Set<string>([
+  'visual_novel',
+  'idle',
+  'tycoon',
+]);
+
+/** Positive ambient/abstract signal — canvas2d is right when the game is genuinely
+ *  generative/fluid (guide a tide, grow a plant, paint), not merely "2D + pointer
+ *  + no enemies" (which also describes a VN or an idle game — the Loop-3 over-steer). */
+const AMBIENT_MECHANICS = [
+  'guide',
+  'flow',
+  'grow',
+  'paint',
+  'draw',
+  'tide',
+  'ripple',
+  'particle',
+  'fluid',
+  'ambient',
+  'generative',
+];
+
 export function recommendEngine(spec: GameSpec): { engine: GameEngineId; reason: string } | null {
   const caps = spec.capabilities;
   if (spec.dimensions === '3d')
     return { engine: 'three', reason: 'real 3D needs a WebGL scene graph' };
-  // The ambient fingerprint: a 2D pointer/drag toy with no enemies/physics fits a
-  // raw canvas better than a scene framework.
+  // Never steer DOM/text/UI genres onto a raw canvas (v3 P6).
+  if (NON_CANVAS2D_GENRES.has(spec.genre)) return null;
+  // The ambient fingerprint: a 2D pointer/drag toy with no enemies/physics AND a
+  // genuinely ambient/generative mechanic (not just the ABSENCE of combat).
+  const mechanics = (caps?.mechanics ?? []).map((m) => m.toLowerCase());
+  const isAmbient = mechanics.some((m) => AMBIENT_MECHANICS.some((kw) => m.includes(kw)));
   if (
     spec.dimensions === '2d' &&
     (caps?.controlScheme === 'drag' || caps?.controlScheme === 'pointer') &&
     caps?.hasEnemies !== true &&
-    caps?.hasPhysics !== true
+    caps?.hasPhysics !== true &&
+    isAmbient
   ) {
     return {
       engine: 'canvas2d',
       reason:
-        'an ambient/abstract 2D pointer/drag idea fits a raw canvas — build it honestly, no decoy scene',
+        'an ambient/generative 2D pointer/drag idea fits a raw canvas — build it honestly, no decoy scene',
     };
   }
   return null;

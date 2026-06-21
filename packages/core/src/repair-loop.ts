@@ -324,12 +324,19 @@ export function decideRepairAction(
   if (spec !== null && spec !== undefined && !isCompletableSpec(spec)) {
     // The completability gate is skipped for creative / non-completable specs so
     // a genre playbook's assumptions (e.g. "WASD moves the player +x") can't
-    // false-fail a creative variant that repurposes those inputs. TWO carve-outs:
+    // false-fail a creative variant that repurposes those inputs. THREE carve-outs:
     //  - a fatal boot error still repairs (every game must boot — PR boot-gate);
     //  - an AGENT-AUTHORED contract is the agent's OWN commitment, not an external
-    //    template, so it is verified even for a non-completable game (the path
-    //    that lets a genre-less creative game earn a real `passed`).
-    if (verdict.fatalErrors.length === 0 && state.contractAuthored !== true) {
+    //    template, so it is verified even for a non-completable game;
+    //  - v3 P9: if a bundled playbook actually SCORED (score !== null) — VN/idle/
+    //    sandbox gained real predicate playbooks in v2 P6 — DON'T discard that
+    //    score; fall through to pass/fail. The escape is only for genres with no
+    //    predicates AND no contract (genuinely nothing deterministic to judge).
+    if (
+      verdict.fatalErrors.length === 0 &&
+      state.contractAuthored !== true &&
+      verdict.score === null
+    ) {
       return { kind: 'ship', reason: 'skipped_non_completable' };
     }
   }

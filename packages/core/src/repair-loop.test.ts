@@ -246,16 +246,29 @@ describe('decideRepairAction', () => {
     expect(action).toEqual({ kind: 'ship', reason: 'repair_exhausted' });
   });
 
-  it('ships with reason=skipped_non_completable for a non-completable spec (escape hatch)', () => {
-    // A puzzle with no fail state (loseCondition '—') is non-completable even
-    // though its genre ships a playbook with predicates — the failing trace
-    // must NOT trigger a repair.
+  it('v3 P9: a non-completable spec whose playbook SCORED a failure repairs (score not discarded)', () => {
+    // Pre-v3 the escape hatch discarded a real scored failure for any
+    // non-completable spec. v3 P9: if predicates actually ran (score !== null),
+    // honour them — fall through to repair instead of skipping.
     const verdict = buildRepairVerdict(
       { trace: INVERTED_TOPDOWN_TRACE, fatalErrors: [] },
       predicatesFor('topdown_arcade'),
     );
     const nonCompletable: CompletabilitySpec = {
       genre: 'topdown_arcade',
+      winCondition: '—',
+      loseCondition: '—',
+    };
+    const action = decideRepairAction(verdict, nonCompletable, loopState());
+    expect(action.kind).toBe('repair');
+  });
+
+  it('escape hatch still holds for a non-completable spec with NO predicates (score null)', () => {
+    // No playbook predicates + no contract + non-completable → genuinely nothing
+    // deterministic to judge → skipped_non_completable (the legitimate escape).
+    const verdict = buildRepairVerdict({ trace: null, fatalErrors: [] }, []);
+    const nonCompletable: CompletabilitySpec = {
+      genre: 'sandbox',
       winCondition: '—',
       loseCondition: '—',
     };

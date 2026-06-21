@@ -482,10 +482,16 @@ export function assertGameInvariants(
   // mutation or a fail state) that never exposes window.__game.debug.snapshot
   // can't be play-verified and ships no_verdict. Pointer/static toys with no
   // state are exempt. Imported skills wire their getState() here automatically.
-  // Gated on the DECLARED capability (present on real runs via the spec), so a
-  // game that commits to a fail state — i.e. wants a real play verdict — is held
-  // to exposing one. Standalone invariant calls without capabilities are exempt.
-  const wantsVerdict = caps?.hasFailState === true;
+  // Gated on the DECLARED capabilities (present on real runs via the spec), so a
+  // game that commits to ANY measurable gameplay — i.e. wants a real play verdict
+  // — is held to exposing a snapshot. v3 P8: broadened beyond hasFailState so
+  // ambient/no-fail canvas2d toys that still have state (enemies/escalation/
+  // progression) aren't exempt. Standalone calls without capabilities stay exempt.
+  const wantsVerdict =
+    caps?.hasFailState === true ||
+    caps?.hasEnemies === true ||
+    caps?.escalates === true ||
+    caps?.hasProgression === true;
   if (wantsVerdict && !anyMatch(source, SNAPSHOT_WIRING_PATTERNS)) {
     issues.push({
       invariant: 'debug-snapshot',
