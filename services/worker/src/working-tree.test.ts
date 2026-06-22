@@ -62,6 +62,67 @@ describe('WorkingTree edits', () => {
     ).toThrow(/overlapping/);
   });
 
+  it('patch relocates a hunk when the line range is stale but expectedOriginal is unique', () => {
+    // The file gained 2 lines at the top since the model last viewed it, so the
+    // model's line numbers point one block too high. expectedOriginal is the
+    // ground truth → relocate + apply rather than failing with a stale-line error.
+    const t = new WorkingTree([['a.js', '// added\n// added2\nconst hp = 1;\nconst mp = 2;']]);
+    t.patch('a.js', [
+      {
+        startLine: 1,
+        endLine: 1,
+        replacement: 'const hp = 99;',
+        expectedOriginal: 'const hp = 1;',
+      },
+    ]);
+    expect(t.view('a.js')?.content).toBe('// added\n// added2\nconst hp = 99;\nconst mp = 2;');
+  });
+
+  it('patch errors clearly when expectedOriginal is gone (0 matches) vs ambiguous (>1)', () => {
+    const gone = new WorkingTree([['a.js', 'x\ny\nz']]);
+    expect(() =>
+      gone.patch('a.js', [
+        { startLine: 1, endLine: 1, replacement: 'q', expectedOriginal: 'NOT THERE' },
+      ]),
+    ).toThrow(/not present anywhere/);
+    const dupe = new WorkingTree([['a.js', 'dup\nmid\ndup']]);
+    expect(() =>
+      dupe.patch('a.js', [{ startLine: 2, endLine: 2, replacement: 'q', expectedOriginal: 'dup' }]),
+    ).toThrow(/appears 2 times/);
+  });
+
+  it('strReplace does NOT auto-apply on whitespace drift (no silent indent corruption — errors instead)', () => {
+    // Indentation-significant content (e.g. a GLSL shader string). The model's
+    // old_str dropped the indent → exact match fails. We must NOT silently splice
+    // the de-indented bytes in; a clean failure lets the model re-view + retry.
+    const t = new WorkingTree([['a.js', 'const shader = `\n        void main() {\n        }\n`;']]);
+    expect(() => t.strReplace('a.js', 'void main() {\n}', 'void main() { gl_x(); }')).toThrow(
+      /no match/,
+    );
+    // File is untouched — no partial/corrupting write.
+    expect(t.view('a.js')?.content).toBe('const shader = `\n        void main() {\n        }\n`;');
+  });
+
+  it('patch rejects non-integer line numbers rather than truncating (no slice/splice divergence)', () => {
+    // Fast-path fractional: slice(1.7,3.2)→['two','three'] matches expectedOriginal,
+    // but splice(1.7, 1.5) would delete only 1 line → orphan 'three'. Must reject.
+    const t = new WorkingTree([['a.js', 'one\ntwo\nthree\nfour']]);
+    expect(() =>
+      t.patch('a.js', [
+        { startLine: 2.7, endLine: 3.2, replacement: 'X', expectedOriginal: 'two\nthree' },
+      ]),
+    ).toThrow(/must be integers/);
+  });
+
+  it('patch does NOT relocate on a whitespace-only expectedOriginal (too weak an anchor)', () => {
+    // A blank-line anchor carries no signal; relocation must not fire. With a stale
+    // range it falls through to the range path → out-of-range error, never a guess.
+    const t = new WorkingTree([['a.js', 'a\n\nb\n\nc']]);
+    expect(() =>
+      t.patch('a.js', [{ startLine: 50, endLine: 50, replacement: 'X', expectedOriginal: '   ' }]),
+    ).toThrow(/out of range/);
+  });
+
   it('listDir returns sorted paths under a prefix', () => {
     const t = new WorkingTree([
       ['index.html', ''],

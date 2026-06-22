@@ -829,6 +829,31 @@ export function makeTextEditorTool(
           if (hunks === undefined || hunks.length === 0) {
             throw new Error('patch requires a non-empty `hunks` array');
           }
+          // Integer line numbers are required on EVERY hunk, including the
+          // content-anchored (allHaveExpected) path that defers range validation
+          // below. hunk.startLine/endLine are TypeBox numbers (not integers), so a
+          // fractional value would otherwise reach fs.patch, where slice() (verify)
+          // and splice() (apply) truncate independently and can diverge by a line —
+          // silent corruption. Reject, never coerce. (Adversarial review #3.)
+          for (const h of hunks) {
+            if (!Number.isInteger(h.startLine) || !Number.isInteger(h.endLine) || h.startLine < 1) {
+              throw new Error(
+                `patch hunk has non-integer or out-of-range line numbers [${h.startLine}, ${h.endLine}] — startLine and endLine must be whole numbers ≥ 1.`,
+              );
+            }
+          }
+          // When EVERY hunk carries expectedOriginal, the patch is fully
+          // content-anchored: fs.patch relocates each hunk to wherever its
+          // expectedOriginal actually is (handling a file that shifted/shrank
+          // since the model last viewed it) and runs overlap/range checks on the
+          // RESOLVED ranges. Validating the model's stale line numbers HERE would
+          // hard-reject those relocatable edits — that was the #1 "invalid line
+          // range" failure (a hunk whose start fell past a shrunk file). So skip
+          // the line-number gates and defer to fs.patch. Hunks lacking
+          // expectedOriginal still get the strict bounds/overlap checks below.
+          const allHaveExpected = hunks.every(
+            (h) => typeof h.expectedOriginal === 'string' && h.expectedOriginal.length > 0,
+          );
           let totalReplacementBytes = 0;
           for (const h of hunks) totalReplacementBytes += Buffer.byteLength(h.replacement, 'utf8');
           const patchCap = maxStrReplaceBytesFor(path);
@@ -837,44 +862,46 @@ export function makeTextEditorTool(
               `text_editor.patch("${path}", ...) replacement total ${totalReplacementBytes} bytes exceeds ${patchCap}-byte cap. Split into multiple patch calls.`,
             );
           }
-          // Reject overlapping hunks before reaching the fs callback —
-          // cleaner error message than whatever the fs surfaces.
-          const sorted = [...hunks].sort((a, b) => a.startLine - b.startLine);
-          for (let i = 1; i < sorted.length; i += 1) {
-            const prev = sorted[i - 1];
-            const cur = sorted[i];
-            if (prev === undefined || cur === undefined) continue;
-            if (cur.startLine <= prev.endLine) {
-              throw new Error(
-                `patch hunks overlap: hunk ending at line ${prev.endLine} conflicts with hunk starting at line ${cur.startLine}. Hunks must not overlap.`,
-              );
+          if (!allHaveExpected) {
+            // Reject overlapping hunks before reaching the fs callback —
+            // cleaner error message than whatever the fs surfaces.
+            const sorted = [...hunks].sort((a, b) => a.startLine - b.startLine);
+            for (let i = 1; i < sorted.length; i += 1) {
+              const prev = sorted[i - 1];
+              const cur = sorted[i];
+              if (prev === undefined || cur === undefined) continue;
+              if (cur.startLine <= prev.endLine) {
+                throw new Error(
+                  `patch hunks overlap: hunk ending at line ${prev.endLine} conflicts with hunk starting at line ${cur.startLine}. Hunks must not overlap.`,
+                );
+              }
             }
-          }
-          // Bounds validation lives in the tool so it's enforced
-          // regardless of whether the fs adapter validates. Use a
-          // ranged view to know the file's current line count.
-          const fileForBounds = fs.view(path);
-          if (fileForBounds === null) throw new Error(`File not found: ${path}`);
-          const totalLinesBefore = fileForBounds.numLines;
-          for (const h of hunks) {
-            if (
-              !Number.isInteger(h.startLine) ||
-              !Number.isInteger(h.endLine) ||
-              h.startLine < 1 ||
-              h.endLine < h.startLine - 1 ||
-              h.startLine > totalLinesBefore + 1
-            ) {
-              throw new Error(
-                `patch hunk has invalid line range [${h.startLine}, ${h.endLine}] (file has ${totalLinesBefore} lines, 1-indexed inclusive endLine).`,
-              );
-            }
-            // Models routinely over-estimate endLine ("replace lines 1..200" of
-            // a 145-line file) — they mean "to the end of the file". Clamp to EOF
-            // instead of rejecting; the expectedOriginal check below still guards
-            // a genuinely wrong range. This was the dominant cause of the patch
-            // death-spiral (file degrades, then a SyntaxError fails the run).
-            if (h.endLine > totalLinesBefore) {
-              h.endLine = totalLinesBefore;
+            // Bounds validation lives in the tool so it's enforced
+            // regardless of whether the fs adapter validates. Use a
+            // ranged view to know the file's current line count.
+            const fileForBounds = fs.view(path);
+            if (fileForBounds === null) throw new Error(`File not found: ${path}`);
+            const totalLinesBefore = fileForBounds.numLines;
+            for (const h of hunks) {
+              if (
+                !Number.isInteger(h.startLine) ||
+                !Number.isInteger(h.endLine) ||
+                h.startLine < 1 ||
+                h.endLine < h.startLine - 1 ||
+                h.startLine > totalLinesBefore + 1
+              ) {
+                throw new Error(
+                  `patch hunk has invalid line range [${h.startLine}, ${h.endLine}] (file has ${totalLinesBefore} lines, 1-indexed inclusive endLine).`,
+                );
+              }
+              // Models routinely over-estimate endLine ("replace lines 1..200" of
+              // a 145-line file) — they mean "to the end of the file". Clamp to EOF
+              // instead of rejecting; the expectedOriginal check below still guards
+              // a genuinely wrong range. This was the dominant cause of the patch
+              // death-spiral (file degrades, then a SyntaxError fails the run).
+              if (h.endLine > totalLinesBefore) {
+                h.endLine = totalLinesBefore;
+              }
             }
           }
           // Improver1 §8 — per-target retry budget on patch. Use the
