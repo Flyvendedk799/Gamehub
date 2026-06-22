@@ -50,4 +50,26 @@ describe('createEditBudget', () => {
     }
     expect(budget.recordEdit('p')).toContain('5 consecutive');
   });
+
+  it('cumulative warning SURVIVES verifies (reset) and fires once at the cumulative threshold', () => {
+    // The incremental-edit thrash: edit a few, verify (reset), repeat. The
+    // consecutive counter never trips, but the cumulative one must.
+    const budget = createEditBudget(5, 12);
+    let warned: string | null = null;
+    for (let i = 0; i < 12; i += 1) {
+      const w = budget.recordEdit('main.js');
+      if (w?.includes('separate edits')) warned = w;
+      if ((i + 1) % 3 === 0) budget.reset(); // "verify" between edits → resets consecutive only
+    }
+    expect(warned).toContain('12 separate edits to main.js');
+    // One-shot: a further edit does not re-warn cumulatively.
+    const after = budget.recordEdit('main.js');
+    expect(after === null || !after.includes('separate edits')).toBe(true);
+  });
+
+  it('cumulative counter is per-path (one busy file does not flag a quiet one)', () => {
+    const budget = createEditBudget(5, 12);
+    for (let i = 0; i < 12; i += 1) budget.recordEdit('busy.js');
+    expect(budget.recordEdit('quiet.js')).toBeNull();
+  });
 });

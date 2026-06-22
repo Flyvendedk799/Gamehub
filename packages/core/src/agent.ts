@@ -2334,8 +2334,12 @@ export async function generateViaAgent(
       // be reasoning / catching up, not converging.
       if (allEditedPaths.size === 0) return;
       if (allEditedPaths.size > 1) return;
+      // NB: we intentionally DO fire even when verify_artifact ran between the
+      // edits. Verifying used to bail this steer (`if (anyVerify) return`), which
+      // meant the edit→verify→edit→verify pattern (the real prod thrash: 132
+      // edits, 24 verifies, 34 min) permanently dodged it. The inefficiency is the
+      // micro-editing itself, not the absence of verifies.
       const anyVerify = convergenceTurns.some((t) => t.verifyArtifactCalled);
-      if (anyVerify) return;
       const path = Array.from(allEditedPaths)[0] ?? 'index.html';
       convergenceSteerEmitted = true;
       log.warn('[generate] step=convergence_steer', {
@@ -2343,14 +2347,39 @@ export async function generateViaAgent(
         path,
         turnCount: totalTurns,
         lookback: CONVERGENCE_LOOKBACK,
+        anyVerify,
       });
-      const messageBody = `[system-reminder] You've made ${CONVERGENCE_LOOKBACK} small edits in a row on \`${path}\` (each turn produced under ${CONVERGENCE_BYTE_THRESHOLD} chars of output) with no \`verify_artifact\` call between them. The artifact is likely converged or the requirement is unclear. Run \`verify_artifact\` next; if it passes, call \`done\`. If you genuinely need to keep iterating, call \`set_todos\` first to declare the remaining work — that's the signal to keep going.`;
+      const messageBody = `[system-reminder] You've made ${CONVERGENCE_LOOKBACK}+ tiny edits in a row on \`${path}\` (each turn under ${CONVERGENCE_BYTE_THRESHOLD} chars). Incremental micro-editing is the #1 cause of a slow, expensive build — every edit is a full model round-trip that re-reads the whole context. STOP editing piecemeal. Either the file is DONE — call \`done\` — or compose the remaining work as ONE larger block (the complete content in a single \`create\`/\`str_replace\`), not more micro-edits.${anyVerify ? ' (You have already verified; the mandatory pre-done gate verifies again, so you do not need to re-verify after every edit.)' : ''} If you genuinely have a distinct remaining system to build, call \`set_todos\` to declare it, then author it in one block.`;
       agent.steer({
         role: 'user',
         content: messageBody,
         timestamp: Date.now(),
       });
     }
+  });
+
+  // Over-verification steer (independent of the convergence one). The real prod
+  // thrash ran verify_artifact 24× — each is a full model round-trip AND each
+  // resets the edit-budget/convergence guards, so over-verifying both slows the
+  // build and disables the anti-thrash brakes. Nudge ONCE past a sane milestone
+  // count toward verifying at section boundaries + trusting the pre-done gate.
+  const VERIFY_OVERUSE_THRESHOLD = 8;
+  let verifyArtifactCount = 0;
+  let verifyOveruseSteerEmitted = false;
+  agent.subscribe((event) => {
+    if (verifyOveruseSteerEmitted) return;
+    if (event.type !== 'tool_execution_start') return;
+    const tname = (event as unknown as { toolName?: unknown }).toolName;
+    if (tname !== 'verify_artifact') return;
+    verifyArtifactCount += 1;
+    if (verifyArtifactCount < VERIFY_OVERUSE_THRESHOLD) return;
+    verifyOveruseSteerEmitted = true;
+    log.warn('[generate] step=verify_overuse_steer', { ...ctx, count: verifyArtifactCount });
+    agent.steer({
+      role: 'user',
+      content: `[system-reminder] You've run verify_artifact ${verifyArtifactCount} times. It is a MILESTONE check — run it after finishing a whole section, NOT after every edit — and the mandatory pre-done gate (validate_game_scene + playtest_game) is the authoritative final check. Re-verifying after each small change just burns round-trips (each is slow) and resets the anti-thrash guards. Batch the rest of your work into larger blocks; verify only at section boundaries, then call done.`,
+      timestamp: Date.now(),
+    });
   });
 
   const budgetTimer = setTimeout(() => {
