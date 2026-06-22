@@ -642,6 +642,17 @@ export async function runGeneration(
 
     const playVerdict =
       hasPredicates && plan !== null ? await browserJobs.playtest(verifyHtml, plan.steps) : null;
+    // v3.1 (P9 refinement) — a playbook with predicates can ONLY earn a verdict if
+    // the game exposed a live debug contract (window.__game.debug.snapshot()).
+    // Without it the snapshot is empty, predicates evaluate against nothing, and a
+    // null score was being credited as a vacuous PASS (rhythm shipped 'passed' with
+    // no snapshot wired). Make the missing contract an explicit, actionable failure
+    // so the loop forces the agent to wire it instead of crediting an unverifiable pass.
+    if (hasPredicates && playVerdict !== null && playVerdict.hasDebugContract === false) {
+      fatalErrors.push(
+        'The genre playbook needs window.__game.debug.snapshot() to read game state, but it returned no contract. Wire it in ONE line: call window.__game.debug.track({ score: () => score, player, ... }) (or set window.__game.state.*) exposing the fields the gameplay updates — otherwise the playtest cannot verify your game.',
+      );
+    }
     const observation: AttemptObservation = {
       trace: playVerdict === null ? null : traceFromPlaytestResult(playVerdict),
       fatalErrors,

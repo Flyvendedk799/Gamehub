@@ -53,7 +53,26 @@ describe('createRunSignalAggregator', () => {
     expect(agg.snapshot().invariantWarnings).toEqual(['escalation']);
   });
 
-  it('counts failed edits (str_replace thrash)', () => {
+  it('counts failed edits — REAL shape: str_replace_based_edit_tool + top-level isError', () => {
+    const agg = createRunSignalAggregator();
+    // The actual agent event: edit tool is `str_replace_based_edit_tool` and
+    // isError is TOP-LEVEL on the event (this is what the old code missed entirely).
+    const edit = (isError: boolean): AgentEvent =>
+      ({
+        type: 'tool_execution_end',
+        toolName: 'str_replace_based_edit_tool',
+        args: {},
+        result: { content: [] },
+        isError,
+        toolCallId: 'c',
+      }) as unknown as AgentEvent;
+    agg.observe(edit(true));
+    agg.observe(edit(false));
+    agg.observe(edit(true));
+    expect(agg.snapshot().strReplaceFailures).toBe(2);
+  });
+
+  it('counts failed edits — legacy fallback (result.isError on str_replace/text_editor)', () => {
     const agg = createRunSignalAggregator();
     agg.observe(end('str_replace', { isError: true }));
     agg.observe(end('str_replace', { isError: false }));

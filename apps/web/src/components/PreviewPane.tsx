@@ -1,6 +1,7 @@
 'use client';
 
 import { getToken } from '@/lib/auth';
+import { useCloudSaveRelay } from '@/lib/cloud-save-relay';
 import {
   type ControlsManifest,
   PREVIEW_IFRAME_ORIGIN,
@@ -74,6 +75,11 @@ export function PreviewPane({
     setReloadNonce((n) => n + 1);
     setPreviewStale(false);
   }, []);
+
+  // Cross-device cloud-save relay: bridge the in-iframe save shim to the
+  // session-authed API. In the builder the user is always logged in, so the
+  // relay is always enabled (it stays inert until a projectId is present).
+  useCloudSaveRelay(iframeRef, projectId, true);
 
   // Guarded tab switch: confirm before leaving the Files tab with unsaved edits.
   const switchView = useCallback(

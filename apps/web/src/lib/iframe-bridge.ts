@@ -102,6 +102,115 @@ export function sendControlsRequest(iframe: HTMLIFrameElement | null): void {
   );
 }
 
+// ─── Cloud-save protocol — mirrors the in-iframe cloud-save shim ──────────────
+//
+// The sandboxed game posts these to its parent window; the host relays them to
+// the session-authed cloud-save API. As with the controls/tweaks protocols,
+// `apps/web` doesn't depend on the runtime package, so these literals are
+// mirrored here by hand and kept in lockstep with the shim.
+
+export const CLOUD_SAVE_MESSAGE_TYPE = 'playforge:cloudsave' as const;
+export const CLOUD_SAVE_RESULT_MESSAGE_TYPE = 'playforge:cloudsave:result' as const;
+export const CLOUD_SAVE_READY_MESSAGE_TYPE = 'playforge:cloudsave:ready' as const;
+
+/** A validated, parsed inbound cloud-save op from the game iframe. */
+export interface CloudSaveMessage {
+  op: 'get' | 'set' | 'clear';
+  /** `null` is only valid for `clear` (= clear all keys for the project). */
+  key: string | null;
+  /** Present for `set` — the value to persist (arbitrary JSON). */
+  value?: unknown;
+  /** Present for `get` — correlates the async `result` reply. */
+  requestId?: string;
+}
+
+/**
+ * Validate the SHAPE of an inbound cloud-save payload (origin-agnostic). Returns
+ * the typed op or `null` for a malformed payload. Origin/source trust is layered
+ * on by the callers (`parseCloudSaveMessage` for the same-origin preview iframe;
+ * the relay's source-window check for the opaque-origin public play iframe).
+ *
+ * NEVER trusts any identity from the payload — the relay is authed by the host
+ * session only; this only carries the projectId-scoped key/value.
+ */
+export function parseCloudSavePayload(data: unknown): CloudSaveMessage | null {
+  if (!data || typeof data !== 'object') return null;
+  const o = data as Record<string, unknown>;
+  if (o['type'] !== CLOUD_SAVE_MESSAGE_TYPE) return null;
+  const op = o['op'];
+
+  if (op === 'get') {
+    if (typeof o['key'] !== 'string') return null;
+    if (typeof o['requestId'] !== 'string') return null;
+    return { op: 'get', key: o['key'], requestId: o['requestId'] };
+  }
+
+  if (op === 'set') {
+    if (typeof o['key'] !== 'string') return null;
+    // `value` may be any JSON value, including `undefined`/`null`; keep as-is.
+    return { op: 'set', key: o['key'], value: o['value'] };
+  }
+
+  if (op === 'clear') {
+    // `clear` accepts a specific key OR null (= clear all for the project).
+    const key = o['key'];
+    if (typeof key !== 'string' && key !== null) return null;
+    return { op: 'clear', key };
+  }
+
+  return null;
+}
+
+/**
+ * Validate + parse an inbound `cloudsave` message from the game. Returns the
+ * typed op or `null` when the message should be ignored:
+ *  - origin must be the trusted preview origin (#20);
+ *  - shape must match the protocol exactly (op-specific required fields).
+ *
+ * This is the same-origin (builder preview) path. The public play iframe runs at
+ * an opaque origin (no `allow-same-origin`), so its messages report
+ * `origin === "null"`; the relay validates those by source-window identity and
+ * calls `parseCloudSavePayload` directly (mirroring the score listener, CSP H2).
+ */
+export function parseCloudSaveMessage(event: MessageEvent<unknown>): CloudSaveMessage | null {
+  if (!isPreviewIframeOrigin(event.origin)) return null;
+  return parseCloudSavePayload(event.data);
+}
+
+/**
+ * Host → game: reply to a `get` op with the fetched value (or `null` when no
+ * value is stored / the relay failed).
+ *
+ * `targetOrigin` is explicit and defaults to the trusted preview origin — never
+ * `'*'` (#20). The opaque-origin public play iframe is unreachable with a
+ * concrete origin, so the relay passes `'*'` for that frame only (the payload is
+ * the game's own save data — no secret — and the shim ignores message origin).
+ */
+export function sendCloudSaveResult(
+  iframe: HTMLIFrameElement | null,
+  requestId: string,
+  value: unknown,
+  targetOrigin: string = PREVIEW_IFRAME_ORIGIN,
+): void {
+  iframe?.contentWindow?.postMessage(
+    { type: CLOUD_SAVE_RESULT_MESSAGE_TYPE, requestId, value },
+    targetOrigin,
+  );
+}
+
+/**
+ * Host → game: signal that a relay-capable (logged-in) host is present so the
+ * shim flips its `hosted` flag. `targetOrigin` defaults to the preview origin
+ * (#20); the relay passes `'*'` for the opaque play iframe only (see
+ * `sendCloudSaveResult`).
+ */
+export function sendCloudSaveReady(
+  iframe: HTMLIFrameElement | null,
+  targetOrigin: string = PREVIEW_IFRAME_ORIGIN,
+): void {
+  iframe?.contentWindow?.postMessage({ type: CLOUD_SAVE_READY_MESSAGE_TYPE }, targetOrigin);
+}
+
 /**
  * Validates that an inbound `MessageEvent` came from the trusted preview origin
  * and carries a well-formed `{ type: string }` payload. Returns the typed

@@ -58,10 +58,15 @@ export interface ScoreMessage {
 export const CONTROLS_MANIFEST_MESSAGE_TYPE = 'playforge:controls:manifest' as const;
 export const CONTROLS_REBIND_MESSAGE_TYPE = 'playforge:controls:rebind' as const;
 export const CONTROLS_REQUEST_MESSAGE_TYPE = 'playforge:controls:request' as const;
-/** v3 P10b — the game posts cloud-save mutations to the host so a per-account
- *  store can mirror them cross-device (the in-iframe shim persists to localStorage
- *  for the device-local baseline; the host relay is the cloud seam). */
+/** v3 P10b — the game posts cloud-save ops to the host so a per-account store can
+ *  mirror them cross-device. The shim keeps a localStorage baseline; the host
+ *  relays to the API (scoped to the logged-in session user). */
 export const CLOUD_SAVE_MESSAGE_TYPE = 'playforge:cloudsave' as const;
+/** Host → game: the response to a `get` op, matched by requestId. */
+export const CLOUD_SAVE_RESULT_MESSAGE_TYPE = 'playforge:cloudsave:result' as const;
+/** Host → game: posted once when a relay-capable (logged-in) host is present, so
+ *  the shim can flip `hosted` true and the cloud-save skill's isCloud() is honest. */
+export const CLOUD_SAVE_READY_MESSAGE_TYPE = 'playforge:cloudsave:ready' as const;
 
 /** One rebindable action a game declares (id + human label + bound inputs). */
 export interface ControlAction {
@@ -193,6 +198,8 @@ export function gameGlobalSetupSnippet(opts: {
   const ctrlRebindType = JSON.stringify(CONTROLS_REBIND_MESSAGE_TYPE);
   const ctrlRequestType = JSON.stringify(CONTROLS_REQUEST_MESSAGE_TYPE);
   const cloudSaveType = JSON.stringify(CLOUD_SAVE_MESSAGE_TYPE);
+  const cloudSaveResultType = JSON.stringify(CLOUD_SAVE_RESULT_MESSAGE_TYPE);
+  const cloudSaveReadyType = JSON.stringify(CLOUD_SAVE_READY_MESSAGE_TYPE);
   return `<script>
 window.__game = window.__game || {};
 window.__game.engine = ${JSON.stringify(opts.engine)};
@@ -238,17 +245,58 @@ window.__game.debug = window.__game.debug || (function () {
 // store can mirror it cross-device (CSP connect-src 'self' safe — no direct net).
 window.__game.cloudSave = window.__game.cloudSave || (function () {
   var PREFIX = 'pf:cloud:';
+  var hasParent = typeof window !== 'undefined' && window.parent && window.parent !== window;
+  var pending = {};
+  var seq = 0;
   function lsGet(key) { try { var v = localStorage.getItem(PREFIX + key); return v === null ? null : JSON.parse(v); } catch (e) { return null; } }
   function lsSet(key, value) { try { localStorage.setItem(PREFIX + key, JSON.stringify(value)); } catch (e) {} }
-  function relay(op, key, value) { try { if (window.parent && window.parent !== window) window.parent.postMessage({ type: ${cloudSaveType}, op: op, key: key, value: value }, '*'); } catch (e) {} }
-  return {
-    // hosted=false until a real host listener advertises per-account cloud relay;
-    // the cloud-save skill reads this so isCloud() never falsely claims sync.
+  function post(msg) { try { if (hasParent) window.parent.postMessage(msg, '*'); } catch (e) {} }
+  // hosted flips true once a relay-capable host advertises itself (ready) or
+  // answers a get — so the cloud-save skill's isCloud() is honest.
+  var api = {
     hosted: false,
-    get: function (key) { return Promise.resolve(lsGet(key)); },
-    set: function (key, value) { lsSet(key, value); relay('set', key, value); return Promise.resolve(); },
-    clear: function (key) { try { if (key) { localStorage.removeItem(PREFIX + key); } } catch (e) {} relay('clear', key || null, null); return Promise.resolve(); }
+    get: function (key) {
+      if (!hasParent) return Promise.resolve(lsGet(key));
+      return new Promise(function (resolve) {
+        var id = 'cs' + (++seq);
+        pending[id] = function (value) {
+          if (value !== null && value !== undefined) {
+            lsSet(key, value); // mirror cloud → local for offline / fast reads
+            resolve(value);
+          } else {
+            resolve(lsGet(key)); // cloud miss → fall back to a pre-cloud local save
+          }
+        };
+        post({ type: ${cloudSaveType}, op: 'get', key: key, requestId: id });
+        setTimeout(function () {
+          if (pending[id]) { delete pending[id]; resolve(lsGet(key)); }
+        }, 2000);
+      });
+    },
+    set: function (key, value) {
+      lsSet(key, value); // optimistic local mirror
+      post({ type: ${cloudSaveType}, op: 'set', key: key, value: value });
+      return Promise.resolve();
+    },
+    clear: function (key) {
+      try { if (key) { localStorage.removeItem(PREFIX + key); } } catch (e) {}
+      post({ type: ${cloudSaveType}, op: 'clear', key: key || null });
+      return Promise.resolve();
+    }
   };
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('message', function (e) {
+      var d = e && e.data;
+      if (!d || typeof d !== 'object') return;
+      if (d.type === ${cloudSaveReadyType}) { api.hosted = true; return; }
+      if (d.type === ${cloudSaveResultType} && d.requestId && pending[d.requestId]) {
+        api.hosted = true;
+        var cb = pending[d.requestId]; delete pending[d.requestId];
+        cb(d.value);
+      }
+    });
+  }
+  return api;
 })();
 // WS-A — rebindable input layer. The game DECLARES its controls via
 // window.__game.controls.define({ actions:[{id,label,description,keys:[...]}] })

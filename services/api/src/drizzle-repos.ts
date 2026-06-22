@@ -10,6 +10,7 @@ import { type Db, schema } from '@playforge/db';
 import type { ChatMessageKind } from '@playforge/shared';
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { ChatMessage, ChatRepo } from './chat-repo';
+import type { CloudSaveRepo } from './cloud-save-repo';
 import type { CreateProjectInput, Engine, Project, ProjectRepo, Visibility } from './repo';
 import type {
   CreateRunInput,
@@ -420,5 +421,61 @@ export class DrizzleSnapshotRepo implements SnapshotRepo {
       throw new Error('snapshot append failed: seq allocation exhausted');
     });
     return rowToSnapshotEntry(row);
+  }
+}
+
+// ── CloudSaveRepo ───────────────────────────────────────────────────────────────
+
+export class DrizzleCloudSaveRepo implements CloudSaveRepo {
+  constructor(private readonly db: Db) {}
+
+  async get(userId: string, projectId: string, key: string): Promise<unknown | null> {
+    const [row] = await this.db
+      .select({ value: schema.cloudSaves.value })
+      .from(schema.cloudSaves)
+      .where(
+        and(
+          eq(schema.cloudSaves.userId, userId),
+          eq(schema.cloudSaves.projectId, projectId),
+          eq(schema.cloudSaves.saveKey, key),
+        ),
+      );
+    return row ? row.value : null;
+  }
+
+  async set(userId: string, projectId: string, key: string, value: unknown): Promise<void> {
+    await this.db
+      .insert(schema.cloudSaves)
+      .values({ userId, projectId, saveKey: key, value })
+      .onConflictDoUpdate({
+        target: [schema.cloudSaves.userId, schema.cloudSaves.projectId, schema.cloudSaves.saveKey],
+        set: { value, updatedAt: new Date() },
+      });
+  }
+
+  async countKeys(userId: string, projectId: string): Promise<number> {
+    const [row] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(schema.cloudSaves)
+      .where(and(eq(schema.cloudSaves.userId, userId), eq(schema.cloudSaves.projectId, projectId)));
+    return row?.n ?? 0;
+  }
+
+  async clearKey(userId: string, projectId: string, key: string): Promise<void> {
+    await this.db
+      .delete(schema.cloudSaves)
+      .where(
+        and(
+          eq(schema.cloudSaves.userId, userId),
+          eq(schema.cloudSaves.projectId, projectId),
+          eq(schema.cloudSaves.saveKey, key),
+        ),
+      );
+  }
+
+  async clearProject(userId: string, projectId: string): Promise<void> {
+    await this.db
+      .delete(schema.cloudSaves)
+      .where(and(eq(schema.cloudSaves.userId, userId), eq(schema.cloudSaves.projectId, projectId)));
   }
 }

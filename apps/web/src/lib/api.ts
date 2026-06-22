@@ -886,6 +886,46 @@ export async function fetchProjectZip(projectId: string): Promise<Blob> {
   return res.blob();
 }
 
+// ─── Cloud saves (cross-device game saves) ─────────────────────────────────────
+//
+// Project-scoped + session-authed: the API derives the user from the Bearer
+// token, so callers pass only projectId + key (+ value). These back the
+// host-side cloud-save relay (`cloud-save-relay.ts`), which bridges the
+// in-iframe save shim to this API.
+
+/** Max size of a single cloud-save value, mirrored from the API's 100KB cap. */
+export const CLOUD_SAVE_MAX_VALUE_BYTES = 100 * 1024;
+
+/** Read one cloud-save value for the project (null when nothing is stored). */
+export async function getCloudSave(
+  projectId: string,
+  key: string,
+): Promise<{ value: unknown | null }> {
+  return apiFetch<{ value: unknown | null }>(
+    `/v1/projects/${projectId}/cloud-save?key=${encodeURIComponent(key)}`,
+  );
+}
+
+/** Write one cloud-save value. The API rejects values over 100KB (400). */
+export async function setCloudSave(
+  projectId: string,
+  key: string,
+  value: unknown,
+): Promise<{ ok: true }> {
+  return apiFetch<{ ok: true }>(`/v1/projects/${projectId}/cloud-save`, {
+    method: 'PUT',
+    body: JSON.stringify({ key, value }),
+  });
+}
+
+/** Clear one cloud-save key, or ALL keys for the project when `key` is null. */
+export async function clearCloudSave(projectId: string, key: string | null): Promise<{ ok: true }> {
+  const qs = key === null ? '' : `?key=${encodeURIComponent(key)}`;
+  return apiFetch<{ ok: true }>(`/v1/projects/${projectId}/cloud-save${qs}`, {
+    method: 'DELETE',
+  });
+}
+
 // ─── Hub search ────────────────────────────────────────────────────────────────
 
 export async function searchHub(

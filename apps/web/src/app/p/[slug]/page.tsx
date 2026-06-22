@@ -10,6 +10,8 @@ interface GameMeta {
   /** #3.6 — remix lineage for the play page. */
   remixCount: number;
   parentSlug: string | null;
+  /** Project this published game belongs to — scopes the cloud-save relay. */
+  projectId: string | null;
 }
 
 async function fetchGameMeta(slug: string): Promise<GameMeta | null> {
@@ -22,6 +24,7 @@ async function fetchGameMeta(slug: string): Promise<GameMeta | null> {
         thumbnailUrl?: string | null;
         remixCount?: number;
         parentSlug?: string | null;
+        projectId?: string | null;
       };
     };
     return {
@@ -29,6 +32,7 @@ async function fetchGameMeta(slug: string): Promise<GameMeta | null> {
       thumbnailUrl: json.game?.thumbnailUrl ?? null,
       remixCount: typeof json.game?.remixCount === 'number' ? json.game.remixCount : 0,
       parentSlug: json.game?.parentSlug ?? null,
+      projectId: typeof json.game?.projectId === 'string' ? json.game.projectId : null,
     };
   } catch {
     return null;
@@ -82,6 +86,7 @@ export default async function PlayPage({ params }: { params: Promise<{ slug: str
       {...(meta?.title !== undefined ? { initialTitle: meta.title } : {})}
       remixCount={meta?.remixCount ?? 0}
       parentSlug={meta?.parentSlug ?? null}
+      {...(meta?.projectId ? { projectId: meta.projectId } : {})}
     />
   );
 }
