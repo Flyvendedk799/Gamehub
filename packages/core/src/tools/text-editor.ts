@@ -178,7 +178,12 @@ function formatEditOk(headline: string, result: EditResult, isDeletion: boolean)
 // Sidecar (.css, .js, .json) caps stay generous because Claude-Design-style
 // vanilla artifacts ship 100+ KB of CSS/JS in dedicated files, and the
 // skeleton-vs-section distinction doesn't apply there.
-const MAX_CREATE_BYTES_INDEX = 12288;
+// 16 KB (was 12 KB). A legitimate game index.html — doctype + canvas/mount + the
+// engine CDN <script> tags (Phaser/Three URLs are long) + a short boot that loads
+// src/main.js — can run ~13-15 KB without being a code-dump. 16 KB absorbs those
+// borderline-legit shells while still blocking the genuine "whole game inlined in
+// HTML" case (those land 26 KB+). Game code belongs in src/*.js sidecars (65 KB cap).
+const MAX_CREATE_BYTES_INDEX = 16384;
 const MAX_STR_REPLACE_NEW_BYTES_INDEX = 24576;
 const MAX_CREATE_BYTES_SIDECAR = 65536;
 const MAX_STR_REPLACE_NEW_BYTES_SIDECAR = 49152;
@@ -220,12 +225,10 @@ function throwOversizedCreate(path: string, byteLen: number, cap: number): never
       'Sidecar files (.css, .js, .json) accept up to 65 KB per create. Even so, prefer splitting genuinely large modules across two creates (e.g. data + engine).';
   } else {
     guidance = [
-      'create is a SKELETON tool for `index.html` — never the full design.',
-      'Correct shape: ONE create with the doctype + html shell + empty App() + TWEAK_DEFAULTS/TWEAK_SCHEMA stubs + ReactDOM render (~6-10 KB), then ONE str_replace per section to fill the body.',
-      'Recover from this error in TWO calls:',
-      '  1. Re-issue create with a skeleton-only file_text under 12 KB — empty `<App/>` returning `<div id="root"/>` is fine.',
-      '  2. Use sequential str_replace calls (each 4-10 KB) to add the hero, navigation, cards, footer, etc. one at a time.',
-      'Each str_replace can be ~4-10 KB; 24 KB is its hard cap. Do NOT attempt to inline whole sections in the create call.',
+      '`index.html` must stay a THIN shell — never the whole game.',
+      'Correct shape: ONE create with the doctype + a <canvas> (or mount <div>) + the engine CDN <script> tags (Phaser/Three) + a SHORT boot that loads your entry module (e.g. <script type="module" src="src/main.js">). That is ~6-12 KB.',
+      'The GAME CODE goes in `src/*.js` sidecar files (65 KB cap EACH) — NOT inlined in index.html. A 26 KB index.html means you tried to put the game in the HTML; move it to src/main.js (plus more src/*.js for scenes/entities/systems).',
+      'Recover: (1) re-issue create with a thin shell under 16 KB, then (2) create `src/main.js` with your game logic (and additional src/*.js files as needed).',
     ].join(' ');
   }
   throw new Error(
@@ -241,7 +244,7 @@ function throwOversizedStrReplace(path: string, byteLen: number, cap: number): n
         `${MAX_STR_REPLACE_NEW_BYTES_INDEX} bytes is the per-edit ceiling for index.html.`,
         'A typical fill is 4-10 KB (one section: hero, nav, card grid, footer, …).',
         'Recover by splitting THIS replace into 2-4 smaller str_replace calls, each anchored to a different `old_str` snippet that already exists in the file.',
-        'If you have not landed the skeleton yet, do that first (one create under 12 KB), then build sections via str_replace.',
+        'If you have not landed the skeleton yet, do that first (one create under 16 KB), then build sections via str_replace.',
       ].join(' ');
   throw new Error(
     `text_editor.str_replace on "${path}" was called with new_str=${byteLen} bytes, which exceeds the ${cap}-byte cap for this file type. ${guidance}`,
@@ -256,6 +259,33 @@ function throwOversizedInsert(path: string, byteLen: number, cap: number): never
   throw new Error(
     `text_editor.insert on "${path}" was called with new_str=${byteLen} bytes, which exceeds the ${cap}-byte cap for this file type. ${guidance}`,
   );
+}
+
+/**
+ * symbol-view miss recovery — when a requested `symbol` is not a TOP-LEVEL
+ * declaration, find where the identifier actually appears so the model can read
+ * it with `view_range` instead of re-guessing names. The common miss is a NESTED
+ * function or object method (e.g. `updatePlayer` living inside a scene factory).
+ * Returns definition-like lines first (function/class/const/method/arrow), then
+ * any whole-word occurrence. 1-indexed, capped. (Edit-failure pass 2026-06-22.)
+ */
+function locateIdentifierLines(content: string, ident: string): { defs: number[]; any: number[] } {
+  const esc = ident.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const word = new RegExp(`\\b${esc}\\b`);
+  const def = new RegExp(
+    `(?:\\b(?:function|class|const|let|var)\\s+${esc}\\b)` + // `function NAME` / `const NAME`
+      `|(?:\\b${esc}\\s*[:=]\\s*(?:async\\s*)?(?:function\\b|\\(|[\\w$]+\\s*=>))` + // `NAME = fn` / `NAME: fn` / arrow
+      `|(?:\\b${esc}\\s*\\([^)]*\\)\\s*\\{)`, // method/shorthand `NAME(...) {`
+  );
+  const lines = content.split('\n');
+  const defs: number[] = [];
+  const any: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i] ?? '';
+    if (defs.length < 6 && def.test(ln)) defs.push(i + 1);
+    if (any.length < 8 && word.test(ln)) any.push(i + 1);
+  }
+  return { defs, any };
 }
 
 /**
@@ -556,8 +586,17 @@ export function makeTextEditorTool(
                   found.candidates.length > 0
                     ? `Available top-level symbols: ${found.candidates.join(', ')}.`
                     : 'No top-level function or const declarations found.';
+                // The common miss is a NESTED function / object method, not a
+                // typo — so locate the identifier and point view_range at it
+                // rather than only listing unrelated top-level names.
+                const { defs, any } = locateIdentifierLines(file.content, symbol);
+                const located = defs.length > 0 ? defs : any;
+                const locateHint =
+                  located.length > 0
+                    ? ` "${symbol}" is not top-level, but DOES appear at line(s) ${located.join(', ')}${defs.length > 0 ? ' (likely its definition — probably a nested function or object method)' : ''} — pass view_range covering one of those to read it.`
+                    : '';
                 throw new Error(
-                  `symbol "${symbol}" not found in ${path}. ${suggestion} You can also pass view_range: [startLine, endLine] to read by line number instead.`,
+                  `symbol "${symbol}" not found as a top-level declaration in ${path}. ${suggestion}${locateHint} You can also pass view_range: [startLine, endLine] to read by line number instead.`,
                 );
               }
               if (found.kind === 'ambiguous') {
