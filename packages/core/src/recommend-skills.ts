@@ -143,14 +143,22 @@ export function recommendSkills(
       ['wave-spawner', 'tower-defense waves must escalate'],
       ['enemy-ai', 'creeps need pathing/behaviour'],
     ],
-    visual_novel: [['dialog-flow', 'visual novels need a branching dialogue runner']],
+    visual_novel: [
+      [
+        'dialog-flow',
+        'visual novels need a branching dialogue runner — forward its lineIndex/choicesMade as the EXACT verdict fields: window.__game.debug.track({ dialogueIndex: () => currentLineIndex, choiceCount: () => choicesMade })',
+      ],
+    ],
     roguelike: [['procedural-gen', 'roguelikes need seeded procedural layout']],
     shmup: [
       ['enemy-ai', 'shmup enemies need movement patterns'],
       ['wave-spawner', 'shmup difficulty must ramp in waves'],
     ],
     idle: [
-      ['economy-system', 'idle/incremental is an economy at its core'],
+      [
+        'economy-system',
+        'idle/incremental is an economy at its core — expose its balance as the EXACT verdict field `credits` (NOT score/money) plus a rate: window.__game.debug.track({ credits: () => credits, rate: () => perSecond })',
+      ],
       [
         'cloud-save',
         'idle progress must persist per-account/cross-device (cloud-native), not device-local',

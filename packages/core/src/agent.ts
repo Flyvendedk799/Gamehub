@@ -2439,6 +2439,26 @@ export async function generateViaAgent(
       throw lifted;
     }
   };
+  // Shared retry classifier + logger for both first- and later-turn paths. The
+  // RETRY_BLOCKED guard means a turn that already produced tool side-effects is
+  // NEVER replayed; only a clean transient failure (5xx / overload / 429, incl.
+  // codex service_unavailable_error / server_error) retries.
+  const classifyWithSideEffectGuard = (err: unknown): RetryDecision => {
+    if ((err as RetryBlockedError)[RETRY_BLOCKED]) {
+      return { retry: false, reason: 'agent already produced side effects' };
+    }
+    return classifyError(err);
+  };
+  const onRetryLog = (info: RetryReason) => {
+    log.warn('[generate] step=send_request.retry', {
+      ...ctx,
+      attempt: info.attempt,
+      totalAttempts: info.totalAttempts,
+      delayMs: info.delayMs,
+      reason: info.reason,
+    });
+    deps.onRetry?.(info);
+  };
   try {
     if (isFirstTurn) {
       const retryOpts: Parameters<typeof withBackoff>[1] = {
@@ -2453,27 +2473,23 @@ export async function generateViaAgent(
         maxRetries: 3,
         unbounded: true,
         unboundedCapMs: 60_000,
-        classify: (err): RetryDecision => {
-          if ((err as RetryBlockedError)[RETRY_BLOCKED]) {
-            return { retry: false, reason: 'agent already produced side effects' };
-          }
-          return classifyError(err);
-        },
-        onRetry: (info: RetryReason) => {
-          log.warn('[generate] step=send_request.retry', {
-            ...ctx,
-            attempt: info.attempt,
-            totalAttempts: info.totalAttempts,
-            delayMs: info.delayMs,
-            reason: info.reason,
-          });
-          deps.onRetry?.(info);
-        },
+        classify: classifyWithSideEffectGuard,
+        onRetry: onRetryLog,
       };
       if (input.signal) retryOpts.signal = input.signal;
       await withBackoff(sendOnce, retryOpts);
     } else {
-      await sendOnce();
+      // LATER turns also retry transient provider failures — the gap that killed
+      // heavy multi-turn runs (a codex overload on turn 8 of a roguelike threw
+      // and the whole run died, no retry). BOUNDED (not unbounded) so a persistent
+      // mid-run outage can't hang; the side-effect guard keeps it safe to replay.
+      const retryOpts: Parameters<typeof withBackoff>[1] = {
+        maxRetries: 4,
+        classify: classifyWithSideEffectGuard,
+        onRetry: onRetryLog,
+      };
+      if (input.signal) retryOpts.signal = input.signal;
+      await withBackoff(sendOnce, retryOpts);
     }
   } catch (err) {
     if (budgetReason === 'tool_calls') {

@@ -194,6 +194,15 @@ const ANTHROPIC_ERROR_TYPE_STATUS: Record<string, number> = {
   rate_limit_error: 429,
   api_error: 500,
   overloaded_error: 529,
+  // OpenAI / Codex (openai-codex-responses wire) error types. These lose their
+  // HTTP status the same way Anthropic's do, so the retry layer can only classify
+  // them by type. We map ONLY the TRANSIENT classes (5xx / rate-limit) so they
+  // retry; quota/auth/invalid stay UNMAPPED → status undefined → not retried (a
+  // hard ChatGPT usage-limit must fail fast, not spin). The two that killed heavy
+  // parallel runs were `service_unavailable_error` + `server_error`.
+  service_unavailable_error: 503,
+  server_error: 500,
+  rate_limit_exceeded: 429,
 };
 
 export interface ParsedUpstreamError {

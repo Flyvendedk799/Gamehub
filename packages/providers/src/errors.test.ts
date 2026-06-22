@@ -143,6 +143,28 @@ describe('parseUpstreamErrorMessage', () => {
     });
   });
 
+  it('maps codex service_unavailable_error to 503 (transient → retryable)', () => {
+    const body =
+      '{"type":"error","error":{"type":"service_unavailable_error","code":"server_is_overloaded","message":"overloaded"}}';
+    expect(parseUpstreamErrorMessage(body)).toEqual({
+      status: 503,
+      type: 'service_unavailable_error',
+      providerMessage: 'overloaded',
+      requestId: undefined,
+    });
+  });
+
+  it('maps codex server_error to 500 (transient → retryable)', () => {
+    const body = '{"type":"error","error":{"type":"server_error","message":"oops"}}';
+    expect(parseUpstreamErrorMessage(body)?.status).toBe(500);
+  });
+
+  it('does NOT classify a hard quota/usage-limit as retryable (stays unmapped)', () => {
+    // A ChatGPT usage-limit must fail fast, not spin — its type is not mapped.
+    const body = '{"type":"error","error":{"type":"insufficient_quota","message":"usage limit"}}';
+    expect(parseUpstreamErrorMessage(body)).toBeUndefined();
+  });
+
   it('returns undefined for non-JSON messages', () => {
     expect(parseUpstreamErrorMessage('Provider returned an error')).toBeUndefined();
     expect(parseUpstreamErrorMessage('')).toBeUndefined();

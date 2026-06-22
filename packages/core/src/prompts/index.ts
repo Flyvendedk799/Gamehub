@@ -1195,6 +1195,17 @@ A game without a coherent mechanic — input → state change → feedback → w
 - **Restart**: instant restart binding (R / Space) without page reload. Loss without restart is a hard fail.
 - **Difficulty / escalation**: a game that never gets harder is a tech demo. For arcade / shooter / runner / survival / tower-defense, RAMP the pressure — spawn rate, enemy speed/HP, or count must drift up over time or per wave (e.g. difficulty = 1.15 ** wave) and the player must SEE it rising (a wave counter, a "Wave N" banner). Don't re-derive enemies and waves from scratch: pull the enemy-ai (chase / patrol / orbit / charge / ranged-kite) and wave-spawner (escalating count/speed/HP with a telegraphed countdown) snippets from the list_game_feel / view_game_feel library (category: 'engine'). The assert_game_invariants pass flags a should-escalate genre that ships flat.
 
+## Wire the EXACT field the verdict reads (text/economy genres)
+
+The playtest verdict resolves snapshot fields by EXACT name — there is NO aliasing, so a field named \`score\` does NOT satisfy a predicate on \`credits\`, and exposing only \`dialogOpen\` does NOT satisfy one on \`dialogueIndex\`. The two genres that historically shipped a flat or 0/2 verdict are text-heavy and economy games, because their state is bookkeeping the agent forgets to expose. For these, what a GOOD instance needs AND the one-line wiring it must emit at startup:
+
+- **\`visual_novel\`**: needs branching choices, a readable line/node progression, and at least one ending — not a single static text box. The verdict advances the script and asserts \`dialogueIndex\` RISES on each advance. Track a monotonic line counter you bump every time you show a node (the bundled \`dialog-flow\` skill already exposes \`lineIndex\`/\`choicesMade\` — forward those), plus a choice counter, and adapt the advance binding to a click if your VN advances on click:
+  \`window.__game.debug.track({ dialogueIndex: () => currentLineIndex, choiceCount: () => choicesMade })\`
+- **\`idle\` / incremental**: needs a visible growing number, a click-or-tick earn loop, AND a buy/upgrade decision that ESCALATES the production rate (a pure auto-incrementing number is a screensaver, not a game). The verdict clicks the main earner and asserts \`credits\` RISES. Expose \`credits\` under that EXACT name (the \`economy-system\` wallet's field is \`balance\`/\`coins\` — forward it as \`credits\`, NOT \`score\`/\`money\`), and a \`rate\` so buying a producer visibly raises per-second output:
+  \`window.__game.debug.track({ credits: () => credits, rate: () => perSecond })\`
+
+Other built-in genres expose their fields through their recommended skills' \`getState()\` automatically; these two need the explicit forward above because their canonical skill names the field differently (or, for a hand-rolled VN, exposes nothing numeric).
+
 ## Cadence
 
 **Scaffold, then fill — author in big blocks.** Write each file's full skeleton in ONE \`create\` (every function present in its final position, bodies stubbed), then fill the bodies — this is far cheaper than growing a file through many incremental \`str_replace\` calls. Editing the same region five-plus times is the signal you should have scaffolded it up front; the edit budget below enforces that. Reach for a recommended library skill before writing a system by hand — adapting a vetted snippet is fewer tokens and fewer bugs than re-deriving it.

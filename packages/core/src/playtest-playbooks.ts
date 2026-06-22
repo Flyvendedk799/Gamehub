@@ -567,7 +567,7 @@ const VISUAL_NOVEL: PlaytestPlaybook = {
   schemaVersion: 1,
   genre: 'visual_novel',
   intent:
-    'Visual novel: advancing dialogue increments the line/node index; choices change the route/flags. Expose `dialogueIndex` (and a `route`/flag) in window.__game.debug.snapshot(). Adapt the advance binding to a click if your VN advances on click.',
+    'Visual novel: advancing dialogue increments the line/node index; choices change the route/flags. The verdict reads the EXACT field `dialogueIndex` — wire it at startup: `window.__game.debug.track({ dialogueIndex: () => currentLineIndex, choiceCount: () => choicesMade })` (a snapshot exposing only `dialogOpen`/`isOpen` reports "field missing" → 0/2). Adapt the advance binding to a click if your VN advances on click.',
   steps: [
     { kind: 'wait', durationFrames: 20, assert: 'The first line of dialogue is shown.' },
     {
@@ -621,7 +621,7 @@ const IDLE: PlaytestPlaybook = {
   schemaVersion: 1,
   genre: 'idle',
   intent:
-    'Idle/incremental: clicking the main earner increases currency; buying a producer raises the per-second rate. Expose `credits` (or `score`/`money`) in window.__game.debug.snapshot().',
+    'Idle/incremental: clicking the main earner increases currency; buying a producer raises the per-second rate. The verdict reads the EXACT field `credits` (NOT `score`/`money`/`balance` — the resolver does no aliasing, so a differently-named field reports "field missing"). Wire it at startup: `window.__game.debug.track({ credits: () => credits, rate: () => perSecond })`.',
   steps: [
     {
       kind: 'mouse',

@@ -247,3 +247,16 @@ export function createEconomySystem(catalog, opts = {}) {
 //
 //   window.__game.debug.snapshot = () => economy.getState();
 //   // => { coins: 175, owned: { speed_boost: 2 } }
+//
+// IDLE / INCREMENTAL games — the `idle` playbook asserts the EXACT field
+// `credits` (rises on click) and reads `rate` for escalation. This skill's
+// field is `coins`, so FORWARD it under the name the verdict reads and add a
+// per-second producer rate (buying a producer raises `rate`; `credits` keeps
+// accruing on its own):
+//   // each frame: economy.earn(perSecond * dt);   // passive accrual
+//   // click main earner: economy.earn(clickValue);
+//   // buy producer: if (economy.purchase('miner')) perSecond += 1;
+//   window.__game.debug.track({
+//     credits: () => economy.getCoins(),   // EXACT field name — NOT `coins`/`money`
+//     rate:    () => perSecond,             // escalation signal
+//   });

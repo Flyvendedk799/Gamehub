@@ -71,6 +71,11 @@ export function createDialogFlow(scene, nodes = [], config = {}) {
   let revealed = '';
   let waitingForInput = false;
   let isOpen = false;
+  // Playtest contract: the visual_novel playbook asserts `dialogueIndex` rises
+  // on every advance. We track a monotonic line counter (bumped per node shown)
+  // + a choice counter so the snapshot exposes the EXACT fields the verdict reads.
+  let lineIndex = 0;
+  let choicesMade = 0;
 
   function _drawBox() {
     box.clear();
@@ -111,7 +116,10 @@ export function createDialogFlow(scene, nodes = [], config = {}) {
       label.on('pointerout', () =>
         bg.clear().fillStyle(0x3b2f6e, 1).fillRoundedRect(bx, btnY, btnW, 34, 6),
       );
-      label.on('pointerdown', () => _gotoNode(choice.next));
+      label.on('pointerdown', () => {
+        choicesMade += 1;
+        _gotoNode(choice.next);
+      });
       choiceButtons.push(bg, label);
     });
   }
@@ -149,6 +157,7 @@ export function createDialogFlow(scene, nodes = [], config = {}) {
 
   function _showNode(node) {
     currentNode = node;
+    lineIndex += 1; // monotonic — each shown node advances `dialogueIndex`
     waitingForInput = false;
     _clearChoices();
     _drawBox();
@@ -200,6 +209,19 @@ export function createDialogFlow(scene, nodes = [], config = {}) {
     get isOpen() {
       return isOpen;
     },
+    /** Monotonic line/node counter — the field the visual_novel playbook reads. */
+    get lineIndex() {
+      return lineIndex;
+    },
+    /** Number of branching choices the player has taken. */
+    get choicesMade() {
+      return choicesMade;
+    },
+    /** Serialisable snapshot — spread into window.__game.debug.track / snapshot.
+     *  Exposes the EXACT fields the visual_novel playbook asserts on. */
+    snapshot() {
+      return { dialogueIndex: lineIndex, choiceCount: choicesMade };
+    },
   };
 }
 
@@ -220,4 +242,10 @@ export function createDialogFlow(scene, nodes = [], config = {}) {
 //   this.physics.resume();
 //   this.dialog.start('intro');
 //
-//   //   window.__game.debug.snapshot = () => ({ dialogOpen: this.dialog.isOpen });
+//   // Expose the EXACT fields the visual_novel playbook asserts on. The skill
+//   // already tracks a monotonic `lineIndex` + `choicesMade`, so just forward
+//   // them — a snapshot of only `isOpen` reports "field missing" → 0/2:
+//   //   window.__game.debug.track({
+//   //     dialogueIndex: () => this.dialog.lineIndex,
+//   //     choiceCount: () => this.dialog.choicesMade,
+//   //   });

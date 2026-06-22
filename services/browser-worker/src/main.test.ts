@@ -165,6 +165,29 @@ describe('runRuntimeVerify (real Chromium)', () => {
     expect(result.fatalErrors.some((m) => m.includes('PLAYFORGE_TEST_THROW'))).toBe(true);
   }, 30_000);
 
+  it('(d) catches an async crash AFTER __game booted (the broken-idle class)', async () => {
+    // The shim sets window.__game synchronously, THEN scene setup crashes a tick
+    // later — exactly the broken idle game. Must still be reported as fatal, not
+    // shipped as "booted". Covers both the delayed pageerror + the grace window.
+    const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+      <script>
+        window.__game = { debug: { snapshot: () => null } };
+        setTimeout(() => {
+          // a TypeError like Phaser's "...setParentContainer is not a function"
+          const x = null;
+          x.setParentContainer();
+        }, 50);
+      </script>
+    </body></html>`;
+    const result = await runRuntimeVerify(browser, {
+      kind: 'runtime-verify',
+      htmlContent: html,
+      bootTimeoutMs: 1_500,
+    });
+    expect(result.hasGameContract).toBe(true); // __game DID appear (the deceptive part)
+    expect(result.fatalErrors.length).toBeGreaterThan(0); // ...but the async crash is caught
+  }, 30_000);
+
   it('(e) JUICE: an animating canvas scores higher than a static one (Phase 5.5)', async () => {
     // A juicy game: a RAF loop that repaints a moving rectangle every frame.
     const juicy = `<!doctype html><html><head><meta charset="utf-8"></head><body>
