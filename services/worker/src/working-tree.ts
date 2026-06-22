@@ -85,6 +85,13 @@ export class WorkingTree {
     return { path };
   }
 
+  /** Remove a file from the bundle. Returns true if it existed. Used by the
+   *  v3.1 dead-skill sweep to drop a provably-unreferenced staged module. */
+  delete(path: string): boolean {
+    assertSafeBundlePath(path);
+    return this.files.delete(path);
+  }
+
   /** TextEditorFsCallbacks.strReplace — oldStr must occur exactly once. */
   strReplace(path: string, oldStr: string, newStr: string): EditResult {
     const content = this.requireFile(path);

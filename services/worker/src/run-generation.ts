@@ -745,6 +745,23 @@ export async function runGeneration(
     output = await generate(buildInput(nextPrompt, history), deps);
   }
 
+  // v3.1 — dead-skill sweep. The staged-unused repair round (above) gives the
+  // agent a chance to wire imported skills; whatever remains PROVABLY unreferenced
+  // (its name appears in no other file → it can never be loaded; the game already
+  // booted without it) is dropped so the shipped artifact carries no dead modules.
+  // Bulletproof gate, so this cannot break the booted game. The import_skill TOOL
+  // count stays in telemetry (importWithoutUse/skillsImported), so the adoption
+  // MISS is still measured — only the dead file is removed.
+  const removedDeadSkills: string[] = [];
+  const deadBases = new Set(analyzeSkillUsage(tree.toTextFiles()).unreferencedEngineFiles);
+  if (deadBases.size > 0) {
+    for (const f of tree.toTextFiles()) {
+      if (!/^src\/engine\/.+\.(jsx?|mjs)$/.test(f.path)) continue;
+      const base = (f.path.split('/').pop() ?? '').replace(/\.(jsx?|mjs)$/, '');
+      if (deadBases.has(base) && tree.delete(f.path)) removedDeadSkills.push(base);
+    }
+  }
+
   await assertGeneratedJavaScriptSyntax(tree.toTextFiles());
 
   // Deterministically correct near-miss engine CDN URLs before persisting (e.g.
@@ -847,6 +864,8 @@ export async function runGeneration(
     debugWired: usage.debugWired,
     skillImportedNotCalled: usage.skillImportedNotCalled,
     importWithoutUse: sig.skillsImported.length > 0 && usage.engineImports === 0,
+    removedDeadSkills, // v3.1 — provably-unreferenced staged modules swept at ship
+    removedDeadSkillCount: removedDeadSkills.length,
     recommendedButUnused,
     engineEscaped,
     ...sig,

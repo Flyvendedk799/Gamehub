@@ -805,6 +805,26 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     expect(result.shipReason).toBe('passed');
   });
 
+  it('v3.1: sweeps a provably-unreferenced staged module from the shipped artifact', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = queuedBrowserJobs([passingPlaytest(), passingPlaytest()]);
+    const agent = wireAgent(null); // imports src/engine/wave-spawner.js, NEVER wires it
+    const result = await runGeneration(
+      {
+        prompt: 'topdown',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: agent.fn, browserJobs },
+    );
+    // 3 files were written (index.html, src/engine/wave-spawner.js, src/main.js);
+    // the dead, never-referenced wave-spawner is swept → 2 ship.
+    expect(result.fileCount).toBe(2);
+    await expect(
+      store.readFile(result.snapshot.manifest, 'src/engine/wave-spawner.js'),
+    ).rejects.toThrow();
+  });
+
   it('v3 P9: a non-completable spec whose bundled playbook PASSES earns a real verdict (not skipped)', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());
     // Pre-v3 a non-completable spec (loseCondition —) took the skipped_non_completable
