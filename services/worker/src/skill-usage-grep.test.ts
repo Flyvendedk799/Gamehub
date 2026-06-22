@@ -250,4 +250,61 @@ createWaveSystem({ count: 1 });
     const r = analyzeSkillUsage(files);
     expect(r.unreferencedEngineFiles).toEqual([]);
   });
+
+  it('v3.1 unreferencedEngineFiles: a dead module whose name is in PLAIN code/strings IS still swept', () => {
+    // The real failure mode: the agent hand-rolls a same-named function (or
+    // mentions the name in a string/comment) but never IMPORTS the module. The
+    // gate keys on the absence of an ACTIVE import edge, so name-presence in
+    // ordinary code no longer blocks the sweep (the old gate was defeated by it).
+    const files = [
+      {
+        path: 'src/engine/economy-system.js',
+        content: 'export function createWallet() { return {}; }',
+      },
+      {
+        path: 'src/main.js',
+        // hand-rolled same name + a stray mention, but NO import from ./engine/.
+        content:
+          'function createWallet() { return { coins: 0 }; }\nconst w = createWallet(); // economy-system done by hand',
+      },
+    ];
+    const r = analyzeSkillUsage(files);
+    expect(r.engineImports).toBe(0); // never actively imported
+    expect(r.unreferencedEngineFiles).toEqual(['economy-system']);
+  });
+
+  it('v3.1 unreferencedEngineFiles: a commented-out import is conservatively NOT swept (safe)', () => {
+    // isImported is not comment-aware, so a commented import counts as a reference
+    // and the module is left in place — the safe direction (never delete a file a
+    // line still names as an import target). A rare residual, not a risk.
+    const files = [
+      {
+        path: 'src/engine/economy-system.js',
+        content: 'export function createWallet() { return {}; }',
+      },
+      {
+        path: 'src/main.js',
+        content: "// import { createWallet } from './engine/economy-system.js';\nlet score = 0;",
+      },
+    ];
+    const r = analyzeSkillUsage(files);
+    expect(r.unreferencedEngineFiles).toEqual([]);
+  });
+
+  it('v3.1 unreferencedEngineFiles: a COMPUTED dynamic import disables sweeping (conservative)', () => {
+    const files = [
+      {
+        path: 'src/engine/economy-system.js',
+        content: 'export function createWallet() { return {}; }',
+      },
+      {
+        path: 'src/main.js',
+        content:
+          "const name = 'economy-system';\nconst m = await import('./engine/' + name + '.js');",
+      },
+    ];
+    const r = analyzeSkillUsage(files);
+    // A computed import could resolve to this module at runtime → never sweep.
+    expect(r.unreferencedEngineFiles).toEqual([]);
+  });
 });
