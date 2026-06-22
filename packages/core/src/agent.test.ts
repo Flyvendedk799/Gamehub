@@ -1470,12 +1470,10 @@ describe('generateViaAgent() — convergence-detector — Improver1 §7', () => 
       apiKey: 'sk-test',
     });
     const steers = agentCalls[0]?.steers ?? [];
-    const convergenceSteer = steers.find((s) =>
-      /converged or the requirement is unclear/i.test(s.content),
-    );
+    const convergenceSteer = steers.find((s) => /tiny edits in a row/i.test(s.content));
     expect(convergenceSteer).toBeDefined();
     expect(convergenceSteer?.content).toMatch(/index\.html/);
-    expect(convergenceSteer?.content).toMatch(/verify_artifact/);
+    expect(convergenceSteer?.content).toMatch(/piecemeal|larger block/i);
     expect(convergenceSteer?.content).toMatch(/done/);
   });
 
@@ -1493,16 +1491,15 @@ describe('generateViaAgent() — convergence-detector — Improver1 §7', () => 
       apiKey: 'sk-test',
     });
     const steers = agentCalls[0]?.steers ?? [];
-    const convergenceSteer = steers.find((s) =>
-      /converged or the requirement is unclear/i.test(s.content),
-    );
+    const convergenceSteer = steers.find((s) => /tiny edits in a row/i.test(s.content));
     expect(convergenceSteer).toBeUndefined();
   });
 
-  it('does NOT fire when a verify_artifact landed inside the 5-turn lookback', async () => {
-    // 22 small edits + one verify_artifact + 3 more small edits = 26
-    // turns total (above the 25-turn floor) but the verify still
-    // sits inside the rolling 5-turn window — steer must NOT fire.
+  it('STILL fires with a verify_artifact inside the 5-turn lookback (the prod thrash that used to dodge it)', async () => {
+    // 22 small edits + one verify_artifact + 3 more small edits = 26 turns. The
+    // verify sits in the rolling window — which USED to bail the steer
+    // (`if (anyVerify) return`), so the real edit→verify→edit pattern (132 edits,
+    // 24 verifies, 34 min) permanently dodged it. It must now fire regardless.
     const events: Array<Record<string, unknown>> = [];
     for (let i = 0; i < 22; i += 1) {
       events.push({ type: 'turn_start' });
@@ -1547,10 +1544,8 @@ describe('generateViaAgent() — convergence-detector — Improver1 §7', () => 
       apiKey: 'sk-test',
     });
     const steers = agentCalls[0]?.steers ?? [];
-    const convergenceSteer = steers.find((s) =>
-      /converged or the requirement is unclear/i.test(s.content),
-    );
-    expect(convergenceSteer).toBeUndefined();
+    const convergenceSteer = steers.find((s) => /tiny edits in a row/i.test(s.content));
+    expect(convergenceSteer).toBeDefined();
   });
 
   it('does NOT fire when edits span MULTIPLE files', async () => {
@@ -1584,9 +1579,7 @@ describe('generateViaAgent() — convergence-detector — Improver1 §7', () => 
       apiKey: 'sk-test',
     });
     const steers = agentCalls[0]?.steers ?? [];
-    const convergenceSteer = steers.find((s) =>
-      /converged or the requirement is unclear/i.test(s.content),
-    );
+    const convergenceSteer = steers.find((s) => /tiny edits in a row/i.test(s.content));
     expect(convergenceSteer).toBeUndefined();
   });
 
@@ -1604,7 +1597,7 @@ describe('generateViaAgent() — convergence-detector — Improver1 §7', () => 
       apiKey: 'sk-test',
     });
     const convergenceSteers = (agentCalls[0]?.steers ?? []).filter((s) =>
-      /converged or the requirement is unclear/i.test(s.content),
+      /tiny edits in a row/i.test(s.content),
     );
     expect(convergenceSteers).toHaveLength(1);
   });
