@@ -62,7 +62,14 @@ const nextConfig = {
   // use; public play iframes are already sandboxed without allow-same-origin.
   async rewrites() {
     const apiTarget = process.env.API_PROXY_TARGET ?? 'http://localhost:3191';
-    return [{ source: '/v1/:path*', destination: `${apiTarget}/v1/:path*` }];
+    return [
+      // The directory-style preview routes (`/v1/runs/:id/preview/`,
+      // `/v1/projects/:id/preview/`) MUST keep their trailing slash so the game's
+      // relative assets resolve against the directory. Next's `:path*` capture
+      // drops a trailing slash, so match slash-terminated paths first and re-add it.
+      { source: '/v1/:path+/', destination: `${apiTarget}/v1/:path+/` },
+      { source: '/v1/:path*', destination: `${apiTarget}/v1/:path*` },
+    ];
   },
 };
 
