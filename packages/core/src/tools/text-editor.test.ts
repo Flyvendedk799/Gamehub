@@ -292,11 +292,10 @@ describe('text-editor success message includes post-edit position', () => {
 describe('text-editor per-call size guards', () => {
   it('throws on text_editor.create when file_text exceeds the skeleton cap', async () => {
     const tool = makeTextEditorTool(makeFs());
-    // 12289 bytes — one byte over the 12 KB skeleton cap. The 2026-04-29
-    // traces showed 5/8 runs blowing the prior 24 KB cap with 37-45 KB
-    // monolithic creates; tightening to 12 KB enforces the actual
-    // skeleton-then-fills cadence.
-    const huge = 'x'.repeat(12289);
+    // 16385 bytes — one byte over the 16 KB index.html shell cap (bumped from
+    // 12 KB so borderline-legit game shells with engine CDN tags fit, while
+    // genuine "whole game inlined in HTML" dumps still fail).
+    const huge = 'x'.repeat(16385);
     const msg = await runAndCatch(() =>
       tool.execute('id-create-too-big', {
         command: 'create',
@@ -304,11 +303,11 @@ describe('text-editor per-call size guards', () => {
         file_text: huge,
       }),
     );
-    expect(msg).toMatch(/exceeds the 12288-byte cap/);
-    expect(msg).toMatch(/SKELETON tool/);
-    // The new error copy walks the model through a concrete recovery shape.
-    expect(msg).toMatch(/Recover from this error in TWO calls/);
-    expect(msg).toMatch(/str_replace/);
+    expect(msg).toMatch(/exceeds the 16384-byte cap/);
+    expect(msg).toMatch(/THIN shell/);
+    // The error copy walks the model through the game-appropriate recovery shape.
+    expect(msg).toMatch(/Recover/);
+    expect(msg).toMatch(/src\/main\.js/);
   });
 
   it('lets a typical 8 KB JSX skeleton through create (under the 12 KB cap)', async () => {
@@ -340,15 +339,15 @@ describe('text-editor per-call size guards', () => {
         file_text: monolith,
       }),
     );
-    expect(msg).toMatch(/exceeds the 12288-byte cap/);
-    expect(msg).toMatch(/SKELETON tool/);
-    expect(msg).toMatch(/Recover from this error in TWO calls/);
+    expect(msg).toMatch(/exceeds the 16384-byte cap/);
+    expect(msg).toMatch(/THIN shell/);
+    expect(msg).toMatch(/Recover/);
   });
 
-  it('rejects a 20 KB JSX dump that would have passed the old 24 KB cap (regression guard)', async () => {
-    // Captures the failure mode that motivated the 12 KB tightening: agent
-    // tries to write the entire design in one create. Anything past 12 KB
-    // is now a hard fail, no matter how plausible the contents look.
+  it('rejects a ~20 KB index.html dump (the whole-game-in-HTML failure mode)', async () => {
+    // Captures the failure mode the cap exists for: agent tries to write the
+    // entire game in one index.html create. Past 16 KB is a hard fail no matter
+    // how plausible the contents look — game code belongs in src/*.js sidecars.
     const tool = makeTextEditorTool(makeFs());
     const dump = `<!doctype html>\n<html>\n<body>\n${'<div>section</div>\n'.repeat(1100)}</body>\n</html>`;
     const msg = await runAndCatch(() =>
@@ -358,7 +357,22 @@ describe('text-editor per-call size guards', () => {
         file_text: dump,
       }),
     );
-    expect(msg).toMatch(/exceeds the 12288-byte cap/);
+    expect(msg).toMatch(/exceeds the 16384-byte cap/);
+  });
+
+  it('lets a borderline-legit ~14 KB game shell through (was rejected by the old 12 KB cap)', async () => {
+    // A real game index.html with engine CDN tags + a boot can run ~13-15 KB.
+    // The 12 KB cap rejected these; 16 KB lets them through.
+    const tool = makeTextEditorTool(makeFs());
+    const shell = `<!doctype html>\n<html>\n<head>\n<script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>\n</head>\n<body>\n<canvas id="game"></canvas>\n<script type="module" src="src/main.js"></script>\n${'<!-- pad -->\n'.repeat(1000)}</body>\n</html>`;
+    expect(shell.length).toBeGreaterThan(12_288);
+    expect(shell.length).toBeLessThan(16_384);
+    const res = await tool.execute('id-game-shell', {
+      command: 'create',
+      path: 'index.html',
+      file_text: shell,
+    });
+    expect((res.content[0] as { text: string }).text).toMatch(/Created index\.html/);
   });
 
   it('lets sidecar files (.css / .js) through with the relaxed 64KB create cap', async () => {
@@ -432,11 +446,11 @@ describe('text-editor per-call size guards', () => {
   });
 
   it('throws on insert when new_str exceeds the per-extension cap (backlog-2 #1 insert symmetry)', async () => {
-    // insert mirrors create, so the same 12 KB ceiling applies on
+    // insert mirrors create, so the same 16 KB ceiling applies on
     // index.html. Keeps the four commands' size guarantees consistent.
     const fs = makeFs({ 'index.html': '<App/>' });
     const tool = makeTextEditorTool(fs);
-    const huge = 'z'.repeat(12289);
+    const huge = 'z'.repeat(16385);
     const msg = await runAndCatch(() =>
       tool.execute('id-insert-too-big', {
         command: 'insert',
@@ -446,7 +460,7 @@ describe('text-editor per-call size guards', () => {
       }),
     );
     expect(msg).toMatch(/text_editor\.insert/);
-    expect(msg).toMatch(/exceeds the 12288-byte cap/);
+    expect(msg).toMatch(/exceeds the 16384-byte cap/);
   });
 
   it('lets a typical insert through under the cap', async () => {
@@ -529,6 +543,33 @@ describe('text-editor view by symbol (backlog-2 #2)', () => {
       }),
     );
     expect(msg).toMatch(/non-empty identifier/);
+  });
+
+  it('locates an OBJECT-METHOD symbol (not a top-level declaration) and points view_range at its definition line', async () => {
+    // The real corpus miss: the model asks for an object method (e.g. the methods
+    // returned by a `create*` factory). extractJsxSymbol only resolves top-level
+    // function/const declarations, so this is "missing" — but instead of only
+    // listing unrelated top-level names, the error must say WHERE it actually is.
+    const src = [
+      'const scene = {', // 1
+      '  hp: 100,', // 2
+      '  updatePlayer(dt) {', // 3 — object shorthand method
+      '    return dt;', // 4
+      '  },', // 5
+      '};', // 6
+    ].join('\n');
+    const fs = makeFs({ 'src/main.js': src });
+    const tool = makeTextEditorTool(fs);
+    const msg = await runAndCatch(() =>
+      tool.execute('id-sym-nested', {
+        command: 'view',
+        path: 'src/main.js',
+        symbol: 'updatePlayer',
+      }),
+    );
+    expect(msg).toMatch(/not found as a top-level declaration/);
+    expect(msg).toMatch(/line\(s\) 3/); // its definition line
+    expect(msg).toMatch(/view_range/);
   });
 
   it('throws with line numbers on ambiguous symbols', async () => {
