@@ -21,6 +21,13 @@ const securityHeaders = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // Preserve trailing slashes through the /v1 proxy. Next's default redirects
+  // `/foo/` → `/foo`, which strips the slash off the API's directory-style
+  // preview routes (`/v1/runs/:id/preview/` is served as `/preview/*`) BEFORE the
+  // rewrite runs → the API then 404s on the bare `/preview`. Skipping the auto
+  // redirect lets the slash pass through verbatim. (The app's own pages are all
+  // linked without trailing slashes, so this doesn't affect them.)
+  skipTrailingSlashRedirect: true,
   // Workspace packages ship raw TypeScript (with .js import specifiers), so Next
   // must transpile them + resolve their extensions during `next build`.
   transpilePackages: ['@playforge/shared'],
