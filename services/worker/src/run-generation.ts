@@ -300,10 +300,10 @@ function buildStagedUnusedInstruction(staged: string[]): string {
     )
     .join('\n');
   return [
-    `SKILL WIRING REPAIR — you ran import_skill to write these vetted modules to src/engine/ but never import + call them: ${list}.`,
-    'They are tested systems — do NOT ship them dead while hand-rolling the same behaviour. For EACH module, do ONE of:',
+    `SKILL WIRING REPAIR — you imported these vetted modules but never CALL them: ${list}.`,
+    'The import line is already in your entry — CALLING the skill IS how you implement that system, so do NOT keep a hand-rolled parallel version. For EACH module, do ONE of:',
     lines,
-    '  ...OR delete src/engine/<name>.js if you genuinely do not use it.',
+    '  ...OR, only if you genuinely do not need it, delete src/engine/<name>.js AND its import line.',
     'Then re-run validate_game_scene + playtest_game and call done. Change nothing unrelated.',
   ].join('\n');
 }

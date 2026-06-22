@@ -192,7 +192,7 @@ export function formatRecommendationsForPrompt(recs: SkillRecommendation[]): str
   const fmt = (r: SkillRecommendation) => `- import_skill({ name: '${r.skill}' }) — ${r.reason}`;
   const importNow = recs.slice(0, IMPORT_NOW_TIER_SIZE);
   const also = recs.slice(IMPORT_NOW_TIER_SIZE);
-  let out = `Recommended skills for this game's capabilities — IMPORT these core systems now with import_skill, then call their exports (do NOT hand-roll them):\n${importNow
+  let out = `Recommended skills — vetted, tested implementations of THIS game's core systems. After you scaffold your entry file, import_skill each one (it wires the import into src/main.js), then BUILD that system by CALLING its exports. Calling the skill IS how you implement that system — do NOT write your own parallel version of what you imported:\n${importNow
     .map(fmt)
     .join('\n')}`;
   if (also.length > 0) {

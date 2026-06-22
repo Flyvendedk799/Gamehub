@@ -119,7 +119,8 @@ describe('formatRecommendationsForPrompt', () => {
   it('produces a bullet list with the header line', () => {
     const recs = recommendSkills({ hasEnemies: true, escalates: true }, 'phaser');
     const output = formatRecommendationsForPrompt(recs);
-    expect(output).toContain("Recommended skills for this game's capabilities");
+    expect(output).toContain('Recommended skills');
+    expect(output).toContain('Calling the skill IS how you implement');
     expect(output).toContain('import_skill');
     expect(output).toContain('phaser/enemy-ai.js');
     expect(output).toContain('phaser/wave-spawner.js');
