@@ -17,7 +17,7 @@ const BASE = API_BASE;
 
 function headers(): HeadersInit {
   const token = getToken();
-  const h: Record<string, string> = { 'Content-Type': 'application/json' };
+  const h: Record<string, string> = {};
   if (token) h['Authorization'] = `Bearer ${token}`;
   return h;
 }
@@ -41,10 +41,16 @@ export class ApiError extends Error {
 }
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  // Only declare a JSON content-type when we actually send a body. A bodyless
+  // request (GET, or a bodyless DELETE like clearCloudSave) with
+  // Content-Type: application/json trips Fastify's empty-JSON-body guard (400
+  // FST_ERR_CTP_EMPTY_JSON_BODY) — the cloud-save clear() bug the E2E surfaced.
+  const hasBody = init?.body !== undefined && init?.body !== null;
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: {
       ...headers(),
+      ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
       ...(init?.headers ?? {}),
     },
   });
