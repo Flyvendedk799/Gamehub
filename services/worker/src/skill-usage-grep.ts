@@ -4,6 +4,13 @@ export interface SkillUsageSignals {
   usesSkillFns: number;
   debugWired: number;
   skillImportedNotCalled: string[];
+  /** v3.1 — base names of src/engine modules that are PROVABLY unreferenced: the
+   *  path `engine/<base>`, the base name, and every export identifier appear in NO
+   *  other source file. Such a module can never be loaded (the game booted without
+   *  it), so it is safe to delete deterministically as dead weight. A strict
+   *  subset of skillImportedNotCalled (excludes imported-but-uncalled, whose import
+   *  line still references the file). */
+  unreferencedEngineFiles: string[];
 }
 
 const ENGINE_PATH_RE = /^src\/engine\/.+\.(js|jsx|mjs)$/;
@@ -72,6 +79,7 @@ export function analyzeSkillUsage(
   let engineImports = 0;
   let usesSkillFns = 0;
   const skillImportedNotCalled: string[] = [];
+  const unreferencedEngineFiles: string[] = [];
 
   for (const ef of engineFiles) {
     const base = getBaseName(ef.path);
@@ -96,6 +104,13 @@ export function analyzeSkillUsage(
     if (!imported || callCount === 0) {
       skillImportedNotCalled.push(base);
     }
+
+    // Provably-unreferenced (bulletproof gate for safe deletion): NOT imported,
+    // AND the bare base name appears nowhere else (covers computed/dynamic refs
+    // like `import('./engine/'+name)`), AND no export identifier appears elsewhere.
+    if (!imported && !others.includes(base) && !exports.some((n) => others.includes(n))) {
+      unreferencedEngineFiles.push(base);
+    }
   }
 
   const debugWired = countDebugWirings(allContent);
@@ -106,5 +121,6 @@ export function analyzeSkillUsage(
     usesSkillFns,
     debugWired,
     skillImportedNotCalled,
+    unreferencedEngineFiles,
   };
 }

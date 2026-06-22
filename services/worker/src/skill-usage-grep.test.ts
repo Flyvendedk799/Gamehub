@@ -215,4 +215,39 @@ createWaveSystem({ count: 1 });
     expect(result.usesSkillFns).toBe(1);
     expect(result.skillImportedNotCalled).toEqual([]);
   });
+
+  it('v3.1 unreferencedEngineFiles: flags a truly-dead module, NOT an imported-but-uncalled one', () => {
+    const files = [
+      // (a) truly unreferenced — its name appears nowhere else → safe to delete.
+      {
+        path: 'src/engine/economy-system.js',
+        content: 'export function createWallet() { return {}; }',
+      },
+      // (b) imported but its export is never called — the import line still
+      //     references the file, so it is NOT safe to delete.
+      {
+        path: 'src/engine/wave-spawner.js',
+        content: 'export function createWaveSystem() { return {}; }',
+      },
+      {
+        path: 'src/main.js',
+        content: "import { createWaveSystem } from './engine/wave-spawner.js';\nconst score = 0;",
+      },
+    ];
+    const r = analyzeSkillUsage(files);
+    expect(r.skillImportedNotCalled.sort()).toEqual(['economy-system', 'wave-spawner']);
+    expect(r.unreferencedEngineFiles).toEqual(['economy-system']);
+  });
+
+  it('v3.1 unreferencedEngineFiles: a dynamic import() by name keeps a module referenced', () => {
+    const files = [
+      {
+        path: 'src/engine/save-state.js',
+        content: 'export function createSaveState() { return {}; }',
+      },
+      { path: 'src/main.js', content: "const m = await import('./engine/save-state.js');" },
+    ];
+    const r = analyzeSkillUsage(files);
+    expect(r.unreferencedEngineFiles).toEqual([]);
+  });
 });
