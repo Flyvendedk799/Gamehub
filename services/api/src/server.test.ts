@@ -4,6 +4,7 @@ import { InMemoryBlobStore, SnapshotStore } from '@playforge/storage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InMemoryAccountRepo } from './account-repo';
 import { type Authenticator, HeaderAuthenticator } from './auth';
+import { InMemoryCloudSaveRepo } from './cloud-save-repo';
 import { InMemoryHubRepo } from './hub-repo';
 import { InMemoryPublishRepo } from './publish-repo';
 import { InMemoryProjectRepo } from './repo';
@@ -29,6 +30,7 @@ function makeApp(overrides?: {
   hubRepo?: InMemoryHubRepo;
   adminToken?: string;
   accountRepo?: InMemoryAccountRepo;
+  cloudSaveRepo?: InMemoryCloudSaveRepo;
   allowedCorsOrigins?: string;
   sseMaxStreamMs?: number;
   auth?: Authenticator;
@@ -41,6 +43,7 @@ function makeApp(overrides?: {
     enqueue: overrides?.enqueue ?? (async () => {}),
     ...(overrides?.store !== undefined ? { store: overrides.store } : {}),
     ...(overrides?.snapshotRepo !== undefined ? { snapshotRepo: overrides.snapshotRepo } : {}),
+    ...(overrides?.cloudSaveRepo !== undefined ? { cloudSaveRepo: overrides.cloudSaveRepo } : {}),
     ...(overrides?.publishRepo !== undefined ? { publishRepo: overrides.publishRepo } : {}),
     ...(overrides?.hubRepo !== undefined ? { hubRepo: overrides.hubRepo } : {}),
     ...(overrides?.adminToken !== undefined ? { adminToken: overrides.adminToken } : {}),
@@ -3277,5 +3280,255 @@ describe('social outro (GET /v1/projects/:id/social-outro)', () => {
         cacheCreationInputTokens: 0,
       });
     });
+  });
+});
+
+describe('cloud saves (P10b)', () => {
+  // Saves are scoped to (session user, project, key). The user id is derived
+  // from the session via requireUser — never from the body/params — so a save
+  // is isolated per user. There is no project-ownership requirement: any
+  // logged-in user (here AS_BOB on a project alice owns) may save progress.
+  const PROJECT_ID = 'proj_anything'; // ownership is irrelevant for cloud saves
+
+  it('round-trips a value: PUT then GET for the same user', async () => {
+    const cloudSaveRepo = new InMemoryCloudSaveRepo();
+    const app = makeApp({ cloudSaveRepo });
+
+    const put = await app.inject({
+      method: 'PUT',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save`,
+      headers: AS_ALICE,
+      payload: { key: 'slot1', value: { level: 7, hp: 42 } },
+    });
+    expect(put.statusCode).toBe(200);
+    expect(put.json()).toEqual({ ok: true });
+
+    const get = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save?key=slot1`,
+      headers: AS_ALICE,
+    });
+    expect(get.statusCode).toBe(200);
+    expect(get.json()).toEqual({ value: { level: 7, hp: 42 } });
+  });
+
+  it('caps distinct keys per (user, project) — a NEW key past the limit is 400 key_limit', async () => {
+    const cloudSaveRepo = new InMemoryCloudSaveRepo();
+    // Pre-fill the cap (256 distinct keys) for alice on this project.
+    for (let i = 0; i < 256; i++) {
+      await cloudSaveRepo.set('alice', PROJECT_ID, `k${i}`, { i });
+    }
+    const app = makeApp({ cloudSaveRepo });
+
+    // A NEW (257th) key is rejected...
+    const overflow = await app.inject({
+      method: 'PUT',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save`,
+      headers: AS_ALICE,
+      payload: { key: 'k_new', value: { x: 1 } },
+    });
+    expect(overflow.statusCode).toBe(400);
+    expect(overflow.json()).toMatchObject({ error: 'key_limit' });
+
+    // ...but UPDATING an existing key at the cap still works (no new row).
+    const update = await app.inject({
+      method: 'PUT',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save`,
+      headers: AS_ALICE,
+      payload: { key: 'k0', value: { x: 2 } },
+    });
+    expect(update.statusCode).toBe(200);
+  });
+
+  it('isolates saves per user — a different user gets null for the same project+key', async () => {
+    const cloudSaveRepo = new InMemoryCloudSaveRepo();
+    const app = makeApp({ cloudSaveRepo });
+
+    await app.inject({
+      method: 'PUT',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save`,
+      headers: AS_ALICE,
+      payload: { key: 'slot1', value: { secret: 'alice-only' } },
+    });
+
+    // Bob plays the same game but must NOT see alice's save.
+    const bob = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save?key=slot1`,
+      headers: AS_BOB,
+    });
+    expect(bob.statusCode).toBe(200);
+    expect(bob.json()).toEqual({ value: null });
+  });
+
+  it('lets any logged-in user save progress (no project-ownership requirement)', async () => {
+    const cloudSaveRepo = new InMemoryCloudSaveRepo();
+    const app = makeApp({ cloudSaveRepo });
+
+    // Bob saves + reads his own progress on a project he does not own.
+    const put = await app.inject({
+      method: 'PUT',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save`,
+      headers: AS_BOB,
+      payload: { key: 'slot1', value: { coins: 5 } },
+    });
+    expect(put.statusCode).toBe(200);
+    const get = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save?key=slot1`,
+      headers: AS_BOB,
+    });
+    expect(get.json()).toEqual({ value: { coins: 5 } });
+  });
+
+  it('DELETE with a key removes only that key', async () => {
+    const cloudSaveRepo = new InMemoryCloudSaveRepo();
+    const app = makeApp({ cloudSaveRepo });
+
+    await app.inject({
+      method: 'PUT',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save`,
+      headers: AS_ALICE,
+      payload: { key: 'slot1', value: 1 },
+    });
+    await app.inject({
+      method: 'PUT',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save`,
+      headers: AS_ALICE,
+      payload: { key: 'slot2', value: 2 },
+    });
+
+    const del = await app.inject({
+      method: 'DELETE',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save?key=slot1`,
+      headers: AS_ALICE,
+    });
+    expect(del.statusCode).toBe(200);
+    expect(del.json()).toEqual({ ok: true });
+
+    const gone = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save?key=slot1`,
+      headers: AS_ALICE,
+    });
+    expect(gone.json()).toEqual({ value: null });
+
+    const kept = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save?key=slot2`,
+      headers: AS_ALICE,
+    });
+    expect(kept.json()).toEqual({ value: 2 });
+  });
+
+  it('DELETE without a key clears all of the user’s saves for the project', async () => {
+    const cloudSaveRepo = new InMemoryCloudSaveRepo();
+    const app = makeApp({ cloudSaveRepo });
+
+    // Alice has two saves; bob has one on the same project + key.
+    await app.inject({
+      method: 'PUT',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save`,
+      headers: AS_ALICE,
+      payload: { key: 'slot1', value: 1 },
+    });
+    await app.inject({
+      method: 'PUT',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save`,
+      headers: AS_ALICE,
+      payload: { key: 'slot2', value: 2 },
+    });
+    await app.inject({
+      method: 'PUT',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save`,
+      headers: AS_BOB,
+      payload: { key: 'slot1', value: 99 },
+    });
+
+    const del = await app.inject({
+      method: 'DELETE',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save`,
+      headers: AS_ALICE,
+    });
+    expect(del.statusCode).toBe(200);
+
+    // Both of alice's keys are gone…
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/v1/projects/${PROJECT_ID}/cloud-save?key=slot1`,
+          headers: AS_ALICE,
+        })
+      ).json(),
+    ).toEqual({ value: null });
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/v1/projects/${PROJECT_ID}/cloud-save?key=slot2`,
+          headers: AS_ALICE,
+        })
+      ).json(),
+    ).toEqual({ value: null });
+
+    // …but bob's save on the same project is untouched (isolation).
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/v1/projects/${PROJECT_ID}/cloud-save?key=slot1`,
+          headers: AS_BOB,
+        })
+      ).json(),
+    ).toEqual({ value: 99 });
+  });
+
+  it('rejects a value over 100KB with 400 value_too_large', async () => {
+    const cloudSaveRepo = new InMemoryCloudSaveRepo();
+    const app = makeApp({ cloudSaveRepo });
+
+    const huge = 'x'.repeat(100_001);
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save`,
+      headers: AS_ALICE,
+      payload: { key: 'slot1', value: huge },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'value_too_large', max: 100000 });
+  });
+
+  it('returns 401 when unauthenticated', async () => {
+    const cloudSaveRepo = new InMemoryCloudSaveRepo();
+    const app = makeApp({ cloudSaveRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save?key=slot1`,
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('returns 400 when the GET key query param is missing', async () => {
+    const cloudSaveRepo = new InMemoryCloudSaveRepo();
+    const app = makeApp({ cloudSaveRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save`,
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'key_required' });
+  });
+
+  it('returns 503 when the cloud-save repo is not configured', async () => {
+    const app = makeApp(); // no cloudSaveRepo wired
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${PROJECT_ID}/cloud-save?key=slot1`,
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(503);
+    expect(res.json()).toEqual({ error: 'cloud_save_unavailable' });
   });
 });

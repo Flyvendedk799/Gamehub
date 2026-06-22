@@ -19,3 +19,13 @@ export function clearToken(): void {
 export function isAuthenticated(): boolean {
   return Boolean(getToken());
 }
+
+/**
+ * True when a session token is present (same check `api.ts` uses via `getToken`).
+ * Used to gate relay-capable host features (e.g. the cloud-save relay) on a
+ * logged-in user. Alias of {@link isAuthenticated} with a name that reads at the
+ * call site as "is the player signed in".
+ */
+export function isLoggedIn(): boolean {
+  return Boolean(getToken());
+}

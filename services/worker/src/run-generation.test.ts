@@ -760,6 +760,30 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     expect(result.shipReason).toBe('passed');
   });
 
+  it('v3.1 (P9): a playbook game with NO live debug contract repairs, not a vacuous pass', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    // Round 1 playtest reports hasDebugContract=false (no window.__game.debug
+    // snapshot wired) → must force a wire-debug repair, NOT credit a pass. Round 2
+    // has the contract → passes.
+    const noContract: PlaytestVerdict = { ...passingPlaytest(), hasDebugContract: false };
+    const browserJobs = queuedBrowserJobs([noContract, passingPlaytest()]);
+    let rounds = 0;
+    const agent = specAgent(() => {
+      rounds += 1;
+    });
+    const result = await runGeneration(
+      {
+        prompt: 'topdown',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: agent, browserJobs },
+    );
+    expect(rounds).toBe(2); // the missing-contract round forced a repair
+    expect(result.repairRounds).toBe(1);
+    expect(result.shipReason).toBe('passed');
+  });
+
   it('v3.1: a persistently staged skill is capped at ONE wiring round, then ships', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());
     const browserJobs = queuedBrowserJobs([

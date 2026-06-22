@@ -63,6 +63,7 @@ import type { AuthedUser, Authenticator } from './auth';
 import { generateSessionToken, hashPassword, sessionExpiresAt, verifyPassword } from './auth';
 import type { BrowserJobQueue, RuntimeVerifyResult, ThumbnailResult } from './browser-queue';
 import type { ChatRepo } from './chat-repo';
+import type { CloudSaveRepo } from './cloud-save-repo';
 import type { CreditPurchaseProvider } from './credit-purchase';
 import { type EmailPort, buildPasswordResetEmail } from './email';
 import type { HubRepo } from './hub-repo';
@@ -314,6 +315,13 @@ export interface ServerDeps {
   maxRunTokens?: number;
   /** Optional: enables GET /v1/projects/:id/snapshots + revert endpoint. */
   snapshotRepo?: SnapshotRepo;
+  /**
+   * Optional: per-user cloud-save key-value store (P10b — cross-device game
+   * saves). When set, enables the /v1/projects/:id/cloud-save routes. Saves are
+   * scoped to (authenticated user, project, key) with NO project-ownership
+   * requirement — any logged-in user may save progress for any game they play.
+   */
+  cloudSaveRepo?: CloudSaveRepo;
   /** Optional: enables /v1/auth/* routes (register, login, logout, me). */
   authDb?: import('@playforge/db').Db;
   /** Optional: enables /v1/account/* routes and per-user provider resolution. */
@@ -3061,6 +3069,91 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       manifestKey: snapshot.filesManifestKey,
       snapshotId: snapshot.id,
     });
+  });
+
+  // ── cloud saves (P10b — cross-device game saves) ───────────────────────────
+  // GET    /v1/projects/:id/cloud-save?key=KEY  — read one save (auth)
+  // PUT    /v1/projects/:id/cloud-save          — upsert one save (auth)
+  // DELETE /v1/projects/:id/cloud-save[?key=KEY] — clear one key, or the project
+  //
+  // A save is scoped to (authenticated session user, project, key). The user id
+  // is ALWAYS derived from the session via requireUser — NEVER from the body or
+  // params — so a logged-in user can read/write ONLY their own saves. There is
+  // NO ownership requirement on the project: any logged-in user may save
+  // progress for any game they play. Value size is capped to bound storage.
+
+  /** Hard cap on a serialized save value — bounds per-row storage abuse. */
+  const MAX_CLOUD_SAVE_VALUE_BYTES = 100_000;
+  // Cap distinct save keys per (user, project) — generous for real games (slots,
+  // settings, high-scores) but bounds a hostile game's unbounded key creation.
+  const MAX_CLOUD_SAVE_KEYS = 256;
+
+  app.get('/v1/projects/:id/cloud-save', async (req, reply) => {
+    if (!deps.cloudSaveRepo) return reply.code(503).send({ error: 'cloud_save_unavailable' });
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { id } = req.params as { id: string };
+    if (typeof id !== 'string' || id.length === 0) {
+      return reply.code(400).send({ error: 'invalid_project_id' });
+    }
+    const key = (req.query as { key?: unknown } | undefined)?.key;
+    if (typeof key !== 'string' || key.length === 0) {
+      return reply.code(400).send({ error: 'key_required' });
+    }
+    const value = await deps.cloudSaveRepo.get(user.userId, id, key);
+    return reply.send({ value });
+  });
+
+  app.put('/v1/projects/:id/cloud-save', async (req, reply) => {
+    if (!deps.cloudSaveRepo) return reply.code(503).send({ error: 'cloud_save_unavailable' });
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { id } = req.params as { id: string };
+    if (typeof id !== 'string' || id.length === 0) {
+      return reply.code(400).send({ error: 'invalid_project_id' });
+    }
+    const body = (req.body ?? {}) as { key?: unknown; value?: unknown };
+    if (typeof body.key !== 'string' || body.key.length === 0) {
+      return reply.code(400).send({ error: 'key_required' });
+    }
+    // `value` jsonb is NOT NULL — a missing/undefined value isn't storable.
+    // JSON.stringify(undefined) is `undefined` (not a string), so guard first.
+    if (body.value === undefined) {
+      return reply.code(400).send({ error: 'value_required' });
+    }
+    if (JSON.stringify(body.value).length > MAX_CLOUD_SAVE_VALUE_BYTES) {
+      return reply.code(400).send({ error: 'value_too_large', max: MAX_CLOUD_SAVE_VALUE_BYTES });
+    }
+    // Cap distinct keys per (user, project) so a hostile game can't grow storage
+    // unboundedly by looping set('k'+i, ...). Only counts when creating a NEW key
+    // (updating an existing one is always allowed). Bounds the attacker's own quota.
+    const existing = await deps.cloudSaveRepo.get(user.userId, id, body.key);
+    if (existing === null) {
+      const keyCount = await deps.cloudSaveRepo.countKeys(user.userId, id);
+      if (keyCount >= MAX_CLOUD_SAVE_KEYS) {
+        return reply.code(400).send({ error: 'key_limit', max: MAX_CLOUD_SAVE_KEYS });
+      }
+    }
+    await deps.cloudSaveRepo.set(user.userId, id, body.key, body.value);
+    return reply.send({ ok: true });
+  });
+
+  app.delete('/v1/projects/:id/cloud-save', async (req, reply) => {
+    if (!deps.cloudSaveRepo) return reply.code(503).send({ error: 'cloud_save_unavailable' });
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { id } = req.params as { id: string };
+    if (typeof id !== 'string' || id.length === 0) {
+      return reply.code(400).send({ error: 'invalid_project_id' });
+    }
+    const key = (req.query as { key?: unknown } | undefined)?.key;
+    if (typeof key === 'string' && key.length > 0) {
+      await deps.cloudSaveRepo.clearKey(user.userId, id, key);
+    } else {
+      // No key → clear ALL of this user's saves for the project.
+      await deps.cloudSaveRepo.clearProject(user.userId, id);
+    }
+    return reply.send({ ok: true });
   });
 
   // ── community hub ─────────────────────────────────────────────────────────

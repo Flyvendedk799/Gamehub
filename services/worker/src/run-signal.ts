@@ -84,10 +84,18 @@ export function createRunSignalAggregator() {
             .map((i) => (typeof i.invariant === 'string' ? i.invariant : null))
             .filter((v): v is string => v !== null);
         }
-        if (name === 'str_replace' || name === 'text_editor') {
-          const ok = (result as { isError?: boolean; details?: { ok?: boolean } } | undefined)
-            ?.isError;
-          if (ok === true) strReplaceFailures += 1;
+        // The agent's edit tool is `str_replace_based_edit_tool` (str_replace /
+        // patch / create commands). The earlier 'str_replace'/'text_editor' names
+        // never matched a real event, and isError is TOP-LEVEL on the event, not
+        // on result — so this counter was always 0. Match the real name + read the
+        // right field (with the legacy names + result.isError kept as fallbacks).
+        if (
+          name === 'str_replace_based_edit_tool' ||
+          name === 'str_replace' ||
+          name === 'text_editor'
+        ) {
+          const ev = event as { isError?: boolean; result?: { isError?: boolean } };
+          if (ev.isError === true || ev.result?.isError === true) strReplaceFailures += 1;
         }
       }
     },

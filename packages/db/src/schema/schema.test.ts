@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   apiKeys,
   chatMessages,
+  cloudSaves,
   creditLedger,
   engineKind,
   follows,
@@ -211,5 +212,19 @@ describe('schema', () => {
     // Composite PK on (follower_id, followee_id) makes a follow idempotent.
     expect(cfg.primaryKeys[0]?.columns.map((c) => c.name)).toEqual(['follower_id', 'followee_id']);
     expect(indexNames(follows)).toContain('follows_followee_idx');
+  });
+
+  it('cloud_saves is a (user, project, key) KV store with a composite PK (P10b)', () => {
+    const cfg = getTableConfig(cloudSaves);
+    expect(cfg.name).toBe('cloud_saves');
+    expect(columnNames(cloudSaves)).toEqual(
+      expect.arrayContaining(['user_id', 'project_id', 'save_key', 'value', 'updated_at']),
+    );
+    // Composite PK on (user_id, project_id, save_key) scopes one row per save.
+    expect(cfg.primaryKeys[0]?.columns.map((c) => c.name)).toEqual([
+      'user_id',
+      'project_id',
+      'save_key',
+    ]);
   });
 });

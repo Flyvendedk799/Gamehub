@@ -1,12 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { keyLabel } from '../../components/ControlsPanel';
 import {
+  CLOUD_SAVE_MESSAGE_TYPE,
+  CLOUD_SAVE_READY_MESSAGE_TYPE,
+  CLOUD_SAVE_RESULT_MESSAGE_TYPE,
   CONTROLS_MANIFEST_MESSAGE_TYPE,
   PREVIEW_IFRAME_ORIGIN,
   TWEAKS_UPDATE_MESSAGE_TYPE,
   isPreviewIframeOrigin,
+  parseCloudSaveMessage,
+  parseCloudSavePayload,
   parseControlsManifestMessage,
   parseInboundBridgeMessage,
+  sendCloudSaveReady,
+  sendCloudSaveResult,
 } from '../iframe-bridge';
 
 // Minimal MessageEvent stand-in so we don't need a DOM environment.
@@ -110,5 +117,146 @@ describe('parseInboundBridgeMessage', () => {
     expect(parseInboundBridgeMessage(evt(PREVIEW_IFRAME_ORIGIN, { type: 'ack' }))).toEqual({
       type: 'ack',
     });
+  });
+});
+
+// ─── Cloud-save relay (cross-device game saves) ────────────────────────────────
+
+describe('parseCloudSaveMessage', () => {
+  it('keeps the cloud-save protocol literals in lockstep with the shim', () => {
+    // Mirror of runtime engines/types.ts CLOUD_SAVE_* constants.
+    expect(CLOUD_SAVE_MESSAGE_TYPE).toBe('playforge:cloudsave');
+    expect(CLOUD_SAVE_RESULT_MESSAGE_TYPE).toBe('playforge:cloudsave:result');
+    expect(CLOUD_SAVE_READY_MESSAGE_TYPE).toBe('playforge:cloudsave:ready');
+  });
+
+  it('accepts a valid get op from the preview origin', () => {
+    const msg = { type: CLOUD_SAVE_MESSAGE_TYPE, op: 'get', key: 'save1', requestId: 'cs1' };
+    expect(parseCloudSaveMessage(evt(PREVIEW_IFRAME_ORIGIN, msg))).toEqual({
+      op: 'get',
+      key: 'save1',
+      requestId: 'cs1',
+    });
+  });
+
+  it('accepts a valid set op (value passed through verbatim, incl. null)', () => {
+    const set = {
+      type: CLOUD_SAVE_MESSAGE_TYPE,
+      op: 'set',
+      key: 'save1',
+      value: { level: 3, coins: 12 },
+    };
+    expect(parseCloudSaveMessage(evt(PREVIEW_IFRAME_ORIGIN, set))).toEqual({
+      op: 'set',
+      key: 'save1',
+      value: { level: 3, coins: 12 },
+    });
+    const setNull = { type: CLOUD_SAVE_MESSAGE_TYPE, op: 'set', key: 'k', value: null };
+    expect(parseCloudSaveMessage(evt(PREVIEW_IFRAME_ORIGIN, setNull))).toEqual({
+      op: 'set',
+      key: 'k',
+      value: null,
+    });
+  });
+
+  it('accepts a clear op with a key OR null (= clear all for the project)', () => {
+    const clearKey = { type: CLOUD_SAVE_MESSAGE_TYPE, op: 'clear', key: 'save1' };
+    expect(parseCloudSaveMessage(evt(PREVIEW_IFRAME_ORIGIN, clearKey))).toEqual({
+      op: 'clear',
+      key: 'save1',
+    });
+    const clearAll = { type: CLOUD_SAVE_MESSAGE_TYPE, op: 'clear', key: null };
+    expect(parseCloudSaveMessage(evt(PREVIEW_IFRAME_ORIGIN, clearAll))).toEqual({
+      op: 'clear',
+      key: null,
+    });
+  });
+
+  it('REJECTS a cloud-save message from a foreign origin', () => {
+    const msg = { type: CLOUD_SAVE_MESSAGE_TYPE, op: 'get', key: 'save1', requestId: 'cs1' };
+    expect(parseCloudSaveMessage(evt('https://evil.example', msg))).toBeNull();
+  });
+
+  it('rejects malformed shapes (missing fields, bad op, wrong types)', () => {
+    const cases: unknown[] = [
+      null,
+      'string',
+      { type: 'other', op: 'get', key: 'k', requestId: 'r' }, // wrong type
+      { type: CLOUD_SAVE_MESSAGE_TYPE, op: 'nope', key: 'k' }, // unknown op
+      { type: CLOUD_SAVE_MESSAGE_TYPE, op: 'get', key: 'k' }, // get missing requestId
+      { type: CLOUD_SAVE_MESSAGE_TYPE, op: 'get', requestId: 'r' }, // get missing key
+      { type: CLOUD_SAVE_MESSAGE_TYPE, op: 'get', key: 5, requestId: 'r' }, // non-string key
+      { type: CLOUD_SAVE_MESSAGE_TYPE, op: 'set' }, // set missing key
+      { type: CLOUD_SAVE_MESSAGE_TYPE, op: 'clear', key: 5 }, // clear non-string/non-null key
+    ];
+    for (const data of cases) {
+      expect(parseCloudSaveMessage(evt(PREVIEW_IFRAME_ORIGIN, data))).toBeNull();
+    }
+  });
+});
+
+describe('parseCloudSavePayload (origin-agnostic shape check for the opaque play iframe)', () => {
+  it('parses a valid op regardless of origin (relay layers source-window trust)', () => {
+    const msg = { type: CLOUD_SAVE_MESSAGE_TYPE, op: 'set', key: 'k', value: 1 };
+    // No origin involved — the opaque play iframe's source identity is the gate.
+    expect(parseCloudSavePayload(msg)).toEqual({ op: 'set', key: 'k', value: 1 });
+  });
+
+  it('still rejects malformed payloads', () => {
+    expect(parseCloudSavePayload({ type: 'other' })).toBeNull();
+    expect(parseCloudSavePayload(null)).toBeNull();
+  });
+});
+
+describe('sendCloudSaveResult / sendCloudSaveReady', () => {
+  // Mock the iframe's contentWindow.postMessage to capture (message, targetOrigin).
+  function mockIframe() {
+    const postMessage = vi.fn();
+    const iframe = { contentWindow: { postMessage } } as unknown as HTMLIFrameElement;
+    return { iframe, postMessage };
+  }
+
+  it('posts a result with the correct type, requestId, value + default target origin', () => {
+    const { iframe, postMessage } = mockIframe();
+    sendCloudSaveResult(iframe, 'cs1', { level: 2 });
+    expect(postMessage).toHaveBeenCalledWith(
+      { type: CLOUD_SAVE_RESULT_MESSAGE_TYPE, requestId: 'cs1', value: { level: 2 } },
+      PREVIEW_IFRAME_ORIGIN,
+    );
+  });
+
+  it('posts a result with a null value (no save stored)', () => {
+    const { iframe, postMessage } = mockIframe();
+    sendCloudSaveResult(iframe, 'cs2', null);
+    expect(postMessage).toHaveBeenCalledWith(
+      { type: CLOUD_SAVE_RESULT_MESSAGE_TYPE, requestId: 'cs2', value: null },
+      PREVIEW_IFRAME_ORIGIN,
+    );
+  });
+
+  it('posts ready with the correct type + default target origin (never "*")', () => {
+    const { iframe, postMessage } = mockIframe();
+    sendCloudSaveReady(iframe);
+    expect(postMessage).toHaveBeenCalledWith(
+      { type: CLOUD_SAVE_READY_MESSAGE_TYPE },
+      PREVIEW_IFRAME_ORIGIN,
+    );
+  });
+
+  it('honors an explicit target origin for the opaque play iframe', () => {
+    const { iframe, postMessage } = mockIframe();
+    sendCloudSaveResult(iframe, 'cs3', 1, '*');
+    sendCloudSaveReady(iframe, '*');
+    expect(postMessage).toHaveBeenNthCalledWith(
+      1,
+      { type: CLOUD_SAVE_RESULT_MESSAGE_TYPE, requestId: 'cs3', value: 1 },
+      '*',
+    );
+    expect(postMessage).toHaveBeenNthCalledWith(2, { type: CLOUD_SAVE_READY_MESSAGE_TYPE }, '*');
+  });
+
+  it('is a no-op when the iframe (or its contentWindow) is null', () => {
+    expect(() => sendCloudSaveResult(null, 'cs1', 1)).not.toThrow();
+    expect(() => sendCloudSaveReady(null)).not.toThrow();
   });
 });

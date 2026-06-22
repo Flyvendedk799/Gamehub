@@ -12,6 +12,8 @@ import {
   toggleLike,
 } from '@/lib/api';
 import type { HubComment, LeaderboardEntry } from '@/lib/api';
+import { isLoggedIn } from '@/lib/auth';
+import { useCloudSaveRelay } from '@/lib/cloud-save-relay';
 import { API_BASE } from '@/lib/config';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -45,6 +47,8 @@ interface Props {
   remixCount?: number;
   /** #3.6 — slug this game was remixed FROM, for attribution. Null if original. */
   parentSlug?: string | null;
+  /** Project this published game belongs to — scopes the cloud-save relay. */
+  projectId?: string;
 }
 
 export default function PlayClient({
@@ -52,6 +56,7 @@ export default function PlayClient({
   initialTitle,
   remixCount = 0,
   parentSlug = null,
+  projectId,
 }: Props) {
   const router = useRouter();
   const gameUrl = `${BASE}/v1/play/${slug}`;
@@ -141,6 +146,16 @@ export default function PlayClient({
   // Ref to the game iframe so the score listener can verify a message actually
   // came from THIS frame's window, not an arbitrary script/embed. (CSP H2)
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // Cross-device cloud-save relay (logged-in players only). `getToken` reads
+  // localStorage, which is empty during SSR, so resolve the logged-in flag on
+  // mount to avoid a hydration mismatch — the relay only needs to enable after
+  // the client has hydrated anyway.
+  const [loggedIn, setLoggedIn] = useState(false);
+  useEffect(() => {
+    setLoggedIn(isLoggedIn());
+  }, []);
+  useCloudSaveRelay(iframeRef, projectId, loggedIn);
 
   async function refreshLeaderboard() {
     try {

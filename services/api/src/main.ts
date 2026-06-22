@@ -42,6 +42,7 @@ import { BrowserJobQueue } from './browser-queue';
 import { type CreditPurchaseProvider, MockCreditProvider } from './credit-purchase';
 import {
   DrizzleChatRepo,
+  DrizzleCloudSaveRepo,
   DrizzleProjectRepo,
   DrizzleRunRepo,
   DrizzleSnapshotRepo,
@@ -197,6 +198,7 @@ async function main() {
   const accountRepo = new DrizzleAccountRepo(db);
   const publishRepo = new DrizzlePublishRepo(db);
   const hubRepo = new DrizzleHubRepo(db);
+  const cloudSaveRepo = new DrizzleCloudSaveRepo(db);
 
   let queue: Queue | undefined;
   let browserQueue: BrowserJobQueue | undefined;
@@ -433,6 +435,7 @@ async function main() {
     enqueue,
     store,
     snapshotRepo,
+    cloudSaveRepo,
     // Durable build-feed backfill — the SSE relay replays these on (re)connect
     // so the log survives a refresh / API restart.
     loadRunEvents: async (runId: string) => {
