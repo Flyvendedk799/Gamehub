@@ -81,6 +81,15 @@ export function analyzeSkillUsage(
   const skillImportedNotCalled: string[] = [];
   const unreferencedEngineFiles: string[] = [];
 
+  // A COMPUTED dynamic import — `import(expr)` whose argument is NOT a single
+  // string literal (e.g. `import('./engine/' + name)` or `import(path)`) — could
+  // resolve to any module at runtime, so if one exists ANYWHERE we cannot prove
+  // any module is unreferenced. A clean LITERAL `import('./engine/x.js')` is
+  // handled by isImported per-module and does NOT count as computed.
+  const hasComputedDynamicImport = (allContent.match(/\bimport\s*\([^)]*\)/g) ?? []).some(
+    (call) => !/^import\s*\(\s*['"][^'"]*['"]\s*\)$/.test(call),
+  );
+
   for (const ef of engineFiles) {
     const base = getBaseName(ef.path);
     const exports = parseExportNames(ef.content);
@@ -105,10 +114,13 @@ export function analyzeSkillUsage(
       skillImportedNotCalled.push(base);
     }
 
-    // Provably-unreferenced (bulletproof gate for safe deletion): NOT imported,
-    // AND the bare base name appears nowhere else (covers computed/dynamic refs
-    // like `import('./engine/'+name)`), AND no export identifier appears elsewhere.
-    if (!imported && !others.includes(base) && !exports.some((n) => others.includes(n))) {
+    // Safe to delete iff there is NO ACTIVE import edge to it (a comment — e.g.
+    // P3's commented import stub — or a string mentioning the name can't LOAD a
+    // module; only an active import can). The earlier "name appears nowhere" gate
+    // was defeated by P3's own `// import { ... } from './engine/<base>'` stub, so
+    // genuinely-dead modules were never swept. Stay conservative only when a
+    // COMPUTED dynamic import exists (it could resolve to this module at runtime).
+    if (!imported && !hasComputedDynamicImport) {
       unreferencedEngineFiles.push(base);
     }
   }
