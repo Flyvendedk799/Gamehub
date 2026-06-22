@@ -43,6 +43,20 @@ const nextConfig = {
       },
     ];
   },
+  // Same-origin API proxy: the browser calls `https://<app-origin>/v1/*` (same
+  // origin as the page), and the Next server forwards to the API server-side.
+  // This removes the cross-origin/CORS + mixed-content failure that blocked
+  // production login (the app and API are different services), without exposing
+  // the API on its own public hostname. The target is the API on the same host
+  // (override with API_PROXY_TARGET for other layouts).
+  // SECURITY follow-up: this also routes the game preview/play iframes
+  // (`/v1/projects/:id/preview/*`, `/v1/play/*`) through the app origin — revisit
+  // per-project origin isolation (the *.games.<brand> model) before heavy public
+  // use; public play iframes are already sandboxed without allow-same-origin.
+  async rewrites() {
+    const apiTarget = process.env.API_PROXY_TARGET ?? 'http://localhost:3191';
+    return [{ source: '/v1/:path*', destination: `${apiTarget}/v1/:path*` }];
+  },
 };
 
 export default nextConfig;
