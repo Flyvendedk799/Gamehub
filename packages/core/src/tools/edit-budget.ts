@@ -25,7 +25,7 @@ const DEFAULT_THRESHOLD = 5;
 // ~19 edits per file, 34 min) sails past it forever. This counter does NOT reset:
 // past ~12 edits to a single file you are thrashing incrementally — each edit is a
 // full model round-trip — and should author the file in one block instead.
-const DEFAULT_CUMULATIVE_THRESHOLD = 12;
+const DEFAULT_CUMULATIVE_THRESHOLD = 10;
 
 export interface EditBudget {
   /** Returns the warning string when the path has now reached or

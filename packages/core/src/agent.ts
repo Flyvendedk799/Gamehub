@@ -2252,7 +2252,10 @@ export async function generateViaAgent(
   //   - no verify_artifact has fired in those 5 turns
   //
   // The steer nudges the agent toward verify_artifact + done.
-  const CONVERGENCE_TURN_FLOOR = 25;
+  // Lowered 25→20 so the anti-thrash steer engages a few turns earlier on medium
+  // runs (still gated by 5 consecutive small single-file edits, so legit work
+  // isn't nagged). Pairs with the edit-budget cumulative threshold (12→10).
+  const CONVERGENCE_TURN_FLOOR = 20;
   const CONVERGENCE_LOOKBACK = 5;
   const CONVERGENCE_BYTE_THRESHOLD = 800;
   interface ConvergenceTurn {

@@ -1477,7 +1477,7 @@ describe('generateViaAgent() — convergence-detector — Improver1 §7', () => 
     expect(convergenceSteer?.content).toMatch(/done/);
   });
 
-  it('does NOT fire under the 25-turn floor', async () => {
+  it('does NOT fire under the turn floor (too few turns to be sure it is thrash)', async () => {
     const events = scriptSmallEditTurns('index.html', 10);
     scriptedAgent = {
       assistantText: RESPONSE_WITH_ARTIFACT,
