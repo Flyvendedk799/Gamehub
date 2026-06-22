@@ -813,7 +813,10 @@ describe('generateViaAgent() — first-turn retry', () => {
     expect(agentCalls[0]?.prompts.length).toBe(1);
   });
 
-  it('does not retry when history is non-empty (protects multi-turn agent state)', async () => {
+  it('DOES retry a CLEAN transient error on a later turn (no side effects to replay)', async () => {
+    // A later-turn transient failure with NO assistant messages added is safe to
+    // retry — this is the gap that killed heavy multi-turn runs (a codex overload
+    // on turn 8 threw and the whole run died with no retry).
     scriptedAgent = {
       assistantText: '',
       promptThrows: new HttpError('upstream 500', 500),
@@ -829,8 +832,30 @@ describe('generateViaAgent() — first-turn retry', () => {
         apiKey: 'sk-test',
       }),
     ).rejects.toBeTruthy();
-    // Single attempt: replaying a partial multi-turn session would corrupt
-    // tool state, so the second+ turn must surface transient errors directly.
+    // Retried (bounded), not a single bare attempt.
+    expect(agentCalls[0]?.prompts.length ?? 0).toBeGreaterThan(1);
+  });
+
+  it('does NOT retry a later turn once it produced side effects (state-corruption guard)', async () => {
+    // The protection that matters: if the failing turn already appended an
+    // assistant message (tool calls / partial turn), replaying would corrupt
+    // multi-turn state — RETRY_BLOCKED must keep it a single attempt.
+    scriptedAgent = {
+      assistantText: '',
+      promptThrows: new HttpError('upstream 500', 500),
+      promptPushesAssistantBeforeThrow: true,
+    };
+    await expect(
+      generateViaAgent({
+        prompt: 'refine this',
+        history: [
+          { role: 'user', content: 'first request' },
+          { role: 'assistant', content: 'first reply' },
+        ],
+        model: MODEL,
+        apiKey: 'sk-test',
+      }),
+    ).rejects.toBeTruthy();
     expect(agentCalls[0]?.prompts.length).toBe(1);
   });
 });

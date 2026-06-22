@@ -689,6 +689,24 @@ async function measureJuice(page: Page): Promise<number> {
   }
 }
 
+/** Grace window after window.__game appears, to let an async scene-setup crash
+ *  (which fires a tick after the synchronous shim sets __game) surface as a
+ *  pageerror/console error before we report the boot verdict. */
+const BOOT_ERROR_GRACE_MS = 600;
+
+/** The unambiguous fatal-JS-exception class. Matching console.error text here is
+ *  a real crash (a TypeError/ReferenceError), not a benign game log like
+ *  console.error('player died'). Conservative on purpose. */
+const FATAL_CONSOLE_PATTERNS: readonly RegExp[] = [
+  /is not a function/,
+  /is not defined/,
+  /Cannot read propert(?:y|ies) of (?:undefined|null)/,
+  /Cannot access .+ before initialization/,
+  /is not a constructor/,
+  /Maximum call stack size exceeded/,
+  /(?:undefined|null) is not an object/,
+];
+
 export async function runRuntimeVerify(
   browser: Browser,
   data: BrowserJobData,
@@ -704,6 +722,18 @@ export async function runRuntimeVerify(
   const fatalErrors: string[] = [];
   page.on('pageerror', (err) => {
     fatalErrors.push(err.message);
+  });
+  // Some engines (Phaser) catch a scene-setup exception internally and re-log it
+  // as console.error instead of letting it bubble as a pageerror — so the game
+  // "boots" (window.__game is set by the shim) but the scene is dead. Capture the
+  // unambiguous fatal-exception class from the console too, so that crash isn't
+  // shipped as a working game (the broken idle: `…setParentContainer is not a function`).
+  page.on('console', (msg) => {
+    if (msg.type() !== 'error') return;
+    const text = msg.text();
+    if (FATAL_CONSOLE_PATTERNS.some((re) => re.test(text))) {
+      fatalErrors.push(`Uncaught error during boot: ${text}`);
+    }
   });
 
   const start = Date.now();
@@ -738,6 +768,14 @@ export async function runRuntimeVerify(
     // a never-booted artifact has no juice to measure (score 0). Best-effort:
     // measureJuice never throws.
     const juiceScore = hasGameContract ? await measureJuice(page) : 0;
+    // Robustness — the inline shim sets window.__game synchronously, so
+    // waitForFunction resolves BEFORE the engine's async scene create() runs.
+    // A crash there fires a tick after we'd otherwise return, and ships as a
+    // "booted" game. Give async boot errors a grace window to surface into
+    // fatalErrors before we report the verdict.
+    if (hasGameContract) {
+      await page.waitForTimeout(BOOT_ERROR_GRACE_MS).catch(() => {});
+    }
     return {
       hasGameContract,
       fatalErrors,

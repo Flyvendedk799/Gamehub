@@ -223,3 +223,16 @@ export function createUpgradeSystem(upgrades = []) {
 //   //     owned: this.shop.toJSON(),
 //   //     upgrades: this.upgrades.toJSON(),
 //   //   });
+//
+// IDLE / INCREMENTAL games — the `idle` playbook asserts the EXACT field
+// `credits` (rises on click) and reads `rate` for escalation. The wallet's
+// field is `balance`, so FORWARD it under the name the verdict reads, and add
+// a per-second producer rate so buying a producer raises `rate` and `credits`
+// keeps accruing on its own:
+//   // each frame: this.wallet.earn(this.perSecond * dt);   // passive accrual
+//   // click main earner: this.wallet.earn(this.clickValue);
+//   // buy producer: if (this.shop.buy('miner', this.wallet).ok) this.perSecond += 1;
+//   window.__game.debug.track({
+//     credits: () => this.wallet.balance,   // EXACT field name — NOT `balance`/`money`
+//     rate:    () => this.perSecond,         // escalation signal
+//   });

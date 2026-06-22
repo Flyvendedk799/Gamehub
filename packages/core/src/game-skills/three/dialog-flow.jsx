@@ -42,6 +42,11 @@ export function createDialogFlow(nodes, startId, opts = {}) {
   let revealT = 0;
   let fullyRevealed = false;
   let active = false;
+  // Playtest contract: the visual_novel playbook asserts `dialogueIndex` rises
+  // on every advance. Track a monotonic line counter (bumped per node shown) +
+  // a choice counter so getState() carries the EXACT fields the verdict reads.
+  let dialogueIndex = 0;
+  let choiceCount = 0;
 
   // ---------------------------------------------------------------------------
   // DOM overlay.
@@ -97,6 +102,7 @@ export function createDialogFlow(nodes, startId, opts = {}) {
     }
     currentId = id;
     currentNode = node;
+    dialogueIndex += 1; // monotonic — each shown node advances `dialogueIndex`
     revealedChars = 0;
     revealT = 0;
     fullyRevealed = false;
@@ -141,7 +147,10 @@ export function createDialogFlow(nodes, startId, opts = {}) {
         btn.addEventListener('pointerout', () => {
           btn.style.background = 'rgba(255,255,255,0.08)';
         });
-        btn.addEventListener('click', () => advance(choice.next));
+        btn.addEventListener('click', () => {
+          choiceCount += 1;
+          advance(choice.next);
+        });
         choicesEl.append(btn);
       }
     } else {
@@ -238,6 +247,10 @@ export function createDialogFlow(nodes, startId, opts = {}) {
     return {
       active,
       currentId,
+      // dialogueIndex + choiceCount are the EXACT fields the visual_novel
+      // playbook asserts on — keep them in the snapshot.
+      dialogueIndex,
+      choiceCount,
       speaker: currentNode?.speaker ?? null,
       revealedChars,
       totalChars: currentNode?.line.length ?? 0,
@@ -286,4 +299,6 @@ export function createDialogFlow(nodes, startId, opts = {}) {
 //     dlg.update(dt);     // drives typewriter
 //   }
 //   window.__game.debug.snapshot = () => dlg.getState();
-//   // => { active: true, currentId: 'intro', fullyRevealed: false, ... }
+//   // => { active: true, currentId: 'intro', dialogueIndex: 1, choiceCount: 0, ... }
+//   // dialogueIndex (rises on every advance) + choiceCount are the EXACT fields
+//   // the visual_novel playbook asserts on.
