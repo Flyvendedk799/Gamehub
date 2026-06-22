@@ -58,26 +58,28 @@ describe('makeImportSkillTool', () => {
     await expect(tool.execute('c', { name: 'phaser/nope.js' })).rejects.toThrow(/Unknown skill/);
   });
 
-  it('P3: auto-wires a COMMENTED import stub into src/main.js when it exists', async () => {
+  it('v3.1: auto-wires an ACTIVE import into src/main.js when it exists (so it gets CALLED)', async () => {
     const { fs, files } = mockFs({ 'src/main.js': 'const x = 1;\n' });
     const tool = makeImportSkillTool(fs);
     const res = await tool.execute('c', { name: 'phaser/wave-spawner.js' });
     const main = files.get('src/main.js') ?? '';
-    // The stub is COMMENTED (boot-safe) and references the canonical .js path.
-    expect(main).toContain('// import { createWaveSystem');
-    expect(main).toContain("from './engine/wave-spawner.js'");
-    expect(main.startsWith('//')).toBe(true); // prepended at the top
-    // The active code below the stub is untouched.
+    // The import is ACTIVE (not commented) and uses the canonical .js path — an
+    // unused ESM import is boot-safe, and a live import is what gets it called.
+    expect(main).toContain('import { createWaveSystem');
+    expect(main).toContain("from './engine/wave-spawner.js';");
+    expect(main.startsWith('import {')).toBe(true); // prepended, active
+    expect(main).not.toContain('// import { createWaveSystem'); // NOT commented
+    // The agent's existing code below the import is untouched.
     expect(main).toContain('const x = 1;');
     const text = res.content?.[0]?.type === 'text' ? res.content[0].text : '';
-    expect(text).toContain('src/main.js');
+    expect(text).toContain('CALL');
   });
 
-  it('P3: no entry file → falls back to text guidance, no throw', async () => {
-    const { fs } = mockFs(); // no src/main.js
+  it('v3.1: no entry file → text guidance tells the agent to scaffold first, no throw', async () => {
+    const { fs } = mockFs(); // no src/main.js — we never create (avoids the overwrite race)
     const tool = makeImportSkillTool(fs);
     const res = await tool.execute('c', { name: 'phaser/wave-spawner.js' });
     const text = res.content?.[0]?.type === 'text' ? res.content[0].text : '';
-    expect(text).toContain('Add this import to your entry file');
+    expect(text).toContain('Scaffold your entry file');
   });
 });

@@ -137,11 +137,11 @@ You can `import_skill` any engine-agnostic skill. Example:
 ```js
 // import_skill: procedural-gen
 // The skill's exported functions are available after the import resolves.
-import { generateLevel } from './skills/procedural-gen.js';
+import { generateLevel } from './engine/procedural-gen.js';
 const level = generateLevel({ seed: 42, width: 30, height: 20 });
 ```
 
-Other compatible skills: `save-state`, `economy-system`. Skills author their own JS modules under `src/skills/`; your main loop calls into them normally.
+Other compatible skills: `save-state`, `economy-system`. import_skill writes each module under `src/engine/`; your main loop imports from `./engine/<name>.js` and calls into them normally.
 
 ## Feedback and juice
 

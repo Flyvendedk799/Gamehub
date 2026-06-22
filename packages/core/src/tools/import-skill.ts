@@ -118,11 +118,13 @@ export function makeImportSkillTool(
           ? `import { ${exports.join(', ')} } from '${importFrom}';`
           : `import '${importFrom}';`;
 
-      // v3 P3 — auto-wire: drop a COMMENTED import stub at the top of the entry
-      // file so the agent uncomments + calls it, instead of (per loop-3) writing
-      // the module to disk and forgetting to wire it. A COMMENT can never break a
-      // boot even if we guessed the wrong entry; we only touch a file that exists
-      // and doesn't already import this module.
+      // v3.1 — auto-wire: insert an ACTIVE import at the top of an EXISTING entry
+      // (never `create` — WorkingTree.create overwrites, so a created entry would
+      // be clobbered by the agent's own authoring). An unused ESM import is
+      // harmless to a boot, and having the import already live in the file the
+      // agent is building is what gets it CALLED (the goal: usesSkillFns>0). We
+      // only touch a file that exists and doesn't already import this module.
+      const callHint = exports[0] ? `${exports[0]}(...)` : 'its exports';
       let wiredInto: string | null = null;
       if (!alreadyPresent && typeof fs.insert === 'function') {
         for (const cand of ENTRY_CANDIDATES) {
@@ -132,8 +134,7 @@ export function makeImportSkillTool(
             wiredInto = cand;
             break;
           } // already wired
-          const callHint = exports[0] ? `${exports[0]}(/* ... */)` : 'its exports';
-          const stub = `// v3 import_skill: uncomment + call ${callHint}\n// ${importLine}\n`;
+          const stub = `${importLine}\n// ^ imported for you — CALL ${callHint} and build on it; do NOT re-implement this system.\n`;
           try {
             await fs.insert(cand, 0, stub);
             wiredInto = cand;
@@ -147,9 +148,9 @@ export function makeImportSkillTool(
       const verb = alreadyPresent ? 'already present' : 'written';
       const wireLine =
         wiredInto !== null
-          ? `A commented import stub was added to the top of ${wiredInto} — UNCOMMENT it and call the exports.`
-          : 'Add this import to your entry file and CALL the exports — do NOT reimplement them.';
-      const text = `Skill module ${verb} at ${path}. ${wireLine}\n  ${importLine}\n${usage ? `\nHow to wire it:\n${usage}\n` : ''}\nThe module is vetted + tested; call its functions directly.`;
+          ? `An ACTIVE import was added to the top of ${wiredInto} — now CALL ${callHint} and build the system ON it. Do NOT write your own version of what you just imported.`
+          : 'Scaffold your entry file (src/main.js) FIRST, then call import_skill so the import is wired in for you. For now: add the import below and CALL the exports — do NOT reimplement them.';
+      const text = `Skill module ${verb} at ${path}. ${wireLine}\n  ${importLine}\n${usage ? `\nHow to wire it:\n${usage}\n` : ''}\nThe module is vetted + tested; call its functions directly — re-implementing it by hand is the #1 source of flat, buggy games.`;
       return {
         content: [{ type: 'text', text }],
         details: { name: entry.name, path, exports, alreadyPresent },
