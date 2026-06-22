@@ -806,6 +806,24 @@ describe('text-editor patch protocol — Backlog-3 §2', () => {
     expect(msg).toMatch(/invalid line range|exceeds/i);
   });
 
+  it('does NOT tool-reject an out-of-range hunk that carries expectedOriginal — defers to fs.patch for content relocation', async () => {
+    // A shrunk file leaves the model's line numbers past EOF, but expectedOriginal
+    // names the real text. The tool must NOT throw its own "invalid line range";
+    // it hands off to fs.patch (which relocates by content in the real WorkingTree).
+    const fs = makeFs({ 'index.html': 'one\ntwo' });
+    const tool = makeTextEditorTool(fs);
+    const msg = await runAndCatch(() =>
+      tool.execute('p6b', {
+        command: 'patch',
+        path: 'index.html',
+        hunks: [{ startLine: 50, endLine: 50, replacement: 'X', expectedOriginal: 'two' }],
+      }),
+    );
+    // Either it succeeded at fs.patch, or fs.patch surfaced its OWN error — but
+    // never the tool-layer line-number rejection that would block relocation.
+    expect(msg).not.toMatch(/invalid line range/i);
+  });
+
   it('clamps an over-reaching endLine to EOF instead of rejecting (patch death-spiral fix)', async () => {
     const fs = makeFs({ 'index.html': 'one\ntwo\nthree' });
     const tool = makeTextEditorTool(fs);

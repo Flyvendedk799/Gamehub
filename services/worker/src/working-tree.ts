@@ -31,6 +31,29 @@ function countLines(s: string): number {
 }
 
 /**
+ * Find every 0-indexed start position where `block` occurs as a contiguous run
+ * of lines inside `lines` (exact, line-by-line). Files are small (hundreds of
+ * lines) so a full scan is trivial and lets callers report an accurate match
+ * count. Used by `patch` to relocate a hunk whose line range went stale.
+ */
+function findContiguousBlock(lines: string[], block: string[]): number[] {
+  const hits: number[] = [];
+  if (block.length === 0 || block.length > lines.length) return hits;
+  const last = lines.length - block.length;
+  for (let i = 0; i <= last; i++) {
+    let ok = true;
+    for (let j = 0; j < block.length; j++) {
+      if (lines[i + j] !== block[j]) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) hits.push(i);
+  }
+  return hits;
+}
+
+/**
  * Generated binary assets (sprites, audio) are written into the tree as a
  * base64 data-URL STRING — the image tool calls fs.create with
  * `data:image/png;base64,…`, the audio tool with a mime-less `data:base64,…`.
@@ -97,8 +120,13 @@ export class WorkingTree {
     const content = this.requireFile(path);
     const first = content.indexOf(oldStr);
     if (first === -1) {
-      // Actionable error: a bare "no match" makes models re-guess the same way
-      // and thrash. Tell them WHY + the recovery path.
+      // Exact match only — we deliberately do NOT auto-apply a whitespace-tolerant
+      // match here. The tool layer (text-editor.ts findFuzzyWhitespaceMatch) already
+      // detects whitespace drift and surfaces the EXACT file bytes for the model to
+      // retry with — which is safe. Auto-applying the model's drifted snippet would
+      // silently rewrite indentation (corrupting indent-significant content like
+      // GLSL shader strings in template literals); a clean failure is the correct
+      // outcome here. (Adversarial review 2026-06-22.)
       throw new PlayforgeError(
         `str_replace: no match for the given text in ${path} (${content.split('\n').length} lines). old_str must match the file content EXACTLY (whitespace + indentation included) and it does not. Recover: \`view\` ${path} and copy the exact snippet, OR \`create\` to rewrite the whole file, OR \`patch\` by line range.`,
         ERROR_CODES.IPC_BAD_INPUT,
@@ -156,10 +184,50 @@ export class WorkingTree {
   ): EditResult {
     const content = this.requireFile(path);
     const lines = content.split('\n');
-    const ordered = [...hunks].sort((a, b) => b.startLine - a.startLine);
+    // Resolve each hunk's actual line range BEFORE applying. When a hunk carries
+    // `expectedOriginal`, that text is the ground truth and the line range is only
+    // a hint — and the dominant edit failure is a stale hint: a prior edit shifted
+    // the file so [startLine-endLine] no longer points at the intended text. If the
+    // expectedOriginal text still exists UNIQUELY elsewhere, relocate the hunk to
+    // where it actually is (semantics are preserved — we replace exactly the text
+    // the model named). 0 occurrences = genuinely gone; >1 = ambiguous → error.
+    const resolved = hunks.map((h) => {
+      // Only relocate by a MEANINGFUL anchor. A whitespace-only/empty
+      // expectedOriginal carries no signal and could relocate onto an unintended
+      // blank line — fall through to the range path (and its checks) instead.
+      if (h.expectedOriginal === undefined || h.expectedOriginal.trim() === '') return h;
+      const inRange = h.startLine >= 1 && h.endLine <= lines.length && h.endLine >= h.startLine;
+      const atRange = inRange ? lines.slice(h.startLine - 1, h.endLine).join('\n') : null;
+      if (atRange === h.expectedOriginal) return h; // range still correct — fast path
+      const block = h.expectedOriginal.split('\n');
+      const hits = findContiguousBlock(lines, block);
+      if (hits.length === 1) {
+        const start = (hits[0] as number) + 1;
+        return { ...h, startLine: start, endLine: start + block.length - 1 };
+      }
+      const reason =
+        hits.length === 0
+          ? `and that exact text is not present anywhere in the file (it now has ${lines.length} lines) — it may have been edited already. Recover: \`view\` ${path}, copy the CURRENT snippet, then re-issue (or \`create\` to rewrite the file).`
+          : `and it appears ${hits.length} times, so the target is ambiguous — add more surrounding context to expectedOriginal to make it unique.`;
+      throw new PlayforgeError(
+        `patch: expectedOriginal at [${h.startLine}-${h.endLine}] in ${path} does not match the file's current content there ${reason}`,
+        ERROR_CODES.IPC_BAD_INPUT,
+      );
+    });
+    const ordered = [...resolved].sort((a, b) => b.startLine - a.startLine);
     for (let i = 0; i < ordered.length; i++) {
       const h = ordered[i];
       if (!h) continue;
+      // Reject (never coerce) non-integer line numbers: slice() truncates toward
+      // zero while splice()'s deleteCount truncates independently, so a fractional
+      // range that PASSED the expectedOriginal/range check above could delete a
+      // different line count than it verified — silent corruption. (Review #3.)
+      if (!Number.isInteger(h.startLine) || !Number.isInteger(h.endLine)) {
+        throw new PlayforgeError(
+          `patch: hunk line numbers must be integers, got [${h.startLine}-${h.endLine}] in ${path}`,
+          ERROR_CODES.IPC_BAD_INPUT,
+        );
+      }
       if (h.startLine < 1 || h.endLine > lines.length || h.endLine < h.startLine) {
         throw new PlayforgeError(
           `patch: hunk [${h.startLine}-${h.endLine}] out of range in ${path}`,
@@ -169,15 +237,6 @@ export class WorkingTree {
       const prev = ordered[i - 1];
       if (prev && h.endLine >= prev.startLine) {
         throw new PlayforgeError(`patch: overlapping hunks in ${path}`, ERROR_CODES.IPC_BAD_INPUT);
-      }
-      const original = lines.slice(h.startLine - 1, h.endLine).join('\n');
-      if (h.expectedOriginal !== undefined && h.expectedOriginal !== original) {
-        throw new PlayforgeError(
-          `patch: expectedOriginal at [${h.startLine}-${h.endLine}] in ${path} does not match the file's current content there ` +
-            `(the file likely changed since you last viewed it; it now has ${lines.length} lines). ` +
-            `Recover: \`view\` ${path} to get the CURRENT line numbers + text, then re-issue the patch.`,
-          ERROR_CODES.IPC_BAD_INPUT,
-        );
       }
       lines.splice(h.startLine - 1, h.endLine - h.startLine + 1, ...h.replacement.split('\n'));
     }
