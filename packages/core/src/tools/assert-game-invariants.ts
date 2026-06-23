@@ -201,6 +201,17 @@ const SCORE_PATTERNS: readonly RegExp[] = [
   /\b(score|points?|coins?|stars?|kills?|level|wave|round)\s*[+\-*/]?=\s*[+\-]?\s*\d/i,
   /\b(score|points?|coins?)\s*\+\+/i,
   /\bsetScore\s*\(/i,
+  // Non-numeric / variable RHS + compound assignment. run3 (tower defense) shipped a
+  // FALSE `score-or-state` warning while PASSING 4/4 runtime predicates that read
+  // score/wave — because it wrote `score = score + enemy.value`, `this.score += pts`,
+  // `kills = kills + 1`, none of which have the literal-digit RHS the first rule needs.
+  // The trailing `[^=;]` excludes comparisons (`==`, `>=`). (Plan step 1.)
+  // Negative lookbehind excludes `const|let|var NAME = …` DECLARATIONS so binding a
+  // same-named local to something unrelated (`const wave = audioCtx.createWaveShaper()`,
+  // `const level = config.level`) doesn't false-mark score state (review M6). A real
+  // score init with a numeric RHS is still caught by the first pattern; a real score
+  // MUTATION (`score += pts`, `score = score + 1`) is still caught here.
+  /(?<!\b(?:const|let|var)\s+)\b(?:this\.|state\.|window\.|game\.|__game\.state\.)?(?:score|points?|coins?|stars?|kills?|money|gold|lives|wave|round|level)\s*[+\-*/]?=\s*[^=;]/i,
 ];
 
 const FEEDBACK_PATTERNS: readonly RegExp[] = [
@@ -245,6 +256,14 @@ const SNAPSHOT_WIRING_PATTERNS: readonly RegExp[] = [
   /\bdebug\s*\.\s*track\s*\(/,
   /\bdebug\s*\.\s*snapshot\s*=[^=]/,
   /__game\s*\.\s*state\s*=[^=]/,
+  // run3 wired its snapshot in forms these missed (shipped a FALSE debug-snapshot
+  // warning while PASSING runtime predicates that read it). All require an
+  // ASSIGNMENT/CALL — they never match the shim's `var st = window.__game.state`
+  // READ. (Plan step 1.)
+  /__game\s*\.\s*state\s*\.\s*\w+\s*=[^=]/, // __game.state.score = x
+  /__game\s*\.\s*state\s*\[[^\]]*\]\s*=[^=]/, // __game.state['score'] = x
+  /Object\.assign\s*\(\s*[^,)]*__game\s*\.\s*state\b/, // Object.assign(__game.state, {...})
+  /\b\w+\s*\.\s*track\s*\(\s*\{/, // aliased: dbg.track({ ... })
 ];
 
 // Camera-relative movement (3D's #1 recurring bug). A 3D game with a MOVING
@@ -490,6 +509,10 @@ export function assertGameInvariants(
   // — is held to exposing a snapshot. v3 P8: broadened beyond hasFailState so
   // ambient/no-fail canvas2d toys that still have state (enemies/escalation/
   // progression) aren't exempt. Standalone calls without capabilities stay exempt.
+  // NB: step 5a's "also want a verdict when the genre playbook has predicates"
+  // lives in run-generation's observeVerdict (which has the SPEC genre), NOT here —
+  // this tool only receives the INVARIANT-genre token (brawler/shooter/…), a
+  // different enum that can't index the spec-genre playbooks.
   const wantsVerdict =
     caps?.hasFailState === true ||
     caps?.hasEnemies === true ||

@@ -90,6 +90,10 @@ export interface PredicateResult {
   pass: boolean;
   /** Human-readable explanation — always set, pass or fail. */
   reason: string;
+  /** Whether the subject field actually RESOLVED in the snapshot (vs "field
+   *  missing"). Lets the verdict distinguish a substantiated pass from a vacuous
+   *  one and surface how many predicates read real data. (Plan step 6.) */
+  fieldPresent: boolean;
   /** Resolved subject value, when numeric. */
   observed?: number;
   /** Resolved comparison value (baseline frame value or literal), when
@@ -102,6 +106,9 @@ export interface PlaytestScore {
   results: ReadonlyArray<PredicateResult>;
   /** Count of failing predicates. */
   failures: number;
+  /** Predicates whose subject field actually resolved — i.e. read REAL data.
+   *  A clean pass should have observed > 0 (substantiated, not vacuous). (Plan step 6.) */
+  observed: number;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -179,10 +186,16 @@ export function evaluatePredicate(
       predicate.value !== undefined ? ` ${predicate.value}` : ''
     } @ ${describeFrame(subjectRef)}`;
 
-  const fail = (reason: string, observed?: number, baseline?: number): PredicateResult => ({
+  const fail = (
+    reason: string,
+    observed?: number,
+    baseline?: number,
+    fieldPresent = true,
+  ): PredicateResult => ({
     predicate,
     pass: false,
     reason,
+    fieldPresent,
     ...(observed !== undefined ? { observed } : {}),
     ...(baseline !== undefined ? { baseline } : {}),
   });
@@ -190,17 +203,28 @@ export function evaluatePredicate(
     predicate,
     pass: true,
     reason,
+    fieldPresent: true,
     ...(observed !== undefined ? { observed } : {}),
     ...(baseline !== undefined ? { baseline } : {}),
   });
 
   if (subjectSnap === OUT_OF_RANGE) {
-    return fail(`${label}: subject frame ${describeFrame(subjectRef)} is out of range`);
+    return fail(
+      `${label}: subject frame ${describeFrame(subjectRef)} is out of range`,
+      undefined,
+      undefined,
+      false,
+    );
   }
 
   const subjectRaw = resolvePath(subjectSnap, predicate.field);
   if (subjectRaw === undefined) {
-    return fail(`${label}: field '${predicate.field}' is missing at ${describeFrame(subjectRef)}`);
+    return fail(
+      `${label}: field '${predicate.field}' is missing at ${describeFrame(subjectRef)}`,
+      undefined,
+      undefined,
+      false,
+    );
   }
 
   // Literal-comparison ops.
@@ -299,7 +323,8 @@ export function scorePlaytest(
 ): PlaytestScore {
   const results = predicates.map((p) => evaluatePredicate(trace, p));
   const failures = results.filter((r) => !r.pass).length;
-  return { pass: failures === 0, results, failures };
+  const observed = results.filter((r) => r.fieldPresent).length;
+  return { pass: failures === 0, results, failures, observed };
 }
 
 const VALID_OPS = new Set<string>(PLAYTEST_PREDICATE_OPS);

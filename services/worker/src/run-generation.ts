@@ -27,6 +27,7 @@ import {
   type PlaytesterOutput,
   type RepairVerdict,
   type ShipReason,
+  buildInteractivityFloorPlan,
   buildRepairVerdict,
   decideRepairAction,
   generateViaAgent,
@@ -636,9 +637,42 @@ export async function runGeneration(
       fatalErrors.push('Runtime load: window.__game never appeared — the game did not boot.');
     }
 
-    // Nothing to gate on: the game booted cleanly AND the genre has no playbook
-    // predicates → honest no_verdict (ship as-is).
-    if (fatalErrors.length === 0 && !hasPredicates) return null;
+    // Plan step 7 — booted cleanly, but the genre has no playbook predicates AND no
+    // agent contract. We do NOT fabricate a pass/fail from generic input here: a
+    // whole-snapshot "something changed" check can't tell input-driven change from
+    // ambient time/animation drift (→ vacuous pass) and can't tell "ignores input"
+    // from "responds to inputs we didn't send" (→ false fail) — both LESS honest
+    // than no_verdict (adversarial review 2026-06-23, findings M1/M2). So: drive a
+    // generic probe ONLY to read whether a debug snapshot is wired. If the game
+    // DECLARED gameplay capabilities (it wants a real verdict) but wired none,
+    // that's repairable — push the actionable wire-snapshot fatal (same discipline
+    // the predicate path applies). Otherwise ship an honest no_verdict.
+    if (fatalErrors.length === 0 && !hasPredicates) {
+      const caps = spec.capabilities;
+      const wantsVerdict =
+        caps?.hasFailState === true ||
+        caps?.hasEnemies === true ||
+        caps?.escalates === true ||
+        caps?.hasProgression === true;
+      if (!wantsVerdict) return null; // static toy / no declared gameplay → honest no_verdict
+      const floor = buildInteractivityFloorPlan();
+      const floorPlay = await browserJobs.playtest(verifyHtml, floor.steps);
+      if (floorPlay !== null && floorPlay.hasDebugContract === false) {
+        return buildRepairVerdict(
+          {
+            trace: null,
+            fatalErrors: [
+              'This game declares gameplay (a fail state / enemies / escalation / progression) but exposes no window.__game.debug snapshot, so it cannot be play-verified. Wire it in ONE line: window.__game.debug.track({ score: () => score, player, ... }) (or set window.__game.state.*) exposing the fields your gameplay updates.',
+            ],
+          },
+          [],
+        );
+      }
+      // Snapshot is wired (or unreadable) but there are no predicates to score it
+      // against — an interactivity guess would be less honest than admitting we
+      // can't verify play. Ship no_verdict.
+      return null;
+    }
 
     const playVerdict =
       hasPredicates && plan !== null ? await browserJobs.playtest(verifyHtml, plan.steps) : null;

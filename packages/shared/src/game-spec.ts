@@ -21,6 +21,7 @@ export const GameGenre = z.enum([
   'topdown_arcade',
   'fps',
   'tps',
+  'collectathon',
   'fighting',
   'puzzle',
   'runner',

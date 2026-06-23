@@ -83,6 +83,36 @@ describe('assertGameInvariants', () => {
     expect(result.issues.map((i) => i.invariant)).toContain('score-or-state');
   });
 
+  it('recognizes variable-RHS score mutation but NOT same-named declarations (review step1 + M6)', () => {
+    // The widened SCORE pattern must catch `score = score + x` / `this.score += pts`
+    // (run3's style) yet NOT false-match `const wave = audioCtx.createWaveShaper()` or
+    // `const level = config.level` as score state.
+    const mutates = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: 'function onHit() { score = score + enemy.value; this.kills += 1; }',
+        },
+      ]),
+    );
+    expect(mutates.issues.map((i) => i.invariant)).not.toContain('score-or-state');
+
+    const decoOnly = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: `
+            const wave = audioCtx.createWaveShaper();
+            const level = config.level;
+            function onHit() { gameOver(); }
+          `,
+        },
+      ]),
+    );
+    // declarations alone are not score state → the warning still fires
+    expect(decoOnly.issues.map((i) => i.invariant)).toContain('score-or-state');
+  });
+
   it('warns on missing feedback', () => {
     const result = assertGameInvariants(
       deps([

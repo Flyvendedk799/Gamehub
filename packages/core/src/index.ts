@@ -90,6 +90,7 @@ export {
 export {
   planPlaytest,
   selectGamePlaytestPlan,
+  buildInteractivityFloorPlan,
   planFromContract,
   type PlaytestPlan,
   type PlaytestStep as DesignPlaytestStep,

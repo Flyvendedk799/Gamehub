@@ -332,8 +332,36 @@ const GAME_INVARIANT_SOURCE_PREFIX = 'game.invariant.';
  *  spec genre runs the four base invariants with no genre-specific add-
  *  ons. Returns undefined when there's no genre-specific mapping. */
 function mapSpecGenreToInvariantGenre(specGenre: string): InvariantGameGenre | undefined {
-  if (specGenre === 'fighting') return 'brawler';
-  return undefined;
+  // Plan step 8 — translate the SPEC genre to its INVARIANT-genre analog so the
+  // genre-specific advisory checks (e.g. escalation for combat genres) reflect the
+  // spec rather than only the agent's self-reported caps. Was a fighting→brawler
+  // stub. Only clear analogs are mapped; ambiguous/non-combat genres (collectathon,
+  // rpg, idle, tycoon, sandbox, visual_novel, topdown_arcade, other) stay undefined
+  // so they don't trigger false combat advisories. Escalation stays WARN-only.
+  switch (specGenre) {
+    case 'fighting':
+      return 'brawler';
+    case 'shmup':
+    case 'fps':
+    case 'tps':
+      return 'shooter';
+    case 'platformer':
+      return 'platformer';
+    case 'puzzle':
+      return 'puzzle';
+    case 'racing':
+      return 'racer';
+    case 'runner':
+      return 'runner';
+    case 'tower_defense':
+      return 'tower-defense';
+    case 'roguelike':
+      return 'survival';
+    case 'rhythm':
+      return 'rhythm';
+    default:
+      return undefined;
+  }
 }
 
 /**

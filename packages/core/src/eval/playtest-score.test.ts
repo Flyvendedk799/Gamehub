@@ -177,3 +177,17 @@ describe('parsePlaytestPredicate', () => {
     );
   });
 });
+
+describe('scorePlaytest — observed/substantiation (plan step 6)', () => {
+  it('scorePlaytest reports observed = predicates whose field resolved (plan step 6)', () => {
+    const trace: PlaytestTrace = {
+      baseline: { score: 0 },
+      frames: [{ stepIndex: 1, snapshot: { score: 5 } }],
+    };
+    const score = scorePlaytest(trace, [
+      { field: 'score', op: 'increased' }, // present → observed
+      { field: 'missingField', op: 'increased' }, // missing → NOT observed
+    ]);
+    expect(score.observed).toBe(1);
+  });
+});

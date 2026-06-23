@@ -116,11 +116,14 @@ describe('formatRecommendationsForPrompt', () => {
     expect(formatRecommendationsForPrompt([])).toBe('');
   });
 
-  it('produces a bullet list with the header line', () => {
+  it('produces an OPTIONAL-shortcut bullet list (plan step 11 — no push)', () => {
     const recs = recommendSkills({ hasEnemies: true, escalates: true }, 'phaser');
     const output = formatRecommendationsForPrompt(recs);
-    expect(output).toContain('Recommended skills');
-    expect(output).toContain('Calling the skill IS how you implement');
+    // Reframed from a push ("Recommended skills … do NOT write your own") to an
+    // optional shortcut: build-it-yourself is explicitly fine; what's graded is
+    // behavior, not import count.
+    expect(output).toContain('Optional skill shortcut');
+    expect(output).toMatch(/shortcut, NOT a requirement|build the system yourself/i);
     expect(output).toContain('import_skill');
     expect(output).toContain('phaser/enemy-ai.js');
     expect(output).toContain('phaser/wave-spawner.js');

@@ -599,8 +599,15 @@ async function measureJuice(page: Page): Promise<number> {
 
     // Snapshot 2: diff the canvas against `before`, restore RAF, and fold in
     // the animation-activity churn the game exposed.
+    // Plan step 10 — graduated juice. The old formula clustered every game at
+    // ~385: rafChurn*4 dominated (a bare RAF loop alone hit ~384), the pixel term
+    // was a CELL COUNT (not magnitude), and the sync `img.complete` decode usually
+    // failed (→ a coarse +1). Now: reliable `await img.decode()`, pixel MAGNITUDE +
+    // spatial SPREAD (a full-screen explosion >> a cursor blink), particles/tweens
+    // the game exposes, and rafChurn demoted to a modest "the loop runs" BASE — so
+    // the score actually RANKS games across a wide range instead of saturating.
     const score = await page.evaluate(
-      ({ max, frameWindow }: { max: number; frameWindow: number }) => {
+      async ({ max, frameWindow }: { max: number; frameWindow: number }) => {
         const w = window as Window & {
           __juice?: { rafCount: number; before?: string };
           __game?: {
@@ -614,11 +621,6 @@ async function measureJuice(page: Page): Promise<number> {
         const state = w.__juice;
         if (state === undefined) return 0;
 
-        // (1) Pixel-delta between the two forced frames. Decode both data URLs
-        // onto a tiny offscreen canvas (downsampled to 64×64) and count cells
-        // whose RGB changed beyond a small threshold — bounded, fast, and
-        // resolution-independent.
-        let pixelDelta = 0;
         const SAMPLE = 64;
         const after = (() => {
           const canvas = document.querySelector('canvas');
@@ -629,56 +631,74 @@ async function measureJuice(page: Page): Promise<number> {
             return undefined;
           }
         })();
+
+        // (1) Motion: magnitude + spread between the two forced frames. Decode
+        // both data URLs at 64×64 via `img.decode()` (reliable, unlike the old
+        // sync `img.complete` which usually missed) and accumulate per-cell
+        // channel delta (magnitude) + which screen QUADRANTS changed (spread).
+        let magnitude = 0;
+        let changedCells = 0;
+        const quadrants = [false, false, false, false];
+        let decodedOk = false;
         if (state.before !== undefined && after !== undefined && state.before !== after) {
-          // Cheap structural fast-path: identical data URLs ⇒ no motion. When
-          // they differ, decode both and count changed sample cells.
-          const decode = (dataUrl: string): Uint8ClampedArray | undefined => {
+          const decode = async (dataUrl: string): Promise<Uint8ClampedArray | undefined> => {
             const off = document.createElement('canvas');
             off.width = SAMPLE;
             off.height = SAMPLE;
             const ctx = off.getContext('2d');
             if (ctx === null) return undefined;
-            const img = new Image();
-            // Data URLs decode synchronously enough for drawImage when the
-            // source is a same-origin data: URL already fully in memory; but to
-            // be safe we draw only if complete. Fall back to undefined.
-            img.src = dataUrl;
-            if (!img.complete) return undefined;
             try {
+              const img = new Image();
+              img.src = dataUrl;
+              await img.decode();
               ctx.drawImage(img, 0, 0, SAMPLE, SAMPLE);
               return ctx.getImageData(0, 0, SAMPLE, SAMPLE).data;
             } catch {
               return undefined;
             }
           };
-          const a = decode(state.before);
-          const b = decode(after);
+          const a = await decode(state.before);
+          const b = await decode(after);
           if (a !== undefined && b !== undefined && a.length === b.length) {
-            for (let i = 0; i < a.length; i += 4) {
-              const dr = Math.abs(a[i]! - b[i]!);
-              const dg = Math.abs(a[i + 1]! - b[i + 1]!);
-              const db = Math.abs(a[i + 2]! - b[i + 2]!);
-              if (dr + dg + db > 24) pixelDelta += 1;
+            decodedOk = true;
+            const cells = a.length / 4;
+            for (let c = 0; c < cells; c += 1) {
+              const i = c * 4;
+              const d =
+                Math.abs(a[i]! - b[i]!) +
+                Math.abs(a[i + 1]! - b[i + 1]!) +
+                Math.abs(a[i + 2]! - b[i + 2]!);
+              if (d > 24) {
+                changedCells += 1;
+                magnitude += d;
+                const row = Math.floor(c / SAMPLE);
+                const col = c % SAMPLE;
+                quadrants[(row < SAMPLE / 2 ? 0 : 2) + (col < SAMPLE / 2 ? 0 : 1)] = true;
+              }
             }
-          } else if (a === undefined || b === undefined) {
-            // Could not decode (async image) but the data URLs DID differ —
-            // credit a single coarse "something moved" unit so a real animation
-            // is never scored as fully static.
-            pixelDelta += 1;
+          }
+          if (!decodedOk) {
+            // Frames differed but decode failed — coarse "something moved" credit
+            // so a real animation is never scored fully static.
+            magnitude = 96;
+            changedCells = 2;
           }
         }
+        const quadrantSpread = quadrants.filter(Boolean).length; // 0..4
+        const motion = Math.round(magnitude / 6) + changedCells * 4 + quadrantSpread * 60;
 
-        // (2) Animation-activity churn: RAF callbacks scheduled during the
-        // forced window (one per frame for a live loop) plus any particle /
-        // tween counts the game surfaces on its debug contract.
+        // (2) Richness the game EXPOSES + a modest churn base proving the loop runs.
         const rafChurn = Math.min(state.rafCount, frameWindow * 4);
         const dbg = w.__game?.debug;
-        const particles = typeof dbg?.particleCount === 'number' ? dbg.particleCount : 0;
-        const tweens = typeof dbg?.activeTweens === 'number' ? dbg.activeTweens : 0;
-        const churn = rafChurn * 4 + Math.min(particles, 2000) + Math.min(tweens, 500) * 2;
+        // Number.isFinite (not typeof === 'number') — a game exposing NaN/Infinity
+        // would otherwise propagate to juiceScore = NaN (review M-juice).
+        const particles = Number.isFinite(dbg?.particleCount) ? (dbg?.particleCount ?? 0) : 0;
+        const tweens = Number.isFinite(dbg?.activeTweens) ? (dbg?.activeTweens ?? 0) : 0;
+        const richness = Math.min(particles, 5000) * 2 + Math.min(tweens, 1000) * 4;
+        const base = rafChurn; // was rafChurn*4 — demoted from dominant term to a floor
 
-        const raw = pixelDelta + churn;
-        return Math.max(0, Math.min(max, Math.round(raw)));
+        const raw = motion + richness + base;
+        return Number.isFinite(raw) ? Math.max(0, Math.min(max, Math.round(raw))) : 0;
       },
       { max: JUICE_SCORE_MAX, frameWindow: JUICE_FRAME_WINDOW },
     );

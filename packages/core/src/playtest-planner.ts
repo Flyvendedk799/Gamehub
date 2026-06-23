@@ -193,6 +193,36 @@ export function selectGamePlaytestPlan(genre: GameGenre): GamePlaytestPlan | nul
   return { playbook, steps, predicates: [...predicates] };
 }
 
+// A generic input probe used ONLY to surface whether a game wired a debug snapshot
+// (`hasDebugContract`) for the step-7 wire-snapshot repair. It carries NO scoring
+// predicate: a whole-snapshot "something changed" check can't distinguish
+// input-driven change from ambient time/animation drift, nor "ignores input" from
+// "responds to inputs we didn't send" — so it must never mint a pass/fail (it would
+// be LESS honest than no_verdict). Adversarial review 2026-06-23 (M1/M2).
+const FLOOR_PLAYBOOK: PlaytestPlaybook = {
+  schemaVersion: 1,
+  genre: 'other',
+  intent: 'Generic input probe — drive common inputs so the debug contract surfaces.',
+  steps: [
+    { kind: 'wait', durationFrames: 20, assert: 'Idle baseline before any input.' },
+    { kind: 'key', code: 'ArrowRight', frames: 15, assert: 'Common movement input.' },
+    { kind: 'key', code: 'ArrowLeft', frames: 15, assert: 'Common movement input.' },
+    { kind: 'key', code: 'Space', frames: 8, assert: 'Common action input.' },
+    { kind: 'mouse', button: 0, assert: 'Pointer interaction.' },
+    { kind: 'wait', durationFrames: 20, assert: 'Settle, then read the snapshot.' },
+  ],
+  watchFor: ['The game exposes no debug snapshot to read.'],
+};
+
+export function buildInteractivityFloorPlan(): GamePlaytestPlan {
+  const steps: GamePlaytestStep[] = [];
+  for (const step of FLOOR_PLAYBOOK.steps) {
+    const projected = projectPlaybookStep(step);
+    if (projected !== null) steps.push(projected);
+  }
+  return { playbook: FLOOR_PLAYBOOK, steps, predicates: [] };
+}
+
 // ---------------------------------------------------------------------------
 // Agent-authored playtest contracts — the path for genre-LESS / novel games.
 //

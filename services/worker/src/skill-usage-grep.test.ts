@@ -110,6 +110,25 @@ var s = window.__game.state; // READ — should NOT count
     expect(result.debugWired).toBe(2);
   });
 
+  it('debugWired: recognizes the wiring styles run3 used (state.x =, Object.assign, aliased track); READ still excluded; no double-count', () => {
+    const files = [
+      {
+        path: 'src/main.js',
+        content: `
+window.__game.state.score = score;
+Object.assign(window.__game.state, { wave: wave, lives: lives });
+const dbg = window.__game.debug; dbg.track({ gold: () => gold });
+window.__game.state['combo'] = combo;
+var s = window.__game.state; // READ — must NOT count
+const looked = window.__game.state.score; // READ — must NOT count
+`,
+      },
+    ];
+    // 4 distinct wiring lines; the two READ lines excluded; the aliased-track line
+    // counts ONCE despite matching two track patterns (distinct-line counting).
+    expect(analyzeSkillUsage(files).debugWired).toBe(4);
+  });
+
   it('debugWired: debug.snapshot assignment counts; __game.state assignment counts', () => {
     const files = [
       {
