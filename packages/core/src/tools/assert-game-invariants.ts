@@ -491,7 +491,11 @@ export function assertGameInvariants(
         'No fail state detected. Add a way for the player to lose — hp <= 0, time runs out, all lives gone — otherwise the brief is a toy, not a game.',
     });
   }
-  if (!anyMatch(source, SCORE_PATTERNS)) {
+  // Intent-gated (premium robustness): a declared no-fail toy/sandbox (zen garden,
+  // relaxation, creative space) legitimately has neither a fail state NOR a score —
+  // demanding one nags a game that is calm by design (the zen-garden false-positive).
+  // Same `hasFailState !== false` guard the fail-state check above uses.
+  if (caps?.hasFailState !== false && !anyMatch(source, SCORE_PATTERNS)) {
     issues.push({
       invariant: 'score-or-state',
       severity: 'warn',
@@ -708,16 +712,25 @@ export function assertGameInvariants(
     }
   }
 
-  // Quality lever 2 — DEPTH FLOOR. Decoupled from the genre/caps gate above: it
-  // fires whenever the SOURCE contains combat-escalation code (ESCALATION_PATTERNS:
-  // spawnWave / difficulty *= / count*wave / 1.15**wave) but matches NONE of the
-  // VARIETY signals — i.e. it ramps scalars (more/faster/tougher of the SAME thing)
-  // with no second idea. The genre gate missed the worst case (a wave-survival game
-  // classified `topdown_arcade`, which maps to no should-escalate genre, shipped
-  // scalar-only with no warning — confirm run 2026-06-23). Source-based detection
-  // catches it regardless of the declared genre. VARIETY_PATTERNS is broad +
+  // Quality lever 2 — DEPTH FLOOR, intent-gated. Fires when (a) the game is a
+  // COMBAT game (declares enemies, or a should-escalate genre) — variety here means
+  // enemy types / bosses / a second weapon, which only makes sense WITH combat — AND
+  // (b) the SOURCE has combat-escalation code (ESCALATION_PATTERNS: spawnWave /
+  // difficulty *= / count*wave) but matches NONE of the VARIETY signals, i.e. it
+  // ramps scalars (more/faster/tougher of the SAME thing) with no second idea.
+  // The hasEnemies gate replaces the earlier raw-source firing, which misfired on a
+  // cozy fishing game (a shrinking timing zone IS "escalation" but telling it to add
+  // a boss is nonsense — premium-generality confirm run 2026-06-23). The combat
+  // genre/caps gate still catches a wave-survival shooter mis-classified
+  // `topdown_arcade` (it declares hasEnemies=true). VARIETY_PATTERNS is broad +
   // camelCase-tolerant so it errs toward silence (no nag on a varied game). Advisory.
-  if (anyMatch(source, ESCALATION_PATTERNS) && !anyMatch(source, VARIETY_PATTERNS)) {
+  const combatIntent =
+    caps?.hasEnemies === true || (genre !== null && SHOULD_ESCALATE_GENRES.has(genre));
+  if (
+    combatIntent &&
+    anyMatch(source, ESCALATION_PATTERNS) &&
+    !anyMatch(source, VARIETY_PATTERNS)
+  ) {
     checked.push('shallow-escalation');
     issues.push({
       invariant: 'shallow-escalation',

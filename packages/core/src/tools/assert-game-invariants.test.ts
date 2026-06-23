@@ -221,10 +221,10 @@ describe('assertGameInvariants', () => {
     expect(ids).toContain('escalation');
     expect(ids).not.toContain('shallow-escalation');
 
-    // DECOUPLED from genre: a wave game with NO genre/caps passed (the
-    // topdown_arcade routing gap from the confirm run) still gets flagged from the
-    // SOURCE escalation code alone.
-    const noGenre = assertGameInvariants(
+    // INTENT-GATED (not genre): a wave game classified off-menu (topdown_arcade →
+    // no should-escalate genre) but declaring hasEnemies still gets flagged — the
+    // combat INTENT carries it where the genre routing missed it (the confirm-run gap).
+    const combatCaps = assertGameInvariants(
       deps([
         {
           path: 'src/main.js',
@@ -235,8 +235,42 @@ describe('assertGameInvariants', () => {
           `,
         },
       ]),
+      { capabilities: { hasEnemies: true } },
     );
-    expect(noGenre.issues.map((i) => i.invariant)).toContain('shallow-escalation');
+    expect(combatCaps.issues.map((i) => i.invariant)).toContain('shallow-escalation');
+
+    // NON-combat game (a cozy fishing game: shrinking timing zone IS escalation, but
+    // no enemies) must NOT be told to add a boss — the premium-generality misfire fix.
+    const cozy = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: `
+            let difficulty = 1;
+            function onCatch() { difficulty = 1 + caught * 0.08; zoneWidth = 120 / difficulty; }
+          `,
+        },
+      ]),
+      { capabilities: { hasEnemies: false } },
+    );
+    expect(cozy.issues.map((i) => i.invariant)).not.toContain('shallow-escalation');
+  });
+
+  it('score-or-state: exempts a declared no-fail sandbox (zen garden) — premium-generality fix', () => {
+    // A calm, no-goal sandbox legitimately has neither a fail state nor a score.
+    const sandbox = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content:
+            'function rake(x, y) { strokes.push({ x, y }); draw(); } function placeStone(x, y) { stones.push({ x, y }); }',
+        },
+      ]),
+      { capabilities: { hasFailState: false } },
+    );
+    const ids = sandbox.issues.map((i) => i.invariant);
+    expect(ids).not.toContain('score-or-state');
+    expect(ids).not.toContain('fail-state');
   });
 
   it('warns on missing feedback', () => {
