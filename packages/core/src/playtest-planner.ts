@@ -193,6 +193,44 @@ export function selectGamePlaytestPlan(genre: GameGenre): GamePlaytestPlan | nul
   return { playbook, steps, predicates: [...predicates] };
 }
 
+// Plan step 5c — the universal interactivity FLOOR. For a genre with no built-in
+// predicates AND no agent contract, this is the fallback verdict source instead of
+// shipping `no_verdict` (unjudged): drive a generic input burst and require SOME
+// tracked snapshot field to change between the idle baseline and the post-input
+// final frame. A game that wires its debug snapshot + responds to input PASSES; one
+// that ignores input FAILS (→ repair); one with no snapshot at all can't be read —
+// the caller treats that as honest no_verdict (no worse than before).
+const FLOOR_PLAYBOOK: PlaytestPlaybook = {
+  schemaVersion: 1,
+  genre: 'other',
+  intent: 'Universal interactivity floor — verify the game responds to input at all.',
+  steps: [
+    { kind: 'wait', durationFrames: 20, assert: 'Idle baseline before any input.' },
+    { kind: 'key', code: 'ArrowRight', frames: 15, assert: 'Common movement input.' },
+    { kind: 'key', code: 'ArrowLeft', frames: 15, assert: 'Common movement input.' },
+    { kind: 'key', code: 'Space', frames: 8, assert: 'Common action input.' },
+    { kind: 'mouse', button: 0, assert: 'Pointer interaction.' },
+    { kind: 'wait', durationFrames: 20, assert: 'Settle, then read the snapshot.' },
+  ],
+  watchFor: ['The game ignores all input — tracked state never changes.'],
+};
+
+export function buildInteractivityFloorPlan(): GamePlaytestPlan {
+  const steps: GamePlaytestStep[] = [];
+  for (const step of FLOOR_PLAYBOOK.steps) {
+    const projected = projectPlaybookStep(step);
+    if (projected !== null) steps.push(projected);
+  }
+  const floorPredicate: PlaytestPredicate = {
+    field: '*',
+    op: 'any-changed',
+    frame: 'final',
+    against: 'baseline',
+    label: 'interactivity floor — tracked state changes in response to input',
+  };
+  return { playbook: FLOOR_PLAYBOOK, steps, predicates: [floorPredicate] };
+}
+
 // ---------------------------------------------------------------------------
 // Agent-authored playtest contracts — the path for genre-LESS / novel games.
 //

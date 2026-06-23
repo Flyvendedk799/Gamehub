@@ -27,6 +27,7 @@ import {
   type PlaytesterOutput,
   type RepairVerdict,
   type ShipReason,
+  buildInteractivityFloorPlan,
   buildRepairVerdict,
   decideRepairAction,
   generateViaAgent,
@@ -636,9 +637,22 @@ export async function runGeneration(
       fatalErrors.push('Runtime load: window.__game never appeared — the game did not boot.');
     }
 
-    // Nothing to gate on: the game booted cleanly AND the genre has no playbook
-    // predicates → honest no_verdict (ship as-is).
-    if (fatalErrors.length === 0 && !hasPredicates) return null;
+    // Plan step 5c — booted cleanly but the genre has no playbook predicates AND
+    // no agent contract. Rather than ship no_verdict (unjudged), run the UNIVERSAL
+    // INTERACTIVITY FLOOR: a generic input probe that requires SOME tracked
+    // snapshot field to change. A game that wired its snapshot + responds to input
+    // passes; one that ignores input fails (→ repair). A game with NO snapshot at
+    // all can't be read → keep the prior honest no_verdict (strictly no worse).
+    if (fatalErrors.length === 0 && !hasPredicates) {
+      const floor = buildInteractivityFloorPlan();
+      const floorPlay = await browserJobs.playtest(verifyHtml, floor.steps);
+      if (floorPlay === null || floorPlay.hasDebugContract === false) return null;
+      const floorObs: AttemptObservation = {
+        trace: traceFromPlaytestResult(floorPlay),
+        fatalErrors: [],
+      };
+      return buildRepairVerdict(floorObs, floor.predicates);
+    }
 
     const playVerdict =
       hasPredicates && plan !== null ? await browserJobs.playtest(verifyHtml, plan.steps) : null;

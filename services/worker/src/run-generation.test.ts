@@ -858,14 +858,13 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     expect(rounds).toBe(1);
   });
 
-  it('a genre with no playbook predicates ships with no_verdict, no repair', async () => {
+  it('a no-predicate genre now runs the interactivity FLOOR (input changes state → passed), not a blind no_verdict — plan step 5c', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());
+    // 'tycoon' has no bundled playbook → selectGamePlaytestPlan returns null. The
+    // game booted, so instead of shipping no_verdict the floor runs ONE probe; the
+    // mock snapshot moves (playerPos changes) → the any-changed floor predicate passes.
     const browserJobs = queuedBrowserJobs([invertedPlaytest()]);
     const agent: GenerateFn = async (_input, deps) => {
-      // 'tycoon' has no bundled playbook → selectGamePlaytestPlan returns null.
-      // (idle/sandbox/rhythm/visual_novel gained playbooks in v2 P6; tycoon did not.)
-      // The game still BOOTS in the mock, so the boot-gate has nothing to flag
-      // and the run ships an honest no_verdict.
       await deps.gameMode?.setSpec?.({ ...TOPDOWN_SPEC, genre: 'tycoon' } as unknown as GameSpec);
       await deps.fs?.create('index.html', RED_SQUARE);
       return emptyOutput('idle');
@@ -873,7 +872,33 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
 
     const result = await runGeneration(
       {
-        prompt: 'an rpg',
+        prompt: 'a tycoon',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: agent, browserJobs },
+    );
+
+    expect(result.repairRounds).toBe(0);
+    expect(result.shipReason).toBe('passed'); // floor verified input-responsiveness
+    expect(browserJobs.playtestCalls).toBe(1); // the floor ran exactly one probe
+  });
+
+  it('a no-predicate genre with NO debug snapshot still ships honest no_verdict (floor can read nothing) — plan step 5c', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    // Floor runs a probe but the game exposes no window.__game.debug snapshot →
+    // hasDebugContract=false → the floor can't read state → honest no_verdict
+    // (strictly no worse than the prior behavior; we didn't ask this genre to wire one).
+    const browserJobs = queuedBrowserJobs([{ ...passingPlaytest(), hasDebugContract: false }]);
+    const agent: GenerateFn = async (_input, deps) => {
+      await deps.gameMode?.setSpec?.({ ...TOPDOWN_SPEC, genre: 'tycoon' } as unknown as GameSpec);
+      await deps.fs?.create('index.html', RED_SQUARE);
+      return emptyOutput('idle');
+    };
+
+    const result = await runGeneration(
+      {
+        prompt: 'a tycoon',
         model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
         apiKey: 'sk-test',
       },
@@ -882,8 +907,6 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
 
     expect(result.repairRounds).toBe(0);
     expect(result.shipReason).toBe('no_verdict');
-    // No playbook → no playtest round-trip for the verdict.
-    expect(browserJobs.playtestCalls).toBe(0);
   });
 
   it('boot-gate: a non-booting game with no playbook still repairs (not a silent no_verdict)', async () => {

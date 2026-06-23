@@ -36,6 +36,10 @@ export const PLAYTEST_PREDICATE_OPS = [
   'eq',
   'gt',
   'lt',
+  // Plan step 5c — whole-snapshot interactivity floor: passes when ANY part of the
+  // tracked snapshot differs between two frames. Used with field '*' for the
+  // universal "the game responds to input" check on genres without specific predicates.
+  'any-changed',
 ] as const;
 export type PlaytestPredicateOp = (typeof PLAYTEST_PREDICATE_OPS)[number];
 
@@ -90,6 +94,10 @@ export interface PredicateResult {
   pass: boolean;
   /** Human-readable explanation — always set, pass or fail. */
   reason: string;
+  /** Whether the subject field actually RESOLVED in the snapshot (vs "field
+   *  missing"). Lets the verdict distinguish a substantiated pass from a vacuous
+   *  one and surface how many predicates read real data. (Plan step 6.) */
+  fieldPresent: boolean;
   /** Resolved subject value, when numeric. */
   observed?: number;
   /** Resolved comparison value (baseline frame value or literal), when
@@ -102,6 +110,9 @@ export interface PlaytestScore {
   results: ReadonlyArray<PredicateResult>;
   /** Count of failing predicates. */
   failures: number;
+  /** Predicates whose subject field actually resolved — i.e. read REAL data.
+   *  A clean pass should have observed > 0 (substantiated, not vacuous). (Plan step 6.) */
+  observed: number;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -179,10 +190,16 @@ export function evaluatePredicate(
       predicate.value !== undefined ? ` ${predicate.value}` : ''
     } @ ${describeFrame(subjectRef)}`;
 
-  const fail = (reason: string, observed?: number, baseline?: number): PredicateResult => ({
+  const fail = (
+    reason: string,
+    observed?: number,
+    baseline?: number,
+    fieldPresent = true,
+  ): PredicateResult => ({
     predicate,
     pass: false,
     reason,
+    fieldPresent,
     ...(observed !== undefined ? { observed } : {}),
     ...(baseline !== undefined ? { baseline } : {}),
   });
@@ -190,17 +207,63 @@ export function evaluatePredicate(
     predicate,
     pass: true,
     reason,
+    fieldPresent: true,
     ...(observed !== undefined ? { observed } : {}),
     ...(baseline !== undefined ? { baseline } : {}),
   });
 
   if (subjectSnap === OUT_OF_RANGE) {
-    return fail(`${label}: subject frame ${describeFrame(subjectRef)} is out of range`);
+    return fail(
+      `${label}: subject frame ${describeFrame(subjectRef)} is out of range`,
+      undefined,
+      undefined,
+      false,
+    );
+  }
+
+  // Plan step 5c — whole-snapshot interactivity floor. field is a sentinel ('*');
+  // passes when ANY part of the tracked snapshot differs between the two frames.
+  // Handled BEFORE per-field resolution (resolvePath('*') would be "missing").
+  if (predicate.op === 'any-changed') {
+    const againstRefAC: FrameRef = predicate.against ?? 'baseline';
+    const againstSnapAC = frameSnapshot(trace, againstRefAC);
+    if (againstSnapAC === OUT_OF_RANGE) {
+      return fail(`${label}: against frame is out of range`, undefined, undefined, false);
+    }
+    let subjJson: string | undefined;
+    let againstJson: string | undefined;
+    try {
+      subjJson = JSON.stringify(subjectSnap);
+      againstJson = JSON.stringify(againstSnapAC);
+    } catch {
+      return fail(`${label}: snapshot is not serializable`, undefined, undefined, false);
+    }
+    const empty = (s: string | undefined): boolean =>
+      s === undefined || s === '{}' || s === 'null' || s === '';
+    if (empty(subjJson) && empty(againstJson)) {
+      // No tracked state on either frame → nothing observed → not substantiated.
+      return fail(
+        `${label}: snapshot is empty on both frames — no tracked state to observe`,
+        undefined,
+        undefined,
+        false,
+      );
+    }
+    return subjJson !== againstJson
+      ? pass(`${label}: tracked snapshot CHANGED after input`)
+      : fail(
+          `${label}: tracked snapshot did NOT change after input — game may not respond to input`,
+        );
   }
 
   const subjectRaw = resolvePath(subjectSnap, predicate.field);
   if (subjectRaw === undefined) {
-    return fail(`${label}: field '${predicate.field}' is missing at ${describeFrame(subjectRef)}`);
+    return fail(
+      `${label}: field '${predicate.field}' is missing at ${describeFrame(subjectRef)}`,
+      undefined,
+      undefined,
+      false,
+    );
   }
 
   // Literal-comparison ops.
@@ -299,7 +362,8 @@ export function scorePlaytest(
 ): PlaytestScore {
   const results = predicates.map((p) => evaluatePredicate(trace, p));
   const failures = results.filter((r) => !r.pass).length;
-  return { pass: failures === 0, results, failures };
+  const observed = results.filter((r) => r.fieldPresent).length;
+  return { pass: failures === 0, results, failures, observed };
 }
 
 const VALID_OPS = new Set<string>(PLAYTEST_PREDICATE_OPS);

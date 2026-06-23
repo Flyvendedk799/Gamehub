@@ -504,6 +504,10 @@ export function assertGameInvariants(
   // — is held to exposing a snapshot. v3 P8: broadened beyond hasFailState so
   // ambient/no-fail canvas2d toys that still have state (enemies/escalation/
   // progression) aren't exempt. Standalone calls without capabilities stay exempt.
+  // NB: step 5a's "also want a verdict when the genre playbook has predicates"
+  // lives in run-generation's observeVerdict (which has the SPEC genre), NOT here —
+  // this tool only receives the INVARIANT-genre token (brawler/shooter/…), a
+  // different enum that can't index the spec-genre playbooks.
   const wantsVerdict =
     caps?.hasFailState === true ||
     caps?.hasEnemies === true ||
