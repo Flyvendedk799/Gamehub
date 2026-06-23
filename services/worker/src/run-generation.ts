@@ -22,6 +22,8 @@ import {
   type GenerateInput,
   type GenerateOutput,
   type GenerateViaAgentDeps,
+  PREMIUM_STARTERS,
+  PREMIUM_STARTER_PATH,
   type PlaytestStep,
   type PlaytesterInput,
   type PlaytesterOutput,
@@ -536,6 +538,16 @@ export async function runGeneration(
         // silently dropped canvas2d, persisting engine: null.
         if (engine === 'three' || engine === 'phaser' || engine === 'canvas2d') {
           state.engine = engine;
+          // Premium pivot: SEED a complete, bootable, premium starter at src/main.js
+          // the moment the engine is pinned, so the agent EDITS a premium scaffold
+          // (art direction + screens + juice/sfx + draw-the-subject + preserveDrawing-
+          // Buffer) instead of writing a bare loop from scratch — guide-level premium
+          // only got partial adoption (confirm 2026-06-23). Seed ONLY when nothing is
+          // there yet: a remix (initialFiles) or an agent who already wrote an entry
+          // keeps their file. The choose_engine result tells the agent to adapt it.
+          if (tree.view(PREMIUM_STARTER_PATH) === null) {
+            tree.create(PREMIUM_STARTER_PATH, PREMIUM_STARTERS[engine]);
+          }
         }
       },
       getCurrentEngine: () => state.engine,

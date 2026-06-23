@@ -101,7 +101,10 @@ describe('runGeneration (offline E2E)', () => {
     // Engine + spec carried forward through the gameMode callbacks.
     expect(result.engine).toBe('phaser');
     expect(result.spec).toMatchObject({ genre: 'sandbox', dimension: '2d' });
-    expect(result.fileCount).toBe(1);
+    // 2 files: the stub agent's index.html + the premium starter src/main.js that
+    // setEngine seeds the moment the engine is pinned (premium pivot). A real agent
+    // edits that seeded entry into its game; this minimal stub leaves it in place.
+    expect(result.fileCount).toBe(2);
 
     // Snapshot persisted to content-addressed storage; index.html readable back.
     expect(result.snapshot.manifestKey).toBe(
