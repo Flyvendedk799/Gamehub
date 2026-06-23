@@ -558,15 +558,21 @@ export type ContextSink = (context: BrowserContext) => void;
  */
 async function measureJuice(page: Page): Promise<number> {
   try {
-    // Snapshot 1: install a RAF counter + capture the first canvas frame.
+    // Snapshot 1: install a RAF counter + capture the first canvas frame as a
+    // DOWNSAMPLED PIXEL BUFFER (drawImage → getImageData), not a PNG data URL.
+    // The old toDataURL→new Image()→img.decode() roundtrip failed in headless on
+    // most runs, firing a hard-coded magnitude=96 fallback that clustered nearly
+    // every game at ~96 — a broken instrument. Reading pixels directly off an
+    // offscreen canvas has no decode step to fail. The buffer lives on
+    // window.__juice (page memory) so snapshot 2 can diff against it in-page.
     const ok = await page.evaluate(() => {
       const w = window as Window & {
-        __juice?: { rafCount: number; before?: string };
+        __juice?: { rafCount: number; beforePixels?: Uint8ClampedArray };
         requestAnimationFrame: typeof requestAnimationFrame;
       };
       const canvas = document.querySelector('canvas');
       if (!(canvas instanceof HTMLCanvasElement)) return false;
-      const state: { rafCount: number; before?: string } = { rafCount: 0 };
+      const state: { rafCount: number; beforePixels?: Uint8ClampedArray } = { rafCount: 0 };
       // Wrap RAF so we can count how many callbacks the game schedules during
       // the forced window — a static page schedules ~0, a juicy one schedules
       // one per frame (or many, for layered tween/particle systems).
@@ -575,11 +581,19 @@ async function measureJuice(page: Page): Promise<number> {
         state.rafCount += 1;
         return orig(cb);
       };
-      try {
-        state.before = canvas.toDataURL('image/png');
-      } catch {
-        // Tainted canvas (cross-origin draw) — pixel diff unavailable; churn
-        // alone will carry the score. `state.before` simply stays unset.
+      const SAMPLE = 64;
+      const off = document.createElement('canvas');
+      off.width = SAMPLE;
+      off.height = SAMPLE;
+      const octx = off.getContext('2d');
+      if (octx !== null) {
+        try {
+          octx.drawImage(canvas, 0, 0, SAMPLE, SAMPLE);
+          state.beforePixels = octx.getImageData(0, 0, SAMPLE, SAMPLE).data;
+        } catch {
+          // Tainted canvas (cross-origin draw) — pixel diff unavailable; churn
+          // alone carries the score. `state.beforePixels` simply stays unset.
+        }
       }
       w.__juice = state;
       return true;
@@ -597,19 +611,19 @@ async function measureJuice(page: Page): Promise<number> {
     }
     await tickFrames(page, JUICE_FRAME_WINDOW);
 
-    // Snapshot 2: diff the canvas against `before`, restore RAF, and fold in
-    // the animation-activity churn the game exposed.
-    // Plan step 10 — graduated juice. The old formula clustered every game at
-    // ~385: rafChurn*4 dominated (a bare RAF loop alone hit ~384), the pixel term
-    // was a CELL COUNT (not magnitude), and the sync `img.complete` decode usually
-    // failed (→ a coarse +1). Now: reliable `await img.decode()`, pixel MAGNITUDE +
-    // spatial SPREAD (a full-screen explosion >> a cursor blink), particles/tweens
-    // the game exposes, and rafChurn demoted to a modest "the loop runs" BASE — so
-    // the score actually RANKS games across a wide range instead of saturating.
+    // Snapshot 2: diff the AFTER frame against `beforePixels`, restore RAF, and
+    // fold in the animation-activity churn the game exposed.
+    // Graduated juice. Two prior formulas clustered scores: the first at ~385
+    // (rafChurn*4 dominated); the second at ~96 (the toDataURL→img.decode()
+    // roundtrip failed in headless on most runs, firing a hard-coded magnitude=96
+    // fallback). Now: DIRECT drawImage→getImageData pixel buffers (no decode to
+    // fail), pixel MAGNITUDE + spatial SPREAD (a full-screen explosion >> a cursor
+    // blink), particles/tweens the game exposes, and rafChurn demoted to a modest
+    // "the loop runs" BASE — so the score actually RANKS games across a wide range.
     const score = await page.evaluate(
       async ({ max, frameWindow }: { max: number; frameWindow: number }) => {
         const w = window as Window & {
-          __juice?: { rafCount: number; before?: string };
+          __juice?: { rafCount: number; beforePixels?: Uint8ClampedArray };
           __game?: {
             debug?: {
               snapshot?: () => unknown;
@@ -622,66 +636,46 @@ async function measureJuice(page: Page): Promise<number> {
         if (state === undefined) return 0;
 
         const SAMPLE = 64;
+        // Capture the AFTER frame the same way as before — direct drawImage →
+        // getImageData, no PNG/decode roundtrip (that was the broken path).
         const after = (() => {
           const canvas = document.querySelector('canvas');
           if (!(canvas instanceof HTMLCanvasElement)) return undefined;
+          const off = document.createElement('canvas');
+          off.width = SAMPLE;
+          off.height = SAMPLE;
+          const octx = off.getContext('2d');
+          if (octx === null) return undefined;
           try {
-            return canvas.toDataURL('image/png');
+            octx.drawImage(canvas, 0, 0, SAMPLE, SAMPLE);
+            return octx.getImageData(0, 0, SAMPLE, SAMPLE).data;
           } catch {
             return undefined;
           }
         })();
 
-        // (1) Motion: magnitude + spread between the two forced frames. Decode
-        // both data URLs at 64×64 via `img.decode()` (reliable, unlike the old
-        // sync `img.complete` which usually missed) and accumulate per-cell
-        // channel delta (magnitude) + which screen QUADRANTS changed (spread).
+        // (1) Motion: magnitude + spread between the two forced frames, compared
+        // DIRECTLY on the two pixel buffers (no decode → no failure fallback).
+        // Per-cell channel delta = magnitude; which screen QUADRANTS changed = spread.
+        const before = state.beforePixels;
         let magnitude = 0;
         let changedCells = 0;
         const quadrants = [false, false, false, false];
-        let decodedOk = false;
-        if (state.before !== undefined && after !== undefined && state.before !== after) {
-          const decode = async (dataUrl: string): Promise<Uint8ClampedArray | undefined> => {
-            const off = document.createElement('canvas');
-            off.width = SAMPLE;
-            off.height = SAMPLE;
-            const ctx = off.getContext('2d');
-            if (ctx === null) return undefined;
-            try {
-              const img = new Image();
-              img.src = dataUrl;
-              await img.decode();
-              ctx.drawImage(img, 0, 0, SAMPLE, SAMPLE);
-              return ctx.getImageData(0, 0, SAMPLE, SAMPLE).data;
-            } catch {
-              return undefined;
+        if (before !== undefined && after !== undefined && before.length === after.length) {
+          const cells = before.length / 4;
+          for (let c = 0; c < cells; c += 1) {
+            const i = c * 4;
+            const d =
+              Math.abs(before[i]! - after[i]!) +
+              Math.abs(before[i + 1]! - after[i + 1]!) +
+              Math.abs(before[i + 2]! - after[i + 2]!);
+            if (d > 24) {
+              changedCells += 1;
+              magnitude += d;
+              const row = Math.floor(c / SAMPLE);
+              const col = c % SAMPLE;
+              quadrants[(row < SAMPLE / 2 ? 0 : 2) + (col < SAMPLE / 2 ? 0 : 1)] = true;
             }
-          };
-          const a = await decode(state.before);
-          const b = await decode(after);
-          if (a !== undefined && b !== undefined && a.length === b.length) {
-            decodedOk = true;
-            const cells = a.length / 4;
-            for (let c = 0; c < cells; c += 1) {
-              const i = c * 4;
-              const d =
-                Math.abs(a[i]! - b[i]!) +
-                Math.abs(a[i + 1]! - b[i + 1]!) +
-                Math.abs(a[i + 2]! - b[i + 2]!);
-              if (d > 24) {
-                changedCells += 1;
-                magnitude += d;
-                const row = Math.floor(c / SAMPLE);
-                const col = c % SAMPLE;
-                quadrants[(row < SAMPLE / 2 ? 0 : 2) + (col < SAMPLE / 2 ? 0 : 1)] = true;
-              }
-            }
-          }
-          if (!decodedOk) {
-            // Frames differed but decode failed — coarse "something moved" credit
-            // so a real animation is never scored fully static.
-            magnitude = 96;
-            changedCells = 2;
           }
         }
         const quadrantSpread = quadrants.filter(Boolean).length; // 0..4

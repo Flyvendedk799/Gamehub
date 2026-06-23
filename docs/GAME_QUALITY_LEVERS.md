@@ -153,3 +153,22 @@ Key files (all verified): `/Users/tobiasmastek/Desktop/Gamehub/packages/core/src
 - **Lever 1 (audio) + Lever 6 (synth path) — SHIPPED (this batch):** three/phaser engine guides rewritten to teach in-code WebAudio synth (zero assets) + "never reference a .wav you did not create"; canvas2d already taught synth. Backstop: new `silent-audio` advisory invariant (resolves audio refs against the VFS). Kept advisory (the guide change is the default-changer; promote to repair only if runs still go silent).
 - **Lever 5 (fps pointer-lock) — SHIPPED:** new `fps-no-pointer-lock` advisory invariant (mouse-look source must call requestPointerLock).
 - **Remaining (next batches):** L2 depth-floor gate (scalar-only-escalation = fail), L3 decoy-engine escalation (warn→fatal + loaded-but-unreferenced engine), L4 close no_verdict/budget_exhausted ship-holes + reserve boot+playtest budget, and the MISSED lever — re-weight juiceScore to fold in audioPlays/depth/evidence so the model optimizes for the right objective (needs an audioPlays runtime signal first).
+
+---
+
+## Premium-generality pass (2026-06-23) — diverse off-menu batch
+
+Direction pivot: universal PREMIUM + reliability, not per-genre. Assessed 6 deliberately off-menu games (fishing, kitchen, zen-garden, physics-stacker, word-game, "surprise me"). Scores (fidelity/visual/feel/complete/DISAPPOINT): fishing 5/4/4/4/2 · kitchen 4/2/2/2/4 · zengarden 5/4/3/4/2 · stacker 4/3/2/3/3 · wordfall 2/2/1/2/5 · surprise 3/3/3/4/3.
+
+### THE measurement bug (critique's catch, highest leverage)
+`measureJuice` (browser-worker/main.ts) compared two PNG data URLs via `new Image()+img.decode()` — a roundtrip that FAILED in headless on most runs, firing a hard-coded `magnitude=96` fallback. The "~96 everywhere" cluster WAS this bug, not real flatness. **FIXED (batch A):** direct `drawImage(canvas)→getImageData` pixel buffers, no decode, no 96 fallback. Every premium before/after metric depends on this.
+
+### General levers (ordered; critique-adjusted)
+1. **silent-audio warn→FATAL** + dead-image-ref detection — DEFERRED (the silent-audio invariant found 0 mute ships in the batch; the agents' "mute" findings were a materialization artifact — my fetcher pulls only .js/.css, not .wav; fatal-promotion needs an escape-never-walls confirm first).
+2. **PREMIUM-BY-DEFAULT starter (KEYSTONE)** — bake art direction + typography + Title→Play→End screens + juice + sfx into the engine starters (canvas2d.ts:60 ships `#0b0b0e`+`ui-sans-serif`+single screen+player-as-ctx.arc). MUST capability-gate the screen machine (collapse to one ambient screen for sandbox/zen/VN) or it smuggles arcade assumptions back in. NEXT.
+3. **Representational-art layer** — "there is no fish"; a burger is the word "Burger"; chef = fillCircle. The renderer has only primitives. Add a `drawEntity(descriptor)` scaffold convention so named nouns get drawn (procedural silhouette or generate_image_asset). Ship the SCAFFOLD; DEFER the auto-check (noisy heuristic). Highest share-worthiness lever; depends on #2.
+4. **Universal play-verdict** — kill no_verdict (stacker shipped unverified): boot + zero console errors in ~2s (catches wordfall's dead-loop ReferenceError) + non-blank first frame + one input mutates snapshot. Genre playbooks become an overlay.
+5. **Intent-gate misfiring checks — DONE (batch A):** shallow-escalation now gated on combat intent (caps.hasEnemies / should-escalate genre) so it stops nagging cozy fishing; score-or-state exempts declared no-fail sandboxes (zen garden).
+- Fold #6 (completeness floor) into #2; #7 (dual-engine divergence) lowest priority (lever 4 neutralizes the harm).
+
+Correction to the synthesis framing: juice is a REAL measurement (pixel magnitude+spread), not a gamed counter — the problem was the decode bug + warn-only detectors + premium-in-prose-not-scaffold.
