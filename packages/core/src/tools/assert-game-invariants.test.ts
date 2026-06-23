@@ -17,10 +17,11 @@ describe('assertGameInvariants', () => {
           path: 'src/main.js',
           content: `
             let score = 0;
+            const audioCtx = new AudioContext();
             window.__game.controls.define({ actions: [{ id: 'restart', label: 'Restart', keys: ['KeyR'] }] });
             function onCollision() {
               score += 10;
-              new Audio('coin.wav').play();
+              const o = audioCtx.createOscillator(); o.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + 0.08);
             }
             function onGameOver() { /* lose */ }
             window.addEventListener('keydown', (e) => {
@@ -111,6 +112,56 @@ describe('assertGameInvariants', () => {
     );
     // declarations alone are not score state → the warning still fires
     expect(decoOnly.issues.map((i) => i.invariant)).toContain('score-or-state');
+  });
+
+  it('silent-audio: warns on a referenced .wav that does not exist; clean on synth or data: URL (quality lever 1)', () => {
+    const phantom = assertGameInvariants(
+      deps([{ path: 'src/main.js', content: `new Audio('assets/audio/hit.wav').play();` }]),
+    );
+    expect(phantom.issues.map((i) => i.invariant)).toContain('silent-audio');
+
+    // WebAudio synth + a data: URL audio + a real referenced file are all fine.
+    const ok = assertGameInvariants(
+      deps([
+        { path: 'assets/audio/win.wav', content: 'data:audio/wav;base64,UklGRg==' },
+        {
+          path: 'src/main.js',
+          content: `
+            const ctx = new AudioContext(); const o = ctx.createOscillator(); o.start();
+            const realSample = new Audio('assets/audio/win.wav');
+          `,
+        },
+      ]),
+    );
+    expect(ok.issues.map((i) => i.invariant)).not.toContain('silent-audio');
+  });
+
+  it('fps-no-pointer-lock: warns when a mouse-look game never acquires pointer lock (quality lever 5)', () => {
+    const broken = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: `
+            window.addEventListener('mousemove', (e) => { yaw += e.movementX * 0.002; });
+            function onEsc() { document.exitPointerLock?.(); }
+          `,
+        },
+      ]),
+    );
+    expect(broken.issues.map((i) => i.invariant)).toContain('fps-no-pointer-lock');
+
+    const fixed = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: `
+            canvas.addEventListener('click', () => canvas.requestPointerLock());
+            window.addEventListener('mousemove', (e) => { yaw += e.movementX * 0.002; });
+          `,
+        },
+      ]),
+    );
+    expect(fixed.issues.map((i) => i.invariant)).not.toContain('fps-no-pointer-lock');
   });
 
   it('warns on missing feedback', () => {

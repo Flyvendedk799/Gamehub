@@ -80,9 +80,23 @@ const mat = new THREE.MeshBasicMaterial({ map: tex });
 
 GLTF / GLB models load via `import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'` (the addons importmap entry is pre-wired).
 
-## Audio
+## Audio — SYNTHESIZE in code; never fetch a `.wav` you didn't create
 
-Use the Web Audio API directly — `new AudioContext()`, decode an `ArrayBuffer` from `fetch('assets/audio/jump.wav')`. If `window.__game.config.startMuted` is true, gate playback until first user input (autoplay policy).
+Sound is HALF of game feel — a silent game feels broken. Generate SFX IN CODE with WebAudio (no asset files). **Do NOT `fetch('assets/audio/…')` / reference any `assets/audio/*.wav` you didn't create — it 404s and your game ships MUTE** (the failure mode is invisible because the error gets swallowed). Construct the context once (on a user gesture if `window.__game.config.startMuted` is true):
+
+```js
+let audioCtx;
+function sfx(freq = 440, dur = 0.08, type = 'square') {
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type; o.frequency.value = freq; o.connect(g); g.connect(audioCtx.destination);
+  g.gain.setValueAtTime(0.25, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+  o.start(); o.stop(audioCtx.currentTime + dur);
+}
+```
+Call `sfx(...)` on every meaningful event — jump, hit, pickup, win, hurt — varying `freq`/`type` so they read distinct. For a REAL recorded sample, call `generate_audio_asset` (it writes the actual file INTO your project) and only then reference its path.
 
 ## Performance
 
