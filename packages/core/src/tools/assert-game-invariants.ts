@@ -403,10 +403,10 @@ const VARIETY_PATTERNS: readonly RegExp[] = [
   /(?:type|kind|variant|role)\s*[:=]\s*['"][a-z]/i, // type: 'tank'
   /(?:boss|miniboss)/i, // boss, spawnBoss, bossWave
   // Progression / upgrades / pickups / economy
-  /upgrade|power-?up|\bperks?\b|unlock|level-?up|skill\s*tree|\bshop\b|purchase/i,
+  /upgrade|power-?up|\bperks?\b|unlock|level-?up|skill\s*tree|shop|purchase/i,
   /pickup|\bloot\b|\bdrops?\b/i,
   // Multiple abilities / weapons
-  /weapons?\s*\[|switch\s*weapon|alt-?fire|secondary(?:fire|weapon)|special(?:attack|ability)|\babilities\b|\bdash\b|\bshield\b|grenade|\bultimate\b/i,
+  /weapons?\s*\[|switch\s*weapon|alt-?fire|secondary(?:fire|weapon)|special(?:attack|ability)|\babilities\b|dash|shield|grenade|\bultimate\b/i,
 ];
 
 /** GameGenre tokens (game-workflow §2 menu) whose games MUST get harder over
@@ -570,7 +570,9 @@ export function assertGameInvariants(
     ...source.matchAll(/\bfetch\s*\(\s*['"]([^'"]+\.(?:wav|mp3|ogg|m4a|aac))['"]/g),
   ]
     .map((m) => m[1])
-    .filter((p): p is string => typeof p === 'string' && !p.startsWith('data:'));
+    // Keep only LOCAL refs: a data: URL (inline, incl. leading whitespace), an
+    // http(s) URL, or a protocol-relative //cdn ref is not a missing project file.
+    .filter((p): p is string => typeof p === 'string' && !/^\s*(?:data:|(?:https?:)?\/\/)/.test(p));
   if (audioRefs.length > 0) {
     const projectPaths = new Set(deps.listFiles().map((f) => f.path.replace(/^\.?\//, '')));
     const missing = [...new Set(audioRefs)].filter(
@@ -602,8 +604,7 @@ export function assertGameInvariants(
   ]
     .map((m) => m[1])
     .filter(
-      (p): p is string =>
-        typeof p === 'string' && !p.startsWith('data:') && !/^https?:/.test(p) && !/^#/.test(p),
+      (p): p is string => typeof p === 'string' && !/^\s*(?:data:|(?:https?:)?\/\/|#)/.test(p),
     );
   if (imageRefs.length > 0) {
     const projectPaths = new Set(deps.listFiles().map((f) => f.path.replace(/^\.?\//, '')));
@@ -627,7 +628,13 @@ export function assertGameInvariants(
   // juice meter scores it ~0/floor). The premium starters set it; the confirm found
   // the agent sometimes drops it (a WebGL shooter scored juice=96 for this reason).
   // Detect WebGL usage in source + the absence of the flag. Advisory.
-  const usesWebGL = /new\s+THREE\.WebGLRenderer|new\s+Phaser\.Game/.test(source);
+  // `new Phaser.Game` defaults to WebGL (AUTO) — but a game that explicitly picks
+  // Phaser.CANVAS (or type: 1) is 2D canvas and needs no preserveDrawingBuffer, so
+  // don't false-warn it (review C3 false-positive).
+  const phaserCanvasMode = /Phaser\.CANVAS|type\s*:\s*(?:Phaser\.CANVAS|1)\b/.test(source);
+  const usesWebGL =
+    /new\s+THREE\.WebGLRenderer/.test(source) ||
+    (/new\s+Phaser\.Game/.test(source) && !phaserCanvasMode);
   if (usesWebGL && !/preserveDrawingBuffer/.test(source)) {
     checked.push('webgl-no-preserve-buffer');
     issues.push({

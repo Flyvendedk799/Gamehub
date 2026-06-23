@@ -318,6 +318,16 @@ export async function runGeneration(
   const generate = ports.generate ?? generateViaAgent;
   const validateScene = ports.validateScene ?? ENGINE_SCENE_VALIDATOR;
   const tree = new WorkingTree(req.initialFiles);
+  // Premium pivot — also seed the premium starter when the engine is PRE-PICKED.
+  // The New-design dialog skips choose_engine when the user picked an engine, so the
+  // setEngine seed (below) never fires on that common path; seed here too. The
+  // tree.view===null guard skips remixes (their src/main.js already exists).
+  if (
+    (req.engine === 'three' || req.engine === 'phaser' || req.engine === 'canvas2d') &&
+    tree.view(PREMIUM_STARTER_PATH) === null
+  ) {
+    tree.create(PREMIUM_STARTER_PATH, PREMIUM_STARTERS[req.engine]);
+  }
 
   // Hard run ceiling (#18) — abort cleanly when a token budget is set.
   // The agent emits a `turn_end` AgentEvent after each model turn carrying the
