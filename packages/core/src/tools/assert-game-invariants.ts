@@ -206,7 +206,12 @@ const SCORE_PATTERNS: readonly RegExp[] = [
   // score/wave — because it wrote `score = score + enemy.value`, `this.score += pts`,
   // `kills = kills + 1`, none of which have the literal-digit RHS the first rule needs.
   // The trailing `[^=;]` excludes comparisons (`==`, `>=`). (Plan step 1.)
-  /\b(?:this\.|state\.|window\.|game\.|__game\.state\.)?(?:score|points?|coins?|stars?|kills?|money|gold|lives|wave|round|level)\s*[+\-*/]?=\s*[^=;]/i,
+  // Negative lookbehind excludes `const|let|var NAME = …` DECLARATIONS so binding a
+  // same-named local to something unrelated (`const wave = audioCtx.createWaveShaper()`,
+  // `const level = config.level`) doesn't false-mark score state (review M6). A real
+  // score init with a numeric RHS is still caught by the first pattern; a real score
+  // MUTATION (`score += pts`, `score = score + 1`) is still caught here.
+  /(?<!\b(?:const|let|var)\s+)\b(?:this\.|state\.|window\.|game\.|__game\.state\.)?(?:score|points?|coins?|stars?|kills?|money|gold|lives|wave|round|level)\s*[+\-*/]?=\s*[^=;]/i,
 ];
 
 const FEEDBACK_PATTERNS: readonly RegExp[] = [

@@ -858,11 +858,12 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     expect(rounds).toBe(1);
   });
 
-  it('a no-predicate genre now runs the interactivity FLOOR (input changes state → passed), not a blind no_verdict — plan step 5c', async () => {
+  it('a no-predicate genre with no declared gameplay ships honest no_verdict — no fabricated interactivity pass (review M1/M2)', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());
-    // 'tycoon' has no bundled playbook → selectGamePlaytestPlan returns null. The
-    // game booted, so instead of shipping no_verdict the floor runs ONE probe; the
-    // mock snapshot moves (playerPos changes) → the any-changed floor predicate passes.
+    // 'tycoon' has no bundled playbook AND declares no gameplay caps. The floor must
+    // NOT mint a 'passed' from generic-input/ambient drift (that was less honest than
+    // no_verdict — adversarial review). With no caps it ships no_verdict without even
+    // running a probe.
     const browserJobs = queuedBrowserJobs([invertedPlaytest()]);
     const agent: GenerateFn = async (_input, deps) => {
       await deps.gameMode?.setSpec?.({ ...TOPDOWN_SPEC, genre: 'tycoon' } as unknown as GameSpec);
@@ -880,8 +881,8 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     );
 
     expect(result.repairRounds).toBe(0);
-    expect(result.shipReason).toBe('passed'); // floor verified input-responsiveness
-    expect(browserJobs.playtestCalls).toBe(1); // the floor ran exactly one probe
+    expect(result.shipReason).toBe('no_verdict'); // never a drift-driven vacuous pass
+    expect(browserJobs.playtestCalls).toBe(0); // no declared gameplay → no probe needed
   });
 
   it('a no-predicate genre with NO debug snapshot still ships honest no_verdict (floor can read nothing) — plan step 5c', async () => {

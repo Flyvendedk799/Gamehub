@@ -690,13 +690,15 @@ async function measureJuice(page: Page): Promise<number> {
         // (2) Richness the game EXPOSES + a modest churn base proving the loop runs.
         const rafChurn = Math.min(state.rafCount, frameWindow * 4);
         const dbg = w.__game?.debug;
-        const particles = typeof dbg?.particleCount === 'number' ? dbg.particleCount : 0;
-        const tweens = typeof dbg?.activeTweens === 'number' ? dbg.activeTweens : 0;
+        // Number.isFinite (not typeof === 'number') — a game exposing NaN/Infinity
+        // would otherwise propagate to juiceScore = NaN (review M-juice).
+        const particles = Number.isFinite(dbg?.particleCount) ? (dbg?.particleCount ?? 0) : 0;
+        const tweens = Number.isFinite(dbg?.activeTweens) ? (dbg?.activeTweens ?? 0) : 0;
         const richness = Math.min(particles, 5000) * 2 + Math.min(tweens, 1000) * 4;
         const base = rafChurn; // was rafChurn*4 — demoted from dominant term to a floor
 
         const raw = motion + richness + base;
-        return Math.max(0, Math.min(max, Math.round(raw)));
+        return Number.isFinite(raw) ? Math.max(0, Math.min(max, Math.round(raw))) : 0;
       },
       { max: JUICE_SCORE_MAX, frameWindow: JUICE_FRAME_WINDOW },
     );

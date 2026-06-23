@@ -178,39 +178,7 @@ describe('parsePlaytestPredicate', () => {
   });
 });
 
-describe("evaluatePredicate — 'any-changed' interactivity floor (plan step 5c)", () => {
-  const FLOOR: PlaytestPredicate = {
-    field: '*',
-    op: 'any-changed',
-    frame: 'final',
-    against: 'baseline',
-  };
-
-  it('PASSES when any tracked field changed between baseline and final', () => {
-    const trace: PlaytestTrace = {
-      baseline: { playerPos: { x: 0, y: 0 }, score: 0 },
-      frames: [{ stepIndex: 5, snapshot: { playerPos: { x: 12, y: 0 }, score: 0 } }],
-    };
-    const r = evaluatePredicate(trace, FLOOR);
-    expect(r.pass).toBe(true);
-    expect(r.fieldPresent).toBe(true);
-  });
-
-  it('FAILS when the snapshot is identical (game ignored input)', () => {
-    const trace: PlaytestTrace = {
-      baseline: { playerPos: { x: 0, y: 0 }, score: 0 },
-      frames: [{ stepIndex: 5, snapshot: { playerPos: { x: 0, y: 0 }, score: 0 } }],
-    };
-    expect(evaluatePredicate(trace, FLOOR).pass).toBe(false);
-  });
-
-  it('does NOT count as observed when both snapshots are empty (no tracked state)', () => {
-    const trace: PlaytestTrace = { baseline: {}, frames: [{ stepIndex: 5, snapshot: {} }] };
-    const r = evaluatePredicate(trace, FLOOR);
-    expect(r.pass).toBe(false);
-    expect(r.fieldPresent).toBe(false);
-  });
-
+describe('scorePlaytest — observed/substantiation (plan step 6)', () => {
   it('scorePlaytest reports observed = predicates whose field resolved (plan step 6)', () => {
     const trace: PlaytestTrace = {
       baseline: { score: 0 },

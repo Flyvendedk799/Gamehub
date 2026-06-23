@@ -36,10 +36,6 @@ export const PLAYTEST_PREDICATE_OPS = [
   'eq',
   'gt',
   'lt',
-  // Plan step 5c — whole-snapshot interactivity floor: passes when ANY part of the
-  // tracked snapshot differs between two frames. Used with field '*' for the
-  // universal "the game responds to input" check on genres without specific predicates.
-  'any-changed',
 ] as const;
 export type PlaytestPredicateOp = (typeof PLAYTEST_PREDICATE_OPS)[number];
 
@@ -219,41 +215,6 @@ export function evaluatePredicate(
       undefined,
       false,
     );
-  }
-
-  // Plan step 5c — whole-snapshot interactivity floor. field is a sentinel ('*');
-  // passes when ANY part of the tracked snapshot differs between the two frames.
-  // Handled BEFORE per-field resolution (resolvePath('*') would be "missing").
-  if (predicate.op === 'any-changed') {
-    const againstRefAC: FrameRef = predicate.against ?? 'baseline';
-    const againstSnapAC = frameSnapshot(trace, againstRefAC);
-    if (againstSnapAC === OUT_OF_RANGE) {
-      return fail(`${label}: against frame is out of range`, undefined, undefined, false);
-    }
-    let subjJson: string | undefined;
-    let againstJson: string | undefined;
-    try {
-      subjJson = JSON.stringify(subjectSnap);
-      againstJson = JSON.stringify(againstSnapAC);
-    } catch {
-      return fail(`${label}: snapshot is not serializable`, undefined, undefined, false);
-    }
-    const empty = (s: string | undefined): boolean =>
-      s === undefined || s === '{}' || s === 'null' || s === '';
-    if (empty(subjJson) && empty(againstJson)) {
-      // No tracked state on either frame → nothing observed → not substantiated.
-      return fail(
-        `${label}: snapshot is empty on both frames — no tracked state to observe`,
-        undefined,
-        undefined,
-        false,
-      );
-    }
-    return subjJson !== againstJson
-      ? pass(`${label}: tracked snapshot CHANGED after input`)
-      : fail(
-          `${label}: tracked snapshot did NOT change after input — game may not respond to input`,
-        );
   }
 
   const subjectRaw = resolvePath(subjectSnap, predicate.field);
