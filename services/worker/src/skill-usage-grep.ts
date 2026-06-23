@@ -17,10 +17,19 @@ const ENGINE_PATH_RE = /^src\/engine\/.+\.(js|jsx|mjs)$/;
 const EXPORT_FN_RE = /export\s+function\s+([A-Za-z_$][\w$]*)/g;
 const SOURCE_EXTS = ['.js', '.jsx', '.ts', '.mjs', '.html'];
 
+// Kept in lockstep with SNAPSHOT_WIRING_PATTERNS in
+// packages/core/src/tools/assert-game-invariants.ts — both decide "is the debug
+// snapshot wired?" and must agree, else the build-report `debugWired` disagrees
+// with the runtime verdict (run3 shipped debugWired=0 yet passed snapshot-reading
+// predicates). (Plan step 1.)
 const DEBUG_WIRING_PATTERNS: readonly RegExp[] = [
   /\bdebug\s*\.\s*track\s*\(/,
   /\bdebug\s*\.\s*snapshot\s*=[^=]/,
   /__game\s*\.\s*state\s*=[^=]/,
+  /__game\s*\.\s*state\s*\.\s*\w+\s*=[^=]/,
+  /__game\s*\.\s*state\s*\[[^\]]*\]\s*=[^=]/,
+  /Object\.assign\s*\(\s*[^,)]*__game\s*\.\s*state\b/,
+  /\b\w+\s*\.\s*track\s*\(\s*\{/,
 ];
 
 function parseExportNames(content: string): string[] {
@@ -54,13 +63,15 @@ function countCalls(haystack: string, name: string): number {
 }
 
 function countDebugWirings(allContent: string): number {
-  let total = 0;
-  for (const re of DEBUG_WIRING_PATTERNS) {
-    const flags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
-    const global = new RegExp(re.source, flags);
-    total += (allContent.match(global) ?? []).length;
+  // Count DISTINCT lines that match ANY wiring pattern. Summing per-pattern match
+  // counts double-counts overlapping patterns (e.g. `debug.track(` also matches the
+  // aliased `\w+.track({`), and would inflate every time a new form is added. Per
+  // distinct line, adding a pattern only ever discovers NEW wiring sites. (Plan step 1.)
+  let count = 0;
+  for (const line of allContent.split('\n')) {
+    if (DEBUG_WIRING_PATTERNS.some((re) => re.test(line))) count += 1;
   }
-  return total;
+  return count;
 }
 
 export function analyzeSkillUsage(

@@ -1337,6 +1337,20 @@ window.addEventListener('game:params-changed', (e) => {
 
 Declare the schema via \`declare_tweak_schema\` with \`kind: 'param'\`, \`key: 'player_speed'\`, \`default: 5\`, \`min: 1\`, \`max: 20\`, \`step: 0.5\`.
 
+## Verification contract (REQUIRED)
+
+The platform play-verifies your game by reading \`window.__game.debug\` after driving synthetic input — a 3D game that never wires this ships UNVERIFIED (no pass/fail, just "it booted"). At startup, expose your core state with the CANONICAL field names the playtester reads:
+
+\`\`\`js
+window.__game.debug.track({
+  playerPos: thePlayer.position,   // THREE.Vector3 — verified to CHANGE on WASD/arrows
+  cameraYaw: () => yaw,            // look/heading angle in radians — verified to change on turn input
+  score: () => score,             // or itemsCollected — whatever rises on progress/pickup
+});
+\`\`\`
+
+Use these exact keys (\`playerPos\`, \`cameraYaw\`, and \`score\` or \`itemsCollected\`) so the genre playbook's predicates can resolve them. \`debug.track\` accepts live object refs OR \`() => value\` getters. Wire it BEFORE your first frame.
+
 ## Forbidden
 
 - Loading Three.js from any URL other than the pinned \`cdn.jsdelivr.net/npm/three@0.170.0/...\`.

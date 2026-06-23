@@ -201,6 +201,12 @@ const SCORE_PATTERNS: readonly RegExp[] = [
   /\b(score|points?|coins?|stars?|kills?|level|wave|round)\s*[+\-*/]?=\s*[+\-]?\s*\d/i,
   /\b(score|points?|coins?)\s*\+\+/i,
   /\bsetScore\s*\(/i,
+  // Non-numeric / variable RHS + compound assignment. run3 (tower defense) shipped a
+  // FALSE `score-or-state` warning while PASSING 4/4 runtime predicates that read
+  // score/wave — because it wrote `score = score + enemy.value`, `this.score += pts`,
+  // `kills = kills + 1`, none of which have the literal-digit RHS the first rule needs.
+  // The trailing `[^=;]` excludes comparisons (`==`, `>=`). (Plan step 1.)
+  /\b(?:this\.|state\.|window\.|game\.|__game\.state\.)?(?:score|points?|coins?|stars?|kills?|money|gold|lives|wave|round|level)\s*[+\-*/]?=\s*[^=;]/i,
 ];
 
 const FEEDBACK_PATTERNS: readonly RegExp[] = [
@@ -245,6 +251,14 @@ const SNAPSHOT_WIRING_PATTERNS: readonly RegExp[] = [
   /\bdebug\s*\.\s*track\s*\(/,
   /\bdebug\s*\.\s*snapshot\s*=[^=]/,
   /__game\s*\.\s*state\s*=[^=]/,
+  // run3 wired its snapshot in forms these missed (shipped a FALSE debug-snapshot
+  // warning while PASSING runtime predicates that read it). All require an
+  // ASSIGNMENT/CALL — they never match the shim's `var st = window.__game.state`
+  // READ. (Plan step 1.)
+  /__game\s*\.\s*state\s*\.\s*\w+\s*=[^=]/, // __game.state.score = x
+  /__game\s*\.\s*state\s*\[[^\]]*\]\s*=[^=]/, // __game.state['score'] = x
+  /Object\.assign\s*\(\s*[^,)]*__game\s*\.\s*state\b/, // Object.assign(__game.state, {...})
+  /\b\w+\s*\.\s*track\s*\(\s*\{/, // aliased: dbg.track({ ... })
 ];
 
 // Camera-relative movement (3D's #1 recurring bug). A 3D game with a MOVING
