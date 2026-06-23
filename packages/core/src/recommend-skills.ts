@@ -200,11 +200,11 @@ export function formatRecommendationsForPrompt(recs: SkillRecommendation[]): str
   const fmt = (r: SkillRecommendation) => `- import_skill({ name: '${r.skill}' }) — ${r.reason}`;
   const importNow = recs.slice(0, IMPORT_NOW_TIER_SIZE);
   const also = recs.slice(IMPORT_NOW_TIER_SIZE);
-  let out = `Recommended skills — vetted, tested implementations of THIS game's core systems. After you scaffold your entry file, import_skill each one (it wires the import into src/main.js), then BUILD that system by CALLING its exports. Calling the skill IS how you implement that system — do NOT write your own parallel version of what you imported:\n${importNow
+  let out = `Optional skill shortcuts — vetted implementations of common systems for THIS game. A shortcut, NOT a requirement: import + CALL one to save time, OR build the system yourself — what's graded is the behavior (escalation/snapshot/controls), not whether you imported. If you DO import one, wire + call it; never import-then-not-call (that ships dead code the sweep deletes):\n${importNow
     .map(fmt)
     .join('\n')}`;
   if (also.length > 0) {
-    out += `\n\nAlso available (import if you build that system):\n${also.map(fmt).join('\n')}`;
+    out += `\n\nAlso available (import ONLY if you'll call it):\n${also.map(fmt).join('\n')}`;
   }
   return out;
 }
