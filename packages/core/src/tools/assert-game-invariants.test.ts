@@ -162,6 +162,34 @@ describe('assertGameInvariants', () => {
       ]),
     );
     expect(c2d.issues.map((i) => i.invariant)).not.toContain('webgl-no-preserve-buffer');
+
+    // Phaser.CANVAS / type:1 is 2D canvas, not WebGL — must NOT be nagged (review C3 FP).
+    const phaserCanvas = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: 'const g = new Phaser.Game({ type: Phaser.CANVAS, parent: "game" });',
+        },
+      ]),
+    );
+    expect(phaserCanvas.issues.map((i) => i.invariant)).not.toContain('webgl-no-preserve-buffer');
+  });
+
+  it('shallow-escalation: variety in camelCase (openShop/playerDash/shieldUp) must NOT false-warn (review FP)', () => {
+    const camelVariety = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: `
+            let wave = 1;
+            function spawnWave() { for (let i = 0; i < 5 + wave * 3; i++) enemies.push(makeEnemy()); }
+            function onClear() { wave++; openShop(); playerDash(); spawnWave(); }
+          `,
+        },
+      ]),
+      { capabilities: { hasEnemies: true } },
+    );
+    expect(camelVariety.issues.map((i) => i.invariant)).not.toContain('shallow-escalation');
   });
 
   it('dead-image: warns on a referenced sprite/model that does not exist; clean when drawn or created (C2)', () => {

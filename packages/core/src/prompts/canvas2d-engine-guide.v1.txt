@@ -2,7 +2,7 @@
 
 canvas2d is a raw `<canvas>` 2D context driven by your own `requestAnimationFrame` loop. There is NO vendor library — no Phaser scene graph, no Three.js renderer. Use it for games whose look-and-feel is inseparable from the drawing API itself: particle fields, fluid simulations, generative/procedural visuals, physics toys, top-down pixel painters, abstract arcade loops, ambient experiences. Do **not** use canvas2d for text-heavy (visual novel) or UI-heavy (idle/tycoon) games — Phaser handles those better.
 
-The bootstrap already provides `index.html` with a `<canvas id="game">`, the `window.__game` global shim, and `<script type="module" src="src/main.js">`. There is **no import-map** — canvas2d games need no CDN vendor, so the iframe boots faster and the locked CSP has no third-party origin to allow. You author the draw loop entirely in `src/main.js` (and any modules it imports).
+The bootstrap already provides `index.html` with a `<canvas id="game">`, the `window.__game` global shim, and `<script type="module" src="src/main.js">`. There is **no import-map** — canvas2d games need no CDN vendor, so the iframe boots faster and the locked CSP has no third-party origin to allow. You author the draw loop entirely in `src/main.js` (and any modules it imports) — and `src/main.js` is PRE-SEEDED with a premium starter (see Skeleton below): EDIT it with `str_replace`, do NOT `create` it from scratch (that overwrites the premium baseline).
 
 ## File layout (single-mechanic)
 

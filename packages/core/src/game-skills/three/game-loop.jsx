@@ -5,7 +5,13 @@
 import * as THREE from 'three';
 
 export function startGameLoop({ canvas, scene, camera, onUpdate }) {
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  // preserveDrawingBuffer keeps the rendered frame readable — required for thumbnail
+  // screenshots + the juice motion meter (a WebGL canvas reads as blank otherwise).
+  const renderer = new THREE.WebGLRenderer({
+    canvas,
+    antialias: true,
+    preserveDrawingBuffer: true,
+  });
   renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
