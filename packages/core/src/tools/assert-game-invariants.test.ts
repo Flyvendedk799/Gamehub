@@ -179,6 +179,49 @@ describe('assertGameInvariants', () => {
     expect(chained.issues.map((i) => i.invariant)).not.toContain('fps-no-pointer-lock');
   });
 
+  it('shallow-escalation: warns when a shooter escalates by scalars only; silent when it has variety (quality lever 2)', () => {
+    // Escalation present (spawnWave + wave++) but ZERO variety → scalar-only → warn.
+    const scalarOnly = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: `
+            let wave = 1;
+            function spawnWave() { for (let i = 0; i < 5 + wave * 3; i++) enemies.push(makeEnemy(60 + wave * 12)); }
+            function onClear() { wave++; spawnWave(); }
+          `,
+        },
+      ]),
+      { genre: 'shooter' },
+    );
+    expect(scalarOnly.issues.map((i) => i.invariant)).toContain('shallow-escalation');
+
+    // Same escalation but WITH variety (a boss + an upgrade) → must NOT warn.
+    const withVariety = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: `
+            let wave = 1;
+            function spawnWave() { for (let i = 0; i < 5 + wave * 3; i++) enemies.push(makeEnemy(60 + wave * 12)); if (wave % 5 === 0) spawnBoss(); }
+            function onClear() { wave++; offerUpgrade(); spawnWave(); }
+          `,
+        },
+      ]),
+      { genre: 'shooter' },
+    );
+    expect(withVariety.issues.map((i) => i.invariant)).not.toContain('shallow-escalation');
+
+    // No escalation at all → the existing 'escalation' warning, NOT shallow.
+    const flat = assertGameInvariants(
+      deps([{ path: 'src/main.js', content: 'function shoot() { bullets.push(b); }' }]),
+      { genre: 'shooter' },
+    );
+    const ids = flat.issues.map((i) => i.invariant);
+    expect(ids).toContain('escalation');
+    expect(ids).not.toContain('shallow-escalation');
+  });
+
   it('warns on missing feedback', () => {
     const result = assertGameInvariants(
       deps([
