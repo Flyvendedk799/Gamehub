@@ -646,7 +646,31 @@ export async function runGeneration(
     if (fatalErrors.length === 0 && !hasPredicates) {
       const floor = buildInteractivityFloorPlan();
       const floorPlay = await browserJobs.playtest(verifyHtml, floor.steps);
-      if (floorPlay === null || floorPlay.hasDebugContract === false) return null;
+      if (floorPlay === null) return null;
+      if (floorPlay.hasDebugContract === false) {
+        // Plan step 7 — the floor needs a snapshot to read. If the game DECLARED
+        // gameplay capabilities (it wants a real verdict) but never wired one,
+        // that's repairable: push the actionable wire-snapshot fatal so the bounded
+        // repair loop fixes it — the same discipline line 651 applies to
+        // predicate-bearing genres, now reaching genre-less games that want a
+        // verdict. A static toy with NO declared gameplay stays honest no_verdict.
+        const caps = spec.capabilities;
+        const wantsVerdict =
+          caps?.hasFailState === true ||
+          caps?.hasEnemies === true ||
+          caps?.escalates === true ||
+          caps?.hasProgression === true;
+        if (!wantsVerdict) return null;
+        return buildRepairVerdict(
+          {
+            trace: null,
+            fatalErrors: [
+              'This game declares gameplay (a fail state / enemies / escalation / progression) but exposes no window.__game.debug snapshot, so it cannot be play-verified. Wire it in ONE line: window.__game.debug.track({ score: () => score, player, ... }) (or set window.__game.state.*) exposing the fields your gameplay updates.',
+            ],
+          },
+          [],
+        );
+      }
       const floorObs: AttemptObservation = {
         trace: traceFromPlaytestResult(floorPlay),
         fatalErrors: [],

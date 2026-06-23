@@ -909,6 +909,36 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     expect(result.shipReason).toBe('no_verdict');
   });
 
+  it('a no-predicate genre that DECLARES gameplay but wires no snapshot is REPAIRED (wire it), not no_verdict — plan step 7', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    // wantsVerdict (hasEnemies) + no snapshot across every round → the floor pushes
+    // the wire-snapshot fatal each round → repairs to the ceiling rather than
+    // shipping blind. Contrast the prior test (no declared gameplay → no_verdict).
+    const noContract: PlaytestVerdict = { ...passingPlaytest(), hasDebugContract: false };
+    const browserJobs = queuedBrowserJobs([noContract, noContract, noContract, noContract]);
+    const agent: GenerateFn = async (_input, deps) => {
+      await deps.gameMode?.setSpec?.({
+        ...TOPDOWN_SPEC,
+        genre: 'tycoon',
+        capabilities: { hasEnemies: true },
+      } as unknown as GameSpec);
+      await deps.fs?.create('index.html', RED_SQUARE);
+      return emptyOutput('idle');
+    };
+
+    const result = await runGeneration(
+      {
+        prompt: 'a tycoon with enemies',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: agent, browserJobs },
+    );
+
+    expect(result.shipReason).not.toBe('no_verdict'); // it tried to repair (wire the snapshot)
+    expect(result.repairRounds).toBeGreaterThan(0);
+  });
+
   it('boot-gate: a non-booting game with no playbook still repairs (not a silent no_verdict)', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());
     let rounds = 0;
