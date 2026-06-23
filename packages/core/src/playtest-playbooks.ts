@@ -192,6 +192,15 @@ const FPS: PlaytestPlaybook = {
       code: 'KeyW',
       frames: 30,
       assert: 'Player position moved FORWARD along camera basis (not world +z).',
+      // Plan step 3 — the one universal, unambiguous FPS check: holding forward
+      // MOVES the player. Forward = -z by the Three default-camera convention the
+      // three-engine guide pins (`playerPos` tracked, "verified to CHANGE on WASD").
+      // This alone makes hasPredicates=true so fps no longer ships no_verdict. Yaw
+      // stays an English assert until step 9's synthetic pointer-lock makes a
+      // cameraYaw predicate testable WITHOUT the strafe-vs-turn ambiguity of keys.
+      predicates: [
+        { field: 'playerPos.z', op: 'changed', frame: { step: 3 }, against: 'baseline' },
+      ],
     },
   ],
   watchFor: [
@@ -664,7 +673,48 @@ const SANDBOX: PlaytestPlaybook = {
   ],
 };
 
+// Plan step 4 — the genre run2 was actually about (3D collect-em-up), previously
+// force-fit to `fps` (the worst-covered genre) and shipped NO_VERDICT. The GATING
+// predicate is the safe, universal one — forward input MOVES the player (forward =
+// -z by the three-engine-guide convention). The core loop (count rises on pickup)
+// stays an English assert because blind synthetic movement can't be guaranteed to
+// reach a pickup; the universal interactivity floor (step 5) backs it.
+const COLLECTATHON: PlaytestPlaybook = {
+  schemaVersion: 1,
+  genre: 'collectathon',
+  intent:
+    'Explore + collect: moving the player into pickups raises a collected count / score; reaching the target wins. Expose `playerPos` and `score` (or `itemsCollected`) in window.__game.debug.track().',
+  steps: [
+    {
+      kind: 'wait',
+      durationFrames: 30,
+      assert: 'Game booted; player + at least one pickup are present.',
+    },
+    {
+      kind: 'key',
+      code: 'KeyW',
+      frames: 40,
+      assert: 'Holding forward MOVES the player through the world (toward pickups).',
+      predicates: [
+        { field: 'playerPos.z', op: 'changed', frame: { step: 1 }, against: 'baseline' },
+      ],
+    },
+    {
+      kind: 'wait',
+      durationFrames: 60,
+      assert:
+        'When the player overlaps a pickup, `itemsCollected`/`score` INCREASES and that pickup disappears; reaching the target count shows a win screen.',
+    },
+  ],
+  watchFor: [
+    'Collected count is decorative — never increases on overlap.',
+    'Pickups have no overlap/collision test (the player passes through them).',
+    'No win condition when the target count is reached.',
+  ],
+};
+
 const PLAYBOOKS: Partial<Record<GameGenre, PlaytestPlaybook>> = {
+  collectathon: COLLECTATHON,
   platformer: PLATFORMER,
   fighting: FIGHTING,
   fps: FPS,

@@ -57,6 +57,22 @@ describe('getPlaytestPlaybook', () => {
     expect(fields).toContain('wave');
   });
 
+  it('fps now carries a machine-checkable predicate (no more guaranteed no_verdict) — plan step 3', () => {
+    const pb = getPlaytestPlaybook('fps');
+    const fields = (pb?.steps ?? []).flatMap((s) => (s.predicates ?? []).map((p) => p.field));
+    expect(fields.length).toBeGreaterThan(0);
+    expect(fields).toContain('playerPos.z'); // forward movement = the universal FPS check
+  });
+
+  it('collectathon is a first-class verified genre (run2 was force-fit to fps) — plan step 4', () => {
+    const pb = getPlaytestPlaybook('collectathon');
+    expect(pb).not.toBeNull();
+    expect(pb?.genre).toBe('collectathon');
+    const fields = (pb?.steps ?? []).flatMap((s) => (s.predicates ?? []).map((p) => p.field));
+    expect(fields).toContain('playerPos.z'); // gating predicate: forward input moves the player
+    expect(listSupportedGenres()).toContain('collectathon');
+  });
+
   it('every bundled playbook predicate is well-formed (parses without throwing)', () => {
     for (const genre of listSupportedGenres()) {
       const pb = getPlaytestPlaybook(genre);
