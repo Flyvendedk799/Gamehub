@@ -1267,7 +1267,9 @@ A user expects a game they'd be proud to share, like a Lovable output. A flat bo
 import * as THREE from 'three';
 
 const canvas = document.querySelector('#game');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+// preserveDrawingBuffer keeps the rendered frame readable — lets the canvas be
+// screenshotted (thumbnails) and its motion measured. Keep it.
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
 renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
@@ -1534,6 +1536,7 @@ const game = new Phaser.Game({
   width: 800,
   height: 600,
   physics: { default: 'arcade', arcade: { gravity: { y: 0 } } },
+  render: { preserveDrawingBuffer: true }, // keep this — lets the canvas be screenshotted (thumbnails) + read
   scene: [TitleScene, PlayScene, OverScene], // a no-fail sandbox/zen game: just [PlayScene]
 });
 \`\`\`
