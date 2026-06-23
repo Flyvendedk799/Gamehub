@@ -1255,7 +1255,13 @@ assets/textures/
 assets/audio/
 \`\`\`
 
-## Lifecycle skeleton
+## Lifecycle skeleton — PREMIUM BASELINE (this is the floor, not a suggestion)
+
+A user expects a game they'd be proud to share, like a Lovable output. A flat box in a black void is the #1 reason a 3D game looks unfinished. Bake in:
+- **Lighting + atmosphere** — a hemisphere + directional (sun) light, shadows, a sky \`background\` colour + \`fog\`. Never an unlit \`MeshBasicMaterial\` cube in a black scene.
+- **Real materials + the SUBJECT** — \`MeshStandardMaterial\` on real geometry; every named noun gets real geometry or a \`generate_3d_asset\` glTF model — NOT a default \`BoxGeometry\` placeholder.
+- **Screens** — show Title/Over as a DOM overlay toggled by a \`screen\` variable (a no-fail SANDBOX/zen game skips the Over state).
+- **Juice + sound** — \`sfx()\` + a hit flash/camera nudge on every meaningful event.
 
 \`\`\`js
 import * as THREE from 'three';
@@ -1263,16 +1269,61 @@ import * as THREE from 'three';
 const canvas = document.querySelector('#game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 
+// --- ART DIRECTION: a real sky + fog, not a black void ---
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(60, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
-camera.position.set(0, 1.6, 4);
+scene.background = new THREE.Color(0x10131c);
+scene.fog = new THREE.Fog(0x10131c, 14, 48);
+const camera = new THREE.PerspectiveCamera(60, canvas.clientWidth / canvas.clientHeight, 0.1, 200);
+camera.position.set(0, 5, 9);
+camera.lookAt(0, 0.5, 0);
 
-// Add lights, meshes, etc.
+// --- LIGHTING RIG (hemisphere fill + a shadow-casting sun) ---
+scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x202830, 0.9));
+const sun = new THREE.DirectionalLight(0xffe9b0, 1.4);
+sun.position.set(6, 12, 6); sun.castShadow = true; scene.add(sun);
 
+// --- GROUND + the SUBJECT with a real material (use generate_3d_asset for real models) ---
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(80, 80),
+  new THREE.MeshStandardMaterial({ color: 0x2b3350, roughness: 0.95 }),
+);
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+const player = new THREE.Mesh(
+  new THREE.IcosahedronGeometry(0.6, 0),
+  new THREE.MeshStandardMaterial({ color: 0xffcc4d, flatShading: true, roughness: 0.4 }),
+);
+player.position.y = 0.6; player.castShadow = true; scene.add(player);
+
+// --- JUICE: WebAudio synth (see "Audio") — call sfx() on events ---
+let audioCtx;
+function sfx(freq = 440, dur = 0.08, type = 'square') {
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type; o.frequency.value = freq; o.connect(g); g.connect(audioCtx.destination);
+  g.gain.setValueAtTime(0.25, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+  o.start(); o.stop(audioCtx.currentTime + dur);
+}
+
+// --- DEBUG CONTRACT (required — see "Verification contract") ---
+let score = 0;
+window.__game.debug.track({
+  score: () => score,
+  playerPos: () => player.position,   // Vector3 — reflectPos handles .x/.y/.z
+  cameraYaw: () => camera.rotation.y,
+});
+
+let last = 0;
 function tick(t) {
-  // Per-frame state updates here. Read tweaks live: window.__game.params.player_speed
+  const dt = Math.min((t - last) / 1000, 0.05); last = t;
+  const speed = window.__game.params.player_speed ?? 4;
+  if (window.__game.controls.isDown('left'))  player.position.x -= speed * dt;
+  if (window.__game.controls.isDown('right')) player.position.x += speed * dt;
   renderer.render(scene, camera);
   requestAnimationFrame(tick);
 }
@@ -1283,7 +1334,6 @@ window.addEventListener('resize', () => {
   camera.aspect = canvas.clientWidth / canvas.clientHeight;
   camera.updateProjectionMatrix();
 });
-
 window.addEventListener('beforeunload', () => renderer.dispose());
 \`\`\`
 
@@ -1398,46 +1448,93 @@ assets/sprites/
 assets/audio/
 \`\`\`
 
-## Skeleton
+## Skeleton — PREMIUM BASELINE (this is the floor, not a suggestion)
+
+A user expects a game they'd be proud to share, like a Lovable output. Bake in what makes a game premium rather than a prototype:
+- **Art direction** — a deliberate palette + a gradient backdrop (\`fillGradientStyle\`) + a real font, never a flat \`backgroundColor: '#0b0b0e'\` + system font.
+- **Screens** — \`Title → Play → Over\` scenes. (A no-fail SANDBOX / zen game collapses to a single \`PlayScene\` — do NOT bolt a "GAME OVER" onto a calm toy.)
+- **Juice + sound on by default** — camera shake + \`sfx()\` on every meaningful event (see "Audio"). A silent, static game reads as broken.
+- **Draw the SUBJECT in code** — themed Graphics/Game-Object shapes (or a \`generate_image_asset\` sprite). NEVER \`this.load.image('x','assets/sprites/x.png')\` for a file you didn't create — it 404s and ships an invisible/broken object (the same dead-asset trap as audio). A bare rectangle for a named thing (a fish, a car, a chef) is not premium.
 
 \`\`\`js
 import * as Phaser from 'phaser';
 
-class PlayScene extends Phaser.Scene {
-  constructor() { super('Play'); }
+const PAL = { bg0: 0x10131c, bg1: 0x222a44, ink: '#eef2ff', accent: '#ffcc4d' };
+const TITLE_FONT = { fontFamily: 'Space Grotesk, system-ui, sans-serif' }; // <link> the font in index.html
 
-  preload() {
-    this.load.image('paddle', 'assets/sprites/paddle.png');
-    // AUDIO: do NOT \`this.load.audio('hit', 'assets/audio/hit.wav')\` — that path
-    // does not exist, it 404s, and the game ships MUTE (sound is half of feel). Use
-    // one of: (a) WebAudio synth in code (see "Audio" below, zero assets — preferred
-    // for SFX), or (b) call \`generate_audio_asset\` FIRST so the real .wav exists in
-    // your project, THEN load it. Never load/reference an assets/audio path you
-    // didn't create.
-  }
+// WebAudio synth — no asset files (see "Audio" section). Works alongside Phaser.
+let audioCtx;
+function sfx(freq = 440, dur = 0.08, type = 'square') {
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type; o.frequency.value = freq; o.connect(g); g.connect(audioCtx.destination);
+  g.gain.setValueAtTime(0.25, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+  o.start(); o.stop(audioCtx.currentTime + dur);
+}
+function gradientBg(scene) {
+  const { width: W, height: H } = scene.scale;
+  scene.add.graphics().fillGradientStyle(PAL.bg0, PAL.bg0, PAL.bg1, PAL.bg1, 1).fillRect(0, 0, W, H);
+}
 
+class TitleScene extends Phaser.Scene {
+  constructor() { super('Title'); }
   create() {
-    this.paddle = this.physics.add.sprite(400, 550, 'paddle');
-    this.paddle.setCollideWorldBounds(true);
-    this.cursors = this.input.keyboard.createCursorKeys();
-  }
-
-  update(time, dt) {
-    const speed = window.__game.params.paddle_speed ?? 320;
-    if (this.cursors.left.isDown) this.paddle.setVelocityX(-speed);
-    else if (this.cursors.right.isDown) this.paddle.setVelocityX(speed);
-    else this.paddle.setVelocityX(0);
+    gradientBg(this);
+    const { width: W, height: H } = this.scale;
+    this.add.text(W / 2, H / 2 - 18, 'YOUR GAME', { ...TITLE_FONT, fontSize: '56px', color: PAL.ink }).setOrigin(0.5);
+    this.add.text(W / 2, H / 2 + 34, 'Click or press Space to play', { ...TITLE_FONT, fontSize: '20px', color: PAL.accent }).setOrigin(0.5);
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('Play'));
+    this.input.once('pointerdown', () => this.scene.start('Play'));
   }
 }
+
+class PlayScene extends Phaser.Scene {
+  constructor() { super('Play'); }
+  create() {
+    gradientBg(this);
+    this.score = 0;
+    // DRAW THE SUBJECT in code (themed shapes) or a generate_image_asset sprite —
+    // never a loaded .png you didn't create. Here: a themed paddle drawn as an ellipse.
+    this.player = this.add.ellipse(400, 540, 96, 22, 0xffcc4d);
+    this.physics.add.existing(this.player);
+    this.player.body.setCollideWorldBounds(true);
+    window.__game.debug.track({ score: () => this.score, player: () => this.player });
+  }
+  onHit() { this.cameras.main.shake(120, 0.006); sfx(180, 0.12, 'sawtooth'); this.score += 10; } // JUICE on every event
+  update() {
+    const speed = window.__game.params.paddle_speed ?? 360;
+    if (window.__game.controls.isDown('left')) this.player.body.setVelocityX(-speed);
+    else if (window.__game.controls.isDown('right')) this.player.body.setVelocityX(speed);
+    else this.player.body.setVelocityX(0);
+    // on lose: this.scene.start('Over', { score: this.score });
+  }
+}
+
+class OverScene extends Phaser.Scene {
+  constructor() { super('Over'); }
+  create(data) {
+    gradientBg(this);
+    const { width: W, height: H } = this.scale;
+    this.add.text(W / 2, H / 2 - 10, 'GAME OVER', { ...TITLE_FONT, fontSize: '52px', color: PAL.ink }).setOrigin(0.5);
+    this.add.text(W / 2, H / 2 + 34, 'Score ' + (data?.score ?? 0) + ' · Space to retry', { ...TITLE_FONT, fontSize: '20px', color: PAL.accent }).setOrigin(0.5);
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('Play'));
+  }
+}
+
+window.__game.controls.define({ actions: [
+  { id: 'left',  label: 'Move left',  keys: ['ArrowLeft', 'KeyA'] },
+  { id: 'right', label: 'Move right', keys: ['ArrowRight', 'KeyD'] },
+] });
 
 const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game',
   width: 800,
   height: 600,
-  backgroundColor: '#0b0b0e',
   physics: { default: 'arcade', arcade: { gravity: { y: 0 } } },
-  scene: [PlayScene],
+  scene: [TitleScene, PlayScene, OverScene], // a no-fail sandbox/zen game: just [PlayScene]
 });
 \`\`\`
 

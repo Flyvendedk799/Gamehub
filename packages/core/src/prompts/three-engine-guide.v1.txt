@@ -21,7 +21,13 @@ assets/textures/
 assets/audio/
 ```
 
-## Lifecycle skeleton
+## Lifecycle skeleton — PREMIUM BASELINE (this is the floor, not a suggestion)
+
+A user expects a game they'd be proud to share, like a Lovable output. A flat box in a black void is the #1 reason a 3D game looks unfinished. Bake in:
+- **Lighting + atmosphere** — a hemisphere + directional (sun) light, shadows, a sky `background` colour + `fog`. Never an unlit `MeshBasicMaterial` cube in a black scene.
+- **Real materials + the SUBJECT** — `MeshStandardMaterial` on real geometry; every named noun gets real geometry or a `generate_3d_asset` glTF model — NOT a default `BoxGeometry` placeholder.
+- **Screens** — show Title/Over as a DOM overlay toggled by a `screen` variable (a no-fail SANDBOX/zen game skips the Over state).
+- **Juice + sound** — `sfx()` + a hit flash/camera nudge on every meaningful event.
 
 ```js
 import * as THREE from 'three';
@@ -29,16 +35,61 @@ import * as THREE from 'three';
 const canvas = document.querySelector('#game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 
+// --- ART DIRECTION: a real sky + fog, not a black void ---
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(60, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
-camera.position.set(0, 1.6, 4);
+scene.background = new THREE.Color(0x10131c);
+scene.fog = new THREE.Fog(0x10131c, 14, 48);
+const camera = new THREE.PerspectiveCamera(60, canvas.clientWidth / canvas.clientHeight, 0.1, 200);
+camera.position.set(0, 5, 9);
+camera.lookAt(0, 0.5, 0);
 
-// Add lights, meshes, etc.
+// --- LIGHTING RIG (hemisphere fill + a shadow-casting sun) ---
+scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x202830, 0.9));
+const sun = new THREE.DirectionalLight(0xffe9b0, 1.4);
+sun.position.set(6, 12, 6); sun.castShadow = true; scene.add(sun);
 
+// --- GROUND + the SUBJECT with a real material (use generate_3d_asset for real models) ---
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(80, 80),
+  new THREE.MeshStandardMaterial({ color: 0x2b3350, roughness: 0.95 }),
+);
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+const player = new THREE.Mesh(
+  new THREE.IcosahedronGeometry(0.6, 0),
+  new THREE.MeshStandardMaterial({ color: 0xffcc4d, flatShading: true, roughness: 0.4 }),
+);
+player.position.y = 0.6; player.castShadow = true; scene.add(player);
+
+// --- JUICE: WebAudio synth (see "Audio") — call sfx() on events ---
+let audioCtx;
+function sfx(freq = 440, dur = 0.08, type = 'square') {
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type; o.frequency.value = freq; o.connect(g); g.connect(audioCtx.destination);
+  g.gain.setValueAtTime(0.25, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+  o.start(); o.stop(audioCtx.currentTime + dur);
+}
+
+// --- DEBUG CONTRACT (required — see "Verification contract") ---
+let score = 0;
+window.__game.debug.track({
+  score: () => score,
+  playerPos: () => player.position,   // Vector3 — reflectPos handles .x/.y/.z
+  cameraYaw: () => camera.rotation.y,
+});
+
+let last = 0;
 function tick(t) {
-  // Per-frame state updates here. Read tweaks live: window.__game.params.player_speed
+  const dt = Math.min((t - last) / 1000, 0.05); last = t;
+  const speed = window.__game.params.player_speed ?? 4;
+  if (window.__game.controls.isDown('left'))  player.position.x -= speed * dt;
+  if (window.__game.controls.isDown('right')) player.position.x += speed * dt;
   renderer.render(scene, camera);
   requestAnimationFrame(tick);
 }
@@ -49,7 +100,6 @@ window.addEventListener('resize', () => {
   camera.aspect = canvas.clientWidth / canvas.clientHeight;
   camera.updateProjectionMatrix();
 });
-
 window.addEventListener('beforeunload', () => renderer.dispose());
 ```
 
