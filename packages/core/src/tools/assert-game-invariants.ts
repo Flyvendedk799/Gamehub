@@ -705,20 +705,26 @@ export function assertGameInvariants(
           ? 'No escalation detected for a progression game. Make later levels/stages genuinely harder and advance them (nextLevel / a level-orchestrator), or ramp a difficulty value — a game that never gets harder reads as a tech demo. The bundled `level-orchestrator` skill (import_skill) sequences escalating levels.'
           : 'No difficulty escalation detected for a genre that must ramp. A wave that never gets harder reads as a tech demo — drift the spawn rate, enemy speed/HP, or enemy count up over time or per wave (e.g. difficulty = 1.15 ** wave), and SIGNAL the rising pressure (a wave counter, a "Wave N" banner). Import the bundled `wave-spawner` skill (import_skill({ name: "<engine>/wave-spawner.<js|jsx>" })) — escalating count/speed/hp per wave with a telegraphed countdown — and `enemy-ai` gives the enemies real behaviour to fight.',
       });
-    } else if (!levelRampMode && !anyMatch(source, VARIETY_PATTERNS)) {
-      // Quality lever 2 — DEPTH FLOOR. Escalation IS present but it's scalar-only
-      // (more/faster/tougher of the same thing) with no second idea — exactly the
-      // depth gap the assessed games shared (juicy-arcade: one enemy, one weapon,
-      // count=5+wave*3). VARIETY_PATTERNS is broad, so this only fires when the
-      // game has NO variety signal at all. Advisory.
-      checked.push('shallow-escalation');
-      issues.push({
-        invariant: 'shallow-escalation',
-        severity: 'warn',
-        message:
-          'Difficulty escalates but ONLY by scalars (more/faster/tougher of the SAME thing) — no new enemy behaviour, upgrade, power-up, boss, or second weapon/ability. A game that introduces no SECOND idea by ~minute 2 plays like a tech demo, not something worth sharing. Add variety: a distinct enemy type/behaviour (the `enemy-ai` skill gives chase/orbit/charge/ranged), an upgrade or power-up between waves, a boss encounter, or a second weapon/ability the player unlocks.',
-      });
     }
+  }
+
+  // Quality lever 2 — DEPTH FLOOR. Decoupled from the genre/caps gate above: it
+  // fires whenever the SOURCE contains combat-escalation code (ESCALATION_PATTERNS:
+  // spawnWave / difficulty *= / count*wave / 1.15**wave) but matches NONE of the
+  // VARIETY signals — i.e. it ramps scalars (more/faster/tougher of the SAME thing)
+  // with no second idea. The genre gate missed the worst case (a wave-survival game
+  // classified `topdown_arcade`, which maps to no should-escalate genre, shipped
+  // scalar-only with no warning — confirm run 2026-06-23). Source-based detection
+  // catches it regardless of the declared genre. VARIETY_PATTERNS is broad +
+  // camelCase-tolerant so it errs toward silence (no nag on a varied game). Advisory.
+  if (anyMatch(source, ESCALATION_PATTERNS) && !anyMatch(source, VARIETY_PATTERNS)) {
+    checked.push('shallow-escalation');
+    issues.push({
+      invariant: 'shallow-escalation',
+      severity: 'warn',
+      message:
+        'Difficulty escalates but ONLY by scalars (more/faster/tougher of the SAME thing) — no new enemy behaviour, upgrade, power-up, boss, or second weapon/ability. A game that introduces no SECOND idea by ~minute 2 plays like a tech demo, not something worth sharing. Add variety: a distinct enemy type/behaviour (the `enemy-ai` skill gives chase/orbit/charge/ranged), an upgrade or power-up between waves, a boss encounter, or a second weapon/ability the player unlocks.',
+    });
   }
 
   return {

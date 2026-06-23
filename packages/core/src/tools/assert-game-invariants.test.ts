@@ -220,6 +220,23 @@ describe('assertGameInvariants', () => {
     const ids = flat.issues.map((i) => i.invariant);
     expect(ids).toContain('escalation');
     expect(ids).not.toContain('shallow-escalation');
+
+    // DECOUPLED from genre: a wave game with NO genre/caps passed (the
+    // topdown_arcade routing gap from the confirm run) still gets flagged from the
+    // SOURCE escalation code alone.
+    const noGenre = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: `
+            let wave = 1;
+            function spawnWave() { for (let i = 0; i < 5 + wave * 3; i++) enemies.push(makeEnemy()); }
+            function onClear() { wave++; spawnWave(); }
+          `,
+        },
+      ]),
+    );
+    expect(noGenre.issues.map((i) => i.invariant)).toContain('shallow-escalation');
   });
 
   it('warns on missing feedback', () => {
