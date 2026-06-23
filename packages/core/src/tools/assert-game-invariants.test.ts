@@ -136,6 +136,34 @@ describe('assertGameInvariants', () => {
     expect(ok.issues.map((i) => i.invariant)).not.toContain('silent-audio');
   });
 
+  it('webgl-no-preserve-buffer: warns a WebGL game missing preserveDrawingBuffer; clean when set or 2D (C3)', () => {
+    const three = assertGameInvariants(
+      deps([{ path: 'src/main.js', content: 'const r = new THREE.WebGLRenderer({ canvas });' }]),
+    );
+    expect(three.issues.map((i) => i.invariant)).toContain('webgl-no-preserve-buffer');
+
+    const ok = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: 'const r = new THREE.WebGLRenderer({ canvas, preserveDrawingBuffer: true });',
+        },
+      ]),
+    );
+    expect(ok.issues.map((i) => i.invariant)).not.toContain('webgl-no-preserve-buffer');
+
+    // A pure canvas2d game (no WebGL) must NOT be nagged.
+    const c2d = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: "const ctx = document.getElementById('game').getContext('2d');",
+        },
+      ]),
+    );
+    expect(c2d.issues.map((i) => i.invariant)).not.toContain('webgl-no-preserve-buffer');
+  });
+
   it('dead-image: warns on a referenced sprite/model that does not exist; clean when drawn or created (C2)', () => {
     const phantom = assertGameInvariants(
       deps([
