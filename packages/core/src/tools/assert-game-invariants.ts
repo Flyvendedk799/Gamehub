@@ -85,6 +85,7 @@ export type GameInvariant =
   | 'debug-snapshot'
   | 'silent-audio'
   | 'dead-image'
+  | 'webgl-no-preserve-buffer'
   | 'fps-no-pointer-lock'
   | 'shallow-escalation'
   | 'skill-staged-unused'
@@ -617,6 +618,24 @@ export function assertGameInvariants(
         message: `Image/sprite/model file(s) referenced but never created (they 404 → an invisible or broken object): ${missing.slice(0, 4).join(', ')}. Fix: DRAW the subject in code (procedural shapes), OR call generate_image_asset / generate_3d_asset to create the file BEFORE referencing it. Never reference an assets/ path you did not create.`,
       });
     }
+  }
+
+  // WebGL preserve-drawing-buffer (premium robustness C3) — a WebGL game (three's
+  // WebGLRenderer, or Phaser.Game which defaults to WebGL via AUTO) whose context
+  // does NOT preserve the drawing buffer renders a CLEARED buffer to any read-back:
+  // it cannot be screenshotted (no thumbnail) and its motion can't be measured (the
+  // juice meter scores it ~0/floor). The premium starters set it; the confirm found
+  // the agent sometimes drops it (a WebGL shooter scored juice=96 for this reason).
+  // Detect WebGL usage in source + the absence of the flag. Advisory.
+  const usesWebGL = /new\s+THREE\.WebGLRenderer|new\s+Phaser\.Game/.test(source);
+  if (usesWebGL && !/preserveDrawingBuffer/.test(source)) {
+    checked.push('webgl-no-preserve-buffer');
+    issues.push({
+      invariant: 'webgl-no-preserve-buffer',
+      severity: 'warn',
+      message:
+        'This is a WebGL game but the renderer does not preserve the drawing buffer, so its canvas cannot be screenshotted (no shareable thumbnail) and its motion cannot be measured. Set it: `new THREE.WebGLRenderer({ canvas, preserveDrawingBuffer: true })`, or in the Phaser config `render: { preserveDrawingBuffer: true }`. The premium starter already has it — keep it.',
+    });
   }
 
   // FPS pointer-lock (quality lever 5) — a first-person / mouse-look game that
