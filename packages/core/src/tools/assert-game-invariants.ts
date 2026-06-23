@@ -564,7 +564,9 @@ export function assertGameInvariants(
   if (
     (opts.genre === 'shooter' || /first[_-]?person|pointerlock|movementX/i.test(source)) &&
     /requestPointerLock|exitPointerLock|pointerLockElement/.test(source) &&
-    !/requestPointerLock\s*\(/.test(source)
+    // Allow the call to be written with optional chaining — `el.requestPointerLock?.()`
+    // is the common defensive form (confirmed false-positive otherwise).
+    !/requestPointerLock\s*(?:\?\.)?\s*\(/.test(source)
   ) {
     checked.push('fps-no-pointer-lock');
     issues.push({
