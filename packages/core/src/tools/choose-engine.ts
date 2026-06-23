@@ -128,11 +128,18 @@ export function makeChooseEngineTool(
           ? '\n\nREQUIRED for canvas2d: it has no genre playbook, so you MUST call declare_playtest_contract (2-6 input→state checks against window.__game.debug.snapshot()) and wire debug.track(...) — otherwise the game ships unverified. See the canvas2d engine guide.'
           : '';
 
+      // Premium pivot — a complete, bootable PREMIUM starter has been written to
+      // src/main.js (art direction + Title/Play/Over screens + juice + WebAudio sfx +
+      // draw-the-subject + preserveDrawingBuffer). The agent must ADAPT it, not
+      // recreate it, so the premium structure survives (guide-level premium only got
+      // partial adoption — the scaffold must be edited, not re-derived).
+      const starterSuffix = `\n\nA premium starter is already at src/main.js — VIEW it, then build your game by EDITING it with str_replace (swap in your subject's draw functions, your update/spawn logic, your palette/title). Do NOT recreate src/main.js from scratch: keep its screen flow (Title→Play→Over; collapse to one screen for a no-fail/sandbox game), its juice + sfx() calls on events, its draw-the-subject functions (a tinted circle for a named thing is not acceptable), and the engine config (incl. preserveDrawingBuffer). Replacing it wholesale throws away the premium baseline.`;
+
       return {
         content: [
           {
             type: 'text',
-            text: `${warningPrefix}Engine pinned: ${engine}.${rationaleSuffix}${recSuffix}${canvas2dSuffix}`,
+            text: `${warningPrefix}Engine pinned: ${engine}.${rationaleSuffix}${starterSuffix}${recSuffix}${canvas2dSuffix}`,
           },
         ],
         details: { engine, rationale, fitVerdict },
