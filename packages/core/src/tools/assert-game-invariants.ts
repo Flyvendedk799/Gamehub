@@ -85,6 +85,7 @@ export type GameInvariant =
   | 'debug-snapshot'
   | 'silent-audio'
   | 'fps-no-pointer-lock'
+  | 'shallow-escalation'
   | 'skill-staged-unused'
   | 'brawler-combo'
   | 'brawler-hitstop'
@@ -384,6 +385,28 @@ const LEVEL_RAMP_PATTERNS: readonly RegExp[] = [
   /\bunlock(Level|Stage|Next)\b/i,
 ];
 
+/** VARIETY signals (quality lever 2 — depth floor). A combat game that escalates
+ *  but matches NONE of these is "scalar-only": more/faster/tougher of the SAME
+ *  thing, no second idea — the depth gap (scored 1-2/5 across the assessed games).
+ *  Deliberately BROAD so a game with ANY real variety is never false-flagged
+ *  (advisory + err toward silence). Presence of any ⇒ the game has some depth. */
+const VARIETY_PATTERNS: readonly RegExp[] = [
+  // NB: NO leading \b on the keyword groups — variety is routinely expressed in
+  // camelCase identifiers (spawnBoss, offerUpgrade, enemyType), which a \b
+  // boundary would miss → a false "scalar-only" warning on a game that DOES have
+  // variety. We deliberately err toward silence (substring match): better to miss
+  // a shallow game than to nag a varied one (advisory).
+  // Distinct enemy/entity types or behaviours
+  /enem(?:y|ies)\w*\s*(?:type|kind|variant|class|behaviou?r)/i, // enemyType, enemy behaviour
+  /(?:type|kind|variant|role)\s*[:=]\s*['"][a-z]/i, // type: 'tank'
+  /(?:boss|miniboss)/i, // boss, spawnBoss, bossWave
+  // Progression / upgrades / pickups / economy
+  /upgrade|power-?up|\bperks?\b|unlock|level-?up|skill\s*tree|\bshop\b|purchase/i,
+  /pickup|\bloot\b|\bdrops?\b/i,
+  // Multiple abilities / weapons
+  /weapons?\s*\[|switch\s*weapon|alt-?fire|secondary(?:fire|weapon)|special(?:attack|ability)|\babilities\b|\bdash\b|\bshield\b|grenade|\bultimate\b/i,
+];
+
 /** GameGenre tokens (game-workflow §2 menu) whose games MUST get harder over
  *  time to feel like a game rather than a demo. Survival/arcade/runner/TD all
  *  ramp; brawler/puzzle/racer/rhythm/platformer pace differently (handcrafted
@@ -681,6 +704,19 @@ export function assertGameInvariants(
         message: levelRampMode
           ? 'No escalation detected for a progression game. Make later levels/stages genuinely harder and advance them (nextLevel / a level-orchestrator), or ramp a difficulty value — a game that never gets harder reads as a tech demo. The bundled `level-orchestrator` skill (import_skill) sequences escalating levels.'
           : 'No difficulty escalation detected for a genre that must ramp. A wave that never gets harder reads as a tech demo — drift the spawn rate, enemy speed/HP, or enemy count up over time or per wave (e.g. difficulty = 1.15 ** wave), and SIGNAL the rising pressure (a wave counter, a "Wave N" banner). Import the bundled `wave-spawner` skill (import_skill({ name: "<engine>/wave-spawner.<js|jsx>" })) — escalating count/speed/hp per wave with a telegraphed countdown — and `enemy-ai` gives the enemies real behaviour to fight.',
+      });
+    } else if (!levelRampMode && !anyMatch(source, VARIETY_PATTERNS)) {
+      // Quality lever 2 — DEPTH FLOOR. Escalation IS present but it's scalar-only
+      // (more/faster/tougher of the same thing) with no second idea — exactly the
+      // depth gap the assessed games shared (juicy-arcade: one enemy, one weapon,
+      // count=5+wave*3). VARIETY_PATTERNS is broad, so this only fires when the
+      // game has NO variety signal at all. Advisory.
+      checked.push('shallow-escalation');
+      issues.push({
+        invariant: 'shallow-escalation',
+        severity: 'warn',
+        message:
+          'Difficulty escalates but ONLY by scalars (more/faster/tougher of the SAME thing) — no new enemy behaviour, upgrade, power-up, boss, or second weapon/ability. A game that introduces no SECOND idea by ~minute 2 plays like a tech demo, not something worth sharing. Add variety: a distinct enemy type/behaviour (the `enemy-ai` skill gives chase/orbit/charge/ranged), an upgrade or power-up between waves, a boss encounter, or a second weapon/ability the player unlocks.',
       });
     }
   }
