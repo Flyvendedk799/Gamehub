@@ -136,6 +136,34 @@ describe('assertGameInvariants', () => {
     expect(ok.issues.map((i) => i.invariant)).not.toContain('silent-audio');
   });
 
+  it('dead-image: warns on a referenced sprite/model that does not exist; clean when drawn or created (C2)', () => {
+    const phantom = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: `this.load.image('hero', 'assets/sprites/hero.png'); const t = new THREE.TextureLoader().load('assets/models/ship.glb');`,
+        },
+      ]),
+    );
+    expect(phantom.issues.map((i) => i.invariant)).toContain('dead-image');
+
+    // A real created file + a drawn-in-code subject + a data: URL + an external CDN ref are fine.
+    const ok = assertGameInvariants(
+      deps([
+        { path: 'assets/sprites/hero.png', content: 'data:image/png;base64,iVBORw0KGgo=' },
+        {
+          path: 'src/main.js',
+          content: `
+            this.load.image('hero', 'assets/sprites/hero.png');
+            const logo = new Image(); logo.src = 'data:image/png;base64,iVBORw0KGgo=';
+            ctx.fillRect(0, 0, 10, 10); // subject drawn in code
+          `,
+        },
+      ]),
+    );
+    expect(ok.issues.map((i) => i.invariant)).not.toContain('dead-image');
+  });
+
   it('fps-no-pointer-lock: warns when a mouse-look game never acquires pointer lock (quality lever 5)', () => {
     const broken = assertGameInvariants(
       deps([

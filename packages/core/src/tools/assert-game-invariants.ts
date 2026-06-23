@@ -84,6 +84,7 @@ export type GameInvariant =
   | 'decoy-engine'
   | 'debug-snapshot'
   | 'silent-audio'
+  | 'dead-image'
   | 'fps-no-pointer-lock'
   | 'shallow-escalation'
   | 'skill-staged-unused'
@@ -580,6 +581,40 @@ export function assertGameInvariants(
         invariant: 'silent-audio',
         severity: 'warn',
         message: `Audio file(s) referenced but never created (they 404 → the game ships MUTE, the error is swallowed): ${missing.slice(0, 4).join(', ')}. Sound is half of game feel. Fix: synthesize SFX in code with WebAudio (createOscillator — no asset files), OR call generate_audio_asset to create the file BEFORE referencing it. Never reference an assets/audio path you did not create.`,
+      });
+    }
+  }
+
+  // Dead-image (premium robustness C2) — the image analogue of silent-audio: a
+  // sprite/texture/model referenced but never created renders an INVISIBLE or broken
+  // object (the load 404s). The premium confirm found phantom assets/sprites refs
+  // slipping because silent-audio is audio-only. Resolve LOCAL image refs against the
+  // VFS; data: URLs, drawn-in-code subjects, and external (http) refs don't trip this.
+  const imageRefs = [
+    ...source.matchAll(
+      /\.\s*load\s*\.\s*(?:image|spritesheet|atlas)\s*\(\s*['"][^'"]+['"]\s*,\s*['"]([^'"]+)['"]/g,
+    ),
+    ...source.matchAll(/\.\s*src\s*=\s*['"]([^'"]+\.(?:png|jpe?g|gif|webp|svg))['"]/g),
+    ...source.matchAll(/\.\s*load\s*\(\s*['"]([^'"]+\.(?:png|jpe?g|gif|webp|glb|gltf))['"]/g),
+    ...source.matchAll(/url\(\s*['"]?([^'")]+\.(?:png|jpe?g|gif|webp|svg))['"]?\s*\)/g),
+    ...source.matchAll(/<img[^>]+src=['"]([^'"]+\.(?:png|jpe?g|gif|webp|svg))['"]/g),
+  ]
+    .map((m) => m[1])
+    .filter(
+      (p): p is string =>
+        typeof p === 'string' && !p.startsWith('data:') && !/^https?:/.test(p) && !/^#/.test(p),
+    );
+  if (imageRefs.length > 0) {
+    const projectPaths = new Set(deps.listFiles().map((f) => f.path.replace(/^\.?\//, '')));
+    const missing = [...new Set(imageRefs)].filter(
+      (ref) => !projectPaths.has(ref.replace(/^\.?\//, '')),
+    );
+    if (missing.length > 0) {
+      checked.push('dead-image');
+      issues.push({
+        invariant: 'dead-image',
+        severity: 'warn',
+        message: `Image/sprite/model file(s) referenced but never created (they 404 → an invisible or broken object): ${missing.slice(0, 4).join(', ')}. Fix: DRAW the subject in code (procedural shapes), OR call generate_image_asset / generate_3d_asset to create the file BEFORE referencing it. Never reference an assets/ path you did not create.`,
       });
     }
   }
