@@ -162,6 +162,21 @@ describe('assertGameInvariants', () => {
       ]),
     );
     expect(fixed.issues.map((i) => i.invariant)).not.toContain('fps-no-pointer-lock');
+
+    // Optional-chaining call form must also count as acquired (real generated code
+    // uses `renderer.domElement.requestPointerLock?.()` — was a false positive).
+    const chained = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: `
+            renderer.domElement.addEventListener('click', () => renderer.domElement.requestPointerLock?.());
+            window.addEventListener('mousemove', (e) => { yaw += e.movementX * 0.002; });
+          `,
+        },
+      ]),
+    );
+    expect(chained.issues.map((i) => i.invariant)).not.toContain('fps-no-pointer-lock');
   });
 
   it('warns on missing feedback', () => {
