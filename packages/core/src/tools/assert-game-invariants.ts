@@ -83,6 +83,8 @@ export type GameInvariant =
   | 'escalation'
   | 'decoy-engine'
   | 'debug-snapshot'
+  | 'silent-audio'
+  | 'fps-no-pointer-lock'
   | 'skill-staged-unused'
   | 'brawler-combo'
   | 'brawler-hitstop'
@@ -524,6 +526,52 @@ export function assertGameInvariants(
       severity: 'warn',
       message:
         'No debug snapshot wired, so the deterministic playtest can read nothing and the run ships unverified (no_verdict). Expose your state in ONE line: window.__game.debug.track({ player: thePlayerSprite, score: () => score, wave: () => wave }) — or set window.__game.state = { score, wave }. Imported skills (import_skill) expose a getState() you can pass straight into debug.track.',
+    });
+  }
+
+  // Silent-audio (quality lever 1) — a game that references an audio FILE which
+  // was never created ships MUTE: the load 404s and the error is swallowed. The
+  // quality pass found 3/3 generated games silent this way. Resolve each audio
+  // reference against the actual project files; a missing, non-data:, non-synth
+  // reference is a (warn) silent game. WebAudio synth (createOscillator) and
+  // data: URLs are fine and don't trip this.
+  const audioRefs = [
+    ...source.matchAll(/new\s+Audio\s*\(\s*['"]([^'"]+)['"]/g),
+    ...source.matchAll(/\.\s*load\s*\.\s*audio\s*\(\s*['"][^'"]+['"]\s*,\s*['"]([^'"]+)['"]/g),
+    ...source.matchAll(/\bfetch\s*\(\s*['"]([^'"]+\.(?:wav|mp3|ogg|m4a|aac))['"]/g),
+  ]
+    .map((m) => m[1])
+    .filter((p): p is string => typeof p === 'string' && !p.startsWith('data:'));
+  if (audioRefs.length > 0) {
+    const projectPaths = new Set(deps.listFiles().map((f) => f.path.replace(/^\.?\//, '')));
+    const missing = [...new Set(audioRefs)].filter(
+      (ref) => !projectPaths.has(ref.replace(/^\.?\//, '')),
+    );
+    if (missing.length > 0) {
+      checked.push('silent-audio');
+      issues.push({
+        invariant: 'silent-audio',
+        severity: 'warn',
+        message: `Audio file(s) referenced but never created (they 404 → the game ships MUTE, the error is swallowed): ${missing.slice(0, 4).join(', ')}. Sound is half of game feel. Fix: synthesize SFX in code with WebAudio (createOscillator — no asset files), OR call generate_audio_asset to create the file BEFORE referencing it. Never reference an assets/audio path you did not create.`,
+      });
+    }
+  }
+
+  // FPS pointer-lock (quality lever 5) — a first-person / mouse-look game that
+  // never calls requestPointerLock() is un-turnable (the camera stops at the
+  // window edge). The quality pass found a 3D collectathon shipped exactly this.
+  // Static per-genre contract check: fps/tps perspective ⇒ must acquire lock.
+  if (
+    (opts.genre === 'shooter' || /first[_-]?person|pointerlock|movementX/i.test(source)) &&
+    /requestPointerLock|exitPointerLock|pointerLockElement/.test(source) &&
+    !/requestPointerLock\s*\(/.test(source)
+  ) {
+    checked.push('fps-no-pointer-lock');
+    issues.push({
+      invariant: 'fps-no-pointer-lock',
+      severity: 'warn',
+      message:
+        'This looks like a mouse-look / first-person game (it reads movementX or references pointer lock) but never calls canvas.requestPointerLock(). Without it the camera only turns while the cursor is dragged and stops dead at the window edge — the game is effectively un-turnable. Acquire the lock on a user click: canvas.requestPointerLock().',
     });
   }
 

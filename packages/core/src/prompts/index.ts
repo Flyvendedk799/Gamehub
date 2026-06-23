@@ -1314,9 +1314,23 @@ const mat = new THREE.MeshBasicMaterial({ map: tex });
 
 GLTF / GLB models load via \`import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'\` (the addons importmap entry is pre-wired).
 
-## Audio
+## Audio — SYNTHESIZE in code; never fetch a \`.wav\` you didn't create
 
-Use the Web Audio API directly — \`new AudioContext()\`, decode an \`ArrayBuffer\` from \`fetch('assets/audio/jump.wav')\`. If \`window.__game.config.startMuted\` is true, gate playback until first user input (autoplay policy).
+Sound is HALF of game feel — a silent game feels broken. Generate SFX IN CODE with WebAudio (no asset files). **Do NOT \`fetch('assets/audio/…')\` / reference any \`assets/audio/*.wav\` you didn't create — it 404s and your game ships MUTE** (the failure mode is invisible because the error gets swallowed). Construct the context once (on a user gesture if \`window.__game.config.startMuted\` is true):
+
+\`\`\`js
+let audioCtx;
+function sfx(freq = 440, dur = 0.08, type = 'square') {
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type; o.frequency.value = freq; o.connect(g); g.connect(audioCtx.destination);
+  g.gain.setValueAtTime(0.25, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+  o.start(); o.stop(audioCtx.currentTime + dur);
+}
+\`\`\`
+Call \`sfx(...)\` on every meaningful event — jump, hit, pickup, win, hurt — varying \`freq\`/\`type\` so they read distinct. For a REAL recorded sample, call \`generate_audio_asset\` (it writes the actual file INTO your project) and only then reference its path.
 
 ## Performance
 
@@ -1394,7 +1408,12 @@ class PlayScene extends Phaser.Scene {
 
   preload() {
     this.load.image('paddle', 'assets/sprites/paddle.png');
-    this.load.audio('hit', 'assets/audio/hit.wav');
+    // AUDIO: do NOT \`this.load.audio('hit', 'assets/audio/hit.wav')\` — that path
+    // does not exist, it 404s, and the game ships MUTE (sound is half of feel). Use
+    // one of: (a) WebAudio synth in code (see "Audio" below, zero assets — preferred
+    // for SFX), or (b) call \`generate_audio_asset\` FIRST so the real .wav exists in
+    // your project, THEN load it. Never load/reference an assets/audio path you
+    // didn't create.
   }
 
   create() {
@@ -1435,6 +1454,24 @@ window.__game.controls.define({ actions: [
 // pressed once, in create():  window.__game.controls.on('jump', () => this.player.jump());
 \`\`\`
 Keys are \`KeyboardEvent.code\` strings (\`ArrowUp\`, \`KeyW\`, \`Space\`, \`ShiftLeft\`, …). Call \`define\` once at startup with a clear \`label\` for each action.
+
+## Audio — SYNTHESIZE in code; never load a \`.wav\` you didn't create
+
+Sound is HALF of game feel — a silent game feels broken. The cheapest reliable SFX is WebAudio synth (no asset files), which works fine alongside Phaser:
+
+\`\`\`js
+let audioCtx;
+function sfx(freq = 440, dur = 0.08, type = 'square') {
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type; o.frequency.value = freq; o.connect(g); g.connect(audioCtx.destination);
+  g.gain.setValueAtTime(0.25, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+  o.start(); o.stop(audioCtx.currentTime + dur);
+}
+\`\`\`
+Call \`sfx(...)\` on hits/pickups/jumps/win (vary \`freq\`/\`type\`). For a REAL recorded sample, call \`generate_audio_asset\` FIRST (it writes the file into your project) and only then \`this.load.audio(key, path)\`. **Never \`load.audio\`/reference an \`assets/audio\` path you didn't create — it 404s and the game ships mute.**
 
 ## Hard rules (validator enforces)
 
