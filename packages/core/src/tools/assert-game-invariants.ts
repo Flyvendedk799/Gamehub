@@ -84,6 +84,7 @@ export type GameInvariant =
   | 'decoy-engine'
   | 'debug-snapshot'
   | 'silent-audio'
+  | 'silent-game'
   | 'dead-image'
   | 'webgl-no-preserve-buffer'
   | 'fps-no-pointer-lock'
@@ -588,6 +589,36 @@ export function assertGameInvariants(
     }
   }
 
+  // Silent-game (premium-completeness gate) — a game with NO audio AT ALL. Distinct
+  // from silent-audio (which catches BROKEN audio refs): this catches the ABSENCE of
+  // any sound code. Sound is half of game feel — a premium game is not mute. FATAL for
+  // completable games (the seed ships sfx() so the fix is one call); a no-fail sandbox
+  // /zen toy is exempt (FATAL_FLOOR + isCompletableSpec downgrade it to advisory).
+  const HAS_AUDIO_PATTERNS: readonly RegExp[] = [
+    /createOscillator|createBufferSource|AudioContext|webkitAudioContext/,
+    /new\s+Audio\s*\(/,
+    /\.\s*load\s*\.\s*audio\s*\(/,
+    /\.\s*sound\s*\.\s*(?:play|add|playAudioSprite)\b/,
+    /\b(?:playTone|playBeep|playSfx|playSound|sfx)\s*\(/,
+    // Three.js audio rig + an <audio> element + Howler — audible forms the keyword
+    // set above would otherwise miss (review false-positive fix).
+    /new\s+THREE\.(?:Positional)?Audio\b|AudioLoader|AudioListener/,
+    /<audio[\s/>]/i,
+    /new\s+Howl\b/,
+  ];
+  // Honor a declared no-fail toy (caps.hasFailState === false) — same guard the
+  // fail-state/score checks use, so an ambient zen/sandbox-class game on a genre-
+  // `other` completable spec isn't FATAL-blocked for being quiet (review Q3/Q4 fix).
+  if (caps?.hasFailState !== false && !anyMatch(source, HAS_AUDIO_PATTERNS)) {
+    checked.push('silent-game');
+    issues.push({
+      invariant: 'silent-game',
+      severity: 'warn',
+      message:
+        'This game has NO audio at all — it ships completely silent, which reads as unfinished (sound is half of game feel). Add SFX: synthesize in code with WebAudio (the premium starter ships an sfx() helper — call it on hits/pickups/jumps/win), or generate_audio_asset for real samples. A premium game is not mute.',
+    });
+  }
+
   // Dead-image (premium robustness C2) — the image analogue of silent-audio: a
   // sprite/texture/model referenced but never created renders an INVISIBLE or broken
   // object (the load 404s). The premium confirm found phantom assets/sprites refs
@@ -836,6 +867,9 @@ export const FATAL_FLOOR_INVARIANTS: ReadonlySet<GameInvariant> = new Set<GameIn
   'fail-state',
   'restart',
   'feedback',
+  // Premium-completeness gate: a completable game must not ship MUTE. The seed ships
+  // an sfx() helper, so the fix is one call; sandboxes are exempt via isCompletableSpec.
+  'silent-game',
 ]);
 
 /** GameSpec (`@playforge/shared`) genres that legitimately have no lose

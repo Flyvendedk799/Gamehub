@@ -3,7 +3,11 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { assertGameInvariants, makeAssertGameInvariantsTool } from './assert-game-invariants';
+import {
+  FATAL_FLOOR_INVARIANTS,
+  assertGameInvariants,
+  makeAssertGameInvariantsTool,
+} from './assert-game-invariants';
 
 function deps(files: Array<{ path: string; content: string }>) {
   return { listFiles: () => files };
@@ -190,6 +194,50 @@ describe('assertGameInvariants', () => {
       { capabilities: { hasEnemies: true } },
     );
     expect(camelVariety.issues.map((i) => i.invariant)).not.toContain('shallow-escalation');
+  });
+
+  it('silent-game: warns when a game has NO audio at all; clean with synth/Audio/sound (premium gate)', () => {
+    const mute = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: 'function onHit() { score += 1; particles.push(burst()); shake = 10; }',
+        },
+      ]),
+    );
+    expect(mute.issues.map((i) => i.invariant)).toContain('silent-game');
+    // silent-game is a FATAL-floor invariant (a completable game must not be mute).
+    expect(FATAL_FLOOR_INVARIANTS.has('silent-game')).toBe(true);
+
+    const audible = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content:
+            'function sfx(f){ const o = ctx.createOscillator(); o.start(); } function onHit(){ sfx(440); }',
+        },
+      ]),
+    );
+    expect(audible.issues.map((i) => i.invariant)).not.toContain('silent-game');
+
+    // Three.js audio rig is recognized as audio (review false-positive fix).
+    const threeAudio = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content:
+            'const snd = new THREE.Audio(listener); new THREE.AudioLoader().load("x", (b) => snd.setBuffer(b)); snd.play();',
+        },
+      ]),
+    );
+    expect(threeAudio.issues.map((i) => i.invariant)).not.toContain('silent-game');
+
+    // A declared no-fail toy is exempt from the silent-game gate (review Q3/Q4 fix).
+    const noFailToy = assertGameInvariants(
+      deps([{ path: 'src/main.js', content: 'function tend() { plants.push(grow()); }' }]),
+      { capabilities: { hasFailState: false } },
+    );
+    expect(noFailToy.issues.map((i) => i.invariant)).not.toContain('silent-game');
   });
 
   it('dead-image: warns on a referenced sprite/model that does not exist; clean when drawn or created (C2)', () => {
@@ -392,16 +440,18 @@ describe('assertGameInvariants', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('produces all four invariant warnings for an empty / unhelpful project', () => {
+  it('produces all the core invariant warnings for an empty / unhelpful project', () => {
     const result = assertGameInvariants(
       deps([{ path: 'src/main.js', content: 'console.log("hi")' }]),
     );
-    expect(result.issues.length).toBe(4);
+    // Empty project: missing all 4 design invariants PLUS silent-game (no audio at all).
+    expect(result.issues.length).toBe(5);
     expect(result.issues.map((i) => i.invariant).sort()).toEqual([
       'fail-state',
       'feedback',
       'restart',
       'score-or-state',
+      'silent-game',
     ]);
   });
 });
@@ -413,7 +463,7 @@ describe('makeAssertGameInvariantsTool', () => {
     });
     const result = await tool.execute('call-1', {});
     const text = result.content?.[0]?.type === 'text' ? result.content[0].text : '';
-    expect(text).toContain('4 game invariant(s) appear missing');
+    expect(text).toContain('5 game invariant(s) appear missing');
     expect(text).toContain('restart');
     expect(result.details?.ok).toBe(false);
   });
