@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
-import NavBar from '@/components/NavBar';
+import AppShell from '@/components/AppShell';
 
 export const metadata: Metadata = {
   title: 'PlayerZero — Build games with AI',
@@ -28,8 +28,7 @@ export default function RootLayout({
         />
       </head>
       <body className="h-full antialiased">
-        <NavBar />
-        <div className="pt-12 h-full">{children}</div>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

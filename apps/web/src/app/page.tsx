@@ -1,7 +1,8 @@
 'use client';
 
 import { BrandMark, Wordmark } from '@/components/Logo';
-import { createProject, generateGame } from '@/lib/api';
+import ProjectCard from '@/components/ProjectCard';
+import { createProject, generateGame, listProjects } from '@/lib/api';
 import { isAuthenticated } from '@/lib/auth';
 import {
   GAME_EXAMPLE_BRIEFS,
@@ -10,17 +11,36 @@ import {
   briefToPrompt,
 } from '@/lib/example-briefs';
 import { deriveProjectName, setPendingPrompt } from '@/lib/pending-prompt';
-import type { Engine } from '@/lib/types';
+import type { Engine, Project } from '@/lib/types';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export default function HomePage() {
   const router = useRouter();
   const [prompt, setPrompt] = useState('');
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
+  const [recent, setRecent] = useState<Project[] | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Lovable-style dashboard: when signed in, surface your recent projects right
+  // below the build box so the home doubles as a hub. Logged-out visitors see the
+  // marketing hero only (recent stays null → section hidden).
+  useEffect(() => {
+    if (!isAuthenticated()) return;
+    let cancelled = false;
+    void listProjects()
+      .then(({ projects }) => {
+        if (!cancelled) setRecent(projects);
+      })
+      .catch(() => {
+        if (!cancelled) setRecent([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /**
    * Shared build path (#3.5). The homepage form and the example chips both flow
@@ -70,9 +90,14 @@ export default function HomePage() {
   }
 
   const isLoading = status === 'loading';
+  const hasRecent = recent !== null && recent.length > 0;
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center px-4 py-16 bg-[#0a0a0a]">
+    <main
+      className={`flex min-h-screen flex-col items-center px-4 py-16 bg-[#0a0a0a] ${
+        hasRecent ? '' : 'justify-center'
+      }`}
+    >
       {/* Logo / wordmark */}
       <div className="mb-12 text-center">
         <div className="inline-flex items-center gap-3 mb-4">
@@ -175,13 +200,31 @@ export default function HomePage() {
         </div>
       </div>
 
+      {/* Recent projects — the dashboard hub (signed-in only) */}
+      {hasRecent && recent && (
+        <section className="mt-16 w-full max-w-5xl">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-[#f4f4f5] uppercase tracking-wider">
+              Recent projects
+            </h2>
+            <Link
+              href="/projects"
+              className="text-xs text-[#71717a] hover:text-[#6366f1] transition-colors"
+            >
+              View all →
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {recent.slice(0, 6).map((project) => (
+              <ProjectCard key={project.id} project={project} />
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Footer */}
       <div className="mt-16 flex items-center gap-4">
         <p className="text-xs text-[#3f3f46]">PlayerZero — Phase 0 · Dev build</p>
-        <span className="text-[#2a2a2a]">·</span>
-        <Link href="/hub" className="text-xs text-[#52525b] hover:text-[#a1a1aa] transition-colors">
-          Community Hub
-        </Link>
       </div>
     </main>
   );
