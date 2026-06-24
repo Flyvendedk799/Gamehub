@@ -1,6 +1,6 @@
 'use client';
 
-import { BrandMark, Wordmark } from '@/components/Logo';
+import ProjectCard from '@/components/ProjectCard';
 import { listProjects } from '@/lib/api';
 import type { Project } from '@/lib/types';
 import Link from 'next/link';
@@ -22,21 +22,16 @@ export default function ProjectsPage() {
 
   return (
     <div className="min-h-screen bg-[#0a0a0a]">
-      {/* Nav */}
-      <header className="border-b border-[#222222] bg-[#111111]">
-        <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 group">
-            <BrandMark size={28} />
-            <Wordmark className="text-sm font-semibold text-[#f4f4f5] group-hover:text-[#6366f1] transition-colors" />
-          </Link>
-          <Link href="/" className="text-sm text-[#a1a1aa] hover:text-[#f4f4f5] transition-colors">
+      <main className="max-w-5xl mx-auto px-6 py-10">
+        <div className="flex items-center justify-between mb-8">
+          <h1 className="text-2xl font-bold text-[#f4f4f5]">Your projects</h1>
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-lg transition-all"
+          >
             + New game
           </Link>
         </div>
-      </header>
-
-      <main className="max-w-5xl mx-auto px-6 py-10">
-        <h1 className="text-2xl font-bold text-[#f4f4f5] mb-8">Your projects</h1>
 
         {loading && (
           <div className="flex items-center gap-3 text-[#a1a1aa]">
@@ -69,51 +64,6 @@ export default function ProjectsPage() {
         )}
       </main>
     </div>
-  );
-}
-
-function ProjectCard({ project }: { project: Project }) {
-  const created = new Date(project.createdAt).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
-
-  return (
-    <Link
-      href={`/projects/${project.id}`}
-      className="
-        group block bg-[#111111] border border-[#222222] rounded-2xl p-5
-        hover:border-[#6366f1]/50 hover:shadow-lg hover:shadow-indigo-500/5
-        transition-all duration-200
-      "
-    >
-      {/* Engine badge + preview thumbnail placeholder */}
-      <div className="h-32 rounded-xl bg-[#0a0a0a] border border-[#1a1a1a] mb-4 flex items-center justify-center">
-        <svg
-          width="32"
-          height="32"
-          viewBox="0 0 32 32"
-          fill="none"
-          className="opacity-20"
-          aria-hidden="true"
-        >
-          <polygon points="6,4 26,16 6,28" fill="#6366f1" />
-        </svg>
-      </div>
-
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-[#f4f4f5] truncate group-hover:text-[#6366f1] transition-colors">
-            {project.name}
-          </h2>
-          <p className="mt-1 text-xs text-[#52525b]">{created}</p>
-        </div>
-        <span className="flex-shrink-0 text-[10px] font-mono uppercase tracking-widest px-2 py-1 rounded-md bg-[#1a1a1a] text-[#52525b] border border-[#222222]">
-          {project.engine}
-        </span>
-      </div>
-    </Link>
   );
 }
 

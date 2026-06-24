@@ -2,7 +2,6 @@
 
 import { GameCard } from '@/components/GameCard';
 import type { GameCardData } from '@/components/GameCard';
-import { BrandMark, Wordmark } from '@/components/Logo';
 import { getHubFeed, searchHub } from '@/lib/api';
 import type { HubGame, HubSort } from '@/lib/api';
 import Link from 'next/link';
@@ -100,29 +99,6 @@ export default function HubPage() {
 
   return (
     <div className="flex flex-col min-h-screen bg-[#0a0a0a]">
-      {/* Top nav bar */}
-      <header className="flex-shrink-0 h-12 border-b border-[#222222] bg-[#111111] flex items-center px-4 gap-4 z-10">
-        <Link href="/" className="flex items-center gap-2 group flex-shrink-0">
-          <BrandMark size={24} />
-          <Wordmark className="text-xs font-semibold text-[#f4f4f5] hidden sm:block group-hover:text-[#6366f1] transition-colors" />
-        </Link>
-
-        <div className="w-px h-5 bg-[#222222] flex-shrink-0" />
-
-        <div className="flex-1 min-w-0">
-          <span className="text-sm font-medium text-[#f4f4f5]">Hub</span>
-        </div>
-
-        <div className="flex items-center gap-3 flex-shrink-0">
-          <Link
-            href="/"
-            className="text-xs px-3 py-1.5 rounded-lg bg-[#6366f1]/10 hover:bg-[#6366f1]/20 text-[#6366f1] border border-[#6366f1]/20 transition-colors font-medium"
-          >
-            Make a game
-          </Link>
-        </div>
-      </header>
-
       {/* Main content */}
       <main className="flex-1 px-4 sm:px-6 lg:px-8 py-8 max-w-7xl mx-auto w-full">
         {/* Page heading + sort controls */}

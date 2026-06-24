@@ -2,11 +2,9 @@
 
 import { GameCard } from '@/components/GameCard';
 import type { GameCardData } from '@/components/GameCard';
-import { BrandMark, Wordmark } from '@/components/Logo';
 import { followUser, getCreatorGames, getCreatorProfile, unfollowUser } from '@/lib/api';
 import type { CreatorGame, CreatorProfile } from '@/lib/api';
 import { isAuthenticated } from '@/lib/auth';
-import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -81,42 +79,6 @@ export default function CreatorProfilePage() {
 
   return (
     <div className="min-h-screen bg-[#0a0a0a]">
-      {/* Nav */}
-      <header className="border-b border-[#222222] bg-[#111111]">
-        <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Link href="/" className="flex items-center gap-2 group">
-              <BrandMark size={28} />
-              <Wordmark className="text-sm font-semibold text-[#f4f4f5] group-hover:text-[#6366f1] transition-colors" />
-            </Link>
-
-            <div className="w-px h-5 bg-[#222222]" />
-
-            <nav className="flex items-center gap-3">
-              <Link
-                href="/hub"
-                className="text-xs text-[#71717a] hover:text-[#f4f4f5] transition-colors"
-              >
-                Hub
-              </Link>
-              <Link
-                href="/projects"
-                className="text-xs text-[#71717a] hover:text-[#f4f4f5] transition-colors"
-              >
-                Projects
-              </Link>
-            </nav>
-          </div>
-
-          <Link
-            href="/"
-            className="text-xs px-3 py-1.5 rounded-lg bg-[#6366f1]/10 hover:bg-[#6366f1]/20 text-[#6366f1] border border-[#6366f1]/20 transition-colors font-medium"
-          >
-            Make a game
-          </Link>
-        </div>
-      </header>
-
       <main className="max-w-5xl mx-auto px-6 py-10">
         {/* Loading skeleton */}
         {loading && (
