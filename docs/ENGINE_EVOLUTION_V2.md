@@ -263,3 +263,49 @@ Track per release from `run_quality_metrics.report`, against the batch baseline:
 ## Adversarial-critique verdict
 
 Synthesized by a 6-lens workflow and verified against the tree: **9/10 phases cite real, confirmed signals and name actual files/mechanisms.** The plan attacks the layer *below* v1 (capabilities/push-recommend/decoy-detector are treated as the substrate to fix, not re-proposed). Applied fixes: Phase 7 trimmed to the novel root-cause-classification half (the token budget already exists — reframed as tightening it, plus the new `repairKind` tag); Phases 4/5 split cleanly (4 = pre-build flag hygiene, 5 = mode logic + enum unification, no double-suppression); citations corrected (`game-skills/{phaser,three}/`; the skill snapshot wiring is commented examples, which strengthens Phase 2). **Recommended order:** ship 1, 2, 3, 6, 8 first (highest leverage); 4→5 and 7 next; 9/10 as the tail.
+
+---
+
+## Loop 2 — validation at N=19 (second data batch)
+
+A second batch of 8 runs went through the **same (v1) engine** to test the findings above at larger N: **5 new categories** (match-3 puzzle, top-down racing, idle clicker, physics sandbox, bullet-hell shmup), **2 reproducibility repeats** (tower-defense, rhythm), and **1 novel control** (typing-defense). Corpus is now **19 runs**.
+
+### Batch-2 per-run
+
+| Idea | genre / ship | tokens / calls | skills used in code | note |
+|---|---|---|---|---|
+| match-3 puzzle | puzzle / **no_verdict** | 311K / 49 | **0** | **shipped unverified despite puzzle HAVING a playbook** |
+| top-down racing | racing / passed | 415K / 63 | **0** | recommended `enemy-ai` (wrong — opponents follow a track) |
+| idle clicker | idle / **repair_exhausted** | **600K / 90** | **0** | hardest run; no fail state + number-growth is awkward to verify |
+| physics sandbox | sandbox / passed (contract) | 519K / 91 | **0** | the no-fail toy correctly authored a contract + passed |
+| bullet-hell shmup | shmup / passed | 545K / 99 | **0** | adopted enemy-ai + wave-spawner (viewed), still rewrote them |
+| tower-defense (repeat) | tower_defense / **passed** | 450K / 74 | **0** | **last time = repair_exhausted → the verdict is high-variance** |
+| rhythm (repeat) | rhythm / **no_verdict** | 325K / 64 | **0** | **rhythm-clock recommended this time (missed last time) → coin-flip** |
+| typing-defense (novel) | topdown_arcade / passed | 348K / 89 | **0** | 5 skills recommended, **0 used**; escalation false-positive |
+
+### Findings — confirmed, with the numbers moving the right way
+
+| v1→v2 finding | Loop-1 (N=8) | Loop-2 verdict (N=19) |
+|---|---|---|
+| **Skills viewed, never run** (P1) | 0/8 | **0/19 — ironclad.** Even when recommended AND viewed (shmup, rhythm), `usesSkillFns=0`. |
+| **`debug.snapshot` dead-on-arrival** (P2) | 0/8 | **0/19** — no run ever wired a snapshot or `debug.track`. |
+| **Verification holes** (P6) | no_verdict/exhausted 4/8 | held: puzzle/rhythm/idle unverified-or-exhausted; contract coverage **21%**. |
+| **Recommender brittle** (P3) | rhythm missed | **confirmed as NON-deterministic** — rhythm hit this time, missed last (phrasing-dependent). |
+| **`escalates` mis-declared** (P4) | 3/8 | held — puzzle/idle/typing over-declared `escalates`; escalation false-positives persist. |
+| **Box-escape on ambient** (P8) | garden | rate fell to 5.3% (1/19) only because batch-2 had no ambient/drag idea — not because it's fixed. |
+
+### Three NEW findings the new categories surfaced (refine, don't replace, the 10 phases)
+
+1. **Playbooks are too coarse for sub-genre variance** — match-3 puzzle shipped `no_verdict` *even though `puzzle` has a playbook*: a single per-genre predicate set can't fit both a sokoban and a match-3. → **Refines Phase 6**: predicates should key off *capabilities/mechanics*, not just the genre token, or ship sub-genre variants.
+2. **Recommendation has false-POSITIVES, not just false-negatives** — racing and typing-defense both declared `hasEnemies:true` and were pushed `enemy-ai`, which fits neither (track-following opponents; typed words). → **Refines Phases 3 & 4**: the capability→skill map (and `hasEnemies` itself) needs to distinguish "chasing combat AI" from "adversaries that aren't chase-AI."
+3. **Idle / number-growth genres are hard to verify** — idle was the most expensive run (600K) and `repair_exhausted` *with* a contract: no fail state + monotonic-number gameplay doesn't fit the input→state-delta predicate shape well. → **Strengthens Phase 6's idle playbook** (tick→currency-accrues, buy→rate-increases) and **Phase 7** (converge instead of burning).
+
+### Plan impact
+
+**No new phases — the 10 hold and are sharper.** Loop 2 promotes Phases 1, 2, 3, 6 to "must-ship-first" (the data is now overwhelming), refines 3/4/6 per the new findings, and **softens Phase 7's framing**: tower-defense `repair_exhausted` is *variance* (it passed on repeat), so Phase 7 is about reducing *fragility* (missing-snapshot → flaky verdicts), not fixing a deterministic failure.
+
+### Updated baseline (N=19, the numbers to beat)
+
+`usesSkillFns` **0/19** · `debugSnapshot` **0/19** · adoptionRate 62.5% · missedAdoptionRate **84.2%** · contractCoverage 21.1% · no_verdict-or-exhausted ~6/19 · boxEscape 5.3% · falseWarning(other) 100% · tokenP50 415K / **P90 598K** · bootedRate 100%.
+
+> The flywheel held: a second loop through the unchanged engine **validated the plan at N=19 and sharpened three phases** without needing to re-plan — exactly what a data-rooted roadmap should do. The next loop should run *after* Phases 1–2 ship, to measure `usesSkillFns` and `debugSnapshot` actually moving off zero.
