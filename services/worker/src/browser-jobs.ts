@@ -36,6 +36,9 @@ export interface RuntimeVerifyResult {
   fatalErrors: string[];
   bootedIn: number;
   blockedRequests?: string[];
+  juiceScore?: number;
+  /** Premium-completeness — false ONLY when a 2D canvas is confirmed persistently blank. */
+  renderedNonBlank?: boolean;
 }
 
 export interface PlaytestStepResult {

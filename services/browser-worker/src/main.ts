@@ -467,6 +467,15 @@ export interface RuntimeVerifyResult {
    * `requireJuice` floor gates on this. 0 when no canvas / never booted.
    */
   juiceScore: number;
+  /**
+   * Premium-completeness — did the game render ANYTHING visible? `false` ONLY when
+   * we reliably read a 2D canvas that is essentially a single uniform colour (or
+   * fully transparent) across two captures — i.e. it booted but draws nothing (the
+   * ultimate "disappoint"). Defaults `true` and ABSTAINS (stays true) for a WebGL
+   * canvas (an unreadable cleared buffer ≠ blank), a tainted canvas, or no canvas —
+   * so it can NEVER false-flag a game we couldn't reliably inspect.
+   */
+  renderedNonBlank: boolean;
 }
 
 /** Phase 5.5 — hard ceiling on the juice score so a pathological canvas /
@@ -721,6 +730,70 @@ const FATAL_CONSOLE_PATTERNS: readonly RegExp[] = [
   /(?:undefined|null) is not an object/,
 ];
 
+/**
+ * Premium-completeness — detect a game that booted but renders a BLANK canvas.
+ * Deliberately conservative to NEVER false-flag (a false positive burns a repair
+ * round on a working game):
+ *   - 2D context ONLY. A WebGL canvas's getContext('2d') is null; we can't read a
+ *     WebGL frame reliably without preserveDrawingBuffer (a cleared buffer reads
+ *     blank but isn't), so we ABSTAIN → not blank.
+ *   - "blank" = the sampled frame is essentially ONE colour everywhere (per-channel
+ *     range < UNIFORM_EPSILON) OR fully transparent (nothing drawn). ANY real
+ *     content — a gradient backdrop, title text, a sprite — spikes the range well
+ *     past the threshold.
+ *   - tainted / no-canvas / read failure → ABSTAIN (not blank).
+ * Returns true when the frame is confirmed blank, false otherwise (incl. abstain).
+ */
+async function sampleCanvasBlank(page: Page): Promise<boolean> {
+  try {
+    return await page.evaluate(() => {
+      const UNIFORM_EPSILON = 8;
+      const SAMPLE = 96;
+      const canvas = document.querySelector('canvas');
+      if (!(canvas instanceof HTMLCanvasElement)) return false; // abstain
+      // 2D only — a WebGL canvas returns null here, and we must not guess at it.
+      if (canvas.getContext('2d') === null) return false; // abstain (WebGL)
+      const off = document.createElement('canvas');
+      off.width = SAMPLE;
+      off.height = SAMPLE;
+      const octx = off.getContext('2d');
+      if (octx === null) return false;
+      try {
+        octx.drawImage(canvas, 0, 0, SAMPLE, SAMPLE);
+        const d = octx.getImageData(0, 0, SAMPLE, SAMPLE).data;
+        let rMin = 255;
+        let rMax = 0;
+        let gMin = 255;
+        let gMax = 0;
+        let bMin = 255;
+        let bMax = 0;
+        let aMax = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          const r = d[i] ?? 0;
+          const g = d[i + 1] ?? 0;
+          const b = d[i + 2] ?? 0;
+          const a = d[i + 3] ?? 0;
+          if (r < rMin) rMin = r;
+          if (r > rMax) rMax = r;
+          if (g < gMin) gMin = g;
+          if (g > gMax) gMax = g;
+          if (b < bMin) bMin = b;
+          if (b > bMax) bMax = b;
+          if (a > aMax) aMax = a;
+        }
+        // Fully transparent → nothing drawn. Otherwise blank iff one flat colour.
+        if (aMax === 0) return true;
+        const range = Math.max(rMax - rMin, gMax - gMin, bMax - bMin);
+        return range < UNIFORM_EPSILON;
+      } catch {
+        return false; // tainted canvas → abstain
+      }
+    });
+  } catch {
+    return false; // page gone → abstain
+  }
+}
+
 export async function runRuntimeVerify(
   browser: Browser,
   data: BrowserJobData,
@@ -790,12 +863,26 @@ export async function runRuntimeVerify(
     if (hasGameContract) {
       await page.waitForTimeout(BOOT_ERROR_GRACE_MS).catch(() => {});
     }
+    // Premium-completeness — blank-render check. Only after the game booted +
+    // rendered (measureJuice drove frames). Require TWO blank reads, with frames
+    // driven between them, so a transient intro/fade can never be flagged — only a
+    // PERSISTENTLY uniform 2D canvas (booted-but-draws-nothing) is reported blank.
+    let renderedNonBlank = true;
+    if (hasGameContract) {
+      const blank1 = await sampleCanvasBlank(page);
+      if (blank1) {
+        await tickFrames(page, JUICE_FRAME_WINDOW).catch(() => {});
+        const blank2 = await sampleCanvasBlank(page);
+        renderedNonBlank = !blank2;
+      }
+    }
     return {
       hasGameContract,
       fatalErrors,
       bootedIn,
       blockedRequests: [...egress.blocked],
       juiceScore,
+      renderedNonBlank,
     };
   } finally {
     await context.close();

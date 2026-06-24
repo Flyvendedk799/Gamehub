@@ -638,6 +638,63 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     expect(browserJobs.playtestCalls).toBe(2);
   });
 
+  it('a BLANK-render runtime verdict (renderedNonBlank=false) triggers a repair round (premium non-blank gate)', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    let rounds = 0;
+    const agent = specAgent(() => {
+      rounds += 1;
+    });
+    // Round 0 (rounds===1): booted but BLANK → repair. Round 1 (rounds===2): renders → ship.
+    // Keyed on the round so it's robust to multiple runtimeVerify calls per round.
+    const browserJobs: BrowserJobsPort = {
+      async runtimeVerify() {
+        return {
+          hasGameContract: true,
+          fatalErrors: [],
+          renderedNonBlank: !(rounds <= 1),
+        } satisfies RuntimeVerifyVerdict;
+      },
+      async playtest() {
+        return passingPlaytest();
+      },
+    };
+
+    const result = await runGeneration(
+      {
+        prompt: 'topdown game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: agent, browserJobs },
+    );
+
+    expect(result.repairRounds).toBe(1);
+    expect(rounds).toBe(2); // re-invoked once to fix the blank render
+  });
+
+  it('renderedNonBlank=undefined (abstain — WebGL/old node) does NOT trigger a blank repair', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    // Booted, clean, abstained on blank-check, passing playtest → ships with 0 repairs.
+    const browserJobs = queuedBrowserJobs([passingPlaytest()]);
+    let rounds = 0;
+    const agent = specAgent(() => {
+      rounds += 1;
+    });
+
+    const result = await runGeneration(
+      {
+        prompt: 'topdown game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: agent, browserJobs },
+    );
+
+    // queuedBrowserJobs.runtimeVerify omits renderedNonBlank (undefined) → no blank fatal.
+    expect(result.repairRounds).toBe(0);
+    expect(result.shipReason).toBe('passed');
+  });
+
   it('a persistently FAILING playtest stops at the ceiling with shipReason=repair_exhausted', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());
     // Always inverted — the agent never fixes it. Default budget = 2 rounds.

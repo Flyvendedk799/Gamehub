@@ -111,6 +111,7 @@ export function makeInProcessBrowserJobs(): InProcessBrowserJobs {
         hasGameContract: result.hasGameContract,
         fatalErrors: result.fatalErrors,
         juiceScore: result.juiceScore,
+        renderedNonBlank: result.renderedNonBlank,
       };
     },
     async playtest(htmlContent: string, steps: PlaytestSteps): Promise<PlaytestVerdict | null> {

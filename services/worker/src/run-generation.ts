@@ -130,6 +130,13 @@ export interface RuntimeVerifyVerdict {
    * persisted in the per-run quality telemetry row.
    */
   juiceScore?: number;
+  /**
+   * Premium-completeness — `false` ONLY when the browser reliably read a 2D canvas
+   * that is persistently blank (booted but draws nothing). `undefined` (abstain) for
+   * WebGL / tainted / no-canvas / a queue node predating the check, so observeVerdict
+   * gates strictly on `=== false` and can never false-flag an unverifiable game.
+   */
+  renderedNonBlank?: boolean;
 }
 
 /**
@@ -657,6 +664,16 @@ export async function runGeneration(
     const fatalErrors: string[] = rvVerdict === null ? [] : [...rvVerdict.fatalErrors];
     if (rvVerdict !== null && !rvVerdict.hasGameContract) {
       fatalErrors.push('Runtime load: window.__game never appeared — the game did not boot.');
+    }
+    // Premium-completeness — non-blank-render gate. STRICTLY `=== false`: the browser
+    // reports false ONLY when it reliably read a 2D canvas that is persistently blank
+    // (booted but draws nothing — the worst player outcome). WebGL/tainted/no-canvas
+    // and old queue nodes report undefined and are never flagged. Repairable fatal →
+    // the bounded repair loop forces the agent to actually render the game.
+    if (rvVerdict?.hasGameContract && rvVerdict.renderedNonBlank === false) {
+      fatalErrors.push(
+        'The game booted but renders a BLANK canvas — nothing is drawn to the screen (verified over two frames). Draw your game every frame: clear the canvas, paint a background, then draw the player/subject and the world. A booted-but-blank game is the worst outcome for the player. The premium starter in src/main.js already draws a gradient background + the subject — restore that drawing.',
+      );
     }
 
     // Plan step 7 — booted cleanly, but the genre has no playbook predicates AND no

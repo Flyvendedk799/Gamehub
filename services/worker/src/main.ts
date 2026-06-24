@@ -217,7 +217,14 @@ async function main() {
             const jobId = await browserClient.enqueueRuntimeVerify(htmlContent);
             const result = await browserClient.waitForResult<RuntimeVerifyResult>(jobId, 20_000);
             if (result === null) return null;
-            return { hasGameContract: result.hasGameContract, fatalErrors: result.fatalErrors };
+            return {
+              hasGameContract: result.hasGameContract,
+              fatalErrors: result.fatalErrors,
+              ...(result.juiceScore !== undefined ? { juiceScore: result.juiceScore } : {}),
+              ...(result.renderedNonBlank !== undefined
+                ? { renderedNonBlank: result.renderedNonBlank }
+                : {}),
+            };
           },
           async playtest(htmlContent: string, steps: ReadonlyArray<PlaytestStep>) {
             const jobId = await browserClient.enqueuePlaytest(htmlContent, [...steps]);
