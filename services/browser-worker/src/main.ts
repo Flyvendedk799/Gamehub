@@ -869,6 +869,27 @@ export async function runRuntimeVerify(
     // PERSISTENTLY uniform 2D canvas (booted-but-draws-nothing) is reported blank.
     let renderedNonBlank = true;
     if (hasGameContract) {
+      // Nudge past a Title/Start screen first, so the sample reflects the PLAY state,
+      // not a (possibly flat) intro a game draws content only after — the seed's
+      // start() listens for pointerdown/Space on window (review residual fix). Harmless
+      // if ignored: a game with no start handler simply stays where it was.
+      await page
+        .evaluate(() => {
+          try {
+            const c = document.querySelector('canvas');
+            for (const target of [window, c].filter(Boolean) as EventTarget[]) {
+              target.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+              target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            }
+            window.dispatchEvent(
+              new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true }),
+            );
+          } catch {
+            /* dispatch best-effort */
+          }
+        })
+        .catch(() => {});
+      await tickFrames(page, JUICE_FRAME_WINDOW).catch(() => {});
       const blank1 = await sampleCanvasBlank(page);
       if (blank1) {
         await tickFrames(page, JUICE_FRAME_WINDOW).catch(() => {});
