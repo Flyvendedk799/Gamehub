@@ -22,13 +22,16 @@ export default function HomePage() {
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [recent, setRecent] = useState<Project[] | null>(null);
+  const [authed, setAuthed] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Lovable-style dashboard: when signed in, surface your recent projects right
-  // below the build box so the home doubles as a hub. Logged-out visitors see the
-  // marketing hero only (recent stays null → section hidden).
+  // Lovable-style dashboard: when signed in, the home is a compact dashboard (tight
+  // greeting + build box + your recent projects). Logged-out visitors get the full
+  // marketing hero. `authed` drives that split; it's set client-side post-mount.
   useEffect(() => {
-    if (!isAuthenticated()) return;
+    const ok = isAuthenticated();
+    setAuthed(ok);
+    if (!ok) return;
     let cancelled = false;
     void listProjects()
       .then(({ projects }) => {
@@ -95,23 +98,32 @@ export default function HomePage() {
   return (
     <main
       className={`flex min-h-screen flex-col items-center px-4 py-16 bg-[#0a0a0a] ${
-        hasRecent ? '' : 'justify-center'
+        authed ? '' : 'justify-center'
       }`}
     >
-      {/* Logo / wordmark */}
-      <div className="mb-12 text-center">
-        <div className="inline-flex items-center gap-3 mb-4">
-          <BrandMark size={40} />
-          <Wordmark className="text-2xl font-semibold tracking-tight text-[#f4f4f5]" />
+      {authed ? (
+        /* Signed-in: compact dashboard greeting (the sidebar carries the brand) */
+        <div className="mb-8 w-full max-w-2xl text-center">
+          <h1 className="text-2xl sm:text-3xl font-bold text-[#f4f4f5]">
+            What do you want to build?
+          </h1>
         </div>
-        <h1 className="text-4xl sm:text-5xl font-bold text-[#f4f4f5] leading-tight">
-          Build games with AI
-        </h1>
-        <p className="mt-4 text-lg text-[#a1a1aa] max-w-md mx-auto">
-          Describe the game you want. PlayerZero writes the code, builds it, and gives you something
-          you can play instantly.
-        </p>
-      </div>
+      ) : (
+        /* Logged-out: full marketing hero */
+        <div className="mb-12 text-center">
+          <div className="inline-flex items-center gap-3 mb-4">
+            <BrandMark size={40} />
+            <Wordmark className="text-2xl font-semibold tracking-tight text-[#f4f4f5]" />
+          </div>
+          <h1 className="text-4xl sm:text-5xl font-bold text-[#f4f4f5] leading-tight">
+            Build games with AI
+          </h1>
+          <p className="mt-4 text-lg text-[#a1a1aa] max-w-md mx-auto">
+            Describe the game you want. PlayerZero writes the code, builds it, and gives you
+            something you can play instantly.
+          </p>
+        </div>
+      )}
 
       {/* Form */}
       <form onSubmit={handleSubmit} className="w-full max-w-2xl">
