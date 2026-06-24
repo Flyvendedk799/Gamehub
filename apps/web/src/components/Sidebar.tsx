@@ -10,8 +10,18 @@ import { useEffect, useState } from 'react';
 /** Persistent left navigation rail — the app's primary nav across every
  *  dashboard surface (home, projects, hub, settings, profile). Immersive views
  *  (the editor, the public play page, auth, onboarding) render without it; that
- *  gating lives in AppShell. */
-export default function Sidebar() {
+ *  gating lives in AppShell.
+ *
+ *  Responsive: an in-flow sticky rail at md+; an off-canvas overlay drawer below
+ *  md, toggled by `open` and slid in/out with a transform. `onNavigate` lets the
+ *  shell close the drawer when a link is tapped on mobile. */
+export default function Sidebar({
+  open = false,
+  onNavigate,
+}: {
+  open?: boolean;
+  onNavigate?: () => void;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const [handle, setHandle] = useState<string | null>(null);
@@ -43,6 +53,7 @@ export default function Sidebar() {
   }, [pathname]);
 
   async function handleLogout() {
+    onNavigate?.();
     try {
       await logout();
     } catch {
@@ -79,10 +90,15 @@ export default function Sidebar() {
   ];
 
   return (
-    <aside className="sticky top-0 z-40 flex h-screen w-60 shrink-0 flex-col border-r border-[#1a1a1a] bg-[#0c0c0c]">
+    <aside
+      className={`fixed inset-y-0 left-0 z-50 flex h-screen w-60 shrink-0 flex-col border-r border-[#1a1a1a] bg-[#0c0c0c] transition-transform duration-200 md:sticky md:top-0 md:z-40 md:translate-x-0 ${
+        open ? 'translate-x-0' : '-translate-x-full'
+      }`}
+    >
       {/* Brand */}
       <Link
         href="/"
+        onClick={onNavigate}
         className="flex items-center gap-2 px-4 h-14 border-b border-[#1a1a1a] text-[#f4f4f5] hover:text-white transition-colors"
       >
         <BrandMark size={26} className="flex-shrink-0" />
@@ -97,6 +113,7 @@ export default function Sidebar() {
             <Link
               key={item.href}
               href={item.href}
+              onClick={onNavigate}
               className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all ${
                 active
                   ? 'bg-[#6366f1]/10 text-[#f4f4f5] font-medium'
@@ -127,6 +144,7 @@ export default function Sidebar() {
             )}
             <Link
               href={`/u/${handle}`}
+              onClick={onNavigate}
               className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#161616] transition-all"
             >
               <span className="text-[#6366f1] font-mono">@</span>
@@ -134,6 +152,7 @@ export default function Sidebar() {
             </Link>
             <Link
               href="/settings"
+              onClick={onNavigate}
               className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#161616] transition-all"
             >
               <span className="text-[#52525b]">
@@ -156,12 +175,14 @@ export default function Sidebar() {
           <div className="flex flex-col gap-2">
             <Link
               href="/auth/login"
+              onClick={onNavigate}
               className="w-full text-center px-3 py-2 text-sm text-[#a1a1aa] hover:text-[#f4f4f5] rounded-lg hover:bg-[#161616] transition-all"
             >
               Sign in
             </Link>
             <Link
               href="/auth/register"
+              onClick={onNavigate}
               className="w-full text-center px-3 py-2 text-sm bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-lg transition-all"
             >
               Sign up
