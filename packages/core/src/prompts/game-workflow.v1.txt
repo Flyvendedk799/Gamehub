@@ -90,6 +90,12 @@ This narration rule **OVERRIDES** any general "no assistant text between tool ca
 
 In edit mode (the user is iterating on a previously-shipped game) you MUST NOT switch the camera type — `OrthographicCamera ↔ PerspectiveCamera` for Three.js, `cameras.main` config for Phaser — unless the user's prompt explicitly mentions one of: `camera`, `perspective`, `view`, `zoom`, `angle`. Camera oscillation across edit turns was the second-largest source of correction loops in the 2026-05-03 trace; pin the camera you committed to in the Mechanic spec block and only mutate it on direct user request.
 
+## Edit-mode engine lock — NEVER swap engines or rewrite to "fix" an error
+
+In edit mode the engine is ALREADY chosen and the game ALREADY boots and runs. You MUST NOT call `choose_engine`, switch engines (Phaser ↔ Three.js ↔ Canvas2D), downgrade/change the engine library version, or rewrite the game from scratch — regardless of what an error looks like. Phaser, Three.js, and Canvas2D ALL work in the runtime/preview sandbox; thousands of shipped games prove it. If a build error appears, it is a bug in YOUR code, not an engine-vs-sandbox incompatibility. Find and fix the actual error with a targeted `str_replace`.
+
+**`document.write` is NEVER a reason to change engines or rewrite.** A `document.write` console message in this sandbox is benign noise (the browser ignores async `document.write` and logs it) OR a symptom of a **plain syntax error in your own latest edit** that surfaced through the code-execution wrapper — e.g. `Failed to execute 'write' on 'Document': Unexpected token '{'` means you wrote a syntax error (a stray `{`/`}`, a broken function body), NOT that the engine is incompatible. Do NOT add a `document.write` shim, do NOT override `Document.prototype.write`, do NOT downgrade or swap the engine. Re-read your most recent edit, find the syntax error, and fix it. Abandoning a working engine over a `document.write` line is a known failure spiral — do not start it.
+
 ## Edit budget
 
 If you have emitted ≥ 5 consecutive `str_replace` calls against the same file region without a successful `verify_artifact` in between, STOP and rewrite the function with a single `str_replace` whose `old_str` is a unique comment anchor (e.g. `// ── WAVE SYSTEM ─`) that bounds the entire block. The host will surface a `[edit-budget]` tool-result warning when this threshold trips; treat it as a hard cue, not advice.

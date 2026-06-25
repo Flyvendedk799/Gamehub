@@ -2,7 +2,7 @@ import { performance } from 'node:perf_hooks';
 import type { ContinuationPromptInput } from '@playforge/agent-core';
 import { RedisEventBus } from '@playforge/bus';
 import { createDb, schema } from '@playforge/db';
-import type { AbortKind, ModelRef } from '@playforge/shared';
+import type { AbortKind, GameSpec, ModelRef } from '@playforge/shared';
 import { classifyAbortKind } from '@playforge/shared';
 import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
 import { Queue, Worker } from 'bullmq';
@@ -41,7 +41,7 @@ import {
 } from './browser-jobs';
 import { finalizeRun } from './finalize-run';
 import { enqueueRun } from './queue';
-import type { BrowserJobsPort } from './run-generation';
+import type { BrowserJobsPort, WebEngine } from './run-generation';
 
 function requireEnv(name: string): string {
   const val = process.env[name];
@@ -172,6 +172,10 @@ interface GenerateJobData {
   userId: string;
   prompt: string;
   parentManifestKey?: string;
+  /** The project's chosen engine (iteration) — agent skips choose_engine. */
+  engine?: WebEngine;
+  /** Prior snapshot's game spec (iteration) — agent amends instead of re-declaring. */
+  gameSpec?: GameSpec;
   /** BYOK: per-job API key override. */
   apiKey?: string;
   model?: ModelRef;
@@ -248,6 +252,8 @@ async function main() {
         projectId,
         prompt,
         parentManifestKey,
+        engine,
+        gameSpec,
         apiKey: jobApiKey,
         model: jobModel,
         continuation,
@@ -279,6 +285,8 @@ async function main() {
             model,
             apiKey,
             ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
+            ...(engine !== undefined ? { engine } : {}),
+            ...(gameSpec !== undefined ? { gameSpec } : {}),
             ...(continuation !== undefined ? { continuation } : {}),
             ...(maxTokens !== undefined ? { maxTokens } : {}),
             ...(isRemix === true ? { isRemix } : {}),

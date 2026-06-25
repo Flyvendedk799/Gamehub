@@ -384,6 +384,38 @@ export interface RunArtifactChecksOptions {
   previousContent?: string | null;
 }
 
+const DOCUMENT_WRITE_RE = /Failed to execute 'write' on 'Document'|document\.write/i;
+const SYNTAX_SIGNATURE_RE =
+  /Unexpected token|SyntaxError|Unexpected end of|missing \)|Invalid or unexpected/i;
+
+/**
+ * A `document.write` console message in the runtime sandbox is one of two things,
+ * and agents have spiralled for hundreds of turns misreading BOTH:
+ *   (a) a PLAIN SYNTAX ERROR in the user's own code surfaced through the
+ *       code-execution wrapper — e.g. "Failed to execute 'write' on 'Document':
+ *       Unexpected token '{'" — which must read as a clear, fixable syntax error.
+ *   (b) the browser ignoring an async `document.write()` (common with CDN/UMD
+ *       scripts) — benign noise that must NOT trip the fix loop.
+ * It is NEVER a sign that the engine is incompatible with the sandbox. This
+ * rewrites the cryptic message so the agent fixes the real cause instead of
+ * switching engines / rewriting the game.
+ */
+export function clarifyDocumentWriteError(e: DoneError): DoneError {
+  if (!DOCUMENT_WRITE_RE.test(e.message)) return e;
+  if (SYNTAX_SIGNATURE_RE.test(e.message)) {
+    const tok = e.message.match(/Unexpected token[^.\n]*/i)?.[0]?.trim();
+    return {
+      source: 'syntax',
+      message: `SyntaxError in your code${tok ? ` — ${tok}` : ''}. It surfaced through a document.write wrapper, but it is a PLAIN syntax error in your latest edit (an unbalanced/stray brace, a broken function body), NOT an engine or sandbox problem. Re-read your most recent edit and fix it with str_replace. Do NOT add a document.write shim, override Document.prototype.write, switch engines, downgrade a library, or rewrite the game.`,
+    };
+  }
+  return {
+    source: 'console.warning',
+    message:
+      'Benign: the browser ignored an async document.write() call (normal for some CDN/UMD scripts). It does NOT break the game and is NOT a reason to switch engines, downgrade a library, add a shim, or rewrite anything — ignore it.',
+  };
+}
+
 export async function runArtifactChecks(
   fs: TextEditorFsCallbacks,
   runtimeVerify: DoneRuntimeVerifier | undefined,
@@ -471,7 +503,9 @@ export async function runArtifactChecks(
   if (runtimeVerify) {
     try {
       const runtimeErrors = await runtimeVerify(file.content);
-      errors.push(...runtimeErrors);
+      // Rewrite cryptic document.write console errors into either a clear syntax
+      // error (fix it) or a benign advisory (ignore it) — never an engine swap.
+      errors.push(...runtimeErrors.map(clarifyDocumentWriteError));
     } catch (err) {
       errors.push({
         message: `Runtime verifier failed: ${err instanceof Error ? err.message : String(err)}`,

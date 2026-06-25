@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { HEURISTIC_ADVISORY_SOURCES } from './done-heuristics.js';
-import { makeDoneTool } from './done.js';
+import { clarifyDocumentWriteError, makeDoneTool } from './done.js';
 import type { TextEditorFsCallbacks } from './text-editor.js';
 
 /** Strip out the (always-advisory) heuristic warnings so a "no fatal errors"
@@ -439,5 +439,33 @@ describe('Babel-aware static lint (backlog-1 #10)', () => {
     const tool = makeDoneTool(fs);
     const res = await tool.execute('html-unclosed', {});
     expect(res.details.errors.some((e) => /Unclosed/.test(e.message))).toBe(true);
+  });
+});
+
+describe('clarifyDocumentWriteError (document.write is never an engine-swap signal)', () => {
+  it('rewrites a syntax-error document.write into a clear, fixable syntax error', () => {
+    const out = clarifyDocumentWriteError({
+      source: 'runtime',
+      message: "Failed to execute 'write' on 'Document': Unexpected token '{'",
+    });
+    expect(out.source).toBe('syntax'); // non-advisory → still trips the fix loop
+    expect(out.message).toMatch(/SyntaxError/);
+    expect(out.message).toMatch(/Unexpected token/);
+    expect(out.message).toMatch(/do not.*switch engines/i);
+  });
+
+  it('downgrades a bare async document.write to a benign advisory (console.warning)', () => {
+    const out = clarifyDocumentWriteError({
+      source: 'runtime',
+      message:
+        "Failed to execute 'write' on 'Document': It isn't possible to write into a document from an asynchronously-loaded external script unless it is explicitly opened.",
+    });
+    expect(out.source).toBe('console.warning'); // advisory → never trips has_errors
+    expect(out.message).toMatch(/[Bb]enign/);
+  });
+
+  it('passes through unrelated errors unchanged', () => {
+    const e = { source: 'runtime', message: 'foo is not a function' };
+    expect(clarifyDocumentWriteError(e)).toEqual(e);
   });
 });

@@ -85,6 +85,9 @@ export interface GenerationRequest {
   httpHeaders?: Record<string, string>;
   /** Optional pre-pick; when omitted the agent calls choose_engine itself. */
   engine?: WebEngine;
+  /** Prior game spec (iteration) — seeds run state so the agent amends it via
+   *  amend_game_spec instead of re-declaring a fresh one. */
+  spec?: GameSpec;
   /** Seed the working tree (e.g. a remix's parent snapshot). */
   initialFiles?: Iterable<readonly [string, string]>;
   /** Provider name (e.g. 'openai') — used to enable image asset generation. */
@@ -369,7 +372,9 @@ export async function runGeneration(
     contract: GamePlaytestPlan | null;
   } = {
     engine: req.engine ?? null,
-    spec: null,
+    // Seed the prior spec on an iteration so the agent amends it (getSpec returns
+    // it) rather than declaring a fresh one and rebuilding the game.
+    spec: req.spec ?? null,
     contract: null,
   };
 

@@ -265,6 +265,10 @@ export type EnqueueFn = (input: {
   httpHeaders?: Record<string, string>;
   /** Manifest key of the project's current snapshot — seeds the new generation with existing files. */
   parentManifestKey?: string;
+  /** The project's chosen engine — when set, the agent skips choose_engine (iteration). */
+  engine?: Engine;
+  /** The prior snapshot's game spec — lets the agent amend (not re-declare) it on an edit. */
+  gameSpec?: import('@playforge/shared').GameSpec;
   /** Hard token ceiling for this run — worker aborts if exceeded. */
   maxTokens?: number;
   /** Continuation state from a previously paused run. */
@@ -1897,6 +1901,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     // Check for a paused continuation from a previous run on this project.
     const paused = await deps.runRepo.getPausedContinuation(project.id);
 
+    // On an iteration (the project already has a snapshot), seed the agent with
+    // the project's engine + the prior game spec so it EDITS the existing game
+    // (amend_game_spec, no choose_engine) instead of rebuilding from scratch.
+    let priorSpec: import('@playforge/shared').GameSpec | undefined;
+    if (project.currentSnapshotId !== null && deps.snapshotRepo) {
+      const snap = await deps.snapshotRepo.getById(project.currentSnapshotId);
+      priorSpec = snap?.gameSpec ?? undefined;
+    }
+
     // Fire-and-forget — the worker publishes events; the browser streams via SSE.
     void deps.enqueue({
       runId: run.id,
@@ -1916,6 +1929,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         : project.currentManifestKey !== null
           ? { parentManifestKey: project.currentManifestKey }
           : {}),
+      // Edit-mode seeds: the chosen engine + prior spec (only set on iterations).
+      ...(project.engine !== null ? { engine: project.engine } : {}),
+      ...(priorSpec !== undefined ? { gameSpec: priorSpec } : {}),
       ...(paused !== null ? { continuation: paused.continuation } : {}),
       ...(deps.maxRunTokens !== undefined ? { maxTokens: deps.maxRunTokens } : {}),
       // Prompt-injection guard: flag remix projects so the worker prepends the
