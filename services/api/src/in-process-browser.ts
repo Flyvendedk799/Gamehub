@@ -140,7 +140,7 @@ export function makeInProcessBrowserJobs(): InProcessBrowserJobs {
       return run<ThumbnailResult>({
         kind: 'thumbnail',
         htmlContent,
-        viewport: { width: 640, height: 360 },
+        viewport: { width: 1280, height: 720 },
         bootTimeoutMs: 8000,
       });
     },

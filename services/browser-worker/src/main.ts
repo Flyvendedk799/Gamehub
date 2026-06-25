@@ -928,13 +928,66 @@ export async function runRuntimeVerify(
  *  also has a wall-clock deadline as a second backstop. */
 const THUMBNAIL_MAX_NONBLANK_RETRIES = 6;
 
+/**
+ * Screenshot the game's largest `<canvas>` element — tightly framed on the game
+ * itself. Capturing the canvas element (not a fixed viewport rectangle) gives a
+ * clean crop that:
+ *   - includes the WHOLE game even when the canvas overflows the viewport (an
+ *     element screenshot captures the full element box, not just the visible
+ *     top-left chunk), and
+ *   - excludes page margins, letterbox bars, and DOM overlays such as the
+ *     published bundle's "Remix this" CTA badge (those aren't on the canvas).
+ * Falls back to the full-viewport clip when there's no usable canvas (e.g. a
+ * pure-DOM game). Returns PNG bytes + the captured pixel size.
+ */
+async function captureGameFrame(
+  page: Page,
+  vp: { width: number; height: number },
+): Promise<{ bytes: Buffer; width: number; height: number }> {
+  try {
+    const handle = await page.evaluateHandle(() => {
+      let best: Element | null = null;
+      let bestArea = 0;
+      for (const c of Array.from(document.querySelectorAll('canvas'))) {
+        const r = c.getBoundingClientRect();
+        const area = r.width * r.height;
+        if (area > bestArea) {
+          bestArea = area;
+          best = c;
+        }
+      }
+      return best;
+    });
+    const el = handle.asElement();
+    if (el) {
+      const box = await el.boundingBox();
+      if (box && box.width >= 1 && box.height >= 1) {
+        const bytes = await el.screenshot({ type: 'png' });
+        await handle.dispose();
+        return {
+          bytes: Buffer.from(bytes),
+          width: Math.round(box.width),
+          height: Math.round(box.height),
+        };
+      }
+    }
+    await handle.dispose();
+  } catch {
+    /* no usable canvas / detached element — fall back to the viewport capture */
+  }
+  const bytes = await page.screenshot({ type: 'png', clip: { x: 0, y: 0, ...vp } });
+  return { bytes: Buffer.from(bytes), width: vp.width, height: vp.height };
+}
+
 export async function runThumbnail(
   browser: Browser,
   data: BrowserJobData,
   onContext?: ContextSink,
 ): Promise<ThumbnailResult> {
   assertBrowserAlive(browser);
-  const vp = data.viewport ?? { width: 640, height: 360 };
+  // A 16:9 capture window large enough that the game lays out at a generous size
+  // and the captured canvas is crisp in the share card's ~920px frame.
+  const vp = data.viewport ?? { width: 1280, height: 720 };
   const { context } = await createHardenedContext(browser, vp);
   onContext?.(context);
   const page = await context.newPage();
@@ -998,8 +1051,12 @@ export async function runThumbnail(
       }
     }
 
-    const pngBytes = await page.screenshot({ type: 'png', clip: { x: 0, y: 0, ...vp } });
-    return { pngBase64: Buffer.from(pngBytes).toString('base64'), ...vp };
+    const frame = await captureGameFrame(page, vp);
+    return {
+      pngBase64: frame.bytes.toString('base64'),
+      width: frame.width,
+      height: frame.height,
+    };
   } finally {
     await context.close();
   }

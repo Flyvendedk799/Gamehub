@@ -376,6 +376,38 @@ describe('runThumbnail (gameplay capture, real Chromium)', () => {
     });
     expect(await pngIsNonUniform(result.pngBase64)).toBe(true);
   }, 30_000);
+
+  it('(c) captures the FULL game canvas (not a viewport-clipped corner), excluding DOM overlays', async () => {
+    // The canvas (1000×562) is larger than the 640×360 capture viewport, and a
+    // DOM badge (like the published "Remix this" CTA) sits over the corner. The
+    // element capture must return the WHOLE canvas — proving it is NOT a 640×360
+    // viewport clip — and the badge (not on the canvas) is excluded by framing.
+    const html = `<!doctype html><html><head><meta charset="utf-8">
+      <style>html,body{margin:0;background:#111}
+      #hud{position:fixed;right:8px;bottom:8px;width:160px;height:40px;background:#f0f;z-index:9}</style>
+      </head><body>
+      <canvas id="game" width="1000" height="562"></canvas>
+      <div id="hud">Made with X — Remix this</div>
+      <script>
+        const ctx = document.getElementById('game').getContext('2d');
+        for (let i = 0; i < 96; i++) {
+          ctx.fillStyle = 'hsl(' + (i * 4) + ',90%,55%)';
+          ctx.fillRect((i * 53) % 960, (i * 29) % 520, 32, 32);
+        }
+        window.__game = { debug: { snapshot() { return { ok: true }; } } };
+      </script>
+    </body></html>`;
+    const result = await runThumbnail(browser, {
+      kind: 'thumbnail',
+      htmlContent: html,
+      viewport: { width: 640, height: 360 },
+      bootTimeoutMs: 5_000,
+    });
+    // Full canvas, not the 640×360 viewport — this is the crop fix.
+    expect(result.width).toBe(1000);
+    expect(result.height).toBe(562);
+    expect(await pngIsNonUniform(result.pngBase64)).toBe(true);
+  }, 30_000);
 });
 
 describe('runPlaytest (synthetic input → snapshot diff, real Chromium)', () => {
