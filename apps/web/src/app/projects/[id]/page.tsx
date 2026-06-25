@@ -17,7 +17,7 @@ import {
   revertToSnapshot,
   streamRun,
 } from '@/lib/api';
-import { chatMessageToEvents, lastPreviewUrlFromHistory } from '@/lib/chat-hydration';
+import { hydrateHistoryEvents, lastPreviewUrlFromHistory } from '@/lib/chat-hydration';
 import { API_BASE } from '@/lib/config';
 import { TRANSPORT_LOST_MESSAGE } from '@/lib/event-normalize';
 import type { Project, RunCompleteEvent, RunErrorEvent, SseEvent } from '@/lib/types';
@@ -106,53 +106,15 @@ export default function BuilderPage() {
   // Track active SSE controller so we can close it on unmount / new run
   const streamCtrlRef = useRef<{ close: () => void } | null>(null);
 
-  // ─── Load project metadata + chat history ─────────────────────────────────
+  // ─── Load project metadata + snapshots (independent of any run) ───────────
   useEffect(() => {
     if (!projectId) return;
     setLoadError(null);
     void getProject(projectId)
       .then(({ project }) => setProject(project))
       .catch((err) => setLoadError(describeApiError(err)));
-
     refreshSnapshots();
-
-    void getChatHistory(projectId)
-      .then(({ messages }) => {
-        if (messages.length === 0) return;
-
-        const syntheticEvents: SseEvent[] = [];
-        for (const msg of messages) {
-          // The current run (initialRunId) is replayed in full, in order, by the
-          // durable SSE stream below — including its terminal. Skip the
-          // chat-derived terminal for THAT run so the build log doesn't render
-          // "Build complete" before the steps that produced it (or twice). Other
-          // runs' terminals stay (no stream replays them).
-          if (
-            initialRunId &&
-            (msg.kind === 'artifact_delivered' || msg.kind === 'continuation_pending') &&
-            (msg.payload as { runId?: string } | null)?.runId === initialRunId
-          ) {
-            continue;
-          }
-          syntheticEvents.push(...chatMessageToEvents(msg));
-        }
-
-        // Prepend, don't replace: the durable SSE stream (started in parallel on
-        // mount) may already have appended the current run's events by the time
-        // this resolves. Prepending keeps prior history ahead of the live feed
-        // regardless of which network call wins the race.
-        setEvents((prev) => [...syntheticEvents, ...prev]);
-        const lastPreviewUrl = lastPreviewUrlFromHistory(messages);
-        if (lastPreviewUrl) {
-          const url = lastPreviewUrl.startsWith('http')
-            ? lastPreviewUrl
-            : `${BASE}${lastPreviewUrl}`;
-          setPreviewUrl(url);
-        }
-      })
-      .catch((err) => setLoadError(describeApiError(err)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, refreshSnapshots, initialRunId]);
+  }, [projectId, refreshSnapshots]);
 
   // ─── Start streaming when runId changes ───────────────────────────────────
   const startStream = useCallback(
@@ -245,24 +207,60 @@ export default function BuilderPage() {
     [refreshSnapshots],
   );
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: run once on mount — kicks off the initial stream and excludes initialRunId/startStream so it doesn't restart on re-render
+  // Resolve which run we're streaming, hydrate chat history (deduped against the
+  // SAME id), and attach the live stream. The dedup MUST use the streamed run id
+  // or that run's terminal renders twice — once from the chat-derived hydration,
+  // once from the SSE replay (which carries its own authoritative terminal) — and
+  // a paused run would show a duplicate Resume card.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: run once on mount; intentionally excludes initialRunId/projectId/startStream so it doesn't re-fire on re-render
   useEffect(() => {
+    if (!projectId) return;
     let cancelled = false;
-    if (initialRunId) {
-      startStream(initialRunId);
-    } else if (projectId) {
-      // No `?runId` on this load (e.g. a mobile tab the OS reloaded to a clean
-      // URL): ask the server whether a run is still live for this project and
-      // re-attach. The SSE stream replays history, so live progress resumes.
-      void getActiveRun(projectId)
-        .then(({ run }) => {
-          if (cancelled || !run) return;
-          if (run.status === 'running' || run.status === 'queued' || run.status === 'paused') {
-            setCurrentRunId(run.id);
-            startStream(run.id);
+
+    // Prepend prior history ahead of the live feed; the streamed run's own
+    // events arrive (and append) via the SSE stream, so they're deduped here.
+    const hydrate = (streamRunId: string | null) => {
+      void getChatHistory(projectId)
+        .then(({ messages }) => {
+          if (cancelled || messages.length === 0) return;
+          setEvents((prev) => [...hydrateHistoryEvents(messages, streamRunId), ...prev]);
+          const lastPreviewUrl = lastPreviewUrlFromHistory(messages);
+          if (lastPreviewUrl) {
+            setPreviewUrl(
+              lastPreviewUrl.startsWith('http') ? lastPreviewUrl : `${BASE}${lastPreviewUrl}`,
+            );
           }
         })
-        .catch(() => {});
+        .catch((err) => {
+          if (!cancelled) setLoadError(describeApiError(err));
+        });
+    };
+
+    if (initialRunId) {
+      // URL carries the run id: stream immediately + hydrate in parallel (the id
+      // is known, so the dedup is correct without waiting on a lookup).
+      startStream(initialRunId);
+      hydrate(initialRunId);
+    } else {
+      // No `?runId` (e.g. a mobile tab the OS reloaded to a clean URL): ask the
+      // server for the project's live run, THEN hydrate (deduped against it) and
+      // attach. Resolving first keeps the dedup id and the streamed id in sync.
+      void getActiveRun(projectId)
+        .then(({ run }) => {
+          if (cancelled) return;
+          const liveId =
+            run && (run.status === 'running' || run.status === 'queued' || run.status === 'paused')
+              ? run.id
+              : null;
+          if (liveId) {
+            setCurrentRunId(liveId);
+            startStream(liveId);
+          }
+          hydrate(liveId);
+        })
+        .catch(() => {
+          if (!cancelled) hydrate(null);
+        });
     }
 
     return () => {

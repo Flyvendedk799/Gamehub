@@ -51,6 +51,34 @@ export function chatMessageToEvents(msg: ChatHistoryMessage): SseEvent[] {
   return [];
 }
 
+/**
+ * Hydrate a full chat history into builder-log events, deduping the chat-derived
+ * terminal (`run_complete` / `run_paused`) for the run that the live SSE stream
+ * is replaying. That stream provides its own authoritative terminal (real or
+ * synthesized server-side), so keeping the chat copy too renders the run's
+ * "complete"/"paused" card twice — and a duplicate Resume affordance for a paused
+ * run. `streamRunId` is the run being streamed (from the `?runId=` URL OR the
+ * active-run lookup used to re-attach after a reload); pass null when nothing is
+ * being streamed, in which case every row is kept.
+ */
+export function hydrateHistoryEvents(
+  messages: ChatHistoryMessage[],
+  streamRunId: string | null,
+): SseEvent[] {
+  const out: SseEvent[] = [];
+  for (const msg of messages) {
+    if (
+      streamRunId &&
+      (msg.kind === 'artifact_delivered' || msg.kind === 'continuation_pending') &&
+      (msg.payload as { runId?: string } | null)?.runId === streamRunId
+    ) {
+      continue;
+    }
+    out.push(...chatMessageToEvents(msg));
+  }
+  return out;
+}
+
 /** Extracts the last delivered preview URL from a chat history, if any. */
 export function lastPreviewUrlFromHistory(messages: ChatHistoryMessage[]): string | null {
   let last: string | null = null;
