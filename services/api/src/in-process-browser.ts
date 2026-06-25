@@ -24,6 +24,7 @@ import type {
   BrowserPool as BrowserPoolInstance,
   PlaytestResult,
   RuntimeVerifyResult,
+  ThumbnailResult,
 } from '../../browser-worker/src/main';
 import type {
   BrowserJobsPort,
@@ -42,6 +43,12 @@ type PlaytestSteps = Parameters<BrowserJobsPort['playtest']>[1];
 type BrowserWorkerModule = typeof import('../../browser-worker/src/main');
 
 export interface InProcessBrowserJobs extends BrowserJobsPort {
+  /**
+   * Capture a gallery/social thumbnail of a published bundle, in-process. Returns
+   * null when Chromium is unavailable or the capture produced no frame — the
+   * caller treats a thumbnail as best-effort (publish never blocks on it).
+   */
+  thumbnail(htmlContent: string): Promise<ThumbnailResult | null>;
   /** Tear down the shared Chromium on graceful shutdown. */
   close(): Promise<void>;
 }
@@ -128,6 +135,14 @@ export function makeInProcessBrowserJobs(): InProcessBrowserJobs {
         steps: result.steps,
         bootErrors: result.bootErrors,
       };
+    },
+    async thumbnail(htmlContent: string): Promise<ThumbnailResult | null> {
+      return run<ThumbnailResult>({
+        kind: 'thumbnail',
+        htmlContent,
+        viewport: { width: 640, height: 360 },
+        bootTimeoutMs: 8000,
+      });
     },
     async close(): Promise<void> {
       if (pool !== undefined) await pool.close();

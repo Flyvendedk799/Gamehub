@@ -458,6 +458,9 @@ async function main() {
     maxConcurrentRunsPerUser,
     ...(embedText !== undefined ? { embedText } : {}),
     ...(browserQueue !== undefined ? { browserQueue } : {}),
+    // No-Redis deploys have no browserQueue; reuse the in-process Chromium pool
+    // to capture a publish-time thumbnail so social/Hub cards aren't blank.
+    ...(inProcessBrowserJobs !== undefined ? { browserThumbnail: inProcessBrowserJobs } : {}),
     ...(maxRunTokens !== undefined ? { maxRunTokens } : {}),
     ...(queue !== undefined ? { generateQueue: queue } : {}),
     ...(appBaseUrl !== undefined ? { appBaseUrl } : {}),

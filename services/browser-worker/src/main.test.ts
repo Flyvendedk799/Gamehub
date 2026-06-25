@@ -37,6 +37,7 @@ const isRequestAllowed: MainModule['isRequestAllowed'] = (u) => mod.isRequestAll
 const createHardenedContext: MainModule['createHardenedContext'] = (b, vp) =>
   mod.createHardenedContext(b, vp);
 const runRuntimeVerify: MainModule['runRuntimeVerify'] = (b, d) => mod.runRuntimeVerify(b, d);
+const runThumbnail: MainModule['runThumbnail'] = (b, d) => mod.runThumbnail(b, d);
 const runPlaytest: MainModule['runPlaytest'] = (b, d) => mod.runPlaytest(b, d);
 const withHardTimeout: MainModule['withHardTimeout'] = (fn, ms, label, onTimeout) =>
   mod.withHardTimeout(fn, ms, label, onTimeout);
@@ -278,6 +279,102 @@ describe('runRuntimeVerify (real Chromium)', () => {
     // The metadata SSRF must have been aborted by the route handler.
     expect(result.blockedRequests.some((u) => u.includes('169.254.169.254'))).toBe(true);
     expect(result.blockedRequests.some((u) => u.includes('10.0.0.5'))).toBe(true);
+  }, 30_000);
+});
+
+describe('runThumbnail (gameplay capture, real Chromium)', () => {
+  /** Decode a base64 PNG in-page and report whether it is visually non-uniform
+   *  (colour range beyond a small epsilon) — i.e. real content, not a blank/flat
+   *  frame. Reuses the launched Chromium so no image library is needed. */
+  async function pngIsNonUniform(b64: string): Promise<boolean> {
+    const page = await browser.newPage();
+    try {
+      return await page.evaluate(async (dataB64: string) => {
+        const img = new Image();
+        img.src = `data:image/png;base64,${dataB64}`;
+        await img.decode();
+        const cv = document.createElement('canvas');
+        cv.width = img.naturalWidth;
+        cv.height = img.naturalHeight;
+        const ctx = cv.getContext('2d');
+        if (ctx === null) return false;
+        ctx.drawImage(img, 0, 0);
+        const d = ctx.getImageData(0, 0, cv.width, cv.height).data;
+        let rMin = 255;
+        let rMax = 0;
+        let gMin = 255;
+        let gMax = 0;
+        let bMin = 255;
+        let bMax = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          const r = d[i] ?? 0;
+          const g = d[i + 1] ?? 0;
+          const b = d[i + 2] ?? 0;
+          if (r < rMin) rMin = r;
+          if (r > rMax) rMax = r;
+          if (g < gMin) gMin = g;
+          if (g > gMax) gMax = g;
+          if (b < bMin) bMin = b;
+          if (b > bMax) bMax = b;
+        }
+        return Math.max(rMax - rMin, gMax - gMin, bMax - bMin) > 16;
+      }, b64);
+    } finally {
+      await page.close();
+    }
+  }
+
+  // A multi-colour scene draw shared by the fixtures — unambiguously non-uniform.
+  const PAINT_SCENE = `for (let i = 0; i < 64; i++) {
+      ctx.fillStyle = 'hsl(' + (i * 5) + ',90%,55%)';
+      ctx.fillRect((i * 37) % 600, (i * 23) % 320, 24, 24);
+    }`;
+
+  it('(a) captures the PLAY frame of a game that only paints after a start input', async () => {
+    // Title screen stays a flat black fill until pointerdown/click/Space starts
+    // the game. The old blind 1.5s capture would screenshot the flat title; the
+    // start-nudge + non-blank loop must drive it into the painted PLAY state.
+    const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+      <canvas id="game" width="640" height="360"></canvas>
+      <script>
+        const ctx = document.getElementById('game').getContext('2d');
+        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 640, 360); // flat title
+        let started = false;
+        function start() { if (started) return; started = true; loop(); }
+        function loop() { ${PAINT_SCENE} requestAnimationFrame(loop); }
+        addEventListener('pointerdown', start);
+        addEventListener('click', start);
+        addEventListener('keydown', function (e) { if (e.code === 'Space') start(); });
+        window.__game = { debug: { snapshot() { return { started }; } } };
+      </script>
+    </body></html>`;
+    const result = await runThumbnail(browser, {
+      kind: 'thumbnail',
+      htmlContent: html,
+      viewport: { width: 640, height: 360 },
+      bootTimeoutMs: 5_000,
+    });
+    expect(result.width).toBe(640);
+    expect(result.height).toBe(360);
+    expect(result.pngBase64.length).toBeGreaterThan(0);
+    expect(await pngIsNonUniform(result.pngBase64)).toBe(true);
+  }, 30_000);
+
+  it('(b) captures a non-blank frame from a game that paints immediately (no regression)', async () => {
+    const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+      <canvas id="game" width="640" height="360"></canvas>
+      <script>
+        const ctx = document.getElementById('game').getContext('2d');
+        ${PAINT_SCENE}
+        window.__game = { debug: { snapshot() { return { ok: true }; } } };
+      </script>
+    </body></html>`;
+    const result = await runThumbnail(browser, {
+      kind: 'thumbnail',
+      htmlContent: html,
+      bootTimeoutMs: 5_000,
+    });
+    expect(await pngIsNonUniform(result.pngBase64)).toBe(true);
   }, 30_000);
 });
 

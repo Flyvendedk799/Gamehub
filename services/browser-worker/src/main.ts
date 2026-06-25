@@ -794,6 +794,34 @@ async function sampleCanvasBlank(page: Page): Promise<boolean> {
   }
 }
 
+/**
+ * Nudge a game past a Title/Start screen so a subsequent sample/capture reflects
+ * the PLAY state, not a (possibly flat) intro the game only draws content after.
+ * Dispatches the synthetic start gestures generated games commonly listen for —
+ * pointerdown/click on `window` AND the `<canvas>`, plus a Space keydown.
+ * Best-effort and never throws: a game with no start handler simply stays put.
+ *
+ * Shared by runRuntimeVerify (blank-render gate) and runThumbnail (capture).
+ */
+async function dispatchStartInput(page: Page): Promise<void> {
+  await page
+    .evaluate(() => {
+      try {
+        const c = document.querySelector('canvas');
+        for (const target of [window, c].filter(Boolean) as EventTarget[]) {
+          target.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+          target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        }
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true }),
+        );
+      } catch {
+        /* dispatch best-effort */
+      }
+    })
+    .catch(() => {});
+}
+
 export async function runRuntimeVerify(
   browser: Browser,
   data: BrowserJobData,
@@ -873,22 +901,7 @@ export async function runRuntimeVerify(
       // not a (possibly flat) intro a game draws content only after — the seed's
       // start() listens for pointerdown/Space on window (review residual fix). Harmless
       // if ignored: a game with no start handler simply stays where it was.
-      await page
-        .evaluate(() => {
-          try {
-            const c = document.querySelector('canvas');
-            for (const target of [window, c].filter(Boolean) as EventTarget[]) {
-              target.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
-              target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-            }
-            window.dispatchEvent(
-              new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true }),
-            );
-          } catch {
-            /* dispatch best-effort */
-          }
-        })
-        .catch(() => {});
+      await dispatchStartInput(page);
       await tickFrames(page, JUICE_FRAME_WINDOW).catch(() => {});
       const blank1 = await sampleCanvasBlank(page);
       if (blank1) {
@@ -910,6 +923,11 @@ export async function runRuntimeVerify(
   }
 }
 
+/** Bounded retries for the thumbnail non-blank loop so a legitimately-uniform 2D
+ *  game (or a WebGL game sampleCanvasBlank abstains on) can't spin — the loop
+ *  also has a wall-clock deadline as a second backstop. */
+const THUMBNAIL_MAX_NONBLANK_RETRIES = 6;
+
 export async function runThumbnail(
   browser: Browser,
   data: BrowserJobData,
@@ -921,14 +939,65 @@ export async function runThumbnail(
   onContext?.(context);
   const page = await context.newPage();
   const bootTimeoutMs = data.bootTimeoutMs ?? 8_000;
+  // As in runRuntimeVerify: waitForFunction's inline timeout isn't honoured for
+  // RAF polling on a non-painting headless page (it falls back to the 30s page
+  // default), so set the default explicitly. The job hard timeout is the backstop.
+  page.setDefaultTimeout(bootTimeoutMs);
+
+  // A 0-area screenshot forces the compositor to flush so the canvas backing
+  // store reflects the frames we just ticked (same trick measureJuice uses).
+  const flushCompositor = (): Promise<unknown> =>
+    page.screenshot({ clip: { x: 0, y: 0, width: 1, height: 1 }, type: 'png' }).catch(() => {});
 
   try {
     await page.setContent(data.htmlContent, {
       timeout: bootTimeoutMs,
       waitUntil: 'domcontentloaded',
     });
-    // Brief settle — let the game canvas render first frame.
-    await page.waitForTimeout(1500);
+
+    // Boot gate: wait for window.__game rather than a blind fixed settle. On
+    // timeout we DON'T fail — a thumbnail is best-effort, so we still screenshot
+    // whatever rendered (better a first frame than no card at all).
+    let booted = false;
+    try {
+      await page.waitForFunction(
+        () => typeof (window as Window & { __game?: unknown }).__game === 'object',
+        { timeout: bootTimeoutMs },
+      );
+      booted = true;
+    } catch {
+      booted = false;
+    }
+
+    // Advance frames so the engine paints its first real frame even when headless
+    // RAF is throttled, then flush so the screenshot sees those pixels.
+    await tickFrames(page, JUICE_FRAME_WINDOW).catch(() => {});
+    await flushCompositor();
+
+    if (booted) {
+      // Nudge past a Title/Start screen so the capture reflects PLAY, not a flat
+      // intro. Synthetic gestures (shared with runtime-verify) PLUS real trusted
+      // input for games that gate start on isTrusted.
+      await dispatchStartInput(page);
+      await page.mouse.click(Math.floor(vp.width / 2), Math.floor(vp.height / 2)).catch(() => {});
+      await page.keyboard.press('Space').catch(() => {});
+
+      // Capture a non-blank frame: tick + sample, retrying a bounded number of
+      // times. sampleCanvasBlank abstains (returns false) for WebGL/3D canvases,
+      // so the loop exits immediately for those and only spends retries on a 2D
+      // canvas that is still genuinely uniform. The wall-clock deadline (under the
+      // job hard timeout) guarantees termination.
+      const deadline = Date.now() + bootTimeoutMs;
+      for (let i = 0; i < THUMBNAIL_MAX_NONBLANK_RETRIES; i += 1) {
+        await tickFrames(page, JUICE_FRAME_WINDOW).catch(() => {});
+        await flushCompositor();
+        if (!(await sampleCanvasBlank(page))) break;
+        if (Date.now() >= deadline) break;
+        // The title may have needed a frame to wire its start handler — re-nudge.
+        if (i === 1) await dispatchStartInput(page);
+      }
+    }
+
     const pngBytes = await page.screenshot({ type: 'png', clip: { x: 0, y: 0, ...vp } });
     return { pngBase64: Buffer.from(pngBytes).toString('base64'), ...vp };
   } finally {

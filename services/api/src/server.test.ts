@@ -34,6 +34,11 @@ function makeApp(overrides?: {
   allowedCorsOrigins?: string;
   sseMaxStreamMs?: number;
   auth?: Authenticator;
+  browserThumbnail?: {
+    thumbnail(
+      htmlContent: string,
+    ): Promise<{ pngBase64: string; width: number; height: number } | null>;
+  };
 }) {
   return buildServer({
     repo: overrides?.repo ?? new InMemoryProjectRepo(),
@@ -45,6 +50,9 @@ function makeApp(overrides?: {
     ...(overrides?.snapshotRepo !== undefined ? { snapshotRepo: overrides.snapshotRepo } : {}),
     ...(overrides?.cloudSaveRepo !== undefined ? { cloudSaveRepo: overrides.cloudSaveRepo } : {}),
     ...(overrides?.publishRepo !== undefined ? { publishRepo: overrides.publishRepo } : {}),
+    ...(overrides?.browserThumbnail !== undefined
+      ? { browserThumbnail: overrides.browserThumbnail }
+      : {}),
     ...(overrides?.hubRepo !== undefined ? { hubRepo: overrides.hubRepo } : {}),
     ...(overrides?.adminToken !== undefined ? { adminToken: overrides.adminToken } : {}),
     ...(overrides?.allowedCorsOrigins !== undefined
@@ -794,6 +802,102 @@ describe('publish + play routes', () => {
     });
     expect(res.statusCode).toBe(200);
     expect((res.json() as { published: null }).published).toBeNull();
+  });
+
+  // A hermetic canvas2d snapshot — canvas2d skips the engine CDN fetch in
+  // buildGameHtml, and with no browserQueue the smoke-test gate is skipped, so
+  // publish runs offline.
+  async function seedCanvas2dSnapshot(
+    repo: InstanceType<typeof InMemoryProjectRepo>,
+    store: SnapshotStore,
+    ownerId: string,
+  ): Promise<{ id: string }> {
+    const proj = await repo.create({ ownerId, name: 'My Game', engine: 'canvas2d' });
+    const { manifestKey } = await store.write([
+      {
+        path: 'index.html',
+        bytes: Buffer.from(
+          '<!doctype html><html><head><meta charset="utf-8"></head><body><canvas id="game"></canvas></body></html>',
+          'utf8',
+        ),
+      },
+    ]);
+    await repo.setCurrentSnapshot(proj.id, 'snap-1', manifestKey);
+    return proj;
+  }
+
+  it('publish captures a thumbnail in-process when there is no browserQueue (no-Redis path, #thumbnail)', async () => {
+    const repo = new InMemoryProjectRepo();
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const proj = await seedCanvas2dSnapshot(repo, store, 'alice');
+    const publishRepo = new InMemoryPublishRepo();
+
+    // The capture is fired AFTER the 200 reply (fire-and-forget); resolve when it
+    // lands so the assertion doesn't race the response.
+    let resolveCaptured!: () => void;
+    const captured = new Promise<void>((r) => {
+      resolveCaptured = r;
+    });
+    const origSet = publishRepo.setThumbnailUrl.bind(publishRepo);
+    publishRepo.setThumbnailUrl = async (gid, url) => {
+      await origSet(gid, url);
+      resolveCaptured();
+    };
+
+    // A valid 1×1 PNG, base64.
+    const PNG_1x1 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    let capturedHtml: string | undefined;
+    const browserThumbnail = {
+      thumbnail: async (htmlContent: string) => {
+        capturedHtml = htmlContent;
+        return { pngBase64: PNG_1x1, width: 640, height: 360 };
+      },
+    };
+
+    const app = makeApp({ repo, store, publishRepo, browserThumbnail });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${proj.id}/publish`,
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(200);
+
+    await captured;
+    const published = await publishRepo.getByProject(proj.id);
+    expect(published?.thumbnailUrl).toMatch(/^\/v1\/blobs\/[a-f0-9]{16,}$/);
+    // It captured from the actual published bundle, not some other input.
+    expect(capturedHtml).toContain('<canvas');
+  });
+
+  it('publish stays 200 and leaves thumbnailUrl null when in-process capture returns null (non-blocking)', async () => {
+    const repo = new InMemoryProjectRepo();
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const proj = await seedCanvas2dSnapshot(repo, store, 'alice');
+    const publishRepo = new InMemoryPublishRepo();
+
+    let resolveCalled!: () => void;
+    const called = new Promise<void>((r) => {
+      resolveCalled = r;
+    });
+    const browserThumbnail = {
+      thumbnail: async () => {
+        resolveCalled();
+        return null;
+      },
+    };
+
+    const app = makeApp({ repo, store, publishRepo, browserThumbnail });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${proj.id}/publish`,
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(200);
+
+    await called; // the in-process fallback branch fired…
+    const published = await publishRepo.getByProject(proj.id);
+    expect(published?.thumbnailUrl ?? null).toBeNull(); // …but set no thumbnail.
   });
 });
 

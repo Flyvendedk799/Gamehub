@@ -299,6 +299,12 @@ export interface ServerDeps {
   /** Optional: browser-worker queue for thumbnail capture + runtime verification. */
   browserQueue?: BrowserJobQueue;
   /**
+   * Optional: in-process thumbnail capture for the no-Redis deployment (where
+   * there is no `browserQueue`). Used as a fallback so published games still get
+   * a gallery/social thumbnail. Best-effort — publish never blocks on it.
+   */
+  browserThumbnail?: { thumbnail(htmlContent: string): Promise<ThumbnailResult | null> };
+  /**
    * Optional: space-separated list of origins allowed to embed published games in iframes.
    * Defaults to '*' when not set. Set to your app origin(s) in production.
    * Example: "https://playforge.app https://staging.playforge.app"
@@ -2687,23 +2693,40 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       }
     }
 
-    // Async: thumbnail capture via browser-worker (best-effort, non-blocking).
+    // Async: thumbnail capture (best-effort, non-blocking). Prefer the dedicated
+    // browser-worker queue (Redis deploys); fall back to in-process Chromium so a
+    // no-Redis deploy still gets a real gameplay thumbnail. Either source yields a
+    // PNG that we store content-addressed and record on the published game.
+    const persistThumbnail = async (pngBase64: string | undefined): Promise<void> => {
+      if (!pngBase64 || !deps.store) return;
+      const pngBytes = Buffer.from(pngBase64, 'base64');
+      const thumbKey = await deps.store.putBlob(pngBytes);
+      // putBlob returns a "blobs/<sha256>" key; the /v1/blobs/:key route takes a
+      // single bare-hash segment, so strip the prefix for the URL.
+      const bareThumbKey = thumbKey.replace(/^blobs\//, '');
+      await deps.publishRepo?.setThumbnailUrl(publishedGame.id, `/v1/blobs/${bareThumbKey}`);
+      console.log(
+        `[publish] thumbnail captured for ${publishedGame.publishSlug} → ${bareThumbKey}`,
+      );
+    };
+
     if (deps.browserQueue) {
+      const browserQueue = deps.browserQueue;
       void (async () => {
         try {
-          const jobId = await deps.browserQueue!.enqueueThumbnail(html);
-          const result = await deps.browserQueue!.waitForResult<ThumbnailResult>(jobId, 20_000);
-          if (result?.pngBase64 && deps.store) {
-            const pngBytes = Buffer.from(result.pngBase64, 'base64');
-            const thumbKey = await deps.store.putBlob(pngBytes);
-            // putBlob returns a "blobs/<sha256>" key; the /v1/blobs/:key route
-            // takes a single bare-hash segment, so strip the prefix for the URL.
-            const bareThumbKey = thumbKey.replace(/^blobs\//, '');
-            await deps.publishRepo?.setThumbnailUrl(publishedGame.id, `/v1/blobs/${bareThumbKey}`);
-            console.log(
-              `[publish] thumbnail captured for ${publishedGame.publishSlug} → ${bareThumbKey}`,
-            );
-          }
+          const jobId = await browserQueue.enqueueThumbnail(html);
+          const result = await browserQueue.waitForResult<ThumbnailResult>(jobId, 20_000);
+          await persistThumbnail(result?.pngBase64);
+        } catch (err) {
+          console.warn(`[publish] thumbnail failed for ${publishedGame.publishSlug}:`, err);
+        }
+      })();
+    } else if (deps.browserThumbnail) {
+      const browserThumbnail = deps.browserThumbnail;
+      void (async () => {
+        try {
+          const result = await browserThumbnail.thumbnail(html);
+          await persistThumbnail(result?.pngBase64 ?? undefined);
         } catch (err) {
           console.warn(`[publish] thumbnail failed for ${publishedGame.publishSlug}:`, err);
         }
