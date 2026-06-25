@@ -8,6 +8,7 @@ import {
   type SnapshotEntry,
   describeApiError,
   generateGame,
+  getActiveRun,
   getChatHistory,
   getProject,
   getSnapshots,
@@ -163,6 +164,15 @@ export default function BuilderPage() {
       setHasError(false);
       setErrorMessage(undefined);
 
+      // Leave a `?runId=` breadcrumb so a page reload (common on mobile, where the
+      // OS unloads backgrounded tabs) can re-attach to this run directly. We only
+      // read searchParams on mount, so replaceState here causes no re-render.
+      if (typeof window !== 'undefined') {
+        const u = new URL(window.location.href);
+        u.searchParams.set('runId', runId);
+        window.history.replaceState(null, '', `${u.pathname}${u.search}`);
+      }
+
       const ctrl = streamRun(
         runId,
         (event) => {
@@ -237,11 +247,26 @@ export default function BuilderPage() {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: run once on mount — kicks off the initial stream and excludes initialRunId/startStream so it doesn't restart on re-render
   useEffect(() => {
+    let cancelled = false;
     if (initialRunId) {
       startStream(initialRunId);
+    } else if (projectId) {
+      // No `?runId` on this load (e.g. a mobile tab the OS reloaded to a clean
+      // URL): ask the server whether a run is still live for this project and
+      // re-attach. The SSE stream replays history, so live progress resumes.
+      void getActiveRun(projectId)
+        .then(({ run }) => {
+          if (cancelled || !run) return;
+          if (run.status === 'running' || run.status === 'queued' || run.status === 'paused') {
+            setCurrentRunId(run.id);
+            startStream(run.id);
+          }
+        })
+        .catch(() => {});
     }
 
     return () => {
+      cancelled = true;
       streamCtrlRef.current?.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

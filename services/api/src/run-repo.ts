@@ -68,6 +68,13 @@ export interface RunRepo {
   getPausedContinuation(
     projectId: string,
   ): Promise<{ continuation: unknown; snapshotManifestKey: string | null } | null>;
+  /**
+   * The project's most recent run, returned ONLY if it is still non-terminal
+   * (queued/running/paused) — so the web app can re-attach to a live run after a
+   * page reload. Returns null when the latest run is completed/failed/canceled
+   * (so a stale earlier paused run is never surfaced over a newer finished one).
+   */
+  getActiveByProject(projectId: string): Promise<Run | null>;
   /** Aggregate run stats for build-health dashboard. */
   getStats(): Promise<RunStats>;
   /** Persist the active-generation timing for a run (social-outro AI runtime). */
@@ -141,6 +148,19 @@ export class InMemoryRunRepo implements RunRepo {
       continuation: paused.continuation,
       snapshotManifestKey: paused.snapshotManifestKey ?? null,
     };
+  }
+
+  async getActiveByProject(projectId: string): Promise<Run | null> {
+    // The most recently created run for this project (Map preserves insertion =
+    // creation order, so the last match wins — robust to equal ISO timestamps).
+    let latest: Run | undefined;
+    for (const r of this.byId.values()) {
+      if (r.projectId === projectId) latest = r;
+    }
+    if (!latest) return null;
+    const active =
+      latest.status === 'queued' || latest.status === 'running' || latest.status === 'paused';
+    return active ? latest : null;
   }
 
   async getStats(): Promise<RunStats> {

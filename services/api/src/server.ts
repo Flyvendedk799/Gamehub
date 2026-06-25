@@ -2811,6 +2811,22 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     return reply.send({ published });
   });
 
+  // GET /v1/projects/:id/active-run — the project's current non-terminal run
+  // (running/queued/paused), or null. Lets the web app re-attach to a live run's
+  // SSE stream after a page reload (e.g. a mobile tab the OS unloaded), since the
+  // run id otherwise lives only in the page's in-memory state / the ?runId= URL.
+  app.get('/v1/projects/:id/active-run', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { id } = req.params as { id: string };
+    const project = await deps.repo.get(id);
+    if (!project || project.ownerId !== user.userId) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    const run = await deps.runRepo.getActiveByProject(id);
+    return reply.send({ run: run ? { id: run.id, status: run.status } : null });
+  });
+
   // GET /v1/projects/:id/social-outro — owner-only build-summary metrics for the
   // animated "social outro" share card (docs/SOCIAL_OUTRO_PLAN.md). Returns ONLY
   // aggregate counters (runtime/prompt-loops/tokens) + the public play link when

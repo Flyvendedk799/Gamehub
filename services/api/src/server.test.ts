@@ -1810,6 +1810,80 @@ describe('concurrent run cap', () => {
   });
 });
 
+describe('active run (GET /v1/projects/:id/active-run)', () => {
+  it('returns the running run for the project owner', async () => {
+    const repo = new InMemoryProjectRepo();
+    const proj = await repo.create({ ownerId: 'alice', name: 'G', engine: 'phaser' });
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: proj.id, userId: 'alice' });
+    await runRepo.updateStatus(run.id, 'running');
+    const app = makeApp({ repo, runRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${proj.id}/active-run`,
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ run: { id: run.id, status: 'running' } });
+  });
+
+  it('returns null when the latest run is terminal — ignoring an older paused run', async () => {
+    const repo = new InMemoryProjectRepo();
+    const proj = await repo.create({ ownerId: 'alice', name: 'G', engine: 'phaser' });
+    const runRepo = new InMemoryRunRepo();
+    const older = await runRepo.create({ projectId: proj.id, userId: 'alice' });
+    await runRepo.setPaused(older.id, { step: 1 });
+    const newer = await runRepo.create({ projectId: proj.id, userId: 'alice' });
+    await runRepo.updateStatus(newer.id, 'completed');
+    const app = makeApp({ repo, runRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${proj.id}/active-run`,
+      headers: AS_ALICE,
+    });
+    expect(res.json()).toEqual({ run: null });
+  });
+
+  it('returns the paused run when it is the latest (resume-on-reload)', async () => {
+    const repo = new InMemoryProjectRepo();
+    const proj = await repo.create({ ownerId: 'alice', name: 'G', engine: 'phaser' });
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: proj.id, userId: 'alice' });
+    await runRepo.setPaused(run.id, { step: 1 });
+    const app = makeApp({ repo, runRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${proj.id}/active-run`,
+      headers: AS_ALICE,
+    });
+    expect(res.json()).toEqual({ run: { id: run.id, status: 'paused' } });
+  });
+
+  it('404s for a non-owner', async () => {
+    const repo = new InMemoryProjectRepo();
+    const proj = await repo.create({ ownerId: 'alice', name: 'G', engine: 'phaser' });
+    const app = makeApp({ repo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${proj.id}/active-run`,
+      headers: AS_BOB,
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('returns null when the project has no runs', async () => {
+    const repo = new InMemoryProjectRepo();
+    const proj = await repo.create({ ownerId: 'alice', name: 'G', engine: 'phaser' });
+    const app = makeApp({ repo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${proj.id}/active-run`,
+      headers: AS_ALICE,
+    });
+    expect(res.json()).toEqual({ run: null });
+  });
+});
+
 describe('decideAffordability (pure)', () => {
   it('is affordable exactly at the run cost', () => {
     expect(decideAffordability(10, 10)).toEqual({ ok: true, balance: 10, required: 10 });

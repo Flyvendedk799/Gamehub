@@ -132,6 +132,19 @@ export async function getProject(id: string): Promise<GetProjectResponse> {
   return normalizeProjectResponse(response);
 }
 
+/**
+ * The project's current non-terminal run (running/queued/paused), or null. Used
+ * to re-attach the live SSE stream after a page reload — e.g. a mobile tab the
+ * OS unloaded to a clean URL — when the `?runId=` breadcrumb isn't present.
+ */
+export async function getActiveRun(
+  projectId: string,
+): Promise<{ run: { id: string; status: string } | null }> {
+  return apiFetch<{ run: { id: string; status: string } | null }>(
+    `/v1/projects/${projectId}/active-run`,
+  );
+}
+
 // ─── Social outro (Share card) ─────────────────────────────────────────────────
 
 /** Owner-only build metrics + share link that drive the 10s animated share card. */

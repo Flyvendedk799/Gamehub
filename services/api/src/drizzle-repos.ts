@@ -238,6 +238,21 @@ export class DrizzleRunRepo implements RunRepo {
     return { continuation: row.continuation, snapshotManifestKey: row.snapshotManifestKey ?? null };
   }
 
+  async getActiveByProject(projectId: string): Promise<Run | null> {
+    // The project's most recent run, returned only if it is still non-terminal —
+    // so a project whose latest run finished returns null, never a stale earlier
+    // paused run. Lets the web app re-attach to a live run after a page reload.
+    const row = await this.db.query.runs.findFirst({
+      where: eq(schema.runs.projectId, projectId),
+      orderBy: [desc(schema.runs.createdAt)],
+    });
+    if (!row) return null;
+    const run = rowToRun(row);
+    return run.status === 'queued' || run.status === 'running' || run.status === 'paused'
+      ? run
+      : null;
+  }
+
   async getStats(): Promise<RunStats> {
     const [row] = await this.db
       .select({
