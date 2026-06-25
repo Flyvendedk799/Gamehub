@@ -232,7 +232,7 @@ export function PreviewPane({
                 type="button"
                 onClick={() => switchView('preview')}
                 aria-pressed={view === 'preview'}
-                className={`px-2.5 py-1 transition-colors ${
+                className={`px-3 py-2.5 text-xs md:px-2.5 md:py-1 md:text-[10px] transition-colors ${
                   view === 'preview'
                     ? 'bg-[#6366f1]/20 text-[#818cf8]'
                     : 'bg-[#1a1a1a] text-[#52525b] hover:text-[#a1a1aa]'
@@ -244,7 +244,7 @@ export function PreviewPane({
                 type="button"
                 onClick={() => switchView('controls')}
                 aria-pressed={view === 'controls'}
-                className={`px-2.5 py-1 border-l border-[#222222] transition-colors ${
+                className={`px-3 py-2.5 text-xs md:px-2.5 md:py-1 md:text-[10px] border-l border-[#222222] transition-colors ${
                   view === 'controls'
                     ? 'bg-[#6366f1]/20 text-[#818cf8]'
                     : 'bg-[#1a1a1a] text-[#52525b] hover:text-[#a1a1aa]'
@@ -256,7 +256,7 @@ export function PreviewPane({
                 type="button"
                 onClick={() => switchView('files')}
                 aria-pressed={view === 'files'}
-                className={`px-2.5 py-1 border-l border-[#222222] transition-colors ${
+                className={`px-3 py-2.5 text-xs md:px-2.5 md:py-1 md:text-[10px] border-l border-[#222222] transition-colors ${
                   view === 'files'
                     ? 'bg-[#6366f1]/20 text-[#818cf8]'
                     : 'bg-[#1a1a1a] text-[#52525b] hover:text-[#a1a1aa]'
@@ -273,7 +273,7 @@ export function PreviewPane({
               aria-pressed={showTweaks}
               aria-label="Toggle live tweaks panel"
               className={`
-                text-[10px] px-2 py-1 rounded border transition-colors font-mono
+                text-xs px-3 py-2.5 md:text-[10px] md:px-2 md:py-1 rounded border transition-colors font-mono
                 ${
                   showTweaks
                     ? 'bg-[#6366f1]/20 text-[#6366f1] border-[#6366f1]/40'
@@ -295,7 +295,7 @@ export function PreviewPane({
                   : 'Reload the preview'
               }
               className={`
-                relative text-[10px] px-2 py-1 rounded border transition-colors font-mono
+                relative text-xs px-3 py-2.5 md:text-[10px] md:px-2 md:py-1 rounded border transition-colors font-mono
                 ${
                   previewStale
                     ? 'bg-[#6366f1]/20 text-[#818cf8] border-[#6366f1]/40'
@@ -317,7 +317,7 @@ export function PreviewPane({
               href={previewUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-[10px] text-[#6366f1] hover:text-[#818cf8] transition-colors font-mono"
+              className="text-[10px] px-3 py-2.5 inline-flex md:px-0 md:py-0 text-[#6366f1] hover:text-[#818cf8] transition-colors font-mono"
             >
               open ↗
             </a>

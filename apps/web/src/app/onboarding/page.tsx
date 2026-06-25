@@ -112,7 +112,7 @@ function OnboardingForm() {
   const modelOptions = MODEL_OPTIONS[provider];
 
   return (
-    <main className="min-h-screen bg-[#0a0a0a] px-4 py-10">
+    <main className="min-h-dvh safe-bottom bg-[#0a0a0a] px-4 py-10">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
         <header className="flex items-center justify-between">
           <Link href="/" className="inline-flex items-center gap-2">
@@ -247,14 +247,14 @@ function OnboardingForm() {
           <div className="flex items-center justify-end gap-3">
             <Link
               href="/"
-              className="rounded-lg px-4 py-2.5 text-sm font-medium text-[#a1a1aa] hover:bg-[#161616] hover:text-[#f4f4f5]"
+              className="rounded-lg px-4 py-3 sm:py-2.5 text-sm font-medium text-[#a1a1aa] hover:bg-[#161616] hover:text-[#f4f4f5]"
             >
               Skip
             </Link>
             <button
               type="submit"
               disabled={disabled}
-              className="rounded-lg bg-[#6366f1] px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-indigo-500/20 transition-colors hover:bg-[#4f46e5] disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-lg bg-[#6366f1] px-5 py-3 sm:py-2.5 text-sm font-medium text-white shadow-lg shadow-indigo-500/20 transition-colors hover:bg-[#4f46e5] disabled:cursor-not-allowed disabled:opacity-40"
             >
               {status === 'saving' ? 'Saving...' : 'Continue'}
             </button>

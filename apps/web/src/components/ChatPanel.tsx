@@ -144,7 +144,7 @@ export function ChatPanel({
             onClick={handleSend}
             disabled={isStreaming || !input.trim()}
             className="
-              flex-shrink-0 px-3 md:px-4 py-2 md:py-2.5 rounded-xl
+              flex-shrink-0 px-3 md:px-4 py-2 md:py-2.5 min-h-11 md:min-h-0 rounded-xl
               bg-[#6366f1] hover:bg-[#4f46e5] active:bg-[#4338ca]
               text-white text-sm font-medium
               transition-colors duration-150
@@ -233,7 +233,7 @@ function EventRow({
               type="button"
               onClick={() => onFixError(event.error)}
               className="
-                inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg
+                inline-flex items-center gap-1.5 text-sm px-4 py-2.5 md:text-xs md:px-3 md:py-1.5 rounded-lg
                 bg-[#ef4444]/10 hover:bg-[#ef4444]/20
                 text-[#f87171] border border-[#ef4444]/20
                 transition-colors font-medium
@@ -264,7 +264,7 @@ function EventRow({
               type="button"
               onClick={() => onResume()}
               className="
-                inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg
+                inline-flex items-center gap-1.5 text-sm px-4 py-2.5 md:text-xs md:px-3 md:py-1.5 rounded-lg
                 bg-[#6366f1]/10 hover:bg-[#6366f1]/20
                 text-[#818cf8] border border-[#6366f1]/20
                 transition-colors font-medium
@@ -477,7 +477,7 @@ function AskQuestionCard({
             type="button"
             onClick={submit}
             disabled={!answer.trim()}
-            className="flex-shrink-0 px-3 py-2 rounded-lg bg-[#f59e0b] hover:bg-[#d97706] text-[#1a1a1a] text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex-shrink-0 px-3 py-2 min-h-11 md:min-h-0 rounded-lg bg-[#f59e0b] hover:bg-[#d97706] text-[#1a1a1a] text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Send
           </button>

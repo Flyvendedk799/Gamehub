@@ -100,7 +100,7 @@ export default function AdminDashboard() {
   const hub = metrics?.hub;
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-[#f4f4f5] p-6 max-w-4xl mx-auto">
+    <div className="min-h-dvh bg-[#0a0a0a] text-[#f4f4f5] p-6 max-w-4xl mx-auto">
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-xl font-bold">Build Health Dashboard</h1>
@@ -125,13 +125,13 @@ export default function AdminDashboard() {
             if (e.key === 'Enter') void fetchMetrics(token);
           }}
           placeholder="Admin token (leave blank if none configured)"
-          className="flex-1 bg-[#111111] border border-[#222222] rounded-lg px-4 py-2 text-sm text-[#f4f4f5] placeholder-[#3f3f46] outline-none focus:border-[#6366f1] transition-colors"
+          className="flex-1 bg-[#111111] border border-[#222222] rounded-lg px-4 py-3 text-sm text-[#f4f4f5] placeholder-[#3f3f46] outline-none focus:border-[#6366f1] transition-colors"
         />
         <button
           type="button"
           onClick={() => void fetchMetrics(token)}
           disabled={loading}
-          className="px-4 py-2 rounded-lg bg-[#6366f1] hover:bg-[#4f46e5] text-white text-sm font-medium transition-colors disabled:opacity-50"
+          className="px-4 py-3 rounded-lg bg-[#6366f1] hover:bg-[#4f46e5] text-white text-sm font-medium transition-colors disabled:opacity-50"
         >
           {loading ? 'Loading…' : 'Fetch'}
         </button>

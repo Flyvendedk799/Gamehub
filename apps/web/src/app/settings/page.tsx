@@ -154,7 +154,7 @@ export default function SettingsPage() {
   const disabled = loading || savingProfile || savingProvider;
 
   return (
-    <main className="min-h-screen bg-[#0a0a0a] px-4 py-10">
+    <main className="min-h-dvh bg-[#0a0a0a] px-4 py-10">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
@@ -164,7 +164,7 @@ export default function SettingsPage() {
           {settings && (
             <Link
               href={`/u/${settings.user.handle}`}
-              className="rounded-lg border border-[#222222] px-4 py-2 text-sm text-[#a1a1aa] hover:border-[#6366f1] hover:text-[#f4f4f5]"
+              className="rounded-lg border border-[#222222] px-4 py-3 text-sm text-[#a1a1aa] hover:border-[#6366f1] hover:text-[#f4f4f5]"
             >
               View public profile
             </Link>
@@ -243,7 +243,7 @@ export default function SettingsPage() {
                 <button
                   type="submit"
                   disabled={disabled || displayName.trim().length === 0}
-                  className="rounded-lg bg-[#6366f1] px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-indigo-500/20 transition-colors hover:bg-[#4f46e5] disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-lg bg-[#6366f1] px-5 py-3 text-sm font-medium text-white shadow-lg shadow-indigo-500/20 transition-colors hover:bg-[#4f46e5] disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {savingProfile ? 'Saving...' : 'Save profile'}
                 </button>
@@ -408,7 +408,7 @@ export default function SettingsPage() {
                     type="button"
                     onClick={() => removeKey(provider as 'anthropic' | 'openai')}
                     disabled={disabled}
-                    className="rounded-lg px-4 py-2.5 text-sm font-medium text-[#f87171] hover:bg-[#ef4444]/10 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="rounded-lg px-4 py-3 text-sm font-medium text-[#f87171] hover:bg-[#ef4444]/10 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     Remove key
                   </button>
@@ -418,7 +418,7 @@ export default function SettingsPage() {
                 <button
                   type="submit"
                   disabled={disabled}
-                  className="rounded-lg bg-[#6366f1] px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-indigo-500/20 transition-colors hover:bg-[#4f46e5] disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-lg bg-[#6366f1] px-5 py-3 text-sm font-medium text-white shadow-lg shadow-indigo-500/20 transition-colors hover:bg-[#4f46e5] disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {savingProvider ? 'Saving...' : 'Save provider'}
                 </button>
@@ -485,7 +485,7 @@ function SubscriptionConnect({
             type="button"
             disabled={busy || disabled}
             onClick={() => run('connect')}
-            className="rounded-lg bg-[#6366f1] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#4f46e5] disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-lg bg-[#6366f1] px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-[#4f46e5] disabled:cursor-not-allowed disabled:opacity-40"
           >
             {busy ? 'Connecting…' : 'Connect'}
           </button>
@@ -496,7 +496,7 @@ function SubscriptionConnect({
               type="button"
               disabled={busy || disabled}
               onClick={() => run('reauth')}
-              className="rounded-lg border border-[#6366f1]/40 bg-[#6366f1]/10 px-4 py-2 text-sm font-medium text-[#818cf8] transition-colors hover:bg-[#6366f1]/20 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-lg border border-[#6366f1]/40 bg-[#6366f1]/10 px-4 py-3 text-sm font-medium text-[#818cf8] transition-colors hover:bg-[#6366f1]/20 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {busy ? 'Re-authing…' : 'Re-auth'}
             </button>
@@ -504,7 +504,7 @@ function SubscriptionConnect({
               type="button"
               disabled={busy || disabled}
               onClick={() => run('disconnect')}
-              className="rounded-lg border border-[#222222] px-4 py-2 text-sm text-[#a1a1aa] transition-colors hover:bg-[#1a1a1a] disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-lg border border-[#222222] px-4 py-3 text-sm text-[#a1a1aa] transition-colors hover:bg-[#1a1a1a] disabled:cursor-not-allowed disabled:opacity-40"
             >
               Disconnect
             </button>

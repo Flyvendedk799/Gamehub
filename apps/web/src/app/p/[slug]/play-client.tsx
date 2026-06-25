@@ -217,9 +217,9 @@ export default function PlayClient({
   const displayStar = hoveredStar > 0 ? hoveredStar : selectedStar;
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#0a0a0a]">
+    <div className="flex flex-col min-h-dvh bg-[#0a0a0a]">
       {/* Top bar */}
-      <header className="flex-shrink-0 h-12 border-b border-[#222222] bg-[#111111] flex items-center px-4 gap-4 z-10">
+      <header className="safe-top flex-shrink-0 h-12 border-b border-[#222222] bg-[#111111] flex items-center px-4 gap-4 z-10">
         <Link href="/" className="flex items-center gap-2 group flex-shrink-0">
           <BrandMark size={24} />
           <Wordmark className="text-xs font-semibold text-[#f4f4f5] hidden sm:block group-hover:text-[#6366f1] transition-colors" />
@@ -238,13 +238,13 @@ export default function PlayClient({
             href={gameUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-xs px-3 py-1.5 rounded-lg bg-[#6366f1]/10 hover:bg-[#6366f1]/20 text-[#6366f1] border border-[#6366f1]/20 transition-colors font-medium"
+            className="text-sm px-4 py-2.5 rounded-lg bg-[#6366f1]/10 hover:bg-[#6366f1]/20 text-[#6366f1] border border-[#6366f1]/20 transition-colors font-medium"
           >
             Full screen ↗
           </a>
           <Link
             href="/"
-            className="text-xs px-3 py-1.5 rounded-lg bg-[#1a1a1a] hover:bg-[#222222] text-[#a1a1aa] border border-[#2a2a2a] transition-colors font-medium"
+            className="text-sm px-4 py-2.5 rounded-lg bg-[#1a1a1a] hover:bg-[#222222] text-[#a1a1aa] border border-[#2a2a2a] transition-colors font-medium"
           >
             Make your own
           </Link>
@@ -252,7 +252,7 @@ export default function PlayClient({
       </header>
 
       {/* Game iframe */}
-      <div className="w-full h-[60vh] relative">
+      <div className="w-full h-[60dvh] relative">
         <iframe
           ref={iframeRef}
           src={gameUrl}
@@ -300,7 +300,7 @@ export default function PlayClient({
             void handleLike();
           }}
           disabled={liking}
-          className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors font-medium disabled:opacity-50 ${
+          className={`flex items-center gap-1.5 text-sm px-4 py-2.5 rounded-lg border transition-colors font-medium disabled:opacity-50 ${
             liked
               ? 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20'
               : 'bg-[#1a1a1a] text-[#71717a] border-[#2a2a2a] hover:text-[#f4f4f5] hover:border-[#333333]'
@@ -323,7 +323,7 @@ export default function PlayClient({
                 onMouseEnter={() => setHoveredStar(star)}
                 onMouseLeave={() => setHoveredStar(0)}
                 disabled={rating}
-                className="text-lg leading-none transition-colors disabled:opacity-50"
+                className="text-lg px-2 py-2 leading-none transition-colors disabled:opacity-50"
                 style={{ color: star <= displayStar ? '#f59e0b' : '#3f3f46' }}
                 aria-label={`Rate ${star} star${star === 1 ? '' : 's'}`}
               >
@@ -347,7 +347,7 @@ export default function PlayClient({
             void handleRemix();
           }}
           disabled={remixing}
-          className="text-xs px-3 py-1.5 rounded-lg bg-[#6366f1]/10 hover:bg-[#6366f1]/20 text-[#6366f1] border border-[#6366f1]/20 transition-colors font-medium disabled:opacity-50"
+          className="text-sm px-4 py-2.5 rounded-lg bg-[#6366f1]/10 hover:bg-[#6366f1]/20 text-[#6366f1] border border-[#6366f1]/20 transition-colors font-medium disabled:opacity-50"
         >
           {remixing ? 'Remixing…' : 'Remix'}
         </button>
@@ -359,7 +359,7 @@ export default function PlayClient({
             void handleReport();
           }}
           disabled={reported}
-          className="text-xs px-3 py-1.5 rounded-lg bg-[#1a1a1a] hover:bg-[#222222] text-[#52525b] hover:text-[#71717a] border border-[#2a2a2a] transition-colors font-medium disabled:opacity-50"
+          className="text-sm px-4 py-2.5 rounded-lg bg-[#1a1a1a] hover:bg-[#222222] text-[#52525b] hover:text-[#71717a] border border-[#2a2a2a] transition-colors font-medium disabled:opacity-50"
         >
           {reported ? 'Reported' : 'Report'}
         </button>

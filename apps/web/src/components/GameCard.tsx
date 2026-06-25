@@ -64,7 +64,7 @@ export function GameCard({
 
         {/* Genre badge overlaid on the thumbnail */}
         {game.genre && (
-          <span className="absolute top-2 left-2 text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded-md bg-black/50 backdrop-blur-sm text-[#e4e4e7] border border-white/10">
+          <span className="absolute top-2 left-2 text-xs md:text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded-md bg-black/50 backdrop-blur-sm text-[#e4e4e7] border border-white/10">
             {game.genre.replace(/_/g, ' ')}
           </span>
         )}
@@ -72,10 +72,10 @@ export function GameCard({
 
       {/* Body */}
       <div className="p-4">
-        <h2 className="text-sm font-semibold text-[#f4f4f5] truncate group-hover:text-[#6366f1] transition-colors">
+        <h2 className="text-xs sm:text-sm font-semibold text-[#f4f4f5] truncate group-hover:text-[#6366f1] transition-colors">
           {game.title}
         </h2>
-        <p className="text-xs text-[#52525b] mt-1.5">
+        <p className="text-[10px] sm:text-xs text-[#52525b] mt-1.5">
           {game.playCount !== undefined ? (
             <>
               {game.playCount.toLocaleString()} {game.playCount === 1 ? 'play' : 'plays'}
@@ -104,7 +104,7 @@ export function GameCard({
                   e.stopPropagation();
                   onTagClick(t);
                 }}
-                className="text-[10px] px-2 py-0.5 rounded-full bg-[#1a1a1a] text-[#71717a] border border-[#222222] hover:text-[#6366f1] hover:border-[#6366f1]/40 transition-colors"
+                className="text-xs px-3 py-1.5 md:text-[10px] md:px-2 md:py-0.5 rounded-full bg-[#1a1a1a] text-[#71717a] border border-[#222222] hover:text-[#6366f1] hover:border-[#6366f1]/40 transition-colors"
               >
                 #{t}
               </button>

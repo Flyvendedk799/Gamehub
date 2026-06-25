@@ -76,7 +76,7 @@ function LoginForm() {
       <button
         type="submit"
         disabled={status === 'loading'}
-        className="w-full py-3 rounded-xl bg-[#6366f1] hover:bg-[#4f46e5] active:bg-[#4338ca] text-white font-medium text-sm transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-indigo-500/20"
+        className="w-full py-4 rounded-xl bg-[#6366f1] hover:bg-[#4f46e5] active:bg-[#4338ca] text-white font-medium text-sm transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-indigo-500/20"
       >
         {status === 'loading' ? 'Signing in…' : 'Sign in'}
       </button>
@@ -86,7 +86,7 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center px-4 bg-[#0a0a0a]">
+    <main className="flex min-h-dvh flex-col items-center justify-center px-4 bg-[#0a0a0a] safe-top safe-bottom">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 mb-6 group">
@@ -107,7 +107,7 @@ export default function LoginPage() {
           Don&apos;t have an account?{' '}
           <Link
             href="/auth/register"
-            className="text-[#6366f1] hover:text-[#818cf8] transition-colors"
+            className="inline-block py-2 px-3 text-[#6366f1] hover:text-[#818cf8] transition-colors"
           >
             Sign up
           </Link>

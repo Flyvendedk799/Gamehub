@@ -52,6 +52,10 @@ export default function BuilderPage() {
   const [showTimeline, setShowTimeline] = useState(false);
   const [isReverting, setIsReverting] = useState<string | null>(null);
   const [currentTweakSchema, setCurrentTweakSchema] = useState<TweakSchema | null>(null);
+  // Mobile-only: which full-height panel is showing (md+ shows both side-by-side),
+  // and the header action overflow menu (md+ shows the buttons inline).
+  const [mobileTab, setMobileTab] = useState<'build' | 'play'>('build');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // ─── Social outro (Share card) ─────────────────────────────────────────────
   const [showSocialOutro, setShowSocialOutro] = useState(false);
@@ -162,6 +166,8 @@ export default function BuilderPage() {
             setIsStreaming(false);
             streamCtrlRef.current?.close();
             refreshSnapshots();
+            // On mobile, reveal the finished game (desktop shows both already).
+            setMobileTab('play');
           }
 
           if (event.type === 'run_error') {
@@ -365,9 +371,9 @@ export default function BuilderPage() {
   const isBuilding = isStreaming;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-3rem)] bg-[#0a0a0a] overflow-hidden">
+    <div className="flex flex-col h-[100dvh] bg-[#0a0a0a] overflow-hidden">
       {/* Top nav bar */}
-      <header className="flex-shrink-0 h-12 border-b border-[#222222] bg-[#111111] flex items-center px-4 gap-3 z-10">
+      <header className="flex-shrink-0 h-12 border-b border-[#222222] bg-[#111111] flex items-center px-4 gap-3 z-10 safe-top">
         <Link href="/" className="flex items-center gap-2 group flex-shrink-0">
           <BrandMark size={24} />
           <Wordmark className="text-xs text-[#f4f4f5] hidden sm:block" />
@@ -383,18 +389,21 @@ export default function BuilderPage() {
           )}
         </div>
 
-        <div className="flex items-center gap-2 md:gap-3 flex-shrink-0">
-          {reconnecting ? (
-            <output className="flex items-center gap-1.5 text-xs text-[#f59e0b] font-mono">
-              <PulseRing color="#f59e0b" />
-              <span className="hidden sm:inline">reconnecting</span>
-            </output>
-          ) : isBuilding ? (
-            <output className="flex items-center gap-1.5 text-xs text-[#6366f1] font-mono">
-              <PulseRing />
-              <span className="hidden sm:inline">building</span>
-            </output>
-          ) : null}
+        {/* Status indicator stays visible on every width. */}
+        {reconnecting ? (
+          <output className="flex items-center gap-1.5 text-xs text-[#f59e0b] font-mono flex-shrink-0">
+            <PulseRing color="#f59e0b" />
+            <span className="hidden sm:inline">reconnecting</span>
+          </output>
+        ) : isBuilding ? (
+          <output className="flex items-center gap-1.5 text-xs text-[#6366f1] font-mono flex-shrink-0">
+            <PulseRing />
+            <span className="hidden sm:inline">building</span>
+          </output>
+        ) : null}
+
+        {/* Desktop action cluster — unchanged, just gated to md+. */}
+        <div className="hidden md:flex items-center gap-3 flex-shrink-0">
           {previewUrl && (
             <>
               {/* Full screen — icon-only on small screens */}
@@ -513,6 +522,110 @@ export default function BuilderPage() {
             All projects
           </Link>
         </div>
+
+        {/* Mobile action overflow — the desktop cluster's actions as 48px rows. */}
+        <div className="md:hidden relative flex-shrink-0">
+          <button
+            type="button"
+            aria-label="Actions"
+            aria-haspopup="menu"
+            aria-expanded={mobileMenuOpen}
+            onClick={() => setMobileMenuOpen((v) => !v)}
+            className="tap-target inline-flex items-center justify-center rounded-lg text-lg text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#1a1a1a] transition-colors"
+          >
+            ⋯
+          </button>
+          {mobileMenuOpen && (
+            <>
+              {/* Tap-away backdrop */}
+              <button
+                type="button"
+                aria-label="Close menu"
+                className="fixed inset-0 z-20"
+                onClick={() => setMobileMenuOpen(false)}
+              />
+              <div
+                role="menu"
+                className="absolute right-0 top-full mt-1 w-56 rounded-xl border border-[#222222] bg-[#111111] py-1 z-30 shadow-2xl"
+              >
+                {previewUrl && (
+                  <>
+                    <a
+                      href={previewUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="block w-full px-4 py-3 text-left text-sm text-[#f4f4f5] hover:bg-[#1a1a1a]"
+                    >
+                      Full screen ↗
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMobileMenuOpen(false);
+                        openSocialOutro();
+                      }}
+                      disabled={isStreaming}
+                      className="block w-full px-4 py-3 text-left text-sm text-[#46e6f0] hover:bg-[#1a1a1a] disabled:opacity-40"
+                    >
+                      Share ↗
+                    </button>
+                    <a
+                      href={`${BASE}/v1/projects/${projectId}/game.zip`}
+                      download
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="block w-full px-4 py-3 text-left text-sm text-[#a1a1aa] hover:bg-[#1a1a1a]"
+                    >
+                      Download ↓
+                    </a>
+                    {publishUrl ? (
+                      <a
+                        href={publishUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => setMobileMenuOpen(false)}
+                        className="block w-full px-4 py-3 text-left text-sm text-emerald-400 hover:bg-[#1a1a1a]"
+                      >
+                        Published ↗
+                      </a>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMobileMenuOpen(false);
+                          void handlePublish();
+                        }}
+                        disabled={isPublishing || isStreaming}
+                        className="block w-full px-4 py-3 text-left text-sm text-emerald-400 hover:bg-[#1a1a1a] disabled:opacity-40"
+                      >
+                        {isPublishing ? 'Publishing…' : 'Publish'}
+                      </button>
+                    )}
+                  </>
+                )}
+                {snapshots.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      setShowTimeline((v) => !v);
+                    }}
+                    className="block w-full px-4 py-3 text-left text-sm text-[#a1a1aa] hover:bg-[#1a1a1a]"
+                  >
+                    History ({snapshots.length})
+                  </button>
+                )}
+                <Link
+                  href="/projects"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="block w-full px-4 py-3 text-left text-sm text-[#a1a1aa] hover:bg-[#1a1a1a]"
+                >
+                  All projects
+                </Link>
+              </div>
+            </>
+          )}
+        </div>
       </header>
 
       {/* Load-error banner (#27) — replaces the prior silent catch */}
@@ -526,10 +639,14 @@ export default function BuilderPage() {
         </div>
       )}
 
-      {/* Main split */}
-      <div className="flex flex-col md:flex-row flex-1 overflow-hidden relative">
-        {/* Chat panel — full width on mobile (50vh), 35% sidebar on md+ */}
-        <div className="h-[50vh] md:h-auto w-full md:w-[35%] md:min-w-[280px] md:max-w-[480px] md:flex-shrink-0 overflow-hidden">
+      {/* Main split — on mobile, ONE full-height panel at a time (display-toggled
+          so both stay mounted: the game iframe never reloads on tab switch). On
+          md+, both render side-by-side exactly as before. */}
+      <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden relative">
+        {/* Build (chat) — full-height on mobile when active, 35% sidebar on md+ */}
+        <div
+          className={`${mobileTab === 'build' ? 'flex' : 'hidden'} md:flex flex-col flex-1 min-h-0 w-full md:flex-none md:w-[35%] md:min-w-[280px] md:max-w-[480px] md:h-auto overflow-hidden`}
+        >
           <ChatPanel
             events={events}
             onSend={(prompt) => {
@@ -546,8 +663,10 @@ export default function BuilderPage() {
           />
         </div>
 
-        {/* Preview pane — full width on mobile (50vh), flex-1 on md+ */}
-        <div className="h-[50vh] md:h-auto flex-1 overflow-hidden">
+        {/* Play (preview) — full-height on mobile when active, flex-1 on md+ */}
+        <div
+          className={`${mobileTab === 'play' ? 'flex' : 'hidden'} md:flex flex-col flex-1 min-h-0 md:h-auto overflow-hidden`}
+        >
           <PreviewPane
             previewUrl={previewUrl}
             isBuilding={isBuilding}
@@ -584,7 +703,7 @@ export default function BuilderPage() {
                 type="button"
                 onClick={() => setShowTimeline(false)}
                 aria-label="Close version history"
-                className="text-[#52525b] hover:text-[#a1a1aa] text-xs"
+                className="tap-target md:min-h-0 md:min-w-0 inline-flex items-center justify-center text-[#52525b] hover:text-[#a1a1aa] text-sm -mr-2"
               >
                 ✕
               </button>
@@ -631,11 +750,11 @@ export default function BuilderPage() {
                       }}
                       disabled={isReverting !== null || isStreaming}
                       className="
-                        text-[10px] px-2 py-1 rounded
+                        text-xs px-3 py-2 md:text-[10px] md:px-2 md:py-1 rounded
                         bg-[#6366f1]/10 hover:bg-[#6366f1]/20
                         text-[#6366f1] border border-[#6366f1]/20
                         transition-colors font-medium flex-shrink-0
-                        opacity-0 group-hover:opacity-100
+                        md:opacity-0 md:group-hover:opacity-100
                         disabled:opacity-30 disabled:cursor-not-allowed
                       "
                     >
@@ -648,6 +767,34 @@ export default function BuilderPage() {
           </div>
         )}
       </div>
+
+      {/* Mobile bottom tab bar — toggles the full-height Build / Play panels.
+          Owns the home-indicator inset for the whole builder (safe-bottom). */}
+      <nav className="md:hidden flex-shrink-0 grid grid-cols-2 border-t border-[#222222] bg-[#111111] safe-bottom">
+        <button
+          type="button"
+          onClick={() => setMobileTab('build')}
+          aria-pressed={mobileTab === 'build'}
+          className={`min-h-12 text-sm font-medium transition-colors ${
+            mobileTab === 'build' ? 'text-[#6366f1] bg-[#6366f1]/5' : 'text-[#71717a]'
+          }`}
+        >
+          Build
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileTab('play')}
+          aria-pressed={mobileTab === 'play'}
+          className={`relative min-h-12 text-sm font-medium transition-colors ${
+            mobileTab === 'play' ? 'text-[#6366f1] bg-[#6366f1]/5' : 'text-[#71717a]'
+          }`}
+        >
+          Play
+          {previewUrl && mobileTab !== 'play' && (
+            <span className="absolute top-2.5 right-[calc(50%-1.75rem)] w-1.5 h-1.5 rounded-full bg-[#6366f1] animate-pulse" />
+          )}
+        </button>
+      </nav>
 
       <SocialOutroModal
         open={showSocialOutro}

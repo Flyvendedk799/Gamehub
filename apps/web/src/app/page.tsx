@@ -97,7 +97,7 @@ export default function HomePage() {
 
   return (
     <main
-      className={`flex min-h-screen flex-col items-center px-4 py-16 bg-[#0a0a0a] ${
+      className={`flex min-h-dvh flex-col items-center px-4 py-16 bg-[#0a0a0a] ${
         authed ? '' : 'justify-center'
       }`}
     >
@@ -146,12 +146,12 @@ export default function HomePage() {
             className="w-full bg-transparent px-5 pt-5 pb-2 text-[#f4f4f5] placeholder-[#52525b] text-base resize-none outline-none disabled:opacity-50"
           />
           <div className="flex items-center justify-between px-5 pb-4 pt-2">
-            <span className="text-xs text-[#52525b]">⌘ + Enter to submit</span>
+            <span className="hidden sm:inline text-xs text-[#52525b]">⌘ + Enter to submit</span>
             <button
               type="submit"
               disabled={isLoading || !prompt.trim()}
               className="
-                inline-flex items-center gap-2 px-5 py-2.5 rounded-xl
+                inline-flex items-center gap-2 px-5 py-3 sm:py-2.5 rounded-xl
                 bg-[#6366f1] hover:bg-[#4f46e5] active:bg-[#4338ca]
                 text-white font-medium text-sm
                 transition-all duration-150

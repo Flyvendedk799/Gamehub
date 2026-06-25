@@ -98,7 +98,7 @@ export default function HubPage() {
   const genreChips = useMemo(() => knownGenres, [knownGenres]);
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#0a0a0a]">
+    <div className="flex flex-col min-h-dvh bg-[#0a0a0a]">
       {/* Main content */}
       <main className="flex-1 px-4 sm:px-6 lg:px-8 py-8 max-w-7xl mx-auto w-full">
         {/* Page heading + sort controls */}
@@ -117,7 +117,7 @@ export default function HubPage() {
                 type="button"
                 onClick={() => setSort(s.id)}
                 disabled={isSearching}
-                className={`text-xs px-3 py-1.5 rounded-md transition-colors font-medium disabled:opacity-40 ${
+                className={`text-sm px-4 py-2.5 md:text-xs md:px-3 md:py-1.5 rounded-md transition-colors font-medium disabled:opacity-40 ${
                   sort === s.id ? 'bg-[#6366f1] text-white' : 'text-[#71717a] hover:text-[#f4f4f5]'
                 }`}
               >
@@ -156,7 +156,7 @@ export default function HubPage() {
               type="button"
               onClick={() => setQuery('')}
               aria-label="Clear search"
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-[#52525b] hover:text-[#a1a1aa] text-sm"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-[#52525b] hover:text-[#a1a1aa] text-sm tap-target inline-flex items-center justify-center md:min-h-0 md:min-w-0"
             >
               ✕
             </button>
@@ -170,7 +170,7 @@ export default function HubPage() {
             <button
               type="button"
               onClick={() => setGenre('')}
-              className={`text-xs px-3 py-1.5 rounded-full border transition-colors font-medium ${
+              className={`text-sm px-4 py-2.5 md:text-xs md:px-3 md:py-1.5 rounded-full border transition-colors font-medium ${
                 genre === ''
                   ? 'bg-[#6366f1] text-white border-[#6366f1]'
                   : 'bg-[#111111] text-[#71717a] border-[#222222] hover:text-[#f4f4f5] hover:border-[#333333]'
@@ -183,7 +183,7 @@ export default function HubPage() {
                 key={g}
                 type="button"
                 onClick={() => setGenre(genre === g ? '' : g)}
-                className={`text-xs px-3 py-1.5 rounded-full border transition-colors font-medium ${
+                className={`text-sm px-4 py-2.5 md:text-xs md:px-3 md:py-1.5 rounded-full border transition-colors font-medium ${
                   genre === g
                     ? 'bg-[#6366f1] text-white border-[#6366f1]'
                     : 'bg-[#111111] text-[#71717a] border-[#222222] hover:text-[#f4f4f5] hover:border-[#333333]'
@@ -198,10 +198,13 @@ export default function HubPage() {
               <button
                 type="button"
                 onClick={() => setTag('')}
-                className="text-xs px-3 py-1.5 rounded-full border bg-[#6366f1]/10 text-[#6366f1] border-[#6366f1]/30 font-medium inline-flex items-center gap-1.5"
+                className="text-sm px-4 py-2.5 md:text-xs md:px-3 md:py-1.5 rounded-full border bg-[#6366f1]/10 text-[#6366f1] border-[#6366f1]/30 font-medium inline-flex items-center gap-1.5"
                 aria-label={`Remove tag filter ${tag}`}
               >
-                #{tag} <span className="text-[#6366f1]/70">✕</span>
+                #{tag}{' '}
+                <span className="text-[#6366f1]/70 tap-target inline-flex items-center justify-center md:min-h-0 md:min-w-0">
+                  ✕
+                </span>
               </button>
             )}
           </div>

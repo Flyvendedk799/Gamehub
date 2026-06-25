@@ -33,6 +33,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
 
   // Close the mobile drawer on any route change.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is the trigger — re-run on navigation to close the drawer, even though it's not read in the body.
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
@@ -42,7 +43,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-dvh">
       <Sidebar open={open} onNavigate={() => setOpen(false)} />
 
       {/* Mobile drawer backdrop */}
@@ -57,12 +58,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       <div className="flex flex-1 min-w-0 flex-col">
         {/* Mobile top bar — hamburger + brand (the sidebar carries it on desktop) */}
-        <header className="md:hidden sticky top-0 z-30 flex items-center gap-3 h-14 px-4 border-b border-[#1a1a1a] bg-[#0a0a0a]/90 backdrop-blur">
+        <header className="md:hidden safe-top sticky top-0 z-30 flex items-center gap-3 h-14 px-4 border-b border-[#1a1a1a] bg-[#0a0a0a]/90 backdrop-blur">
           <button
             type="button"
             aria-label="Open menu"
             onClick={() => setOpen(true)}
-            className="p-2 -ml-2 text-[#a1a1aa] hover:text-[#f4f4f5] rounded-lg hover:bg-[#161616] transition-all"
+            className="p-3 -ml-3 tap-target inline-flex items-center justify-center text-[#a1a1aa] hover:text-[#f4f4f5] rounded-lg hover:bg-[#161616] transition-all"
           >
             <svg
               className="w-5 h-5"

@@ -149,7 +149,7 @@ export function FilesPanel({
         <button
           type="button"
           onClick={() => setTreeOpen(true)}
-          className="md:hidden flex-shrink-0 px-3 py-2 text-left text-[11px] font-mono text-[#818cf8] border-b border-[#222222] bg-[#0f0f0f]"
+          className="md:hidden flex-shrink-0 px-4 py-3 text-left text-xs md:py-2 font-mono text-[#818cf8] border-b border-[#222222] bg-[#0f0f0f]"
         >
           Files ▸
         </button>
@@ -294,7 +294,7 @@ function TreeNode({ node, depth, selectedPath, onSelect }: TreeNodeProps) {
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
           style={indent}
-          className="w-full flex items-center gap-1.5 pr-2 py-1 text-left text-[12px] text-[#a1a1aa] hover:bg-[#161616] transition-colors"
+          className="w-full flex items-center gap-1.5 pr-2 py-2.5 px-3 md:py-1 text-left text-[12px] text-[#a1a1aa] hover:bg-[#161616] transition-colors"
         >
           <span className="text-[#52525b] w-2.5 inline-block">{open ? '▾' : '▸'}</span>
           <span className="text-[#6b7280]">📁</span>
@@ -324,7 +324,7 @@ function TreeNode({ node, depth, selectedPath, onSelect }: TreeNodeProps) {
       onClick={() => onSelect(node.path)}
       style={indent}
       aria-pressed={selected}
-      className={`w-full flex items-center gap-1.5 pr-2 py-1 text-left text-[12px] transition-colors ${
+      className={`w-full flex items-center gap-1.5 pr-2 py-2.5 px-3 md:py-1 text-left text-[12px] transition-colors ${
         selected
           ? 'bg-[#1a1a1a] text-[#818cf8]'
           : 'text-[#a1a1aa] hover:bg-[#161616] hover:text-[#d4d4d8]'
@@ -395,7 +395,7 @@ function DownloadZipButton({ projectId }: { projectId: string }) {
         type="button"
         onClick={() => void download()}
         disabled={downloading}
-        className="w-full text-[11px] px-3 py-2 rounded-lg bg-[#1a1a1a] hover:bg-[#222222] text-[#a1a1aa] border border-[#222222] transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+        className="w-full text-xs px-3 py-2.5 md:text-[11px] md:py-2 rounded-lg bg-[#1a1a1a] hover:bg-[#222222] text-[#a1a1aa] border border-[#222222] transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
       >
         {downloading ? 'Preparing…' : 'Download your game (.zip)'}
         {!downloading && <span aria-hidden="true">↓</span>}
@@ -579,7 +579,7 @@ function FileViewer({ projectId, entry, onSaved, isBuilding, onDirtyChange }: Fi
             <button
               type="button"
               onClick={() => void navigator.clipboard?.writeText(load.data.content ?? '')}
-              className="text-[10px] px-2 py-1 rounded border border-[#222222] bg-[#1a1a1a] text-[#a1a1aa] hover:text-[#f4f4f5] transition-colors font-mono"
+              className="text-xs px-3 py-2.5 md:text-[10px] md:px-2 md:py-1 rounded border border-[#222222] bg-[#1a1a1a] text-[#a1a1aa] hover:text-[#f4f4f5] transition-colors font-mono"
             >
               Copy
             </button>
@@ -595,14 +595,14 @@ function FileViewer({ projectId, entry, onSaved, isBuilding, onDirtyChange }: Fi
                   onClick={() => void save()}
                   disabled={!dirty || saving || isBuilding}
                   title={isBuilding ? 'Saving is paused while your game is building' : undefined}
-                  className="text-[10px] px-2.5 py-1 rounded bg-[#6366f1] text-white hover:bg-[#4f46e5] transition-colors font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="text-xs px-3 py-2.5 md:text-[10px] md:px-2.5 md:py-1 rounded bg-[#6366f1] text-white hover:bg-[#4f46e5] transition-colors font-medium disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {saving ? 'Saving…' : 'Save'}
                 </button>
                 <button
                   type="button"
                   onClick={guardedExitEdit}
-                  className="text-[10px] px-2 py-1 rounded border border-[#222222] bg-[#1a1a1a] text-[#a1a1aa] hover:text-[#f4f4f5] transition-colors"
+                  className="text-xs px-3 py-2.5 md:text-[10px] md:px-2 md:py-1 rounded border border-[#222222] bg-[#1a1a1a] text-[#a1a1aa] hover:text-[#f4f4f5] transition-colors"
                 >
                   Cancel
                 </button>
@@ -613,7 +613,7 @@ function FileViewer({ projectId, entry, onSaved, isBuilding, onDirtyChange }: Fi
                 onClick={() => setEditing(true)}
                 disabled={isBuilding}
                 title={isBuilding ? 'Editing is paused while your game is building' : undefined}
-                className="text-[10px] px-2.5 py-1 rounded border border-[#6366f1]/30 text-[#818cf8] hover:bg-[#6366f1]/10 transition-colors font-mono disabled:opacity-40 disabled:cursor-not-allowed"
+                className="text-xs px-3 py-2.5 md:text-[10px] md:px-2.5 md:py-1 rounded border border-[#6366f1]/30 text-[#818cf8] hover:bg-[#6366f1]/10 transition-colors font-mono disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Edit
               </button>
@@ -890,7 +890,7 @@ function DownloadFileButton({
       type="button"
       onClick={download}
       disabled={disabled}
-      className="text-[10px] px-2 py-1 rounded border border-[#222222] bg-[#1a1a1a] text-[#a1a1aa] hover:text-[#f4f4f5] transition-colors font-mono disabled:opacity-40 disabled:cursor-not-allowed"
+      className="text-xs px-3 py-2.5 md:text-[10px] md:px-2 md:py-1 rounded border border-[#222222] bg-[#1a1a1a] text-[#a1a1aa] hover:text-[#f4f4f5] transition-colors font-mono disabled:opacity-40 disabled:cursor-not-allowed"
     >
       Download
     </button>

@@ -21,13 +21,13 @@ export default function ProjectsPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a]">
+    <div className="min-h-dvh bg-[#0a0a0a]">
       <main className="max-w-5xl mx-auto px-6 py-10">
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
           <h1 className="text-2xl font-bold text-[#f4f4f5]">Your projects</h1>
           <Link
             href="/"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-lg transition-all"
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-3 text-base w-full sm:w-auto sm:px-3 sm:py-1.5 sm:text-sm bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-lg transition-all"
           >
             + New game
           </Link>

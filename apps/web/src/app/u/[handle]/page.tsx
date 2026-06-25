@@ -78,7 +78,7 @@ export default function CreatorProfilePage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a]">
+    <div className="min-h-dvh bg-[#0a0a0a]">
       <main className="max-w-5xl mx-auto px-6 py-10">
         {/* Loading skeleton */}
         {loading && (
@@ -114,7 +114,7 @@ export default function CreatorProfilePage() {
         {!loading && !error && (
           <>
             {/* Hero */}
-            <div className="mb-10 flex items-start justify-between gap-4 flex-wrap">
+            <div className="mb-10 flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:flex-wrap">
               <div className="flex items-start gap-4">
                 {profile?.avatarUrl ? (
                   <img
@@ -160,7 +160,7 @@ export default function CreatorProfilePage() {
                     void handleToggleFollow();
                   }}
                   disabled={followBusy}
-                  className={`text-xs px-4 py-2 rounded-lg border transition-colors font-medium disabled:opacity-50 ${
+                  className={`text-sm px-4 py-3 sm:text-xs sm:py-2 rounded-lg border transition-colors font-medium disabled:opacity-50 ${
                     following
                       ? 'bg-[#1a1a1a] text-[#a1a1aa] border-[#2a2a2a] hover:text-[#f4f4f5] hover:border-[#333333]'
                       : 'bg-[#6366f1] hover:bg-[#4f46e5] text-white border-transparent'

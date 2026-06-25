@@ -7,10 +7,50 @@ body {
   height: 100%;
   background-color: #0a0a0a;
   color: #f4f4f5;
+  /* Keep iOS from inflating text on rotate; cancel vertical rubber-band /
+     pull-to-refresh in this app-like UI (x kept so trackpad back-swipe works). */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  overscroll-behavior-y: none;
 }
 
 * {
   box-sizing: border-box;
+  /* No grey/blue tap flash against the dark theme. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Mobile foundations ────────────────────────────────────────────────────
+   Prevent iOS auto-zoom on input focus WITHOUT shipping user-scalable=no
+   (which fails WCAG 1.4.4). Scoped to < md (768px) + !important so it beats
+   Tailwind's text-xs/text-sm utilities on phones while desktop keeps its
+   14px inputs verbatim. */
+@media (max-width: 767px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* Safe-area inset helpers (need viewport-fit=cover, set in layout.tsx). */
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.safe-left {
+  padding-left: env(safe-area-inset-left);
+}
+.safe-right {
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Canonical >=44px touch target for any control that would otherwise be smaller. */
+.tap-target {
+  min-height: 44px;
+  min-width: 44px;
 }
 
 /* Thin scrollbar for panels */

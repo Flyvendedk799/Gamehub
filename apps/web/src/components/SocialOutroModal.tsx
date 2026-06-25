@@ -112,7 +112,7 @@ export function SocialOutroModal({
         aria-modal="true"
         aria-label="Share your game"
         tabIndex={-1}
-        className="w-full max-w-[600px] max-h-[90vh] overflow-y-auto scrollbar-thin rounded-2xl border border-[#242426] bg-[#121214] shadow-2xl outline-none"
+        className="w-full max-w-[600px] max-h-[90dvh] overflow-y-auto scrollbar-thin rounded-2xl border border-[#242426] bg-[#121214] shadow-2xl outline-none"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[#1f1f22]">
@@ -126,7 +126,7 @@ export function SocialOutroModal({
             type="button"
             onClick={onClose}
             aria-label="Close share dialog"
-            className="text-[#52525b] hover:text-[#a1a1aa] text-lg leading-none px-1"
+            className="text-[#52525b] hover:text-[#a1a1aa] text-lg leading-none tap-target inline-flex items-center justify-center md:min-h-0 md:min-w-0"
           >
             ✕
           </button>
@@ -165,7 +165,7 @@ export function SocialOutroModal({
                       type="button"
                       onClick={() => setFormat(val)}
                       aria-pressed={format === val}
-                      className={`px-3 py-1 transition-colors ${
+                      className={`px-4 py-2.5 md:px-3 md:py-1 transition-colors ${
                         format === val
                           ? 'bg-[#46e6f0]/15 text-[#46e6f0]'
                           : 'bg-[#1a1a1a] text-[#52525b] hover:text-[#a1a1aa]'
@@ -193,7 +193,7 @@ export function SocialOutroModal({
                 <button
                   type="button"
                   onClick={() => previewRef.current?.replay()}
-                  className="flex items-center gap-2 h-10 px-4 rounded-lg border border-[#2c2c2e] text-sm text-[#f4f5f7] hover:bg-[#1a1a1a] transition-colors"
+                  className="flex items-center gap-2 h-11 md:h-10 px-4 rounded-lg border border-[#2c2c2e] text-sm text-[#f4f5f7] hover:bg-[#1a1a1a] transition-colors"
                 >
                   <span aria-hidden="true">↻</span> Replay
                 </button>
@@ -221,7 +221,7 @@ export function SocialOutroModal({
                     <button
                       type="button"
                       onClick={copyLink}
-                      className={`text-xs px-3 py-2 rounded-lg border font-medium transition-colors ${
+                      className={`text-xs px-3 h-11 md:h-auto md:py-2 rounded-lg border font-medium transition-colors ${
                         copied
                           ? 'border-[#b6f24a] bg-[#b6f24a]/10 text-[#b6f24a]'
                           : 'border-[#242426] bg-[#1a1a1a] text-[#a1a1aa] hover:text-[#f4f5f7]'

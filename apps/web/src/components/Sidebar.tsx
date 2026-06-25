@@ -91,7 +91,7 @@ export default function Sidebar({
 
   return (
     <aside
-      className={`fixed inset-y-0 left-0 z-50 flex h-screen w-60 shrink-0 flex-col border-r border-[#1a1a1a] bg-[#0c0c0c] transition-transform duration-200 md:sticky md:top-0 md:z-40 md:translate-x-0 ${
+      className={`safe-top safe-left fixed inset-y-0 left-0 z-50 flex h-dvh w-60 shrink-0 flex-col border-r border-[#1a1a1a] bg-[#0c0c0c] transition-transform duration-200 md:sticky md:top-0 md:z-40 md:translate-x-0 ${
         open ? 'translate-x-0' : '-translate-x-full'
       }`}
     >

@@ -40,7 +40,7 @@ export default function ProjectCard({ project }: { project: Project }) {
           </h2>
           <p className="mt-1 text-xs text-[#52525b]">{created}</p>
         </div>
-        <span className="flex-shrink-0 text-[10px] font-mono uppercase tracking-widest px-2 py-1 rounded-md bg-[#1a1a1a] text-[#52525b] border border-[#222222]">
+        <span className="flex-shrink-0 text-xs md:text-[10px] font-mono uppercase tracking-widest px-2 py-1 rounded-md bg-[#1a1a1a] text-[#52525b] border border-[#222222]">
           {project.engine}
         </span>
       </div>

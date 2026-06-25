@@ -151,7 +151,7 @@ export function ControlsPanel({
           <button
             type="button"
             onClick={onMapWithAI}
-            className="rounded-lg bg-[#6366f1] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#4f46e5]"
+            className="rounded-lg bg-[#6366f1] px-4 py-2.5 md:py-2 text-sm font-medium text-white transition-colors hover:bg-[#4f46e5]"
           >
             Map controls with AI
           </button>
@@ -171,7 +171,7 @@ export function ControlsPanel({
         <button
           type="button"
           onClick={reset}
-          className="text-[11px] text-[#818cf8] hover:text-[#a5b4fc] transition-colors"
+          className="px-3 py-2 text-xs text-[#818cf8] hover:text-[#a5b4fc] transition-colors"
         >
           Reset to defaults
         </button>
@@ -199,7 +199,7 @@ export function ControlsPanel({
                 <button
                   type="button"
                   onClick={() => setCapturing(action.id)}
-                  className="flex-shrink-0 text-[11px] px-2.5 py-1 rounded-lg border border-[#6366f1]/30 text-[#818cf8] hover:bg-[#6366f1]/10 transition-colors"
+                  className="flex-shrink-0 text-xs px-3 py-2 md:text-[11px] md:py-1 rounded-lg border border-[#6366f1]/30 text-[#818cf8] hover:bg-[#6366f1]/10 transition-colors"
                 >
                   {capturing === action.id ? 'Press a key or click…' : '+ Add bind'}
                 </button>
@@ -223,7 +223,7 @@ export function ControlsPanel({
                       <button
                         type="button"
                         onClick={() => removeKey(action.id, code)}
-                        className="text-[#52525b] hover:text-[#ef4444] transition-colors"
+                        className="tap-target inline-flex items-center justify-center md:min-h-0 md:min-w-0 text-[#52525b] hover:text-[#ef4444] transition-colors"
                         aria-label={`Remove ${keyLabel(code)} from ${action.label}`}
                       >
                         ✕
