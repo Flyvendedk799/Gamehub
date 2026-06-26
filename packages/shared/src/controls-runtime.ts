@@ -53,16 +53,66 @@ export const CONTROLS_RUNTIME_SNIPPET = `<script data-pf="${CONTROLS_RUNTIME_MAR
   });
 })();</script>`;
 
+/** Marker for the end-of-body manifest bridge (separate from the head runtime). */
+export const CONTROLS_MANIFEST_BRIDGE_MARKER = 'pf-controls-manifest-bridge';
+
 /**
- * Insert the controls runtime right after `<head>` (so it runs before any body
- * script, i.e. the game module) — or prepend if there's no head. Idempotent.
+ * End-of-body manifest BRIDGE. Generated games routinely ship their OWN inline
+ * `window.__game.controls` shim (for standalone play) that does
+ * `controls.define = ({actions}) => {...}` — UNCONDITIONALLY overwriting the head
+ * runtime's `define`. That shim wires input (so the game plays) but never posts
+ * the controls manifest, so the builder's Controls panel stays empty even though
+ * the game declares controls. The head runtime's `define` (which DOES post) is
+ * clobbered.
+ *
+ * This bridge runs at the END of `<body>` — AFTER any such inline shim — and
+ * wraps whatever `controls.define` is current so it ALSO posts the manifest to
+ * the parent. A short poll re-wraps if `define` is reassigned later (e.g. a shim
+ * that runs inside the deferred game module), so the panel populates regardless
+ * of which runtime ends up active. Idempotent (the `__pfWrapped` flag) and ES5.
+ */
+export const CONTROLS_MANIFEST_BRIDGE_SNIPPET = `<script data-pf="${CONTROLS_MANIFEST_BRIDGE_MARKER}">(function(){
+  var MT=${JSON.stringify(MANIFEST_TYPE)},RT=${JSON.stringify(REQUEST_TYPE)};
+  function curActions(c){return (c&&((c.manifest&&c.manifest.actions)||c.actions))||[];}
+  function post(actions){try{var mf={actions:actions||[]};var c=window.__game&&window.__game.controls;if(c)c.manifest=mf;if(window.parent&&window.parent!==window)window.parent.postMessage({type:MT,manifest:mf},'*');}catch(e){}}
+  function wrap(){
+    var c=window.__game&&window.__game.controls;
+    if(!c||typeof c.define!=='function'||c.define.__pfWrapped)return;
+    var orig=c.define;
+    function wrapped(m){var r=orig.apply(this,arguments);post((m&&m.actions)||curActions(c));return r;}
+    wrapped.__pfWrapped=true;
+    c.define=wrapped;
+    var cur=curActions(c);if(cur.length)post(cur);
+  }
+  var iv=setInterval(wrap,100);setTimeout(function(){clearInterval(iv);},15000);wrap();
+  window.addEventListener('message',function(e){if(e&&e.data&&e.data.type===RT){post(curActions(window.__game&&window.__game.controls));}});
+})();</script>`;
+
+/**
+ * Inject the rebindable controls runtime + the manifest bridge:
+ *   - the head runtime right after `<head>` (runs before the game module), and
+ *   - the manifest bridge right before `</body>` (runs AFTER any game-bundled
+ *     controls shim, so the manifest still reaches the builder's Controls panel).
+ * Both are idempotent on their own markers.
  */
 export function injectControlsRuntime(html: string): string {
-  if (html.includes(CONTROLS_RUNTIME_MARKER)) return html;
-  const headOpen = /<head[^>]*>/i.exec(html);
-  if (headOpen?.index !== undefined) {
-    const at = headOpen.index + headOpen[0].length;
-    return `${html.slice(0, at)}\n${CONTROLS_RUNTIME_SNIPPET}${html.slice(at)}`;
+  let out = html;
+  if (!out.includes(CONTROLS_RUNTIME_MARKER)) {
+    const headOpen = /<head[^>]*>/i.exec(out);
+    if (headOpen?.index !== undefined) {
+      const at = headOpen.index + headOpen[0].length;
+      out = `${out.slice(0, at)}\n${CONTROLS_RUNTIME_SNIPPET}${out.slice(at)}`;
+    } else {
+      out = `${CONTROLS_RUNTIME_SNIPPET}\n${out}`;
+    }
   }
-  return `${CONTROLS_RUNTIME_SNIPPET}\n${html}`;
+  if (!out.includes(CONTROLS_MANIFEST_BRIDGE_MARKER)) {
+    const bodyClose = /<\/body\s*>/i.exec(out);
+    if (bodyClose?.index !== undefined) {
+      out = `${out.slice(0, bodyClose.index)}${CONTROLS_MANIFEST_BRIDGE_SNIPPET}\n${out.slice(bodyClose.index)}`;
+    } else {
+      out = `${out}\n${CONTROLS_MANIFEST_BRIDGE_SNIPPET}`;
+    }
+  }
+  return out;
 }
