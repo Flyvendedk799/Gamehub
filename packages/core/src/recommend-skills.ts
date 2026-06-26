@@ -122,6 +122,10 @@ export function recommendSkills(
   ];
   if (rhythmKeywords.some((kw) => mechanicsLower.some((m) => m.includes(kw)))) {
     push('rhythm-clock', "rhythm/beat mechanics need a precision clock — don't hand-roll timing");
+    push(
+      'beatmap-synth',
+      'generate a playable chart AND hear it — generateBeatmap() + a Web Audio chiptune, so the game is never silent (no audio file needed)',
+    );
     push('music-sync', 'lock timing to a REAL audio track (bpm/beatmap), not a synthetic clock');
   }
 
@@ -136,6 +140,10 @@ export function recommendSkills(
   const GENRE_SKILLS: Record<string, ReadonlyArray<readonly [string, string]>> = {
     rhythm: [
       ['rhythm-clock', 'rhythm games need a precision music clock + judgment windows'],
+      [
+        'beatmap-synth',
+        'generate a deterministic chart AND play it as a Web Audio chiptune — a self-sounding rhythm game with no track file (generateBeatmap + createBeatmapSynth: audioTime()/judge(lane))',
+      ],
       ['music-sync', 'sync to a real audio track so notes line up with the music'],
     ],
     tower_defense: [

@@ -30,7 +30,7 @@ A user typing a prompt expects a game they'd be proud to share, like a Lovable o
 - **Art direction** — a deliberate palette + a real display/body font (loaded in index.html). NEVER default canvas grey + system font.
 - **Screens** — Title → Play → Over flow. (A no-fail SANDBOX / zen / creative game COLLAPSES to a single `play` screen — do NOT bolt a "GAME OVER" onto a calm toy. Gate on the game's intent.)
 - **Juice + sound on by default** — `sfx()` and a particle/shake helper, CALLED on every meaningful event. A silent, static game reads as broken.
-- **Draw the SUBJECT** — every named noun in the prompt (a fish, a car, a chef, an enemy) gets its OWN `draw<Noun>()` (a procedural silhouette, or a `generate_image_asset` sprite). A bare tinted circle/rect standing in for a named thing is NOT acceptable — it's the #1 reason a game looks unfinished.
+- **Draw the SUBJECT** — every named noun in the prompt (a fish, a car, a chef, an enemy) is drawn as ITSELF, never a tinted circle/rect — that's the #1 reason a game looks unfinished. The fastest path is the built-in silhouette library: `window.__game.art.draw(ctx, 'fish', x, y, size, { fill: '#ff8a3d', rotate, flip })` draws a recognisable fish/bird/coin/gem/heart/rocket/car/tree/star/person/… centred at (x,y). It accepts synonyms ('salmon'→fish, 'spaceship'→rocket, 'monster'→slime) and, for a noun it doesn't know, draws a distinctive **labelled crest** rather than a blank shape — so EVERY entity reads as something. Need a bespoke look? Write your own `draw<Noun>()` with `ctx` paths, or call `generate_image_asset` for a sprite.
 
 ```js
 // src/main.js

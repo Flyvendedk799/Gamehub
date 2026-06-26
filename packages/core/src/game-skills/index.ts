@@ -78,6 +78,7 @@ const PHASER_SKILLS: ReadonlyArray<GameSkillSpec> = [
   { name: 'phaser/rhythm-clock.js', engine: 'phaser', category: 'engine' },
   // Asset substrates (Engine Evolution v2 P9).
   { name: 'phaser/music-sync.js', engine: 'phaser', category: 'engine' },
+  { name: 'phaser/beatmap-synth.js', engine: 'phaser', category: 'engine' },
 ];
 
 // ── Three.js ────────────────────────────────────────────────────────────────
@@ -114,6 +115,7 @@ const THREE_SKILLS: ReadonlyArray<GameSkillSpec> = [
   { name: 'three/rhythm-clock.jsx', engine: 'three', category: 'engine' },
   // Asset substrates (Engine Evolution v2 P9).
   { name: 'three/music-sync.jsx', engine: 'three', category: 'engine' },
+  { name: 'three/beatmap-synth.jsx', engine: 'three', category: 'engine' },
   { name: 'three/asset-pipeline.jsx', engine: 'three', category: 'engine' },
 ];
 

@@ -19,7 +19,7 @@ export interface BuildReport {
   dimensions: string | null;
   winCondition: string | null;
   fileCount: number;
-  shipReason: string; // 'passed' | 'no_verdict' | 'repair_exhausted' | 'budget_exhausted' | ...
+  shipReason: string; // 'passed' | 'floor_verified' | 'no_verdict' | 'repair_exhausted' | 'budget_exhausted' | ...
   forceAccept: boolean;
   repairRounds: number;
   runtimeBooted: boolean | null;

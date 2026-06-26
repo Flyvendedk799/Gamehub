@@ -25,7 +25,7 @@ assets/audio/
 
 A user expects a game they'd be proud to share, like a Lovable output. A flat box in a black void is the #1 reason a 3D game looks unfinished. Bake in:
 - **Lighting + atmosphere** — a hemisphere + directional (sun) light, shadows, a sky `background` colour + `fog`. Never an unlit `MeshBasicMaterial` cube in a black scene.
-- **Real materials + the SUBJECT** — `MeshStandardMaterial` on real geometry; every named noun gets real geometry or a `generate_3d_asset` glTF model — NOT a default `BoxGeometry` placeholder.
+- **Real materials + the SUBJECT** — `MeshStandardMaterial` on real geometry; every named noun gets real geometry or a `generate_3d_asset` glTF model — NOT a default `BoxGeometry` placeholder. For 2D HUD icons / billboards / sprite-cards, bake one from the silhouette library: `const cv = window.__game.art.sprite('heart', 128); const tex = new THREE.CanvasTexture(cv);` (covers coin/gem/heart/star/key/… + synonyms; an unknown noun bakes a labelled crest).
 - **Screens** — show Title/Over as a DOM overlay toggled by a `screen` variable (a no-fail SANDBOX/zen game skips the Over state).
 - **Juice + sound** — `sfx()` + a hit flash/camera nudge on every meaningful event.
 

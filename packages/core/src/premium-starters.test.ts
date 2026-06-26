@@ -63,4 +63,12 @@ describe('PREMIUM_STARTERS', () => {
     expect(PREMIUM_STARTERS.phaser).toContain('preserveDrawingBuffer');
     expect(PREMIUM_STARTERS.three).toContain('preserveDrawingBuffer');
   });
+
+  it('teaches the representational-art layer (every starter references window.__game.art)', () => {
+    // canvas2d DEMONSTRATES it (the seeded subject is drawn via art.draw); phaser +
+    // three POINT at it (art.sprite → texture) so the agent draws an actual noun, not a circle.
+    expect(PREMIUM_STARTERS.canvas2d).toContain('window.__game.art.draw');
+    expect(PREMIUM_STARTERS.phaser).toContain('window.__game.art.sprite');
+    expect(PREMIUM_STARTERS.three).toContain('window.__game.art.sprite');
+  });
 });

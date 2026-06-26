@@ -30,7 +30,7 @@ A user expects a game they'd be proud to share, like a Lovable output. Bake in w
 - **Art direction** — a deliberate palette + a gradient backdrop (`fillGradientStyle`) + a real font, never a flat `backgroundColor: '#0b0b0e'` + system font.
 - **Screens** — `Title → Play → Over` scenes. (A no-fail SANDBOX / zen game collapses to a single `PlayScene` — do NOT bolt a "GAME OVER" onto a calm toy.)
 - **Juice + sound on by default** — camera shake + `sfx()` on every meaningful event (see "Audio"). A silent, static game reads as broken.
-- **Draw the SUBJECT in code** — themed Graphics/Game-Object shapes (or a `generate_image_asset` sprite). NEVER `this.load.image('x','assets/sprites/x.png')` for a file you didn't create — it 404s and ships an invisible/broken object (the same dead-asset trap as audio). A bare rectangle for a named thing (a fish, a car, a chef) is not premium.
+- **Draw the SUBJECT in code** — the fastest recognisable path is the built-in silhouette library baked to a texture: `const cv = window.__game.art.sprite('fish', 96, { fill: '#ff8a3d' }); this.textures.addCanvas('fish', cv);` then `this.add.image(x, y, 'fish')` / `this.physics.add.image(...)`. It covers fish/bird/coin/gem/heart/rocket/car/tree/star/person/… + synonyms ('salmon', 'spaceship', 'monster'), and an unknown noun bakes a distinctive labelled crest — so a named thing is never a bare rectangle. (You can still use themed Graphics shapes or a `generate_image_asset` sprite for a bespoke look.) NEVER `this.load.image('x','assets/sprites/x.png')` for a file you didn't create — it 404s and ships an invisible/broken object (the same dead-asset trap as audio).
 
 ```js
 import * as Phaser from 'phaser';

@@ -32,6 +32,7 @@ import {
   buildInteractivityFloorPlan,
   buildRepairVerdict,
   decideRepairAction,
+  detectInteractivityResponse,
   generateViaAgent,
   recommendSkills,
   resolveMaxRepairRounds,
@@ -817,7 +818,41 @@ export async function runGeneration(
           [],
         );
       }
-      // Snapshot is wired (or unreadable) but there are no predicates to score it
+      // Plan step 4 — universal interactivity FLOOR. The snapshot is wired but there
+      // are no genre/contract predicates. Rather than ship blind (the "stacker shipped
+      // unverified" hole), drive the ambient-subtracted probe: idle to learn drift,
+      // then exercise arrows + WASD + Space + click and require an input-driven change
+      // BEYOND that drift. This honours M1/M2 (no fabricated scorePlaytest pass; ambient
+      // drift is subtracted, so a ticking clock never reads as a response).
+      if (floorPlay !== null) {
+        const resp = detectInteractivityResponse(floorPlay);
+        if (resp.analyzable && !resp.responded) {
+          // Declares gameplay + wired a snapshot, but NOTHING moved under any common
+          // input — a dead / non-interactive game. Repairable, not no_verdict.
+          return buildRepairVerdict(
+            {
+              trace: null,
+              fatalErrors: [
+                'This game declares gameplay (a fail state / enemies / escalation / progression) but NONE of the common inputs (arrow keys, WASD, Space, click) changed any value exposed by window.__game.debug.snapshot() — the game does not respond to the player. Read input via window.__game.controls.isDown(id) / controls.on(id, fn) and update the state you expose in debug.track({ ... }) so a control press visibly changes score / position / progress. Then re-run playtest_game.',
+              ],
+            },
+            [],
+          );
+        }
+        if (resp.analyzable && resp.responded) {
+          // Booted (fatalErrors empty here) + non-blank + responds to input, but no
+          // predicates to grade fidelity → a real, shallow verification. Ships as
+          // `floor_verified`, not a blind `no_verdict`.
+          return {
+            pass: true,
+            score: null,
+            fatalErrors: [],
+            noEvidence: false,
+            floorVerified: true,
+          };
+        }
+      }
+      // Snapshot unreadable (couldn't analyse) and no predicates to score it
       // against — an interactivity guess would be less honest than admitting we
       // can't verify play. Ship no_verdict.
       return null;

@@ -1265,7 +1265,7 @@ assets/audio/
 
 A user expects a game they'd be proud to share, like a Lovable output. A flat box in a black void is the #1 reason a 3D game looks unfinished. Bake in:
 - **Lighting + atmosphere** — a hemisphere + directional (sun) light, shadows, a sky \`background\` colour + \`fog\`. Never an unlit \`MeshBasicMaterial\` cube in a black scene.
-- **Real materials + the SUBJECT** — \`MeshStandardMaterial\` on real geometry; every named noun gets real geometry or a \`generate_3d_asset\` glTF model — NOT a default \`BoxGeometry\` placeholder.
+- **Real materials + the SUBJECT** — \`MeshStandardMaterial\` on real geometry; every named noun gets real geometry or a \`generate_3d_asset\` glTF model — NOT a default \`BoxGeometry\` placeholder. For 2D HUD icons / billboards / sprite-cards, bake one from the silhouette library: \`const cv = window.__game.art.sprite('heart', 128); const tex = new THREE.CanvasTexture(cv);\` (covers coin/gem/heart/star/key/… + synonyms; an unknown noun bakes a labelled crest).
 - **Screens** — show Title/Over as a DOM overlay toggled by a \`screen\` variable (a no-fail SANDBOX/zen game skips the Over state).
 - **Juice + sound** — \`sfx()\` + a hit flash/camera nudge on every meaningful event.
 
@@ -1462,7 +1462,7 @@ A user expects a game they'd be proud to share, like a Lovable output. Bake in w
 - **Art direction** — a deliberate palette + a gradient backdrop (\`fillGradientStyle\`) + a real font, never a flat \`backgroundColor: '#0b0b0e'\` + system font.
 - **Screens** — \`Title → Play → Over\` scenes. (A no-fail SANDBOX / zen game collapses to a single \`PlayScene\` — do NOT bolt a "GAME OVER" onto a calm toy.)
 - **Juice + sound on by default** — camera shake + \`sfx()\` on every meaningful event (see "Audio"). A silent, static game reads as broken.
-- **Draw the SUBJECT in code** — themed Graphics/Game-Object shapes (or a \`generate_image_asset\` sprite). NEVER \`this.load.image('x','assets/sprites/x.png')\` for a file you didn't create — it 404s and ships an invisible/broken object (the same dead-asset trap as audio). A bare rectangle for a named thing (a fish, a car, a chef) is not premium.
+- **Draw the SUBJECT in code** — the fastest recognisable path is the built-in silhouette library baked to a texture: \`const cv = window.__game.art.sprite('fish', 96, { fill: '#ff8a3d' }); this.textures.addCanvas('fish', cv);\` then \`this.add.image(x, y, 'fish')\` / \`this.physics.add.image(...)\`. It covers fish/bird/coin/gem/heart/rocket/car/tree/star/person/… + synonyms ('salmon', 'spaceship', 'monster'), and an unknown noun bakes a distinctive labelled crest — so a named thing is never a bare rectangle. (You can still use themed Graphics shapes or a \`generate_image_asset\` sprite for a bespoke look.) NEVER \`this.load.image('x','assets/sprites/x.png')\` for a file you didn't create — it 404s and ships an invisible/broken object (the same dead-asset trap as audio).
 
 \`\`\`js
 import * as Phaser from 'phaser';
@@ -2186,7 +2186,7 @@ A user typing a prompt expects a game they'd be proud to share, like a Lovable o
 - **Art direction** — a deliberate palette + a real display/body font (loaded in index.html). NEVER default canvas grey + system font.
 - **Screens** — Title → Play → Over flow. (A no-fail SANDBOX / zen / creative game COLLAPSES to a single \`play\` screen — do NOT bolt a "GAME OVER" onto a calm toy. Gate on the game's intent.)
 - **Juice + sound on by default** — \`sfx()\` and a particle/shake helper, CALLED on every meaningful event. A silent, static game reads as broken.
-- **Draw the SUBJECT** — every named noun in the prompt (a fish, a car, a chef, an enemy) gets its OWN \`draw<Noun>()\` (a procedural silhouette, or a \`generate_image_asset\` sprite). A bare tinted circle/rect standing in for a named thing is NOT acceptable — it's the #1 reason a game looks unfinished.
+- **Draw the SUBJECT** — every named noun in the prompt (a fish, a car, a chef, an enemy) is drawn as ITSELF, never a tinted circle/rect — that's the #1 reason a game looks unfinished. The fastest path is the built-in silhouette library: \`window.__game.art.draw(ctx, 'fish', x, y, size, { fill: '#ff8a3d', rotate, flip })\` draws a recognisable fish/bird/coin/gem/heart/rocket/car/tree/star/person/… centred at (x,y). It accepts synonyms ('salmon'→fish, 'spaceship'→rocket, 'monster'→slime) and, for a noun it doesn't know, draws a distinctive **labelled crest** rather than a blank shape — so EVERY entity reads as something. Need a bespoke look? Write your own \`draw<Noun>()\` with \`ctx\` paths, or call \`generate_image_asset\` for a sprite.
 
 \`\`\`js
 // src/main.js

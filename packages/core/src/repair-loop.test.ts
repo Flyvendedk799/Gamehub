@@ -316,6 +316,40 @@ describe('decideRepairAction', () => {
     expect(action).toEqual({ kind: 'ship', reason: 'no_verdict' });
   });
 
+  it('ships with reason=floor_verified when the universal play floor passed (no predicates)', () => {
+    // No predicates to grade fidelity, but the worker confirmed boot + non-blank +
+    // input response → a real (shallow) verification, NOT a blind no_verdict and NOT
+    // a fidelity `passed`.
+    const verdict: RepairVerdict = {
+      pass: true,
+      score: null,
+      fatalErrors: [],
+      noEvidence: false,
+      floorVerified: true,
+    };
+    const action = decideRepairAction(verdict, completableSpec('topdown_arcade'), loopState());
+    expect(action).toEqual({ kind: 'ship', reason: 'floor_verified' });
+  });
+
+  it('floor_verified takes precedence over the non-completable escape hatch', () => {
+    // A floor-verified verdict is score:null + no fatal, which would otherwise hit
+    // the skipped_non_completable escape — the floorVerified guard prevents that.
+    const verdict: RepairVerdict = {
+      pass: true,
+      score: null,
+      fatalErrors: [],
+      noEvidence: false,
+      floorVerified: true,
+    };
+    const nonCompletable: CompletabilitySpec = {
+      genre: 'sandbox',
+      winCondition: '—',
+      loseCondition: '—',
+    };
+    const action = decideRepairAction(verdict, nonCompletable, loopState());
+    expect(action).toEqual({ kind: 'ship', reason: 'floor_verified' });
+  });
+
   it('simulated full loop: fail → repair → pass terminates with 1 round', () => {
     const spec = completableSpec('topdown_arcade');
     const predicates = predicatesFor('topdown_arcade');

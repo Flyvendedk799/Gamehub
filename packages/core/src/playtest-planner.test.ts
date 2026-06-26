@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { planPlaytest } from './playtest-planner';
+import {
+  INTERACTIVITY_FLOOR_IDLE_STEPS,
+  buildInteractivityFloorPlan,
+  detectInteractivityResponse,
+  planPlaytest,
+} from './playtest-planner';
+
+/** Build a floor-probe trace: a pre-input baseline, then one idle frame, then
+ *  the given input frames. Matches what the browser worker returns. */
+function floorTrace(baseline: unknown, idle: unknown, ...inputs: unknown[]) {
+  return {
+    baselineSnapshot: baseline,
+    steps: [{ snapshotAfter: idle }, ...inputs.map((s) => ({ snapshotAfter: s }))],
+  };
+}
 
 describe('planPlaytest (Phase 6)', () => {
   it('skips playtest on a static artifact (no form / onclick / nav)', () => {
@@ -53,5 +67,82 @@ describe('planPlaytest (Phase 6)', () => {
     for (const step of planPlaytest(html).steps) {
       expect(step.reason.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('buildInteractivityFloorPlan', () => {
+  it('leads with the idle baseline step and drives BOTH arrow + WASD schemes', () => {
+    const plan = buildInteractivityFloorPlan();
+    // The first INTERACTIVITY_FLOOR_IDLE_STEPS steps must be idle waits (ambient baseline).
+    for (let i = 0; i < INTERACTIVITY_FLOOR_IDLE_STEPS; i++) {
+      expect(plan.steps[i]?.kind).toBe('wait');
+    }
+    const keyCodes = plan.steps.flatMap((s) => (s.kind === 'key' ? [s.code] : []));
+    expect(keyCodes).toContain('ArrowRight');
+    expect(keyCodes).toContain('ArrowUp');
+    expect(keyCodes).toContain('KeyW'); // WASD scheme too — covers either control mapping
+    expect(keyCodes).toContain('KeyD');
+    expect(keyCodes).toContain('Space');
+    expect(plan.steps.some((s) => s.kind === 'mouseDown')).toBe(true);
+    expect(plan.predicates).toHaveLength(0); // floor mints NO scorePlaytest predicate (M1/M2)
+  });
+});
+
+describe('detectInteractivityResponse (ambient-subtracted interactivity floor)', () => {
+  it('reports responded=true when input changes a field beyond ambient drift', () => {
+    // `t` drifts during idle (ambient); `score` only moves under input.
+    const trace = floorTrace(
+      { score: 0, t: 0 },
+      { score: 0, t: 5 }, // idle: only the clock advanced
+      { score: 1, t: 9 },
+      { score: 3, t: 13 },
+    );
+    const r = detectInteractivityResponse(trace);
+    expect(r.analyzable).toBe(true);
+    expect(r.responded).toBe(true);
+    expect(r.ambientFields).toEqual(['t']);
+    expect(r.inputFields).toEqual(['score']);
+  });
+
+  it('reports responded=false for a dead game (nothing changes at all)', () => {
+    const trace = floorTrace({ score: 0 }, { score: 0 }, { score: 0 }, { score: 0 });
+    const r = detectInteractivityResponse(trace);
+    expect(r.analyzable).toBe(true);
+    expect(r.responded).toBe(false);
+  });
+
+  it('does NOT count pure ambient drift as a response (the M1/M2 false-signal)', () => {
+    // A ticking clock that advances every frame, idle or not, and NOTHING responds
+    // to input. The ambient subtraction must reject it (responded=false).
+    const trace = floorTrace({ t: 0 }, { t: 5 }, { t: 9 }, { t: 13 });
+    const r = detectInteractivityResponse(trace);
+    expect(r.analyzable).toBe(true);
+    expect(r.responded).toBe(false);
+    expect(r.inputFields).toEqual([]);
+  });
+
+  it('registers a nested {x,y} position change under input', () => {
+    const trace = floorTrace(
+      { playerPos: { x: 100, y: 100 } },
+      { playerPos: { x: 100, y: 100 } }, // no idle drift
+      { playerPos: { x: 130, y: 100 } }, // moved under input
+    );
+    const r = detectInteractivityResponse(trace);
+    expect(r.responded).toBe(true);
+    expect(r.inputFields).toEqual(['playerPos']);
+  });
+
+  it('is not analyzable when the baseline/idle snapshot is empty or null', () => {
+    expect(detectInteractivityResponse(floorTrace(null, null, { score: 1 })).analyzable).toBe(
+      false,
+    );
+    expect(detectInteractivityResponse(floorTrace({}, {}, { score: 1 })).analyzable).toBe(false);
+    // Too few frames (only the idle step) — nothing to compare.
+    expect(
+      detectInteractivityResponse({
+        baselineSnapshot: { s: 0 },
+        steps: [{ snapshotAfter: { s: 0 } }],
+      }).analyzable,
+    ).toBe(false);
   });
 });

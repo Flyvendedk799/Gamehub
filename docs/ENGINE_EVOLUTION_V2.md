@@ -233,6 +233,11 @@ Each phase: **Problem (evidence) → Concrete changes → Verify → Effort/leve
 
 **Effort L · leverage medium.**
 
+**Status (2026-06-26) — largely SHIPPED.** `music-sync` (decode + `audioTime` + beatmap judging) and `asset-pipeline` (lazy `GLTFLoader` from `three/addons` + `InstancedMesh` + primitive fallback) already existed; the `three/addons/` import map + same-origin enforcement were already wired. Filled the real gaps:
+- **NEW `beatmap-synth` skill** (`game-skills/{phaser,three}/beatmap-synth.*`): a pure deterministic `generateBeatmap({bpm,lanes,bars,density,seed})` + a `createBeatmapSynth()` that plays the chart as a **Web Audio chiptune** (oscillator per note + kick per beat), exposing `audioTime()` + `judge(lane)`. This makes a rhythm game **self-sounding with ZERO audio files** (the original "silent or fakes it" problem — no CC0 track needed, CSP-safe). Registered + recommended (rhythm→beatmap-synth). Tests: `beatmap-synth.test.ts`.
+- **glTF verify locked in**: a regression test (`three.test.ts`) asserts a game importing `GLTFLoader` from `three/addons` + loading a same-origin `assets/models/*.glb` does NOT trip `detectNetworkReferences`.
+- Still open: bundled CC0 audio tracks in the manifest (deferred — the synth substrate makes them optional), the `2_5d` depth playbook, and an `eval-games` rhythm fixture.
+
 ---
 
 ## Phase 10 — Honest multiplayer intent

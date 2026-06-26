@@ -80,16 +80,26 @@ export function resolveMaxRepairRounds(requested: number | undefined): number {
  *   - `skipped_non_completable`  — the spec is a non-completable / creative
  *                                  toy (sandbox / idle / no fail state); the
  *                                  predicate gate is inert by design.
+ *   - `floor_verified`           — no genre playbook / contract predicates to
+ *                                  grade fidelity, BUT the universal play floor
+ *                                  passed: the game booted, rendered a non-blank
+ *                                  frame, and RESPONDED to input (a tracked field
+ *                                  changed beyond ambient drift). A real, if
+ *                                  shallow, verification — NOT a blind ship. Kept
+ *                                  distinct from `no_verdict` so telemetry stops
+ *                                  counting floor-verified games as "shipped blind".
  *   - `no_verdict`               — no deterministic verdict was obtainable
- *                                  (no genre playbook with predicates, or the
- *                                  browser-worker returned nothing); we have no
- *                                  evidence to repair on, so we ship as-is.
+ *                                  (no genre playbook with predicates, no debug
+ *                                  contract to read, or the browser-worker
+ *                                  returned nothing); we have no evidence to
+ *                                  repair on, so we ship as-is.
  */
 export type ShipReason =
   | 'passed'
   | 'repair_exhausted'
   | 'budget_exhausted'
   | 'skipped_non_completable'
+  | 'floor_verified'
   | 'no_verdict';
 
 /** The deterministic verdict for a single attempt. Combines the predicate
@@ -107,6 +117,11 @@ export interface RepairVerdict {
    *  no predicates, and no fatal errors. The loop ships an evidence-free
    *  attempt rather than repairing blind. */
   noEvidence: boolean;
+  /** Set by the worker (NOT buildRepairVerdict) when there were no predicates to
+   *  score, but the universal play floor passed: booted + non-blank + responded
+   *  to input. A positive verdict — `decideRepairAction` ships it as
+   *  `floor_verified`, not `no_verdict` and not `passed`. */
+  floorVerified?: boolean;
 }
 
 /** The verdict input the worker hands us per attempt: the out-of-process
@@ -301,11 +316,13 @@ export interface RepairLoopState {
  * another repair round (with a specific instruction). Total + deterministic:
  *
  *   1. Non-completable spec → ship, `skipped_non_completable` (escape hatch).
- *   2. No deterministic evidence → ship, `no_verdict` (nothing to repair on).
- *   3. Verdict passes        → ship, `passed`.
- *   4. Budget exhausted      → ship, `budget_exhausted`.
- *   5. Rounds remaining      → repair with a specific instruction.
- *   6. Otherwise (ceiling reached, still failing) → ship, `repair_exhausted`.
+ *   2. Floor-verified (no predicates, but universal play floor passed) → ship,
+ *      `floor_verified`.
+ *   3. No deterministic evidence → ship, `no_verdict` (nothing to repair on).
+ *   4. Verdict passes        → ship, `passed`.
+ *   5. Budget exhausted      → ship, `budget_exhausted`.
+ *   6. Rounds remaining      → repair with a specific instruction.
+ *   7. Otherwise (ceiling reached, still failing) → ship, `repair_exhausted`.
  *
  * The instruction is built from the verdict; if — defensively — it comes back
  * null (no concrete failure despite a non-passing verdict, which the verdict
@@ -335,33 +352,41 @@ export function decideRepairAction(
     if (
       verdict.fatalErrors.length === 0 &&
       state.contractAuthored !== true &&
-      verdict.score === null
+      verdict.score === null &&
+      verdict.floorVerified !== true // a floor-verified verdict is a positive result, never a skip
     ) {
       return { kind: 'ship', reason: 'skipped_non_completable' };
     }
   }
-  // (2) No deterministic evidence to judge — ship as-is rather than claim a
+  // (2) Universal play floor passed (booted + non-blank + responded to input)
+  // with no genre predicates to grade — ship as `floor_verified`. Checked before
+  // the noEvidence/pass branches: such a verdict is `pass: true, score: null`, so
+  // it would otherwise be mislabelled `passed`, hiding that no fidelity check ran.
+  if (verdict.floorVerified === true && verdict.fatalErrors.length === 0) {
+    return { kind: 'ship', reason: 'floor_verified' };
+  }
+  // (3) No deterministic evidence to judge — ship as-is rather than claim a
   // pass we can't substantiate or repair blind. Checked BEFORE the pass branch
   // because a no-evidence verdict is technically `pass: true` (nothing failed)
   // but we want it surfaced honestly as `no_verdict`, not `passed`.
   if (verdict.noEvidence) {
     return { kind: 'ship', reason: 'no_verdict' };
   }
-  // (3) Clean pass.
+  // (4) Clean pass.
   if (verdict.pass) {
     return { kind: 'ship', reason: 'passed' };
   }
-  // (4) Validation-tail budget gone — stop and ship the best attempt.
+  // (5) Validation-tail budget gone — stop and ship the best attempt.
   if (state.budgetExhausted) {
     return { kind: 'ship', reason: 'budget_exhausted' };
   }
-  // (5) Rounds remaining — author a specific instruction and repair.
+  // (6) Rounds remaining — author a specific instruction and repair.
   if (state.roundsRun < state.maxRounds) {
     const instruction = buildRepairInstruction(verdict);
     if (instruction !== null) {
       return { kind: 'repair', instruction };
     }
   }
-  // (6) Ceiling reached (or no concrete instruction) — ship the best attempt.
+  // (7) Ceiling reached (or no concrete instruction) — ship the best attempt.
   return { kind: 'ship', reason: 'repair_exhausted' };
 }

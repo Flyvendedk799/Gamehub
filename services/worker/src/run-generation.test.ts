@@ -1047,6 +1047,99 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     expect(result.repairRounds).toBeGreaterThan(0);
   });
 
+  it('universal floor: a no-predicate genre that DECLARES gameplay + responds to input ships floor_verified (not blind no_verdict)', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    // wantsVerdict (hasEnemies) + wired snapshot + the floor probe shows input moving
+    // a field BEYOND idle drift → the universal play floor passed. This is a real,
+    // shallow verification — `floor_verified`, not the old blind `no_verdict`.
+    const responsive: PlaytestVerdict = {
+      hasGameContract: true,
+      hasDebugContract: true,
+      baselineSnapshot: { playerPos: { x: 0, y: 0 } },
+      steps: [
+        // step 0 = idle wait (no drift), then input frames move the player.
+        {
+          step: { kind: 'wait', frames: 24 },
+          snapshotAfter: { playerPos: { x: 0, y: 0 } },
+          errors: [],
+        },
+        {
+          step: { kind: 'key', code: 'ArrowRight' },
+          snapshotAfter: { playerPos: { x: 20, y: 0 } },
+          errors: [],
+        },
+        {
+          step: { kind: 'key', code: 'ArrowUp' },
+          snapshotAfter: { playerPos: { x: 20, y: 20 } },
+          errors: [],
+        },
+      ],
+      bootErrors: [],
+    };
+    const browserJobs = queuedBrowserJobs([responsive]);
+    const agent: GenerateFn = async (_input, deps) => {
+      await deps.gameMode?.setSpec?.({
+        ...TOPDOWN_SPEC,
+        genre: 'tycoon',
+        capabilities: { hasEnemies: true },
+      } as unknown as GameSpec);
+      await deps.fs?.create('index.html', RED_SQUARE);
+      return emptyOutput('a responsive tycoon');
+    };
+
+    const result = await runGeneration(
+      {
+        prompt: 'a tycoon with enemies',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: agent, browserJobs },
+    );
+
+    expect(result.repairRounds).toBe(0);
+    expect(result.shipReason).toBe('floor_verified');
+  });
+
+  it('universal floor: a no-predicate game that IGNORES all input is REPAIRED (dead game), not no_verdict', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    // wantsVerdict + wired snapshot, but NOTHING moves under arrows/WASD/Space/click
+    // across the probe → a dead / non-interactive game. The floor turns this into a
+    // repairable fatal instead of shipping it blind.
+    const dead: PlaytestVerdict = {
+      hasGameContract: true,
+      hasDebugContract: true,
+      baselineSnapshot: { score: 0 },
+      steps: [
+        { step: { kind: 'wait', frames: 24 }, snapshotAfter: { score: 0 }, errors: [] },
+        { step: { kind: 'key', code: 'ArrowRight' }, snapshotAfter: { score: 0 }, errors: [] },
+        { step: { kind: 'key', code: 'Space' }, snapshotAfter: { score: 0 }, errors: [] },
+      ],
+      bootErrors: [],
+    };
+    const browserJobs = queuedBrowserJobs([dead]);
+    const agent: GenerateFn = async (_input, deps) => {
+      await deps.gameMode?.setSpec?.({
+        ...TOPDOWN_SPEC,
+        genre: 'tycoon',
+        capabilities: { hasEnemies: true },
+      } as unknown as GameSpec);
+      await deps.fs?.create('index.html', RED_SQUARE);
+      return emptyOutput('a dead tycoon');
+    };
+
+    const result = await runGeneration(
+      {
+        prompt: 'a tycoon with enemies',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: agent, browserJobs },
+    );
+
+    expect(result.shipReason).not.toBe('no_verdict'); // not shipped blind
+    expect(result.repairRounds).toBeGreaterThan(0); // the dead-game fatal drove repair
+  });
+
   it('boot-gate: a non-booting game with no playbook still repairs (not a silent no_verdict)', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());
     let rounds = 0;

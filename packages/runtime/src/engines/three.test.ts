@@ -114,6 +114,31 @@ describe('threeAdapter.validate (gameplan §7.6)', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('asset substrate (P9): a same-origin glTF load + addons GLTFLoader import does NOT trip the network detector', () => {
+    // The 3D asset substrate (asset-pipeline skill + generate_3d_asset) loads models
+    // via the bare `three/addons/` specifier from the importmap and a project-relative
+    // assets/models/*.glb — both same-origin / CSP-legal. detectNetworkReferences must
+    // not flag either (only literal cross-origin http(s) URLs in game code are noise).
+    const modelMain = `
+      import * as THREE from 'three';
+      import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+      const renderer = new THREE.WebGLRenderer({ canvas: document.querySelector('#game') });
+      const scene = new THREE.Scene();
+      new GLTFLoader().load('assets/models/hero.glb', (gltf) => scene.add(gltf.scene));
+      const crowd = new THREE.InstancedMesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial(), 200);
+      scene.add(crowd);
+      function tick() { requestAnimationFrame(tick); renderer.render(scene); }
+      tick();
+      window.addEventListener('resize', () => {});
+      window.addEventListener('beforeunload', () => renderer.dispose());
+    `;
+    const result = threeAdapter.validate([
+      { path: 'index.html', content: goodIndex },
+      { path: 'src/main.js', content: modelMain },
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
   it('flags missing index.html as a hard error', () => {
     const result = threeAdapter.validate([{ path: 'src/main.js', content: goodMain }]);
     expect(result.ok).toBe(false);

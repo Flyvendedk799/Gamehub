@@ -193,23 +193,33 @@ export function selectGamePlaytestPlan(genre: GameGenre): GamePlaytestPlan | nul
   return { playbook, steps, predicates: [...predicates] };
 }
 
-// A generic input probe used ONLY to surface whether a game wired a debug snapshot
-// (`hasDebugContract`) for the step-7 wire-snapshot repair. It carries NO scoring
-// predicate: a whole-snapshot "something changed" check can't distinguish
-// input-driven change from ambient time/animation drift, nor "ignores input" from
-// "responds to inputs we didn't send" — so it must never mint a pass/fail (it would
-// be LESS honest than no_verdict). Adversarial review 2026-06-23 (M1/M2).
+// A generic input probe. It carries NO scoring predicate: a whole-snapshot
+// "something changed" check can't distinguish input-driven change from ambient
+// time/animation drift, nor "ignores input" from "responds to inputs we didn't
+// send" — so it must never mint a scorePlaytest pass/fail (that would be LESS
+// honest than no_verdict; adversarial review 2026-06-23, M1/M2). The universal
+// interactivity FLOOR (detectInteractivityResponse below) answers M1/M2 head-on:
+// it learns ambient drift from the leading idle window and SUBTRACTS it, and it
+// drives BOTH common schemes (arrows AND WASD) + Space + click through the
+// rebindable controls layer so a game listening on either scheme is exercised.
 const FLOOR_PLAYBOOK: PlaytestPlaybook = {
   schemaVersion: 1,
   genre: 'other',
-  intent: 'Generic input probe — drive common inputs so the debug contract surfaces.',
+  intent: 'Generic input probe — idle to learn drift, then drive common inputs.',
   steps: [
-    { kind: 'wait', durationFrames: 20, assert: 'Idle baseline before any input.' },
-    { kind: 'key', code: 'ArrowRight', frames: 15, assert: 'Common movement input.' },
-    { kind: 'key', code: 'ArrowLeft', frames: 15, assert: 'Common movement input.' },
+    // INTERACTIVITY_FLOOR_IDLE_STEPS leading idle frames establish ambient drift.
+    { kind: 'wait', durationFrames: 24, assert: 'Idle baseline before any input.' },
+    { kind: 'key', code: 'ArrowRight', frames: 12, assert: 'Arrow movement.' },
+    { kind: 'key', code: 'ArrowLeft', frames: 12, assert: 'Arrow movement.' },
+    { kind: 'key', code: 'ArrowUp', frames: 12, assert: 'Arrow movement.' },
+    { kind: 'key', code: 'ArrowDown', frames: 12, assert: 'Arrow movement.' },
+    { kind: 'key', code: 'KeyW', frames: 10, assert: 'WASD movement.' },
+    { kind: 'key', code: 'KeyA', frames: 10, assert: 'WASD movement.' },
+    { kind: 'key', code: 'KeyS', frames: 10, assert: 'WASD movement.' },
+    { kind: 'key', code: 'KeyD', frames: 10, assert: 'WASD movement.' },
     { kind: 'key', code: 'Space', frames: 8, assert: 'Common action input.' },
     { kind: 'mouse', button: 0, assert: 'Pointer interaction.' },
-    { kind: 'wait', durationFrames: 20, assert: 'Settle, then read the snapshot.' },
+    { kind: 'wait', durationFrames: 16, assert: 'Settle, then read the snapshot.' },
   ],
   watchFor: ['The game exposes no debug snapshot to read.'],
 };
@@ -221,6 +231,94 @@ export function buildInteractivityFloorPlan(): GamePlaytestPlan {
     if (projected !== null) steps.push(projected);
   }
   return { playbook: FLOOR_PLAYBOOK, steps, predicates: [] };
+}
+
+/** Number of leading idle (wait) steps in the floor plan. Their snapshots
+ *  establish the AMBIENT drift baseline (what changes with NO input), which
+ *  detectInteractivityResponse subtracts so a ticking clock / idle animation is
+ *  never mistaken for a response to the player. Keep in lockstep with the count
+ *  of leading `wait` steps in FLOOR_PLAYBOOK above. */
+export const INTERACTIVITY_FLOOR_IDLE_STEPS = 1;
+
+/** The minimal floor-probe trace shape detectInteractivityResponse reads: a
+ *  pre-input baseline snapshot, then a per-step `snapshotAfter` (the browser
+ *  worker's PlaytesterOutput structurally satisfies this). */
+export interface FloorProbeResult {
+  baselineSnapshot: unknown;
+  steps: ReadonlyArray<{ snapshotAfter: unknown }>;
+}
+
+export interface InteractivityResponse {
+  /** False when the snapshots can't support a judgement (no readable baseline or
+   *  idle snapshot). The caller must NOT fail the game on this — fall back to
+   *  no_verdict. Bias is always away from a false interactivity failure. */
+  analyzable: boolean;
+  /** True when ≥1 snapshot field changed under input BEYOND the ambient idle
+   *  drift — i.e. the game responds to the player. */
+  responded: boolean;
+  /** Fields that drifted during the idle window (ambient — subtracted out). */
+  ambientFields: string[];
+  /** Fields that changed under input and were NOT ambient (the response signal). */
+  inputFields: string[];
+}
+
+function isReadableSnapshot(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && Object.keys(v as object).length > 0;
+}
+
+/** Top-level keys whose JSON-serialised value differs between two snapshots.
+ *  Deep value compare via JSON so a nested `{x,y}` position registers a change. */
+function changedSnapshotKeys(a: unknown, b: unknown): string[] {
+  const ao = (typeof a === 'object' && a !== null ? a : {}) as Record<string, unknown>;
+  const bo = (typeof b === 'object' && b !== null ? b : {}) as Record<string, unknown>;
+  const keys = new Set([...Object.keys(ao), ...Object.keys(bo)]);
+  const out: string[] = [];
+  for (const k of keys) {
+    if (JSON.stringify(ao[k]) !== JSON.stringify(bo[k])) out.push(k);
+  }
+  return out;
+}
+
+/**
+ * Universal interactivity floor — does the game RESPOND to the player? Given the
+ * floor probe's trace (a baseline snapshot, then `idleSteps` idle frames, then
+ * input frames), it learns the ambient drift from the idle window and requires an
+ * input-driven change OUTSIDE that set. This is NOT scorePlaytest — it mints no
+ * predicate pass/fail; it only answers the one universal question every game must
+ * pass, and it SUBTRACTS ambient drift so a ticking clock / looping animation is
+ * never read as a response (the precise false-signal review M1/M2 flagged). When
+ * the snapshots aren't readable it returns `analyzable: false` so the caller
+ * falls back to no_verdict rather than failing the game. Pure.
+ */
+export function detectInteractivityResponse(
+  result: FloorProbeResult,
+  idleSteps: number = INTERACTIVITY_FLOOR_IDLE_STEPS,
+): InteractivityResponse {
+  const empty: InteractivityResponse = {
+    analyzable: false,
+    responded: false,
+    ambientFields: [],
+    inputFields: [],
+  };
+  const frames = result.steps.map((s) => s.snapshotAfter);
+  if (frames.length <= idleSteps) return empty;
+  const base = result.baselineSnapshot;
+  const idleFrame = frames[idleSteps - 1];
+  // Need readable state at BOTH the pre-idle baseline and the post-idle frame to
+  // separate ambient drift from input response — otherwise we can't judge.
+  if (!isReadableSnapshot(base) || !isReadableSnapshot(idleFrame)) return empty;
+  const ambient = new Set(changedSnapshotKeys(base, idleFrame));
+  const inputChanged = new Set<string>();
+  for (const f of frames.slice(idleSteps)) {
+    for (const k of changedSnapshotKeys(idleFrame, f)) inputChanged.add(k);
+  }
+  const inputFields = [...inputChanged].filter((k) => !ambient.has(k));
+  return {
+    analyzable: true,
+    responded: inputFields.length > 0,
+    ambientFields: [...ambient],
+    inputFields,
+  };
 }
 
 // ---------------------------------------------------------------------------

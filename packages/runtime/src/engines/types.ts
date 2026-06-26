@@ -5,6 +5,8 @@
  * pulling in the registry side-effects in the entry module.
  */
 
+import { artLibSource } from './art-lib';
+
 export type GameEngineId = 'three' | 'phaser' | 'canvas2d';
 
 /**
@@ -375,5 +377,10 @@ window.addEventListener('message', function (e) {
     try { if (window.parent && window.parent !== window) window.parent.postMessage({ type: ${ctrlManifestType}, manifest: window.__game.controls.manifest }, '*'); } catch (err) {}
   }
 });
+// Representational-art layer — window.__game.art.draw(ctx, noun, x, y, size, opts).
+// A zero-import procedural-silhouette library so a named noun (fish, coin, rocket,
+// heart, …) is drawn as itself, never a tinted circle. Unknown nouns get a
+// labelled crest. See packages/runtime/src/engines/art-lib.ts.
+${artLibSource()}
 </script>`;
 }

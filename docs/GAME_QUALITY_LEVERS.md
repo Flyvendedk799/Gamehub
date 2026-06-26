@@ -172,3 +172,9 @@ Direction pivot: universal PREMIUM + reliability, not per-genre. Assessed 6 deli
 - Fold #6 (completeness floor) into #2; #7 (dual-engine divergence) lowest priority (lever 4 neutralizes the harm).
 
 Correction to the synthesis framing: juice is a REAL measurement (pixel magnitude+spread), not a gamed counter — the problem was the decode bug + warn-only detectors + premium-in-prose-not-scaffold.
+
+---
+
+## Implementation status (2026-06-26)
+- **#3 Representational-art layer — SHIPPED.** `window.__game.art` injected into every game's bridge (`packages/runtime/src/engines/art-lib.ts`): a zero-import procedural-silhouette library — `art.draw(ctx, noun, x, y, size, opts)` / `art.sprite(noun, size)` — with ~30 recognisable silhouettes (fish, bird, coin, gem, heart, rocket, car, tree, star, person, …), a synonym resolver ('salmon'→fish, 'spaceship'→rocket, 'monster'→slime), and a deterministic **labelled-crest fallback** for unknown nouns (never a bare circle). Demonstrated in the canvas2d premium starter; phaser (`addCanvas`) + three (`CanvasTexture`) paths in the guides + `choose_engine`. SCAFFOLD only, auto-check deferred per plan. Tests: `art-lib.test.ts` (resolver parity + emitted-IIFE eval).
+- **#4 Universal play-verdict — SHIPPED.** boot + post-boot console errors (existing grace window) + non-blank frame (existing #64 gate) + **NEW input-response floor** (`detectInteractivityResponse` in `playtest-planner.ts`): the floor probe idles to learn ambient drift, then drives arrows+WASD+Space+click and requires an input-driven change *beyond* that drift (answers the M1/M2 false-signal concern). A declared-gameplay game that ignores all input is now REPAIRED (not a blind `no_verdict`); a genre-less interactive game ships the new `floor_verified` reason instead of `no_verdict`. Genre playbooks remain the richer overlay. Tests in `playtest-planner.test.ts` + `repair-loop.test.ts` + `run-generation.test.ts`.

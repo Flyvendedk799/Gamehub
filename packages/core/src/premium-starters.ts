@@ -70,25 +70,19 @@ let spawnT = 0;
 function resetGame() { score = 0; player.x = 200; things.length = 0; spawnT = 0; screen = 'play'; }
 window.__game.debug.track({ score: () => score, player: () => player });
 
-// DRAW THE SUBJECT — give each named noun its own draw fn (procedural silhouette or a
-// generate_image_asset sprite). Replace these with YOUR subject; never leave a bare circle for a named thing.
+// DRAW THE SUBJECT — window.__game.art.draw(ctx, NOUN, x, y, size, opts) is a built-in
+// silhouette library (fish, bird, cat, coin, gem, heart, rocket, car, tree, star, person, …;
+// any noun it doesn't know becomes a distinctive labelled crest). SWAP the NOUN strings below
+// for YOUR subject — never leave a bare circle for a named thing. opts: { fill, stroke, accent,
+// rotate (rad), flip }. Want something fully custom? Write your own draw<Noun>() with ctx paths,
+// or call generate_image_asset for a sprite.
 function drawBackground(W, H) {
   const g = ctx.createLinearGradient(0, 0, 0, H);
   g.addColorStop(0, PAL.bg0); g.addColorStop(1, PAL.bg1);
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
 }
-function drawPlayer(p) {
-  ctx.save(); ctx.translate(p.x, p.y);
-  ctx.fillStyle = PAL.accent; ctx.beginPath(); ctx.arc(0, 0, p.r, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = PAL.ink; ctx.beginPath(); ctx.arc(p.r * 0.4, -p.r * 0.3, p.r * 0.2, 0, Math.PI * 2); ctx.fill();
-  ctx.restore();
-}
-function drawThing(t) {
-  ctx.save(); ctx.translate(t.x, t.y); ctx.rotate(t.spin);
-  ctx.fillStyle = PAL.bad; ctx.beginPath();
-  for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; ctx[i ? 'lineTo' : 'moveTo'](Math.cos(a) * t.r, Math.sin(a) * t.r); }
-  ctx.closePath(); ctx.fill(); ctx.restore();
-}
+function drawPlayer(p) { window.__game.art.draw(ctx, 'rocket', p.x, p.y, p.r * 2.8, { fill: PAL.accent }); }
+function drawThing(t) { window.__game.art.draw(ctx, 'star', t.x, t.y, t.r * 2.4, { fill: PAL.bad, rotate: t.spin }); }
 function drawCenter(W, H, title, sub) {
   ctx.fillStyle = 'rgba(8,10,18,0.62)'; ctx.fillRect(0, 0, W, H);
   ctx.textAlign = 'center';
@@ -174,7 +168,12 @@ class PlayScene extends Phaser.Scene {
   create() {
     gradientBg(this);
     this.score = 0;
-    // DRAW THE SUBJECT in code (or a generate_image_asset sprite) — never a loaded png you didn't create.
+    // DRAW THE SUBJECT — bake a recognisable sprite from the built-in silhouette library:
+    //   const cv = window.__game.art.sprite('rocket', 96, { fill: '#ffcc4d' });
+    //   this.textures.addCanvas('player', cv);
+    //   this.player = this.physics.add.image(400, 540, 'player');
+    // (any noun: fish, coin, car, person, …; unknown nouns get a labelled crest.) Or a
+    // generate_image_asset sprite — never a loaded png you didn't create. The ellipse is a placeholder.
     this.player = this.add.ellipse(400, 540, 90, 22, 0xffcc4d);
     this.physics.add.existing(this.player);
     this.player.body.setCollideWorldBounds(true);
@@ -247,7 +246,9 @@ scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x202830, 0.9));
 const sun = new THREE.DirectionalLight(0xffe9b0, 1.4);
 sun.position.set(6, 12, 6); sun.castShadow = true; scene.add(sun);
 
-// GROUND + the SUBJECT with real materials (use generate_3d_asset for real models).
+// GROUND + the SUBJECT with real materials (use generate_3d_asset for real models). For a 2D
+// HUD icon / billboard, bake one from the silhouette library:
+//   const cv = window.__game.art.sprite('heart', 128); const tex = new THREE.CanvasTexture(cv);
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), new THREE.MeshStandardMaterial({ color: 0x2b3350, roughness: 0.95 }));
 ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
 const player = new THREE.Mesh(new THREE.IcosahedronGeometry(0.6, 0), new THREE.MeshStandardMaterial({ color: 0xffcc4d, flatShading: true, roughness: 0.4 }));
