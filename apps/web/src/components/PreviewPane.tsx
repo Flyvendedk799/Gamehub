@@ -419,6 +419,12 @@ export function PreviewPane({
             />
           )}
 
+          {/* Iteration build status — a slim banner over the still-running game so
+              you keep playing the current version while the next one builds. */}
+          {isBuilding && previewUrl && !hasError && view === 'preview' && (
+            <BuildStatus events={events} isBuilding={isBuilding} compact />
+          )}
+
           {/* Live crash/freeze banner — the running game's runtime beacon reported
               an uncaught error or a dead render loop. One click repairs it. */}
           {runtimeIssue && !issueDismissed && view === 'preview' && (
