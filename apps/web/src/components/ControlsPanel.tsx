@@ -6,7 +6,7 @@ import {
   hasGamepadBindings,
   mergeGamepadBindings,
   padLabel,
-} from '@playforge/shared';
+} from '@playforge/shared/controls-gamepad';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 /** Friendly label for a bound input — a KeyboardEvent.code ('ArrowUp' → '↑',

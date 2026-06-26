@@ -9,7 +9,8 @@
     ".": "./src/index.ts",
     "./fingerprint": "./src/fingerprint.ts",
     "./brand": "./src/brand.ts",
-    "./social-outro": "./src/social-outro.ts"
+    "./social-outro": "./src/social-outro.ts",
+    "./controls-gamepad": "./src/controls-gamepad.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
