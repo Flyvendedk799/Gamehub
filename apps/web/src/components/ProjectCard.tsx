@@ -1,3 +1,4 @@
+import { resolveThumbnailUrl } from '@/lib/thumbnail';
 import type { Project } from '@/lib/types';
 import Link from 'next/link';
 
@@ -9,6 +10,9 @@ export default function ProjectCard({ project }: { project: Project }) {
     day: 'numeric',
     year: 'numeric',
   });
+  // Gameplay thumbnail captured after the latest build; null until the first
+  // build completes — fall back to the play-triangle placeholder.
+  const thumb = resolveThumbnailUrl(project.thumbnailUrl);
 
   return (
     <Link
@@ -19,18 +23,29 @@ export default function ProjectCard({ project }: { project: Project }) {
         transition-all duration-200
       "
     >
-      {/* Preview thumbnail placeholder */}
-      <div className="h-32 rounded-xl bg-[#0a0a0a] border border-[#1a1a1a] mb-4 flex items-center justify-center">
-        <svg
-          width="32"
-          height="32"
-          viewBox="0 0 32 32"
-          fill="none"
-          className="opacity-20"
-          aria-hidden="true"
-        >
-          <polygon points="6,4 26,16 6,28" fill="#6366f1" />
-        </svg>
+      {/* Gameplay thumbnail (or placeholder until the first build is captured) */}
+      <div className="h-32 rounded-xl bg-[#0a0a0a] border border-[#1a1a1a] mb-4 overflow-hidden flex items-center justify-center">
+        {thumb ? (
+          // eslint-disable-next-line @next/next/no-img-element -- content-addressed
+          // blob thumbnails from the API, not statically optimizable by next/image.
+          <img
+            src={thumb}
+            alt=""
+            loading="lazy"
+            className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
+          />
+        ) : (
+          <svg
+            width="32"
+            height="32"
+            viewBox="0 0 32 32"
+            fill="none"
+            className="opacity-20"
+            aria-hidden="true"
+          >
+            <polygon points="6,4 26,16 6,28" fill="#6366f1" />
+          </svg>
+        )}
       </div>
 
       <div className="flex items-start justify-between gap-2">

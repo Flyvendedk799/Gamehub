@@ -46,6 +46,7 @@ function rowToProject(row: typeof schema.projects.$inferSelect): Project {
     visibility: row.visibility as Visibility,
     currentSnapshotId: row.currentSnapshotId ?? null,
     currentManifestKey: row.currentManifestKey ?? null,
+    thumbnailUrl: row.thumbnailUrl ?? null,
     remixOfProjectId: row.remixOfProjectId ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -175,6 +176,11 @@ export class DrizzleProjectRepo implements ProjectRepo {
         updatedAt: new Date(),
       })
       .where(eq(schema.projects.id, id));
+  }
+
+  async setThumbnail(id: string, thumbnailUrl: string): Promise<void> {
+    // Don't bump updatedAt — a thumbnail refresh shouldn't reorder the dashboard.
+    await this.db.update(schema.projects).set({ thumbnailUrl }).where(eq(schema.projects.id, id));
   }
 }
 

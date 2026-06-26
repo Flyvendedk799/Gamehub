@@ -1,6 +1,7 @@
 import { performance } from 'node:perf_hooks';
 import { type EventBus, InMemoryEventBus, RedisEventBus } from '@playforge/bus';
 import { createDb, schema } from '@playforge/db';
+import { type ExportGameHtmlOptions, buildGameHtml } from '@playforge/exporters';
 /**
  * Live API entry point.
  *
@@ -52,6 +53,38 @@ import { DrizzleHubRepo } from './hub-repo';
 import { type InProcessBrowserJobs, makeInProcessBrowserJobs } from './in-process-browser';
 import { DrizzlePublishRepo } from './publish-repo';
 import { type EnqueueFn, buildServer, refundRunReservation } from './server';
+
+/**
+ * Capture a gameplay thumbnail of a just-built game and record it on the project,
+ * so the dashboard's project cards show the game instead of a blank placeholder.
+ * Best-effort + non-blocking — a capture failure must never affect the run.
+ * Reuses the in-process Chromium pool (same source the publish thumbnail uses).
+ */
+async function captureProjectThumbnail(
+  store: SnapshotStore,
+  browserThumbnail: InProcessBrowserJobs,
+  projectRepo: DrizzleProjectRepo,
+  args: { manifestKey: string; engine: 'phaser' | 'three' | 'canvas2d'; projectId: string },
+): Promise<void> {
+  const manifest = await store.readManifest(args.manifestKey);
+  const TEXT_PREFIXES = ['text/', 'application/json'];
+  const files: ExportGameHtmlOptions['files'] = await Promise.all(
+    Object.entries(manifest.files).map(async ([path, entry]) => {
+      const bytes = await store.readFile(manifest, path);
+      const isText = TEXT_PREFIXES.some((p) => entry.contentType.startsWith(p));
+      return {
+        path,
+        content: isText ? Buffer.from(bytes).toString('utf8') : Buffer.from(bytes),
+      };
+    }),
+  );
+  const html = await buildGameHtml({ files, engine: args.engine });
+  const result = await browserThumbnail.thumbnail(html);
+  if (!result?.pngBase64) return;
+  const key = await store.putBlob(Buffer.from(result.pngBase64, 'base64'));
+  await projectRepo.setThumbnail(args.projectId, `/v1/blobs/${key.replace(/^blobs\//, '')}`);
+  console.log(`[thumbnail] captured for project ${args.projectId}`);
+}
 
 /** Run cost in credits — must match server.ts and worker/main.ts. */
 const CREDITS_PER_RUN = 10;
@@ -382,7 +415,7 @@ async function main() {
       .then(async (result) => {
         await persistAiRuntime();
         try {
-          await finalizeRun(db, {
+          const outcome = await finalizeRun(db, {
             runId,
             projectId,
             userId,
@@ -391,6 +424,17 @@ async function main() {
             creditsPerRun: CREDITS_PER_RUN,
             log: (msg) => console.log(`${msg} (${Date.now() - startedAt}ms)`),
           });
+          // Best-effort dashboard thumbnail for the freshly-built game (completed
+          // runs only). Non-blocking: a capture failure never affects the run.
+          if (!outcome.paused && inProcessBrowserJobs) {
+            void captureProjectThumbnail(store, inProcessBrowserJobs, projectRepo, {
+              manifestKey: result.snapshot.manifestKey,
+              engine: (result.engine ?? engine ?? 'phaser') as 'phaser' | 'three' | 'canvas2d',
+              projectId,
+            }).catch((err: unknown) =>
+              console.warn(`[run:${runId}] thumbnail capture failed:`, err),
+            );
+          }
         } catch (err: unknown) {
           // Generation succeeded but persistence failed — do NOT refund or mark
           // failed (the artifact exists); surface loudly so it can be repaired.

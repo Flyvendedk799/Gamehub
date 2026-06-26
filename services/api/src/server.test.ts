@@ -1516,11 +1516,15 @@ describe('preview route', () => {
     expect(res.headers['content-security-policy']).toEqual(
       expect.stringContaining("connect-src 'self'"),
     );
-    // The original game HTML is preserved + the rebindable controls runtime is
-    // injected (WS-A) so the Controls tab works even when the agent wrote its own
-    // index.html instead of the engine starter.
-    expect(res.body).toContain(html);
+    // The original game content is preserved (its module script is untouched) and
+    // the serve-time runtime is injected: the rebindable controls runtime + the
+    // manifest/gamepad bridges (before </body>) + the crash beacon (at <head>),
+    // so the Controls tab + live error detection work even when the agent wrote
+    // its own index.html. (A whole-HTML substring match would break now that the
+    // bridges insert before </body>, so assert the preserved game script instead.)
+    expect(res.body).toContain('<script type="module" src="src/main.js"></script>');
     expect(res.body).toContain('pf-controls-runtime');
+    expect(res.body).toContain('pf-runtime-beacon');
   });
 
   it('uses a scoped preview auth cookie for generated subresources', async () => {

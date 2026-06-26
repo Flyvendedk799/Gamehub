@@ -6,6 +6,9 @@ export interface Project {
   id: string;
   name: string;
   engine: Engine;
+  /** Gameplay thumbnail (`/v1/blobs/:key`) captured after the latest build; null
+   *  until the first build completes — the card falls back to a placeholder. */
+  thumbnailUrl?: string | null;
   createdAt: string;
   updatedAt: string;
 }

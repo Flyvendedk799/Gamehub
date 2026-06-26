@@ -16,6 +16,9 @@ export interface Project {
   currentSnapshotId: string | null;
   /** Manifest key of the most recent completed build — used to seed the next generation. */
   currentManifestKey: string | null;
+  /** Gameplay thumbnail (a `/v1/blobs/:key` URL) captured after the latest build,
+   *  shown on the dashboard's project cards. Null until the first build is captured. */
+  thumbnailUrl: string | null;
   remixOfProjectId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -38,6 +41,8 @@ export interface ProjectRepo {
   setCurrentManifestKey(id: string, manifestKey: string): Promise<void>;
   /** Update HEAD pointer to a specific snapshot (used for revert). */
   setCurrentSnapshot(id: string, snapshotId: string, manifestKey: string): Promise<void>;
+  /** Record the gameplay thumbnail URL captured after a build (best-effort). */
+  setThumbnail(id: string, thumbnailUrl: string): Promise<void>;
 }
 
 function slugify(name: string, id: string): string {
@@ -74,6 +79,7 @@ export class InMemoryProjectRepo implements ProjectRepo {
       visibility: input.visibility ?? 'private',
       currentSnapshotId: null,
       currentManifestKey: null,
+      thumbnailUrl: null,
       remixOfProjectId: input.remixOfProjectId ?? null,
       createdAt: ts,
       updatedAt: ts,
@@ -116,5 +122,10 @@ export class InMemoryProjectRepo implements ProjectRepo {
     const p = this.byId.get(id);
     if (p)
       this.byId.set(id, { ...p, currentSnapshotId: snapshotId, currentManifestKey: manifestKey });
+  }
+
+  async setThumbnail(id: string, thumbnailUrl: string): Promise<void> {
+    const p = this.byId.get(id);
+    if (p) this.byId.set(id, { ...p, thumbnailUrl });
   }
 }
