@@ -55,10 +55,24 @@ describe('PREMIUM_STARTERS', () => {
     });
   }
 
-  it('canvas2d + phaser ship Title/Play/Over screens; all expose richness or a score', () => {
+  it('all three engines ship a Title/Play/Over flow + a real scoring loop (premium parity)', () => {
     expect(PREMIUM_STARTERS.canvas2d).toMatch(/screen = 'title'|screen === 'over'/);
     expect(PREMIUM_STARTERS.phaser).toContain('TitleScene');
     expect(PREMIUM_STARTERS.phaser).toContain('OverScene');
+    // three was previously just "move a shape"; now it's a complete game too.
+    expect(PREMIUM_STARTERS.three).toMatch(/screen = 'title'|screen === 'over'/);
+    for (const engine of ENGINES) {
+      expect(PREMIUM_STARTERS[engine], `${engine} should increment a score`).toMatch(/score \+= 1/);
+    }
+  });
+
+  it('the three starter composes a real subject — no bare default-shape player', () => {
+    // The guide bans a default IcosahedronGeometry/BoxGeometry as the SUBJECT. The
+    // craft is a composed Group; a leftover icosahedron is only generic debris.
+    expect(PREMIUM_STARTERS.three).toContain('buildCraft');
+    expect(PREMIUM_STARTERS.three).not.toMatch(
+      /const player = new THREE\.Mesh\(new THREE\.IcosahedronGeometry/,
+    );
   });
 
   it('WebGL starters preserve the drawing buffer (juice meter + thumbnails readable)', () => {
