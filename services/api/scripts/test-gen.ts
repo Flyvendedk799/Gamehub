@@ -53,7 +53,18 @@ async function main(): Promise<number> {
   const token = subscriptionToken();
 
   const store = new SnapshotStore(new InMemoryBlobStore());
-  const browserJobs = makeInProcessBrowserJobs();
+  const rawBrowser = makeInProcessBrowserJobs();
+  // Per-call timeouts: a standalone in-process Chromium pool can occasionally wedge
+  // (no reaper, unlike the live API). Race each call so a wedged verdict degrades to
+  // null — runGeneration treats null as "no evidence" and the run still finishes —
+  // instead of hanging the whole harness. The wall-clock cap below is the backstop.
+  const raceNull = <T>(p: Promise<T>, ms: number): Promise<T | null> =>
+    Promise.race([p, new Promise<T | null>((r) => setTimeout(() => r(null), ms))]);
+  const browserJobs: typeof rawBrowser = {
+    ...rawBrowser,
+    runtimeVerify: (html) => raceNull(rawBrowser.runtimeVerify(html), 45_000),
+    playtest: (html, steps) => raceNull(rawBrowser.playtest(html, steps), 60_000),
+  };
 
   // Hard wall-clock cap so a wedged in-process playtest can never hang the run.
   const timeoutMs = Number(process.env.TEST_GEN_TIMEOUT_MS ?? 480_000);
