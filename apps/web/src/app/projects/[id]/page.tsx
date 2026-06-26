@@ -157,12 +157,12 @@ export default function BuilderPage() {
           });
 
           if (event.type === 'run_complete') {
-            const completeEvent = event as RunCompleteEvent;
-            // Build full preview URL from the path returned by the server
-            const url = completeEvent.previewUrl.startsWith('http')
-              ? completeEvent.previewUrl
-              : `${BASE}${completeEvent.previewUrl}`;
-            setPreviewUrl(url);
+            // Point at the project's HEAD preview rather than the run's immutable
+            // snapshot URL: on completion HEAD == this run's output, but HEAD also
+            // tracks later file-tab/out-of-band edits, so the builder never gets
+            // stuck showing a stale run snapshot. (`completeEvent.previewUrl` is
+            // still what the server records in history; we just render HEAD.)
+            setPreviewUrl(`${BASE}/v1/projects/${projectId}/preview/`);
             setIsStreaming(false);
             streamCtrlRef.current?.close();
             refreshSnapshots();
@@ -210,7 +210,7 @@ export default function BuilderPage() {
 
       streamCtrlRef.current = ctrl;
     },
-    [refreshSnapshots],
+    [refreshSnapshots, projectId],
   );
 
   // Resolve which run we're streaming, hydrate chat history (deduped against the
@@ -230,11 +230,14 @@ export default function BuilderPage() {
         .then(({ messages }) => {
           if (cancelled || messages.length === 0) return;
           setEvents((prev) => [...hydrateHistoryEvents(messages, streamRunId), ...prev]);
-          const lastPreviewUrl = lastPreviewUrlFromHistory(messages);
-          if (lastPreviewUrl) {
-            setPreviewUrl(
-              lastPreviewUrl.startsWith('http') ? lastPreviewUrl : `${BASE}${lastPreviewUrl}`,
-            );
+          // Show the project's CURRENT HEAD preview, not a historical run's
+          // immutable snapshot. After a normal run HEAD == the run output, so this
+          // is identical — but it also reflects file-tab edits and any out-of-band
+          // change to HEAD, which a stale `/v1/runs/:id/preview` URL would hide.
+          // (Only set it when the project actually has output — i.e. a run posted
+          // a preview at some point.)
+          if (!streamRunId && lastPreviewUrlFromHistory(messages)) {
+            setPreviewUrl(`${BASE}/v1/projects/${projectId}/preview/`);
           }
         })
         .catch((err) => {
