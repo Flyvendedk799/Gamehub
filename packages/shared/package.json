@@ -10,7 +10,8 @@
     "./fingerprint": "./src/fingerprint.ts",
     "./brand": "./src/brand.ts",
     "./social-outro": "./src/social-outro.ts",
-    "./controls-gamepad": "./src/controls-gamepad.ts"
+    "./controls-gamepad": "./src/controls-gamepad.ts",
+    "./runtime-beacon": "./src/runtime-beacon.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

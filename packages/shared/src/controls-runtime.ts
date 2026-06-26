@@ -18,6 +18,7 @@
  */
 
 import { GAMEPAD_BRIDGE_MARKER, GAMEPAD_BRIDGE_SNIPPET } from './controls-gamepad';
+import { RUNTIME_BEACON_MARKER, RUNTIME_BEACON_SNIPPET } from './runtime-beacon';
 
 const MANIFEST_TYPE = 'playforge:controls:manifest';
 const REBIND_TYPE = 'playforge:controls:rebind';
@@ -99,6 +100,18 @@ export const CONTROLS_MANIFEST_BRIDGE_SNIPPET = `<script data-pf="${CONTROLS_MAN
  */
 export function injectControlsRuntime(html: string): string {
   let out = html;
+  // Runtime beacon FIRST at <head> — installed before any other script so its
+  // error listeners catch crashes anywhere (including a boot crash) and its rAF
+  // wrapper is in place before the game schedules a frame. Preview-only.
+  if (!out.includes(RUNTIME_BEACON_MARKER)) {
+    const headOpen = /<head[^>]*>/i.exec(out);
+    if (headOpen?.index !== undefined) {
+      const at = headOpen.index + headOpen[0].length;
+      out = `${out.slice(0, at)}\n${RUNTIME_BEACON_SNIPPET}${out.slice(at)}`;
+    } else {
+      out = `${RUNTIME_BEACON_SNIPPET}\n${out}`;
+    }
+  }
   if (!out.includes(CONTROLS_RUNTIME_MARKER)) {
     const headOpen = /<head[^>]*>/i.exec(out);
     if (headOpen?.index !== undefined) {

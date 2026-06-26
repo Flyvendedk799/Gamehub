@@ -6,12 +6,16 @@ import {
   CLOUD_SAVE_RESULT_MESSAGE_TYPE,
   CONTROLS_MANIFEST_MESSAGE_TYPE,
   PREVIEW_IFRAME_ORIGIN,
+  RUNTIME_ALIVE_MESSAGE_TYPE,
+  RUNTIME_ERROR_MESSAGE_TYPE,
   TWEAKS_UPDATE_MESSAGE_TYPE,
   isPreviewIframeOrigin,
   parseCloudSaveMessage,
   parseCloudSavePayload,
   parseControlsManifestMessage,
   parseInboundBridgeMessage,
+  parseRuntimeAliveMessage,
+  parseRuntimeErrorMessage,
   sendCloudSaveReady,
   sendCloudSaveResult,
 } from '../iframe-bridge';
@@ -55,6 +59,44 @@ describe('parseControlsManifestMessage (WS-A)', () => {
       manifest: { actions: [{ label: 'x' }, { keys: ['Space'] }] },
     };
     expect(parseControlsManifestMessage(evt(PREVIEW_IFRAME_ORIGIN, allDropped))).toBeNull();
+  });
+});
+
+describe('runtime beacon parsers', () => {
+  it('parses a runtime crash from the trusted origin', () => {
+    const msg = {
+      type: RUNTIME_ERROR_MESSAGE_TYPE,
+      message: "Audio key 'meleeHit' not found in cache",
+      stack: 'at PlayScene.melee (main.js:370)',
+    };
+    const out = parseRuntimeErrorMessage(evt(PREVIEW_IFRAME_ORIGIN, msg));
+    expect(out?.message).toContain('meleeHit');
+    expect(out?.stack).toContain('melee');
+  });
+
+  it('rejects a foreign origin, wrong type, or empty message', () => {
+    const msg = { type: RUNTIME_ERROR_MESSAGE_TYPE, message: 'boom' };
+    expect(parseRuntimeErrorMessage(evt('https://evil.example', msg))).toBeNull();
+    expect(
+      parseRuntimeErrorMessage(evt(PREVIEW_IFRAME_ORIGIN, { type: 'other', message: 'x' })),
+    ).toBeNull();
+    expect(
+      parseRuntimeErrorMessage(evt(PREVIEW_IFRAME_ORIGIN, { type: RUNTIME_ERROR_MESSAGE_TYPE })),
+    ).toBeNull();
+  });
+
+  it('parses a heartbeat with its rAF tick count (defaulting to 0)', () => {
+    expect(
+      parseRuntimeAliveMessage(
+        evt(PREVIEW_IFRAME_ORIGIN, { type: RUNTIME_ALIVE_MESSAGE_TYPE, raf: 42 }),
+      ),
+    ).toEqual({ raf: 42 });
+    expect(
+      parseRuntimeAliveMessage(evt(PREVIEW_IFRAME_ORIGIN, { type: RUNTIME_ALIVE_MESSAGE_TYPE })),
+    ).toEqual({ raf: 0 });
+    expect(
+      parseRuntimeAliveMessage(evt('https://evil.example', { type: RUNTIME_ALIVE_MESSAGE_TYPE })),
+    ).toBeNull();
   });
 });
 

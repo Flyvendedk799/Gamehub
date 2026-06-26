@@ -694,6 +694,9 @@ export default function BuilderPage() {
                   'wrong key mappings while you do this. Keep everything else the same.',
               );
             }}
+            // A live crash/freeze the running game reported — "Fix it" fires a
+            // repair run with the error as context. Hidden while a run streams.
+            {...(isStreaming ? {} : { onFixRuntimeIssue: (text: string) => void handleSend(text) })}
           />
         </div>
 

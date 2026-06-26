@@ -799,6 +799,7 @@ export * from './ssrf';
 export * from './engine-cdn';
 export * from './controls-runtime';
 export * from './controls-gamepad';
+export * from './runtime-beacon';
 export * from './brand';
 export {
   SOCIAL_OUTRO_SCHEMA_VERSION,

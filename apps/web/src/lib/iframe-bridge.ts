@@ -129,6 +129,34 @@ export function parseGamepadStatusMessage(event: MessageEvent<unknown>): Gamepad
   };
 }
 
+// ─── Runtime beacon — live crash / freeze detection (mirrors runtime-beacon.ts) ─
+
+export const RUNTIME_ERROR_MESSAGE_TYPE = 'playforge:runtime:error' as const;
+export const RUNTIME_ALIVE_MESSAGE_TYPE = 'playforge:runtime:alive' as const;
+
+export interface RuntimeErrorReport {
+  message: string;
+  stack: string;
+}
+
+/** Parse an inbound `runtime:error` — an uncaught crash in the live preview. */
+export function parseRuntimeErrorMessage(event: MessageEvent<unknown>): RuntimeErrorReport | null {
+  if (!isPreviewIframeOrigin(event.origin)) return null;
+  const data = event.data as { type?: unknown; message?: unknown; stack?: unknown } | null;
+  if (!data || data.type !== RUNTIME_ERROR_MESSAGE_TYPE) return null;
+  const message = typeof data.message === 'string' ? data.message.trim() : '';
+  if (!message) return null;
+  return { message, stack: typeof data.stack === 'string' ? data.stack : '' };
+}
+
+/** Parse an inbound `runtime:alive` heartbeat (`raf` = rAF ticks since last beat). */
+export function parseRuntimeAliveMessage(event: MessageEvent<unknown>): { raf: number } | null {
+  if (!isPreviewIframeOrigin(event.origin)) return null;
+  const data = event.data as { type?: unknown; raf?: unknown } | null;
+  if (!data || data.type !== RUNTIME_ALIVE_MESSAGE_TYPE) return null;
+  return { raf: typeof data.raf === 'number' && Number.isFinite(data.raf) ? data.raf : 0 };
+}
+
 // ─── Cloud-save protocol — mirrors the in-iframe cloud-save shim ──────────────
 //
 // The sandboxed game posts these to its parent window; the host relays them to

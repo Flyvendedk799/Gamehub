@@ -9,6 +9,8 @@ import {
   parseControlsManifestMessage,
   parseGamepadStatusMessage,
   parseInboundBridgeMessage,
+  parseRuntimeAliveMessage,
+  parseRuntimeErrorMessage,
   sendControlsRebind,
   sendControlsRequest,
 } from '@/lib/iframe-bridge';
@@ -45,6 +47,10 @@ interface PreviewPaneProps {
   /** Fired after a manual file save in the Files tab so the parent can repoint
    *  the live preview at the project's just-edited HEAD and refresh versions. */
   onFileSaved?: () => void;
+  /** Fired when the user clicks "Fix it" on a live crash/freeze the running game
+   *  reported — the parent kicks off a repair run with the error as context.
+   *  Undefined hides the button (e.g. while a run is already streaming). */
+  onFixRuntimeIssue?: (errorText: string) => void;
 }
 
 export function PreviewPane({
@@ -56,6 +62,7 @@ export function PreviewPane({
   projectId,
   onMapControls,
   onFileSaved,
+  onFixRuntimeIssue,
 }: PreviewPaneProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [showTweaks, setShowTweaks] = useState(false);
@@ -65,6 +72,19 @@ export function PreviewPane({
   // Whether a controller is connected to the running game (the gamepad bridge
   // posts this once controller support is mapped) — drives the panel's badge.
   const [gamepadConnected, setGamepadConnected] = useState(false);
+  // Live crash/freeze the running game reported (runtime beacon). Drives the
+  // "your game crashed — Fix it" banner. `dismissed` hides it until the next
+  // reload without re-querying.
+  const [runtimeIssue, setRuntimeIssue] = useState<{
+    kind: 'crash' | 'freeze';
+    message: string;
+  } | null>(null);
+  const [issueDismissed, setIssueDismissed] = useState(false);
+  // Freeze detection state (refs — they must not trigger re-renders): whether the
+  // game has ever animated, and how many consecutive heartbeats reported a dead
+  // render loop (rAF flatlined while the thread is still beating).
+  const animatedRef = useRef(false);
+  const staleBeatsRef = useRef(0);
   // Tracks unsaved edits in the Files tab so switching tabs can't silently
   // discard them (the FilesPanel bubbles this up via onDirtyChange).
   const [filesDirty, setFilesDirty] = useState(false);
@@ -151,6 +171,32 @@ export function PreviewPane({
         setGamepadConnected(gamepad.connected);
         return;
       }
+      // Live CRASH — an uncaught error in the running game. The first one wins
+      // (a crash usually repeats every frame); we surface it and offer a fix.
+      const crash = parseRuntimeErrorMessage(event);
+      if (crash) {
+        setRuntimeIssue((cur) => cur ?? { kind: 'crash', message: crash.message });
+        return;
+      }
+      // Heartbeat — detect a dead render loop (FREEZE). rAF flatlining for two
+      // beats (~3s) after the game has animated, while the tab is visible (a
+      // backgrounded tab throttles rAF to ~0 — not a real freeze), means the loop
+      // stopped. A true thread hang can't be seen here (same-origin tab hangs too).
+      const alive = parseRuntimeAliveMessage(event);
+      if (alive) {
+        if (alive.raf > 0) {
+          animatedRef.current = true;
+          staleBeatsRef.current = 0;
+        } else if (animatedRef.current && typeof document !== 'undefined' && !document.hidden) {
+          staleBeatsRef.current += 1;
+          if (staleBeatsRef.current >= 2) {
+            setRuntimeIssue(
+              (cur) => cur ?? { kind: 'freeze', message: 'The game stopped responding.' },
+            );
+          }
+        }
+        return;
+      }
       const msg = parseInboundBridgeMessage(event);
       if (!msg) return; // untrusted origin or malformed shape → ignore
       // Reserved for future bridge ack handling.
@@ -158,6 +204,15 @@ export function PreviewPane({
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
   }, []);
+
+  // Reset crash/freeze detection whenever the preview (re)loads or swaps games.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reload nonce + url are the reset triggers
+  useEffect(() => {
+    setRuntimeIssue(null);
+    setIssueDismissed(false);
+    animatedRef.current = false;
+    staleBeatsRef.current = 0;
+  }, [previewUrl, reloadNonce]);
 
   // Push rebound keys to the running game.
   const applyControls = useCallback((bindings: Record<string, string[]>) => {
@@ -356,6 +411,51 @@ export function PreviewPane({
               sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-downloads"
               className="absolute inset-0 w-full h-full border-0"
             />
+          )}
+
+          {/* Live crash/freeze banner — the running game's runtime beacon reported
+              an uncaught error or a dead render loop. One click repairs it. */}
+          {runtimeIssue && !issueDismissed && view === 'preview' && (
+            <div className="absolute bottom-0 left-0 right-0 z-20 m-3 rounded-xl border border-[#ef4444]/40 bg-[#1a0f0f]/95 px-4 py-3 shadow-lg backdrop-blur">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[#fca5a5]">
+                    {runtimeIssue.kind === 'crash'
+                      ? '⚠️ Your game hit an error while playing'
+                      : '⚠️ Your game stopped responding'}
+                  </p>
+                  <p className="mt-0.5 line-clamp-2 break-words font-mono text-[11px] leading-relaxed text-[#a1a1aa]">
+                    {runtimeIssue.message}
+                  </p>
+                </div>
+                <div className="flex flex-shrink-0 items-center gap-2">
+                  {onFixRuntimeIssue && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onFixRuntimeIssue(
+                          runtimeIssue.kind === 'crash'
+                            ? `The game crashes during play with this runtime error: "${runtimeIssue.message}". Find the root cause and fix it.`
+                            : 'The game freezes / stops responding during play (its render loop dies). Find the root cause and fix it.',
+                        );
+                        setIssueDismissed(true);
+                      }}
+                      className="rounded-lg bg-[#ef4444] px-3.5 py-2 text-xs font-medium text-white transition-colors hover:bg-[#dc2626]"
+                    >
+                      Fix it
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setIssueDismissed(true)}
+                    aria-label="Dismiss"
+                    className="rounded-lg border border-[#3f3f46] px-2.5 py-2 text-xs text-[#a1a1aa] transition-colors hover:text-[#d4d4d8]"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
 
           {/* Controls tab — overlays the (still-running) game so rebinds apply live */}
