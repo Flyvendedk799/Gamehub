@@ -12,7 +12,10 @@ import { useEffect, useState } from 'react';
  * views where a nav rail would intrude:
  *   - /auth/*            — login / register
  *   - /onboarding        — first-run setup
- *   - /projects/:id      — the full-screen game builder/editor
+ *   - /projects/:id      — the full-screen game builder/editor, which embeds its
+ *                          own Sidebar instance (in-flow rail + hamburger drawer)
+ *                          so the main nav is present there too, without the
+ *                          mobile top bar colliding with the editor's own chrome
  *   - /p/:slug           — the public, shareable/embeddable play page
  *
  * Responsive: at md+ the sidebar is an in-flow sticky rail. Below md it collapses

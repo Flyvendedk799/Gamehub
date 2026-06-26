@@ -8,9 +8,10 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 /** Persistent left navigation rail — the app's primary nav across every
- *  dashboard surface (home, projects, hub, settings, profile). Immersive views
- *  (the editor, the public play page, auth, onboarding) render without it; that
- *  gating lives in AppShell.
+ *  dashboard surface (home, projects, hub, settings, profile). AppShell mounts
+ *  it on those surfaces; the project editor (/projects/:id) embeds its own
+ *  instance directly so the nav is present there too. The remaining chromeless
+ *  views (public play page, auth, onboarding) render without it.
  *
  *  Responsive: an in-flow sticky rail at md+; an off-canvas overlay drawer below
  *  md, toggled by `open` and slid in/out with a transform. `onNavigate` lets the
