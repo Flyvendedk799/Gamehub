@@ -1,5 +1,6 @@
 'use client';
 
+import { formatElapsed } from '@/lib/build-status';
 import { buildRenderItems } from '@/lib/chat-render';
 import { EDIT_TOOL, shouldOfferFix, writtenPaths } from '@/lib/event-normalize';
 import type { SseEvent } from '@/lib/types';
@@ -59,6 +60,22 @@ export function ChatPanel({
 
   const renderItems = useMemo(() => buildRenderItems(events), [events]);
 
+  // Elapsed build timer for the "Running" indicator. Anchored to the first event's
+  // timestamp so a mid-build reload shows the true elapsed, not 0.
+  const startedAt = useMemo(() => {
+    for (const e of events) {
+      const t = Date.parse(e.timestamp);
+      if (Number.isFinite(t)) return t;
+    }
+    return null;
+  }, [events]);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!isStreaming) return;
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [isStreaming]);
+
   // Phase 2.6 — "Changed N files" per iteration. Map each terminal event's
   // render key to the file paths written since the previous terminal event, so
   // the completion row can list exactly that iteration's changes.
@@ -80,6 +97,11 @@ export function ChatPanel({
           <output className="flex items-center gap-1.5 text-xs text-[#6366f1]">
             <PulseIcon />
             Running
+            {startedAt !== null && (
+              <span className="font-mono tabular-nums text-[#52525b]">
+                · {formatElapsed(nowMs - startedAt)}
+              </span>
+            )}
           </output>
         ) : null}
       </div>

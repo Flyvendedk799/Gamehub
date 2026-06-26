@@ -677,6 +677,7 @@ export default function BuilderPage() {
             errorMessage={errorMessage}
             tweakSchema={currentTweakSchema}
             projectId={projectId}
+            events={events}
             onFileSaved={() => {
               // A manual file edit created a new version — repoint the live
               // preview at the project's current HEAD and refresh the timeline.

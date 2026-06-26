@@ -14,7 +14,9 @@ import {
   sendControlsRebind,
   sendControlsRequest,
 } from '@/lib/iframe-bridge';
+import type { SseEvent } from '@/lib/types';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BuildStatus } from './BuildStatus';
 import { ControlsPanel } from './ControlsPanel';
 import { FilesPanel } from './FilesPanel';
 
@@ -51,6 +53,9 @@ interface PreviewPaneProps {
    *  reported — the parent kicks off a repair run with the error as context.
    *  Undefined hides the button (e.g. while a run is already streaming). */
   onFixRuntimeIssue?: (errorText: string) => void;
+  /** Live SSE events for the running build — drives the in-preview build status
+   *  (current step, elapsed timer, phase tracker) while the game generates. */
+  events?: SseEvent[];
 }
 
 export function PreviewPane({
@@ -63,6 +68,7 @@ export function PreviewPane({
   onMapControls,
   onFileSaved,
   onFixRuntimeIssue,
+  events = [],
 }: PreviewPaneProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [showTweaks, setShowTweaks] = useState(false);
@@ -493,13 +499,7 @@ export function PreviewPane({
           {!previewUrl && !hasError && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-6">
               {isBuilding ? (
-                <>
-                  <BuildingAnimation />
-                  <div className="text-center">
-                    <p className="text-[#f4f4f5] text-sm font-medium">Building your game…</p>
-                    <p className="mt-1 text-[#52525b] text-xs">This usually takes 15–60 seconds</p>
-                  </div>
-                </>
+                <BuildStatus events={events} isBuilding={isBuilding} />
               ) : (
                 <>
                   <IdleGraphic />
@@ -673,38 +673,6 @@ function TweakControl({ tweakKey, entry, value, onChange }: TweakControlProps) {
 }
 
 // ─── Animations ───────────────────────────────────────────────────────────────
-
-function BuildingAnimation() {
-  return (
-    <div className="relative w-16 h-16">
-      {/* Outer ring */}
-      <svg
-        className="absolute inset-0 animate-spin"
-        style={{ animationDuration: '3s' }}
-        viewBox="0 0 64 64"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-      >
-        <circle
-          cx="32"
-          cy="32"
-          r="28"
-          stroke="#6366f1"
-          strokeWidth="2"
-          strokeDasharray="44 132"
-          strokeLinecap="round"
-        />
-      </svg>
-      {/* Inner icon */}
-      <div className="absolute inset-0 flex items-center justify-center">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <polygon points="4,3 20,12 4,21" fill="#6366f1" className="opacity-80" />
-        </svg>
-      </div>
-    </div>
-  );
-}
 
 function IdleGraphic() {
   return (
