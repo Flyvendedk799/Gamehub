@@ -80,6 +80,13 @@ export function parseControlsManifestMessage(
       ...(pointer === 'look' || pointer === 'aim' || pointer === 'drag' ? { pointer } : {}),
     });
   }
+  // Ignore an EMPTY manifest. The game posts its real manifest once it declares
+  // controls, but the runtime's request-responders also fire BEFORE that (and on
+  // every `controls:request`), posting `{actions: []}`. Accepting an empty
+  // manifest would clobber a good one — the "binds flash then disappear" bug. A
+  // game with genuinely zero controls simply never declares any, so it has no
+  // manifest to show; treat empty exactly like "no manifest yet".
+  if (actions.length === 0) return null;
   return { actions };
 }
 

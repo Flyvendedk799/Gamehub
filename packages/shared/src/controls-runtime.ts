@@ -76,7 +76,7 @@ export const CONTROLS_MANIFEST_BRIDGE_MARKER = 'pf-controls-manifest-bridge';
 export const CONTROLS_MANIFEST_BRIDGE_SNIPPET = `<script data-pf="${CONTROLS_MANIFEST_BRIDGE_MARKER}">(function(){
   var MT=${JSON.stringify(MANIFEST_TYPE)},RT=${JSON.stringify(REQUEST_TYPE)};
   function curActions(c){return (c&&((c.manifest&&c.manifest.actions)||c.actions))||[];}
-  function post(actions){try{var mf={actions:actions||[]};var c=window.__game&&window.__game.controls;if(c)c.manifest=mf;if(window.parent&&window.parent!==window)window.parent.postMessage({type:MT,manifest:mf},'*');}catch(e){}}
+  function post(actions){if(!actions||!actions.length)return;try{var mf={actions:actions};var c=window.__game&&window.__game.controls;if(c)c.manifest=mf;if(window.parent&&window.parent!==window)window.parent.postMessage({type:MT,manifest:mf},'*');}catch(e){}}
   function wrap(){
     var c=window.__game&&window.__game.controls;
     if(!c||typeof c.define!=='function'||c.define.__pfWrapped)return;

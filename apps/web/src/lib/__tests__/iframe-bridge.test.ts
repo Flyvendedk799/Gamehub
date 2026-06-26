@@ -45,6 +45,17 @@ describe('parseControlsManifestMessage (WS-A)', () => {
     expect(parseControlsManifestMessage(evt('https://evil.example', manifest))).toBeNull();
     expect(parseControlsManifestMessage(evt(PREVIEW_IFRAME_ORIGIN, { type: 'other' }))).toBeNull();
   });
+
+  it('ignores an EMPTY manifest so a race-posted {actions:[]} cannot clobber a good one', () => {
+    const empty = { type: CONTROLS_MANIFEST_MESSAGE_TYPE, manifest: { actions: [] } };
+    expect(parseControlsManifestMessage(evt(PREVIEW_IFRAME_ORIGIN, empty))).toBeNull();
+    // actions present but all invalid (no ids) → also effectively empty → null
+    const allDropped = {
+      type: CONTROLS_MANIFEST_MESSAGE_TYPE,
+      manifest: { actions: [{ label: 'x' }, { keys: ['Space'] }] },
+    };
+    expect(parseControlsManifestMessage(evt(PREVIEW_IFRAME_ORIGIN, allDropped))).toBeNull();
+  });
 });
 
 describe('keyLabel', () => {
