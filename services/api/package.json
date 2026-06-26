@@ -9,7 +9,8 @@
     "test": "vitest run --passWithNoTests",
     "dev": "tsx src/main.ts",
     "start": "tsx src/main.ts",
-    "seed": "tsx src/seed.ts"
+    "seed": "tsx src/seed.ts",
+    "test:gen": "tsx scripts/test-gen.ts"
   },
   "dependencies": {
     "@fastify/websocket": "^11.2.0",

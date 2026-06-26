@@ -37,7 +37,9 @@ describe('PREMIUM_STARTERS', () => {
           expect(src).toContain('Fog');
         } else {
           expect(src).toMatch(/PAL\b/);
-          expect(src).toMatch(/function draw[A-Z]|this\.add\.(ellipse|star|graphics)/);
+          // The subject is drawn — either a per-noun draw fn (canvas2d) or a sprite
+          // baked from the representational-art layer (phaser artTexture/art.sprite).
+          expect(src).toMatch(/function draw[A-Z]|__game\.art\.(draw|sprite)|artTexture/);
         }
       });
 

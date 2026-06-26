@@ -150,6 +150,15 @@ function gradientBg(scene) {
   const { width: W, height: H } = scene.scale;
   scene.add.graphics().fillGradientStyle(PAL.bg0, PAL.bg0, PAL.bg1, PAL.bg1, 1).fillRect(0, 0, W, H);
 }
+// Bake a recognisable sprite from the built-in silhouette library into a texture
+// ONCE, so add.image(key) / group.create(x, y, key) draw an ACTUAL noun (fish,
+// rocket, coin, …) instead of a tinted shape. Swap the noun for YOUR subject.
+function artTexture(scene, key, noun, size, opts) {
+  if (scene.textures.exists(key)) return key;
+  const cv = window.__game.art.sprite(noun, size, opts);
+  if (cv) scene.textures.addCanvas(key, cv);
+  return key;
+}
 
 class TitleScene extends Phaser.Scene {
   constructor() { super('Title'); }
@@ -168,20 +177,18 @@ class PlayScene extends Phaser.Scene {
   create() {
     gradientBg(this);
     this.score = 0;
-    // DRAW THE SUBJECT — bake a recognisable sprite from the built-in silhouette library:
-    //   const cv = window.__game.art.sprite('rocket', 96, { fill: '#ffcc4d' });
-    //   this.textures.addCanvas('player', cv);
-    //   this.player = this.physics.add.image(400, 540, 'player');
-    // (any noun: fish, coin, car, person, …; unknown nouns get a labelled crest.) Or a
-    // generate_image_asset sprite — never a loaded png you didn't create. The ellipse is a placeholder.
-    this.player = this.add.ellipse(400, 540, 90, 22, 0xffcc4d);
-    this.physics.add.existing(this.player);
-    this.player.body.setCollideWorldBounds(true);
+    // DRAW THE SUBJECT — bake recognisable sprites from the silhouette library. SWAP the
+    // nouns ('rocket' / 'star') for YOUR subject (fish, coin, car, person, enemy, …; an
+    // unknown noun gets a distinctive labelled crest). Or generate_image_asset for a
+    // custom sprite — never a loaded png you didn't create.
+    artTexture(this, 'player', 'rocket', 96, { fill: '#ffcc4d' });
+    artTexture(this, 'hazard', 'star', 64, { fill: '#ff5d7a' });
+    this.player = this.physics.add.image(400, 540, 'player').setCollideWorldBounds(true);
     this.things = this.physics.add.group();
     this.scoreText = this.add.text(16, 14, 'Score 0', { ...TITLE_FONT, fontSize: '20px', color: PAL.ink });
     this.spawn = this.time.addEvent({ delay: 800, loop: true, callback: () => {
       const x = 30 + Math.random() * (this.scale.width - 60);
-      const t = this.add.star(x, -20, 6, 6, 13, PAL.bad); this.things.add(t); t.body.setVelocityY(160 + this.score * 6);
+      const t = this.things.create(x, -20, 'hazard'); t.setVelocityY(160 + this.score * 6);
     } });
     window.__game.debug.track({ score: () => this.score, player: () => this.player });
   }
