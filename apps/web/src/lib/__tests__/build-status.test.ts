@@ -89,6 +89,21 @@ describe('deriveBuildStatus', () => {
     expect(s.currentStep).toBe('Adding the player controller so it runs and jumps.');
   });
 
+  it('declare_playtest_contract (declared up front) does NOT jump to Test — stays in Build', () => {
+    const s = deriveBuildStatus([
+      ev({ type: 'tool_use', toolName: 'declare_playtest_contract', status: 'start' }),
+      ev({
+        type: 'tool_use',
+        toolName: 'str_replace_based_edit_tool',
+        status: 'start',
+        path: 'index.html',
+        label: 'writing index.html',
+      }),
+    ]);
+    expect(s.phase).toBe('Build');
+    expect(s.currentStep).toBe('writing index.html');
+  });
+
   it('exposes exactly four ordered phases', () => {
     expect(BUILD_PHASES).toEqual(['Design', 'Build', 'Test', 'Ready']);
   });

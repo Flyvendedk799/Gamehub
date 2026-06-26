@@ -20,14 +20,18 @@ const PHASE_HINTS = [
   'Your game is ready',
 ] as const;
 
-/** Tools that mean the agent (or server) is verifying, not authoring. */
+/**
+ * Tools that mean the agent (or server) is VERIFYING, not authoring. Note
+ * `declare_playtest_contract` is deliberately NOT here — the agent declares that
+ * up front during design, so counting it would jump the tracker to Test while the
+ * game is still being written.
+ */
 const VERIFY_TOOLS = new Set([
   'validate_game_scene',
   'playtest_game',
   'get_playtest_playbook',
   'assert_game_invariants',
   'runtime_verify',
-  'declare_playtest_contract',
 ]);
 
 export interface BuildStatus {
