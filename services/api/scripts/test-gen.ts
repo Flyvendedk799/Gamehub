@@ -49,6 +49,8 @@ async function main(): Promise<number> {
     return 64;
   }
   const engineArg = process.argv[3] as Engine | undefined;
+  // Default to opus-4-8 — reliable on the subscription wire. (claude-sonnet-4-6 was
+  // observed to hang the inference call here; the wall-clock cap below still exits.)
   const modelId = process.argv[4] || 'claude-opus-4-8';
   const token = subscriptionToken();
 
