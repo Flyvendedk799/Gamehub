@@ -53,6 +53,16 @@ export const ART_KINDS = [
   'rocket',
   'car',
   'house',
+  'crab',
+  'octopus',
+  'jellyfish',
+  'whale',
+  'anchor',
+  'snail',
+  'spider',
+  'robot',
+  'banana',
+  'potion',
 ] as const;
 
 export type ArtKind = (typeof ART_KINDS)[number];
@@ -192,6 +202,29 @@ export const ART_SYNONYMS: Record<string, ArtKind> = {
   building: 'house',
   hut: 'house',
   castle: 'house',
+  // crab
+  lobster: 'crab',
+  // octopus
+  squid: 'octopus',
+  kraken: 'octopus',
+  // jellyfish
+  medusa: 'jellyfish',
+  // whale
+  dolphin: 'whale',
+  orca: 'whale',
+  // snail
+  slug: 'snail',
+  // spider
+  tarantula: 'spider',
+  // robot
+  bot: 'robot',
+  android: 'robot',
+  droid: 'robot',
+  mech: 'robot',
+  // potion
+  flask: 'potion',
+  elixir: 'potion',
+  brew: 'potion',
 };
 
 const ART_KIND_SET = new Set<string>(ART_KINDS);
@@ -250,6 +283,16 @@ const DEFAULT_FILL: Record<ArtKind, string> = {
   rocket: '#ff5d5d',
   car: '#ff5d5d',
   house: '#e0c089',
+  crab: '#e5563b',
+  octopus: '#b25fd6',
+  jellyfish: '#ff8fcf',
+  whale: '#5b8cff',
+  anchor: '#9aa7bd',
+  snail: '#c79a5b',
+  spider: '#2b2f3a',
+  robot: '#9aa7bd',
+  banana: '#ffd23d',
+  potion: '#7ad14f',
 };
 
 /**
@@ -556,6 +599,85 @@ export function artLibSource(): string {
       ctx.fillStyle = c.dark; ctx.beginPath(); ctx.moveTo(-s * 0.9, -s * 0.05); ctx.lineTo(0, -s * 0.85); ctx.lineTo(s * 0.9, -s * 0.05); ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#7a5a2e'; ctx.fillRect(-s * 0.18, s * 0.3, s * 0.36, s * 0.55);
       ctx.fillStyle = '#9fd8ff'; ctx.fillRect(s * 0.25, s * 0.05, s * 0.3, s * 0.3);
+    },
+    crab: function (ctx, s, c) {
+      ctx.strokeStyle = c.dark; ctx.lineWidth = Math.max(1, s * 0.06); ctx.lineCap = 'round';
+      var i; for (i = 0; i < 3; i++) { var yy = i * s * 0.22; ctx.beginPath(); ctx.moveTo(-s * 0.5, yy); ctx.lineTo(-s * 0.95, yy + s * 0.14); ctx.moveTo(s * 0.5, yy); ctx.lineTo(s * 0.95, yy + s * 0.14); ctx.stroke(); }
+      ctx.fillStyle = c.fill; ctx.beginPath(); ctx.ellipse(0, s * 0.1, s * 0.75, s * 0.5, 0, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(-s * 0.85, -s * 0.25, s * 0.26, s * 0.18, -0.5, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(s * 0.85, -s * 0.25, s * 0.26, s * 0.18, 0.5, 0, TAU); ctx.fill();
+      ctx.strokeStyle = c.fill; ctx.lineWidth = Math.max(1, s * 0.06); ctx.beginPath(); ctx.moveTo(-s * 0.2, -s * 0.3); ctx.lineTo(-s * 0.2, -s * 0.55); ctx.moveTo(s * 0.2, -s * 0.3); ctx.lineTo(s * 0.2, -s * 0.55); ctx.stroke();
+      dot(ctx, -s * 0.2, -s * 0.58, s * 0.1, '#fff'); dot(ctx, s * 0.2, -s * 0.58, s * 0.1, '#fff');
+      dot(ctx, -s * 0.2, -s * 0.58, s * 0.05, c.eye); dot(ctx, s * 0.2, -s * 0.58, s * 0.05, c.eye);
+    },
+    octopus: function (ctx, s, c) {
+      ctx.fillStyle = c.fill; ctx.strokeStyle = c.fill; ctx.lineCap = 'round';
+      var i; for (i = 0; i < 5; i++) { var x = -s * 0.55 + i * s * 0.275; ctx.lineWidth = s * 0.18; ctx.beginPath(); ctx.moveTo(x, s * 0.05); ctx.quadraticCurveTo(x - s * 0.1, s * 0.6, x + (i % 2 ? 1 : -1) * s * 0.16, s * 0.9); ctx.stroke(); }
+      ctx.beginPath(); ctx.arc(0, -s * 0.2, s * 0.6, Math.PI, 0); ctx.lineTo(s * 0.6, s * 0.12); ctx.lineTo(-s * 0.6, s * 0.12); ctx.closePath(); ctx.fill();
+      dot(ctx, -s * 0.22, -s * 0.25, s * 0.14, '#fff'); dot(ctx, s * 0.22, -s * 0.25, s * 0.14, '#fff');
+      dot(ctx, -s * 0.22, -s * 0.22, s * 0.07, c.eye); dot(ctx, s * 0.22, -s * 0.22, s * 0.07, c.eye);
+    },
+    jellyfish: function (ctx, s, c) {
+      ctx.fillStyle = c.fill;
+      ctx.beginPath(); ctx.arc(0, -s * 0.05, s * 0.62, Math.PI, 0); var k; for (k = 0; k < 4; k++) { var x0 = s * 0.62 - k * s * 0.31; ctx.quadraticCurveTo(x0 - s * 0.155, s * 0.12, x0 - s * 0.31, -s * 0.05); } ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = c.fill; ctx.lineWidth = Math.max(1, s * 0.05); ctx.lineCap = 'round';
+      var i; for (i = 0; i < 5; i++) { var tx = -s * 0.45 + i * s * 0.225; ctx.beginPath(); ctx.moveTo(tx, s * 0.05); ctx.quadraticCurveTo(tx + s * 0.12, s * 0.55, tx - s * 0.06, s * 0.92); ctx.stroke(); }
+      dot(ctx, -s * 0.18, -s * 0.18, s * 0.08, 'rgba(255,255,255,0.6)'); dot(ctx, s * 0.18, -s * 0.18, s * 0.08, 'rgba(255,255,255,0.6)');
+    },
+    whale: function (ctx, s, c) {
+      ctx.fillStyle = c.fill;
+      ctx.beginPath(); ctx.ellipse(-s * 0.1, s * 0.05, s * 0.85, s * 0.5, 0, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(s * 0.6, 0); ctx.lineTo(s * 1.05, -s * 0.35); ctx.lineTo(s * 0.92, s * 0.05); ctx.lineTo(s * 1.05, s * 0.4); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.28)'; ctx.beginPath(); ctx.ellipse(-s * 0.2, s * 0.28, s * 0.55, s * 0.2, 0, 0, TAU); ctx.fill();
+      ctx.strokeStyle = c.fill; ctx.lineWidth = Math.max(1, s * 0.06); ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(-s * 0.5, -s * 0.4); ctx.lineTo(-s * 0.58, -s * 0.78); ctx.moveTo(-s * 0.5, -s * 0.4); ctx.lineTo(-s * 0.38, -s * 0.74); ctx.stroke();
+      dot(ctx, -s * 0.45, -s * 0.05, s * 0.08, c.eye);
+    },
+    anchor: function (ctx, s, c) {
+      ctx.strokeStyle = c.fill; ctx.lineWidth = Math.max(2, s * 0.15); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.beginPath(); ctx.arc(0, -s * 0.68, s * 0.2, 0, TAU); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, -s * 0.48); ctx.lineTo(0, s * 0.62); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-s * 0.35, -s * 0.22); ctx.lineTo(s * 0.35, -s * 0.22); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, s * 0.62); ctx.quadraticCurveTo(-s * 0.72, s * 0.5, -s * 0.6, s * 0.02); ctx.moveTo(0, s * 0.62); ctx.quadraticCurveTo(s * 0.72, s * 0.5, s * 0.6, s * 0.02); ctx.stroke();
+      ctx.fillStyle = c.fill; ctx.beginPath(); ctx.moveTo(-s * 0.6, s * 0.02); ctx.lineTo(-s * 0.78, s * 0.12); ctx.lineTo(-s * 0.48, s * 0.2); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(s * 0.6, s * 0.02); ctx.lineTo(s * 0.78, s * 0.12); ctx.lineTo(s * 0.48, s * 0.2); ctx.closePath(); ctx.fill();
+    },
+    snail: function (ctx, s, c) {
+      ctx.fillStyle = c.fill;
+      ctx.beginPath(); ctx.moveTo(-s * 0.9, s * 0.5); ctx.quadraticCurveTo(-s * 0.95, s * 0.78, -s * 0.55, s * 0.78); ctx.lineTo(s * 0.5, s * 0.78); ctx.quadraticCurveTo(s * 0.95, s * 0.78, s * 0.72, s * 0.32); ctx.lineTo(-s * 0.4, s * 0.32); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.arc(s * 0.62, s * 0.35, s * 0.22, 0, TAU); ctx.fill();
+      ctx.strokeStyle = c.fill; ctx.lineWidth = Math.max(1, s * 0.05); ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(s * 0.6, s * 0.15); ctx.lineTo(s * 0.6, -s * 0.18); ctx.moveTo(s * 0.74, s * 0.18); ctx.lineTo(s * 0.86, -s * 0.12); ctx.stroke();
+      dot(ctx, s * 0.6, -s * 0.2, s * 0.06, c.eye); dot(ctx, s * 0.88, -s * 0.14, s * 0.06, c.eye);
+      ctx.fillStyle = c.accent || '#e0a44d'; ctx.beginPath(); ctx.arc(-s * 0.15, s * 0.1, s * 0.5, 0, TAU); ctx.fill();
+      ctx.strokeStyle = c.dark; ctx.lineWidth = Math.max(1, s * 0.06); ctx.beginPath(); ctx.arc(-s * 0.15, s * 0.1, s * 0.33, 0, TAU * 0.85); ctx.stroke(); ctx.beginPath(); ctx.arc(-s * 0.1, s * 0.12, s * 0.16, 0, TAU * 0.85); ctx.stroke();
+    },
+    spider: function (ctx, s, c) {
+      ctx.strokeStyle = c.fill; ctx.lineWidth = Math.max(1, s * 0.06); ctx.lineCap = 'round';
+      var i; for (i = 0; i < 4; i++) { var yy = -s * 0.2 + i * s * 0.2; ctx.beginPath(); ctx.moveTo(-s * 0.2, yy); ctx.quadraticCurveTo(-s * 0.7, yy - s * 0.1, -s * 0.85, yy + s * 0.28); ctx.stroke(); ctx.beginPath(); ctx.moveTo(s * 0.2, yy); ctx.quadraticCurveTo(s * 0.7, yy - s * 0.1, s * 0.85, yy + s * 0.28); ctx.stroke(); }
+      ctx.fillStyle = c.fill; ctx.beginPath(); ctx.ellipse(0, s * 0.18, s * 0.42, s * 0.5, 0, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(0, -s * 0.35, s * 0.3, 0, TAU); ctx.fill();
+      dot(ctx, -s * 0.12, -s * 0.4, s * 0.08, '#fff'); dot(ctx, s * 0.12, -s * 0.4, s * 0.08, '#fff');
+      dot(ctx, -s * 0.12, -s * 0.38, s * 0.04, c.eye); dot(ctx, s * 0.12, -s * 0.38, s * 0.04, c.eye);
+    },
+    robot: function (ctx, s, c) {
+      ctx.strokeStyle = c.dark; ctx.lineWidth = Math.max(1, s * 0.05); ctx.beginPath(); ctx.moveTo(0, -s * 0.55); ctx.lineTo(0, -s * 0.85); ctx.stroke();
+      dot(ctx, 0, -s * 0.88, s * 0.08, c.accent || '#ff5d7a');
+      ctx.fillStyle = c.fill; rrect(ctx, -s * 0.45, -s * 0.55, s * 0.9, s * 0.55, s * 0.12); ctx.fill();
+      dot(ctx, -s * 0.18, -s * 0.28, s * 0.1, '#46e6f0'); dot(ctx, s * 0.18, -s * 0.28, s * 0.1, '#46e6f0');
+      ctx.fillStyle = c.fill; rrect(ctx, -s * 0.55, s * 0.05, s * 1.1, s * 0.7, s * 0.1); ctx.fill();
+      ctx.fillStyle = c.dark; rrect(ctx, -s * 0.78, s * 0.1, s * 0.2, s * 0.5, s * 0.08); ctx.fill(); rrect(ctx, s * 0.58, s * 0.1, s * 0.2, s * 0.5, s * 0.08); ctx.fill();
+      dot(ctx, 0, s * 0.35, s * 0.1, c.accent || '#ffcf4d');
+    },
+    banana: function (ctx, s, c) {
+      ctx.fillStyle = c.fill;
+      ctx.beginPath(); ctx.arc(s * 0.1, -s * 0.35, s * 0.95, Math.PI * 0.35, Math.PI * 0.92, false); ctx.arc(s * 0.1, -s * 0.35, s * 0.62, Math.PI * 0.92, Math.PI * 0.35, true); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = c.dark; dot(ctx, -s * 0.5, s * 0.2, s * 0.08, c.dark); dot(ctx, s * 0.62, s * 0.18, s * 0.08, c.dark);
+    },
+    potion: function (ctx, s, c) {
+      ctx.fillStyle = 'rgba(225,235,245,0.22)'; ctx.fillRect(-s * 0.18, -s * 0.55, s * 0.36, s * 0.55); ctx.beginPath(); ctx.arc(0, s * 0.25, s * 0.55, 0, TAU); ctx.fill();
+      ctx.fillStyle = c.fill; ctx.beginPath(); ctx.arc(0, s * 0.3, s * 0.45, 0, TAU); ctx.fill(); ctx.fillRect(-s * 0.12, -s * 0.2, s * 0.24, s * 0.5);
+      ctx.fillStyle = '#9a6b34'; ctx.fillRect(-s * 0.2, -s * 0.72, s * 0.4, s * 0.22);
+      ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.beginPath(); ctx.ellipse(-s * 0.22, s * 0.18, s * 0.08, s * 0.18, -0.5, 0, TAU); ctx.fill();
+      dot(ctx, s * 0.12, s * 0.28, s * 0.06, 'rgba(255,255,255,0.55)'); dot(ctx, -s * 0.04, s * 0.46, s * 0.04, 'rgba(255,255,255,0.5)');
     }
   };
 
