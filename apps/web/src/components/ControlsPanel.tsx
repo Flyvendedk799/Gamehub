@@ -1,11 +1,20 @@
 'use client';
 
 import type { ControlsManifest } from '@/lib/iframe-bridge';
+import {
+  autoMapGamepad,
+  hasGamepadBindings,
+  mergeGamepadBindings,
+  padLabel,
+} from '@playforge/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 /** Friendly label for a bound input — a KeyboardEvent.code ('ArrowUp' → '↑',
- *  'KeyW' → 'W') or a mouse button ('Mouse0' → 'Left Click'). */
+ *  'KeyW' → 'W'), a mouse button ('Mouse0' → 'Left Click'), or a controller
+ *  code ('Pad0' → 'A', 'PadLLeft' → 'L-Stick ←'). */
 export function keyLabel(code: string): string {
+  const pad = padLabel(code);
+  if (pad) return pad;
   if (code.startsWith('Mouse')) {
     const m: Record<string, string> = {
       Mouse0: 'Left Click',
@@ -56,6 +65,7 @@ export function ControlsPanel({
   storageKey,
   onMapWithAI,
   onUserRebind,
+  gamepadConnected = false,
 }: {
   manifest: ControlsManifest | null;
   /** Push the full binding set to the running game. */
@@ -71,6 +81,8 @@ export function ControlsPanel({
   /** Fired on a USER-initiated bind change (not the initial seed) so the host can
    *  cue a preview reload. */
   onUserRebind?: () => void;
+  /** True when the running game reports a connected controller (gamepad bridge). */
+  gamepadConnected?: boolean;
 }) {
   const defaults = useMemo(() => (manifest ? bindingsFromManifest(manifest) : {}), [manifest]);
   const [bindings, setBindings] = useState<Bindings>({});
@@ -128,10 +140,45 @@ export function ControlsPanel({
     window.addEventListener('keydown', onKey, { capture: true });
     window.addEventListener('mousedown', onMouse, { capture: true });
     window.addEventListener('contextmenu', onCtx, { capture: true });
+
+    // Also capture a CONTROLLER button/stick while binding, so pad binds are
+    // rebindable like keys. Poll the gamepad; the first newly-pressed button (or
+    // a stick pushed past the deadzone) binds. The first frame only records the
+    // resting state so an already-held button doesn't bind instantly.
+    let raf = 0;
+    let prev: boolean[] = [];
+    let first = true;
+    const pollPad = () => {
+      const pads = navigator.getGamepads?.();
+      const gp = pads ? Array.from(pads).find((p) => p?.connected) : null;
+      if (gp) {
+        const pressed = gp.buttons.map((b) => b.pressed || b.value > 0.5);
+        if (!first) {
+          for (let i = 0; i < pressed.length; i++) {
+            if (pressed[i] && !prev[i]) {
+              bind(`Pad${i}`);
+              return;
+            }
+          }
+          const ax = gp.axes[0] ?? 0;
+          const ay = gp.axes[1] ?? 0;
+          if (ax < -0.5) return bind('PadLLeft');
+          if (ax > 0.5) return bind('PadLRight');
+          if (ay < -0.5) return bind('PadLUp');
+          if (ay > 0.5) return bind('PadLDown');
+        }
+        prev = pressed;
+        first = false;
+      }
+      raf = requestAnimationFrame(pollPad);
+    };
+    raf = requestAnimationFrame(pollPad);
+
     return () => {
       window.removeEventListener('keydown', onKey, { capture: true });
       window.removeEventListener('mousedown', onMouse, { capture: true });
       window.removeEventListener('contextmenu', onCtx, { capture: true });
+      cancelAnimationFrame(raf);
     };
   }, [capturing, bindings, commit]);
 
@@ -139,6 +186,16 @@ export function ControlsPanel({
     commit({ ...bindings, [id]: (bindings[id] ?? []).filter((k) => k !== code) });
   };
   const reset = () => commit({ ...defaults });
+
+  // Controller support: auto-map the current controls onto a standard gamepad
+  // (the SAME heuristic the add_controller_support agent tool uses) and merge the
+  // pad codes into the live bindings. The gamepad bridge in the running game then
+  // translates controller input into the keys these actions already read.
+  const controllerMapped = useMemo(() => hasGamepadBindings(bindings), [bindings]);
+  const addControllerSupport = useCallback(() => {
+    if (!manifest) return;
+    commit(mergeGamepadBindings(bindings, autoMapGamepad(manifest.actions)));
+  }, [manifest, bindings, commit]);
 
   if (!manifest) {
     return (
@@ -176,6 +233,52 @@ export function ControlsPanel({
           Reset to defaults
         </button>
       </div>
+
+      {/* Controller support — one click auto-maps the current controls onto a
+          standard gamepad; afterwards each action shows its pad button as a chip. */}
+      <div className="mb-3 rounded-xl border border-[#222222] bg-[#0f0f0f] px-3.5 py-3">
+        {controllerMapped ? (
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-sm">🎮</span>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-[#f4f4f5]">
+                  {gamepadConnected ? 'Controller connected' : 'Controller mapped'}
+                </p>
+                <p className="text-[11px] text-[#71717a] leading-relaxed">
+                  {gamepadConnected
+                    ? 'Your controller is driving the game.'
+                    : 'Connect a controller and press a button to start.'}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={addControllerSupport}
+              className="flex-shrink-0 text-[11px] px-3 py-1.5 rounded-lg border border-[#27272a] text-[#a1a1aa] hover:text-[#d4d4d8] hover:border-[#3f3f46] transition-colors"
+            >
+              Re-map
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-sm">🎮</span>
+              <p className="text-xs text-[#a1a1aa] leading-relaxed">
+                Add controller support — auto-maps these controls onto a gamepad.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={addControllerSupport}
+              className="flex-shrink-0 rounded-lg bg-[#6366f1] px-3.5 py-2 text-xs font-medium text-white transition-colors hover:bg-[#4f46e5]"
+            >
+              Add controller support
+            </button>
+          </div>
+        )}
+      </div>
+
       <ul className="space-y-2">
         {manifest.actions.map((action) => (
           <li
@@ -201,7 +304,7 @@ export function ControlsPanel({
                   onClick={() => setCapturing(action.id)}
                   className="flex-shrink-0 text-xs px-3 py-2 md:text-[11px] md:py-1 rounded-lg border border-[#6366f1]/30 text-[#818cf8] hover:bg-[#6366f1]/10 transition-colors"
                 >
-                  {capturing === action.id ? 'Press a key or click…' : '+ Add bind'}
+                  {capturing === action.id ? 'Press a key, click, or button…' : '+ Add bind'}
                 </button>
               )}
             </div>

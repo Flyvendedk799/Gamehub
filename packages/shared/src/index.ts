@@ -798,6 +798,7 @@ export type { EditmodeBlock, TokenSchemaEntry, TweakSchema } from './editmode';
 export * from './ssrf';
 export * from './engine-cdn';
 export * from './controls-runtime';
+export * from './controls-gamepad';
 export * from './brand';
 export {
   SOCIAL_OUTRO_SCHEMA_VERSION,

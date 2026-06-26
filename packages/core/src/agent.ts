@@ -71,6 +71,7 @@ import { reasoningForModel } from './index.js';
 import { type CoreLogger, NOOP_LOGGER } from './logger.js';
 import { createNarrationDetector } from './narration-detector.js';
 import { composeSystemPrompt } from './prompts/index.js';
+import { makeAddControllerSupportTool } from './tools/add-controller-support.js';
 import { type GetGameSpecFn, makeAmendGameSpecTool } from './tools/amend-game-spec.js';
 import { makeAskUserTool } from './tools/ask-user.js';
 import { makeAssertGameInvariantsTool } from './tools/assert-game-invariants.js';
@@ -1247,6 +1248,11 @@ export async function generateViaAgent(
     // the tested code instead of retyping it (needs fs, hence this block).
     if (isGameMode) {
       defaultTools.push(makeImportSkillTool(deps.fs) as unknown as AgentTool<TSchema, unknown>);
+      // Controller support — auto-map controls onto a gamepad + bake the bridge
+      // into the game HTML (works in the builder AND the published game).
+      defaultTools.push(
+        makeAddControllerSupportTool(deps.fs) as unknown as AgentTool<TSchema, unknown>,
+      );
     }
     defaultTools.push(makeListFilesTool(deps.fs) as unknown as AgentTool<TSchema, unknown>);
     defaultTools.push(

@@ -7,6 +7,7 @@ import {
   PREVIEW_IFRAME_ORIGIN,
   TWEAKS_UPDATE_MESSAGE_TYPE,
   parseControlsManifestMessage,
+  parseGamepadStatusMessage,
   parseInboundBridgeMessage,
   sendControlsRebind,
   sendControlsRequest,
@@ -61,6 +62,9 @@ export function PreviewPane({
   const [tweakValues, setTweakValues] = useState<Record<string, string | number | boolean>>({});
   const [view, setView] = useState<'preview' | 'controls' | 'files'>('preview');
   const [controlsManifest, setControlsManifest] = useState<ControlsManifest | null>(null);
+  // Whether a controller is connected to the running game (the gamepad bridge
+  // posts this once controller support is mapped) — drives the panel's badge.
+  const [gamepadConnected, setGamepadConnected] = useState(false);
   // Tracks unsaved edits in the Files tab so switching tabs can't silently
   // discard them (the FilesPanel bubbles this up via onDirtyChange).
   const [filesDirty, setFilesDirty] = useState(false);
@@ -140,6 +144,11 @@ export function PreviewPane({
       const controls = parseControlsManifestMessage(event);
       if (controls) {
         setControlsManifest(controls);
+        return;
+      }
+      const gamepad = parseGamepadStatusMessage(event);
+      if (gamepad) {
+        setGamepadConnected(gamepad.connected);
         return;
       }
       const msg = parseInboundBridgeMessage(event);
@@ -361,6 +370,7 @@ export function PreviewPane({
                 // A user rebind applies live, but cue a reload so they can restart
                 // the game and test the new bindings from a clean state.
                 onUserRebind={() => setPreviewStale(true)}
+                gamepadConnected={gamepadConnected}
                 {...(onMapControls ? { onMapWithAI: onMapControls } : {})}
               />
             </div>

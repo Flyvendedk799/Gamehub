@@ -17,6 +17,8 @@
  * `apps/web/src/lib/iframe-bridge.ts` — kept in lockstep by hand.
  */
 
+import { GAMEPAD_BRIDGE_MARKER, GAMEPAD_BRIDGE_SNIPPET } from './controls-gamepad';
+
 const MANIFEST_TYPE = 'playforge:controls:manifest';
 const REBIND_TYPE = 'playforge:controls:rebind';
 const REQUEST_TYPE = 'playforge:controls:request';
@@ -112,6 +114,19 @@ export function injectControlsRuntime(html: string): string {
       out = `${out.slice(0, bodyClose.index)}${CONTROLS_MANIFEST_BRIDGE_SNIPPET}\n${out.slice(bodyClose.index)}`;
     } else {
       out = `${out}\n${CONTROLS_MANIFEST_BRIDGE_SNIPPET}`;
+    }
+  }
+  // Gamepad bridge — translates controller input into the synthetic key/mouse
+  // events the game already listens for. Dormant until handed pad-coded bindings
+  // (via controls:rebind), so it's strictly opt-in: preview games are unaffected
+  // until the user clicks "Add controller support". Published games bake their own
+  // copy (the add_controller_support tool); the marker prevents a double-inject.
+  if (!out.includes(GAMEPAD_BRIDGE_MARKER)) {
+    const bodyClose = /<\/body\s*>/i.exec(out);
+    if (bodyClose?.index !== undefined) {
+      out = `${out.slice(0, bodyClose.index)}${GAMEPAD_BRIDGE_SNIPPET}\n${out.slice(bodyClose.index)}`;
+    } else {
+      out = `${out}\n${GAMEPAD_BRIDGE_SNIPPET}`;
     }
   }
   return out;

@@ -102,6 +102,26 @@ export function sendControlsRequest(iframe: HTMLIFrameElement | null): void {
   );
 }
 
+/** Mirrors shared `GAMEPAD_STATUS_MESSAGE_TYPE` — game → host controller state. */
+export const GAMEPAD_STATUS_MESSAGE_TYPE = 'playforge:controls:gamepad:status' as const;
+
+export interface GamepadStatus {
+  connected: boolean;
+  /** The controller's id string (e.g. "Xbox Wireless Controller"), '' if none. */
+  id: string;
+}
+
+/** Validate + parse an inbound `gamepad:status` message from the game iframe. */
+export function parseGamepadStatusMessage(event: MessageEvent<unknown>): GamepadStatus | null {
+  if (!isPreviewIframeOrigin(event.origin)) return null;
+  const data = event.data as { type?: unknown; connected?: unknown; id?: unknown } | null;
+  if (!data || data.type !== GAMEPAD_STATUS_MESSAGE_TYPE) return null;
+  return {
+    connected: data.connected === true,
+    id: typeof data.id === 'string' ? data.id : '',
+  };
+}
+
 // ─── Cloud-save protocol — mirrors the in-iframe cloud-save shim ──────────────
 //
 // The sandboxed game posts these to its parent window; the host relays them to
