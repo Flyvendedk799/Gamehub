@@ -339,11 +339,16 @@ describe('runGeneration browser-jobs wiring (#1.4 — out-of-process runtimeVeri
         model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
         apiKey: 'sk-test',
       },
-      { store, generate: agent, browserJobs },
+      // maxRepairRounds:0 keeps this focused on the DONE gate — otherwise the
+      // loop's (now spec-independent) boot check would see the failing boot and
+      // spend repair rounds, which the boot-and-repair suite covers separately.
+      { store, generate: agent, browserJobs, maxRepairRounds: 0 },
     );
 
     expect(runtimeVerifyWasWired).toBe(true);
-    expect(browserJobs.calls.verify).toHaveLength(1);
+    // Booted twice now: once by the agent's done gate, once by the loop's boot
+    // check (which no longer skips spec-less games).
+    expect(browserJobs.calls.verify).toHaveLength(2);
     // The throwing boot surfaces as errors → done would report status='has_errors'.
     expect(runtimeErrors.length).toBeGreaterThan(0);
     expect(runtimeErrors.some((e) => e.message.includes('boot blew up'))).toBe(true);
@@ -761,6 +766,47 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     expect(result.repairRounds).toBe(0);
     expect(result.shipReason).toBe('repair_exhausted');
     expect(rounds).toBe(1);
+  });
+
+  it('a SPEC-LESS game that fails to boot still gets a repair round (boot check is NOT gated on a declared spec)', async () => {
+    // Regression: a quick "fix this" edit to a game that never declared a spec
+    // (genre=n/a) used to bail BEFORE the boot check → it shipped no_verdict,
+    // unbooted, so a load crash went out unnoticed. Now the boot check runs
+    // regardless and a crash earns a repair round.
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    let verifyCall = 0;
+    const browserJobs: BrowserJobsPort = {
+      async runtimeVerify() {
+        verifyCall += 1;
+        // Round 0 boots broken (window.__game never appears); the repair boots clean.
+        return verifyCall === 1
+          ? { hasGameContract: false, fatalErrors: ['Uncaught Error: boot blew up'] }
+          : { hasGameContract: true, fatalErrors: [] };
+      },
+      async playtest() {
+        return null;
+      },
+    };
+    let rounds = 0;
+    // Agent writes index.html but NEVER declares a spec → state.spec stays null.
+    const agent: GenerateFn = async (_input, deps) => {
+      rounds += 1;
+      await deps.fs?.create('index.html', RED_SQUARE);
+      return emptyOutput('fix this — no spec declared');
+    };
+
+    const result = await runGeneration(
+      {
+        prompt: 'fix this',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: agent, browserJobs },
+    );
+
+    expect(result.spec).toBeNull(); // genuinely spec-less
+    expect(rounds).toBe(2); // round 0 + ONE repair round (was 1 — shipped unbooted — before the fix)
+    expect(result.repairRounds).toBe(1);
   });
 
   // v3.1 — staged-unused (import→use gap) driver: a skill written to src/engine/

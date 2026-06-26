@@ -722,18 +722,8 @@ export async function runGeneration(
   // loop then ships the attempt as-is.
   const observeVerdict = async (): Promise<RepairVerdict | null> => {
     if (browserJobs === undefined) return null;
-    const spec = state.spec;
-    if (spec === null) return null;
     const entry = tree.view('index.html');
     if (entry === null) return null;
-
-    // The genre playbook is the preferred verdict source (an EXTERNAL check the
-    // agent didn't author). When the genre has none (genre-less / novel games),
-    // fall back to the agent-authored contract so creativity is still verified
-    // against its own declared input→state behaviour instead of shipping
-    // unverified. Boot + juice stay external regardless.
-    const plan = selectGamePlaytestPlan(spec.genre) ?? state.contract;
-    const hasPredicates = plan !== null && plan.predicates.length > 0;
 
     // Inline the WHOLE project into one self-contained HTML before booting it in
     // the browser-worker — exactly like `done`'s gate (inlineForVerify). Passing
@@ -774,6 +764,27 @@ export async function runGeneration(
         'The game booted but renders a BLANK canvas — nothing is drawn to the screen (verified over two frames). Draw your game every frame: clear the canvas, paint a background, then draw the player/subject and the world. A booted-but-blank game is the worst outcome for the player. The premium starter in src/main.js already draws a gradient background + the subject — restore that drawing.',
       );
     }
+
+    // The play-verification source (genre playbook / agent contract) needs a
+    // declared spec. A spec-less game — e.g. a quick "fix this" edit to a game
+    // that never declared one (genre=n/a) — has none. But the BOOT CHECK above
+    // ran REGARDLESS, so a load/early-update crash is still caught and repaired
+    // here: previously this whole function bailed before booting when spec was
+    // null, so an edit that crashed the game shipped 'no_verdict', unbooted. A
+    // clean boot with no spec ships an honest no_verdict (we won't fabricate a
+    // play verdict from generic input).
+    const spec = state.spec;
+    if (spec === null) {
+      return fatalErrors.length > 0 ? buildRepairVerdict({ trace: null, fatalErrors }, []) : null;
+    }
+
+    // The genre playbook is the preferred verdict source (an EXTERNAL check the
+    // agent didn't author). When the genre has none (genre-less / novel games),
+    // fall back to the agent-authored contract so creativity is still verified
+    // against its own declared input→state behaviour instead of shipping
+    // unverified. Boot + juice stay external regardless.
+    const plan = selectGamePlaytestPlan(spec.genre) ?? state.contract;
+    const hasPredicates = plan !== null && plan.predicates.length > 0;
 
     // Plan step 7 — booted cleanly, but the genre has no playbook predicates AND no
     // agent contract. We do NOT fabricate a pass/fail from generic input here: a
