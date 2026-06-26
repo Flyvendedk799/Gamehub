@@ -17,6 +17,7 @@ import {
   type RuntimeVerifyVerdict,
   isVerifyInlineAssetNoise,
   runGeneration,
+  validateControlsManifest,
 } from './run-generation';
 
 describe('isVerifyInlineAssetNoise (WS-C — drop inlining harness artifacts)', () => {
@@ -1124,5 +1125,81 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     );
     expect(result.repairRounds).toBe(0);
     expect(result.shipReason).toBe('no_verdict');
+  });
+});
+
+describe('validateControlsManifest (controls-manifest lint)', () => {
+  const f = (content: string) => [{ path: 'src/main.js', content }];
+
+  it('flags MULTIPLE controls.define() with differing action sets (the shop-overwrite bug)', () => {
+    // Mirrors the real regression: defineControls() (no shop) runs after a second
+    // define() that had shop, wiping it from the manifest.
+    const code = `
+      function defineControls() {
+        window.__game.controls.define({ actions: [
+          { id: 'start', label: 'Start', keys: ['Space'] },
+          { id: 'build', label: 'Build', keys: ['KeyB'] }
+        ]});
+      }
+      class TitleScene { create() { defineControls(); } }
+      window.__game.controls.define({ actions: [
+        { id: 'build', label: 'Build', keys: ['KeyB'] },
+        { id: 'shop',  label: 'Open Shop', keys: ['Tab', 'KeyE'] }
+      ] });
+      class PlayScene { update() { if (window.__game.controls.isDown('shop')) this.toggleShop(); } }
+    `;
+    const issues = validateControlsManifest(f(code));
+    const dup = issues.find((i) => /RESETS the controls manifest/.test(i.message));
+    expect(dup).toBeDefined();
+    expect(dup?.severity).toBe('error');
+  });
+
+  it('flags a control read whose id is declared in NO define() (dangling binding)', () => {
+    const code = `
+      window.__game.controls.define({ actions: [{ id: 'jump', label: 'Jump', keys: ['Space'] }] });
+      function tick() { if (window.__game.controls.isDown('dash')) doDash(); }
+    `;
+    const issues = validateControlsManifest(f(code));
+    const dangling = issues.find((i) => i.message.includes("'dash'"));
+    expect(dangling).toBeDefined();
+    expect(dangling?.severity).toBe('error');
+  });
+
+  it('passes a clean single define() with all reads declared', () => {
+    const code = `
+      window.__game.controls.define({ actions: [
+        { id: 'jump', label: 'Jump', keys: ['Space'] },
+        { id: 'dash', label: 'Dash', keys: ['ShiftLeft'] }
+      ] });
+      if (window.__game.controls.isDown('jump')) jump();
+      window.__game.controls.on('dash', dash);
+    `;
+    expect(validateControlsManifest(f(code))).toHaveLength(0);
+  });
+
+  it('ignores a game that does not use the controls API at all', () => {
+    const code = `addEventListener('keydown', (e) => { if (e.code === 'Space') jump(); });`;
+    expect(validateControlsManifest(f(code))).toHaveLength(0);
+  });
+
+  it('downgrades identical duplicate defines to a warn (harmless, not action-dropping)', () => {
+    const code = `
+      window.__game.controls.define({ actions: [{ id: 'jump', label: 'J', keys: ['Space'] }] });
+      window.__game.controls.define({ actions: [{ id: 'jump', label: 'J', keys: ['Space'] }] });
+    `;
+    const issues = validateControlsManifest(f(code));
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.severity).toBe('warn');
+  });
+
+  it('ENGINE_SCENE_VALIDATOR surfaces controls issues (ok=false) for every engine', () => {
+    const code = `
+      window.__game.controls.define({ actions: [{ id: 'a', keys: ['KeyA'] }] });
+      window.__game.controls.define({ actions: [{ id: 'a', keys: ['KeyA'] }, { id: 'b', keys: ['KeyB'] }] });
+      if (window.__game.controls.isDown('b')) {}
+    `;
+    const res = ENGINE_SCENE_VALIDATOR('canvas2d', [{ path: 'src/main.js', content: code }]);
+    expect(res.ok).toBe(false);
+    expect(res.issues.some((i) => /RESETS the controls manifest/.test(i.message))).toBe(true);
   });
 });

@@ -291,14 +291,108 @@ export function isVerifyInlineAssetNoise(message: string): boolean {
   );
 }
 
+/**
+ * Engine-AGNOSTIC lint for the rebindable controls manifest
+ * (`window.__game.controls`). Catches two foot-guns that slip past the
+ * per-engine scene adapters AND a non-exhaustive playtest, yet silently break
+ * both the in-game key bindings and the builder's Controls panel:
+ *
+ *   1. MULTIPLE `controls.define()` calls. Every `define()` RESETS the manifest
+ *      (bindings/meta/order are rebuilt from scratch), so only the LAST one to
+ *      EXECUTE survives — any action declared only in an earlier call (and its
+ *      key binding) vanishes. This is exactly how an edit that "added a shop"
+ *      shipped a shop the Controls panel never showed and Tab/E never opened:
+ *      `defineControls()` (no shop) ran after a second define() that had it.
+ *
+ *   2. A control READ via `controls.isDown(id)` / `.on(id)` whose `id` is
+ *      declared in NO `define()` actions list — it has no binding, so it never
+ *      fires and never appears in the panel.
+ *
+ * Only fires when the game actually uses the controls API. The dangling-read
+ * check is suppressed when any `define()` passes a non-inline actions array
+ * (e.g. a variable), since the declared ids can't be read statically.
+ */
+export function validateControlsManifest(
+  files: ReadonlyArray<{ path: string; content: string }>,
+): SceneIssue[] {
+  const issues: SceneIssue[] = [];
+  const js = files.filter((f) => /\.[mc]?[jt]sx?$/.test(f.path));
+  const lineAt = (content: string, idx: number): number =>
+    content.slice(0, Math.max(0, idx)).split('\n').length;
+  const DEFINE_CALL_RE = /\.controls\s*\.\s*define\s*\(/g;
+  const DEFINE_BLOCK_RE =
+    /\.controls\s*\.\s*define\s*\(\s*\{\s*actions\s*:\s*\[([\s\S]*?)\]\s*\}\s*\)/g;
+  const ID_RE = /\bid\s*:\s*['"`]([\w-]+)['"`]/g;
+  const READ_RE = /\.controls\s*\.\s*(?:isDown|on)\s*\(\s*['"`]([\w-]+)['"`]/g;
+
+  let defineCalls = 0;
+  const defineBlocks: Array<{ path: string; line: number; ids: Set<string> }> = [];
+  const declared = new Set<string>();
+  const reads: Array<{ id: string; path: string; line: number }> = [];
+
+  for (const f of js) {
+    for (const m of f.content.matchAll(DEFINE_CALL_RE)) defineCalls += 1;
+    for (const b of f.content.matchAll(DEFINE_BLOCK_RE)) {
+      const ids = new Set([...(b[1] ?? '').matchAll(ID_RE)].map((m) => m[1] as string));
+      defineBlocks.push({ path: f.path, line: lineAt(f.content, b.index ?? 0), ids });
+      for (const id of ids) declared.add(id);
+    }
+    for (const m of f.content.matchAll(READ_RE)) {
+      reads.push({ id: m[1] as string, path: f.path, line: lineAt(f.content, m.index ?? 0) });
+    }
+  }
+
+  // Game doesn't use the controls API at all — nothing to check.
+  if (defineCalls === 0 && reads.length === 0) return issues;
+
+  // (1) More than one define() → silent manifest overwrite. Identical duplicate
+  // definitions are harmless (warn); differing ones drop actions (error).
+  if (defineCalls > 1) {
+    const setsEqual = (a: Set<string>, b: Set<string>): boolean =>
+      a.size === b.size && [...a].every((x) => b.has(x));
+    const first = defineBlocks[0];
+    const differ =
+      defineBlocks.length < defineCalls || // a non-inline define — can't compare, assume differ
+      (first !== undefined && defineBlocks.some((b) => !setsEqual(b.ids, first.ids)));
+    issues.push({
+      path: first?.path ?? js[0]?.path ?? 'src/main.js',
+      line: first?.line,
+      severity: differ ? 'error' : 'warn',
+      message: `${defineCalls} \`window.__game.controls.define()\` calls in this game. Each call RESETS the controls manifest, so only the LAST one to RUN survives — any action declared only in an earlier call (and its key binding) silently disappears from the game AND the Controls panel. Declare controls EXACTLY ONCE (e.g. a single defineControls() called once with every action listed) and delete the duplicate.`,
+    });
+  }
+
+  // (2) Reads of a control declared in no inline define(). Suppressed when a
+  // define passes a non-inline actions array (declared ids unknowable statically).
+  const allDefinesInline = defineBlocks.length === defineCalls;
+  if (allDefinesInline) {
+    const seen = new Set<string>();
+    for (const r of reads) {
+      if (declared.has(r.id) || seen.has(r.id)) continue;
+      seen.add(r.id);
+      issues.push({
+        path: r.path,
+        line: r.line,
+        severity: 'error',
+        message: `\`controls.isDown('${r.id}')\`/\`.on('${r.id}')\` reads a control \`${r.id}\` that is declared in NO \`controls.define()\` actions list — it has no key binding, so it never fires and never appears in the Controls panel. Add \`{ id: '${r.id}', label: '…', keys: ['…'] }\` to the single define().`,
+      });
+    }
+  }
+
+  return issues;
+}
+
 export const ENGINE_SCENE_VALIDATOR: SceneValidator = (engine, files) => {
+  // Engine-agnostic controls-manifest lint runs for every engine, merged with
+  // the per-engine adapter's findings.
+  const controlsIssues = validateControlsManifest(files);
   const adapter = GAME_ENGINE_ADAPTERS.get(engine);
-  if (!adapter) return { ok: true, engine, issues: [] };
-  const result = adapter.validate(files);
-  if (result.ok) return { ok: true, engine, issues: [] };
-  // ValidationIssue and the host SceneIssue are the same shape ({path,line?,
-  // message,severity}) — pass through.
-  return { ok: false, engine, issues: result.issues };
+  // adapter.validate returns {ok:true} | {ok:false, issues} — ValidationIssue and
+  // the host SceneIssue are the same shape ({path,line?,message,severity}).
+  const adapterResult = adapter ? adapter.validate(files) : { ok: true as const };
+  const adapterIssues: SceneIssue[] = adapterResult.ok ? [] : adapterResult.issues;
+  const issues = [...adapterIssues, ...controlsIssues];
+  return { ok: issues.length === 0, engine, issues };
 };
 
 /** v3.1 — the repair instruction for staged-unused skills (imported to
