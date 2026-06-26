@@ -17,6 +17,7 @@
  * `apps/web/src/lib/iframe-bridge.ts` — kept in lockstep by hand.
  */
 
+import { ART_RUNTIME_MARKER, ART_RUNTIME_SNIPPET } from './art-runtime';
 import { GAMEPAD_BRIDGE_MARKER, GAMEPAD_BRIDGE_SNIPPET } from './controls-gamepad';
 import { RUNTIME_BEACON_MARKER, RUNTIME_BEACON_SNIPPET } from './runtime-beacon';
 
@@ -119,6 +120,19 @@ export function injectControlsRuntime(html: string): string {
       out = `${out.slice(0, at)}\n${CONTROLS_RUNTIME_SNIPPET}${out.slice(at)}`;
     } else {
       out = `${CONTROLS_RUNTIME_SNIPPET}\n${out}`;
+    }
+  }
+  // Representational-art runtime (window.__game.art). Like the controls runtime, a
+  // game whose author REPLACED index.html ships without the bootstrap art shim, so
+  // re-inject it here at <head> (before the game module) — idempotent via its marker
+  // + the inner `if (window.__game.art) return` guard.
+  if (!out.includes(ART_RUNTIME_MARKER)) {
+    const headOpen = /<head[^>]*>/i.exec(out);
+    if (headOpen?.index !== undefined) {
+      const at = headOpen.index + headOpen[0].length;
+      out = `${out.slice(0, at)}\n${ART_RUNTIME_SNIPPET}${out.slice(at)}`;
+    } else {
+      out = `${ART_RUNTIME_SNIPPET}\n${out}`;
     }
   }
   if (!out.includes(CONTROLS_MANIFEST_BRIDGE_MARKER)) {

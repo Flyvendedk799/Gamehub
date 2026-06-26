@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { ART_KINDS, ART_SYNONYMS, artLibSource, resolveArtKind } from './art-lib';
+import {
+  ART_KINDS,
+  ART_RUNTIME_MARKER,
+  ART_RUNTIME_SNIPPET,
+  ART_SYNONYMS,
+  artLibSource,
+  resolveArtKind,
+} from './art-runtime';
+
+describe('ART_RUNTIME_SNIPPET (serve-time injection)', () => {
+  it('is a marker-tagged <script> wrapping the art IIFE', () => {
+    expect(ART_RUNTIME_SNIPPET).toContain(`data-pf="${ART_RUNTIME_MARKER}"`);
+    expect(ART_RUNTIME_SNIPPET.startsWith('<script')).toBe(true);
+    expect(ART_RUNTIME_SNIPPET.trimEnd().endsWith('</script>')).toBe(true);
+    expect(ART_RUNTIME_SNIPPET).toContain('window.__game.art');
+    // The wrapped source is exactly artLibSource() (single source of truth).
+    expect(ART_RUNTIME_SNIPPET).toContain(artLibSource());
+  });
+});
 
 // ── Mock 2D context that records every method call by name and stores props ───
 interface MockCtx {

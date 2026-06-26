@@ -5,7 +5,7 @@
  * pulling in the registry side-effects in the entry module.
  */
 
-import { artLibSource } from './art-lib';
+import { ART_RUNTIME_SNIPPET } from '@playforge/shared';
 
 export type GameEngineId = 'three' | 'phaser' | 'canvas2d';
 
@@ -380,7 +380,9 @@ window.addEventListener('message', function (e) {
 // Representational-art layer — window.__game.art.draw(ctx, noun, x, y, size, opts).
 // A zero-import procedural-silhouette library so a named noun (fish, coin, rocket,
 // heart, …) is drawn as itself, never a tinted circle. Unknown nouns get a
-// labelled crest. See packages/runtime/src/engines/art-lib.ts.
-${artLibSource()}
-</script>`;
+// labelled crest. Defined as its own marked <script> (ART_RUNTIME_SNIPPET) so the
+// serve-time injectControlsRuntime can re-add it if the agent replaced index.html.
+// See packages/shared/src/art-runtime.ts.
+</script>
+${ART_RUNTIME_SNIPPET}`;
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ART_RUNTIME_MARKER } from './art-runtime';
 import {
   CONTROLS_MANIFEST_BRIDGE_MARKER,
   CONTROLS_RUNTIME_MARKER,
@@ -26,6 +27,20 @@ describe('injectControlsRuntime', () => {
     const out = injectControlsRuntime('<body><script src="main.js"></script></body>');
     expect(out).toContain(CONTROLS_RUNTIME_MARKER);
     expect(out.indexOf(CONTROLS_RUNTIME_MARKER)).toBeLessThan(out.indexOf('main.js'));
+  });
+
+  it('injects the representational-art runtime (window.__game.art) for a self-authored index.html', () => {
+    // A game whose author replaced index.html lost the bootstrap art shim; serve-time
+    // injection restores it so window.__game.art is always available.
+    const out = injectControlsRuntime(
+      '<!doctype html><html><head><title>x</title></head><body><script type="module" src="src/main.js"></script></body></html>',
+    );
+    expect(out).toContain(ART_RUNTIME_MARKER);
+    expect(out).toContain('window.__game.art');
+    expect(out.indexOf(ART_RUNTIME_MARKER)).toBeLessThan(out.indexOf('src/main.js'));
+    // Idempotent: a bootstrap that already embeds the marker isn't double-injected.
+    const twice = injectControlsRuntime(out);
+    expect(twice.split(ART_RUNTIME_MARKER).length - 1).toBe(1);
   });
 
   it('installs window.__game.controls with define + rebind', () => {

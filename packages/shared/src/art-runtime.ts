@@ -727,3 +727,14 @@ export function artLibSource(): string {
   window.__game.art = { draw: draw, sprite: sprite, has: has, list: list, kinds: list, resolve: resolve };
 })();`;
 }
+
+/** Marker so a double pass (or a bootstrap that already embedded it) doesn't inject
+ *  the art runtime twice. Mirrors the controls-runtime markers. */
+export const ART_RUNTIME_MARKER = 'pf-art-runtime';
+
+/** Script-tagged, marker-guarded art runtime for serve-time injection. The game
+ *  bootstrap embeds this, and `injectControlsRuntime` re-injects it when serving a
+ *  game whose author REPLACED index.html (so it lost the bootstrap shim) — exactly
+ *  the case the controls runtime guards. The inner IIFE is idempotent (`if
+ *  (window.__game.art) return`), so a stray double-include is harmless. */
+export const ART_RUNTIME_SNIPPET = `<script data-pf="${ART_RUNTIME_MARKER}">${artLibSource()}</script>`;
