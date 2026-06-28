@@ -130,21 +130,27 @@ const PREVIEW_AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60;
  *  - connect-src                         — published games use 'none'; preview uses
  *                                          'self' for same-origin dev assets only.
  */
-function gameContentCsp(
+export function gameContentCsp(
   frameAncestors: string,
   mode: 'single-file' | 'preview-multifile' = 'single-file',
 ): string {
+  // Google Fonts is the standard way generated games get premium typography. It is
+  // render-ONLY: the stylesheet (fonts.googleapis.com) + the font files (fonts.gstatic.com)
+  // cannot exfiltrate — connect-src / img-src / script-src stay locked, so there is no
+  // beacon channel. base-uri is 'self' (not 'none') so the served same-origin <base href>
+  // (rewritten to the preview/play URL for relative module resolution) is allowed without
+  // permitting a cross-origin base-tag hijack of relative URLs.
   if (mode === 'preview-multifile') {
     return [
       "default-src 'none'",
       "script-src 'self' 'unsafe-inline' data: blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com https://cdn.skypack.dev",
-      "style-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "img-src 'self' data: blob:",
       "media-src 'self' data: blob:",
-      "font-src 'self' data:",
+      "font-src 'self' data: https://fonts.gstatic.com",
       "worker-src 'self' blob:",
       "connect-src 'self'",
-      "base-uri 'none'",
+      "base-uri 'self'",
       "form-action 'none'",
       `frame-ancestors ${frameAncestors}`,
     ].join('; ');
@@ -153,13 +159,13 @@ function gameContentCsp(
   return [
     "default-src 'none'",
     "script-src 'unsafe-inline' data: blob:",
-    "style-src 'unsafe-inline'",
+    "style-src 'unsafe-inline' https://fonts.googleapis.com",
     "img-src 'self' data: blob:",
     "media-src 'self' data: blob:",
-    'font-src data:',
+    'font-src data: https://fonts.gstatic.com',
     'worker-src blob:',
     "connect-src 'none'",
-    "base-uri 'none'",
+    "base-uri 'self'",
     "form-action 'none'",
     `frame-ancestors ${frameAncestors}`,
   ].join('; ');
