@@ -99,11 +99,23 @@ sudo usermod -aG docker $USER && newgrp docker
 
 ```bash
 git clone https://github.com/Flyvendedk799/Gamehub.git
+cd Gamehub
+bash deploy/bootstrap-oracle.sh
+```
+
+`bootstrap-oracle.sh` does steps 2 and 4 for you (firewall + Docker), generates
+every secret locally on the box, prompts only for the domain, an ACME email and
+your provider key, checks DNS actually points here before Caddy requests a
+certificate, and brings the stack up. It is idempotent — re-running it never
+overwrites an existing `deploy/.env`.
+
+Prefer to do it by hand:
+
+```bash
 cd Gamehub/deploy
 cp .env.example .env
 openssl rand -hex 32   # run once per secret in .env
 nano .env              # fill DOMAIN, ACME_EMAIL, secrets, PLATFORM_API_KEY
-
 docker compose up -d --build
 ```
 
@@ -119,16 +131,24 @@ Then open `https://<your domain>`.
 
 ## 6. Before you make it public
 
-Two defaults are unsafe on a public URL with a funded provider key:
+Every generation is a multi-turn agent loop (build → playtest → repair), so each
+one is real provider spend. Two defaults matter:
 
 1. **`CREDIT_PURCHASE_ENABLED=true`** uses `MockCreditProvider`, which the source
    itself marks *"NEVER use in production — no money changes hands."* It confirms
-   any purchase instantly and grants the credits free.
-2. **Signup is open** — this build has no invite gate.
+   any purchase instantly and grants the credits free — so anyone who registers
+   can mint **unlimited** credits against your key. `bootstrap-oracle.sh` writes
+   `false` for this reason.
+2. **Signup is open** — this build has no invite gate, and registration grants
+   `FREE_TIER_CREDITS = 100`. At `CREDITS_PER_RUN = 10` that is **10 free
+   generations per email address**, on your key, even with purchases disabled.
 
-Together, anyone who registers can mint unlimited credits and spend your provider
-budget. Set `CREDIT_PURCHASE_ENABLED=false` until a real payment provider is
-wired in, and set `MAX_RUN_TOKENS` as a per-run ceiling.
+Disabling purchases does *not* break signup: the welcome grant is committed
+atomically with the user row, so new accounts can still generate.
+
+The effective cost ceiling is **`MAX_RUN_TOKENS`** — set it. Without it, a single
+runaway build has no token limit. `MAX_CONCURRENT_RUNS` (default 1) bounds how
+much can run at once.
 
 Also worth knowing: generated games are served from the **same origin** as the
 app. `next.config.mjs` flags per-project origin isolation (`*.games.<brand>`) as
