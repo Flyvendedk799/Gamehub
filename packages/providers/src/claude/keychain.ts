@@ -1,24 +1,34 @@
 /**
- * Harvest a Claude Code OAuth identity from the local macOS Keychain.
+ * Harvest a Claude Code OAuth identity from the local Claude Code login.
  *
- * Claude Code stores its subscription OAuth blob under the generic-password
- * service "Claude Code-credentials". Because Gamehub's API runs locally on the
- * same Mac where `claude` is logged in, we can read that blob, persist the
- * {accessToken, refreshToken, clientId, expiresAt} into a ClaudeTokenStore, and
- * keep it fresh via the OAuth refresh exchange — so generation runs on the
- * subscription against the REAL Anthropic API.
+ * Claude Code stores its subscription OAuth blob two ways depending on host:
+ *   - macOS: the Keychain generic-password service "Claude Code-credentials".
+ *   - Linux / headless / macOS-without-keyring: a plaintext file at
+ *     ~/.claude/.credentials.json.
+ * Because Gamehub's API runs on the same machine where `claude` is logged in, we
+ * read whichever exists, persist the {accessToken, refreshToken, clientId,
+ * expiresAt} into a ClaudeTokenStore, and keep it fresh by re-reading the local
+ * login — so generation runs on the subscription against the REAL Anthropic API,
+ * whether the box is a developer's Mac or a Linux VPS.
  *
- * macOS-only: on any other platform (or when `claude` isn't logged in) the read
- * returns null and the caller surfaces "connect Claude Code first". The `readRaw`
- * + `env` seams are injectable so the parser is unit-testable without a keychain.
+ * When neither source has a login the read returns null and the caller surfaces
+ * "connect Claude Code first". The `readRaw` + `env` seams are injectable so the
+ * parser is unit-testable without a keychain or a real credentials file.
  */
 import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
 
 /** The macOS Keychain generic-password service name Claude Code writes to. */
 const KEYCHAIN_SERVICE = 'Claude Code-credentials';
+
+/** Override for the Linux/headless credentials file path (tests + non-standard
+ *  homes). Defaults to ~/.claude/.credentials.json. */
+const CREDENTIALS_FILE_ENV = 'PLAYFORGE_CLAUDE_CREDENTIALS_FILE';
 
 /** Env fallback for the OAuth client id when the blob omits it (Anthropic binds
  *  the refresh token to the Claude Code client id). */
@@ -48,6 +58,37 @@ async function readRawFromKeychain(): Promise<string | null> {
     // security exits 44 ("could not be found") / 51 ("interaction not allowed").
     return null;
   }
+}
+
+/** Path to Claude Code's plaintext credentials file (Linux / headless / macOS
+ *  keyring-less). Honors the env override so a service running as a different
+ *  user, or tests, can point at an explicit file. */
+function credentialsFilePath(env: NodeJS.ProcessEnv): string {
+  const override = env[CREDENTIALS_FILE_ENV];
+  if (typeof override === 'string' && override.length > 0) return override;
+  return join(homedir(), '.claude', '.credentials.json');
+}
+
+/** Read Claude Code's credentials file. Returns null when it doesn't exist or is
+ *  empty — the same "no login here" signal the keychain reader gives. */
+async function readRawFromFile(env: NodeJS.ProcessEnv): Promise<string | null> {
+  try {
+    const raw = await readFile(credentialsFilePath(env), 'utf8');
+    return raw.trim().length === 0 ? null : raw;
+  } catch {
+    // ENOENT (never logged in) / EACCES (wrong user) — both mean "no login".
+    return null;
+  }
+}
+
+/** Default raw reader: the macOS Keychain first, then the plaintext file. On
+ *  Linux the keychain read is a no-op (returns null), so this resolves to the
+ *  file; on macOS the keychain wins but a keyring-less setup still falls back to
+ *  the file. Either way the shape handed to the parser is identical. */
+async function readRawDefault(env: NodeJS.ProcessEnv): Promise<string | null> {
+  const fromKeychain = await readRawFromKeychain();
+  if (fromKeychain !== null) return fromKeychain;
+  return readRawFromFile(env);
 }
 
 /** Parse Claude Code's keychain JSON. The token lives under `claudeAiOauth`
@@ -94,13 +135,15 @@ export function parseKeychainBlob(
   return out;
 }
 
-/** Read + parse the Claude Code identity from the macOS Keychain, or null when
- *  unavailable (non-macOS, not logged in, locked keychain). */
+/** Read + parse the Claude Code identity from the local login — the macOS
+ *  Keychain or the ~/.claude/.credentials.json file — or null when neither has a
+ *  login (not logged in, locked keychain, wrong user). */
 export async function readClaudeCodeKeychainCredentials(opts?: {
   readRaw?: () => Promise<string | null>;
   env?: NodeJS.ProcessEnv;
 }): Promise<ClaudeKeychainCredentials | null> {
-  const readRaw = opts?.readRaw ?? readRawFromKeychain;
+  const env = opts?.env ?? process.env;
+  const readRaw = opts?.readRaw ?? (() => readRawDefault(env));
   const raw = await readRaw();
   if (raw === null) return null;
   let parsed: unknown;
@@ -109,5 +152,5 @@ export async function readClaudeCodeKeychainCredentials(opts?: {
   } catch {
     return null;
   }
-  return parseKeychainBlob(parsed, opts?.env ?? process.env);
+  return parseKeychainBlob(parsed, env);
 }
