@@ -1,0 +1,94 @@
+name: gamehub
+
+# Single-VM deployment: Postgres + API + web + Caddy (auto-HTTPS).
+#
+# Redis is intentionally absent. With REDIS_URL unset the API runs generation
+# in-process and uses an in-memory event bus — correct and fully functional for
+# a single node. See README "Scaling out" for adding Redis + the worker and
+# browser-worker services when one box stops being enough.
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: playforge
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+      POSTGRES_DB: playforge
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    # Deliberately NOT published to the host — only the compose network reaches it.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U playforge -d playforge']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    image: gamehub-api:local
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://playforge:${POSTGRES_PASSWORD}@db:5432/playforge
+      PLATFORM_API_KEY: ${PLATFORM_API_KEY:?set PLATFORM_API_KEY in deploy/.env}
+      PLATFORM_PROVIDER: ${PLATFORM_PROVIDER:-anthropic}
+      PLATFORM_MODEL_ID: ${PLATFORM_MODEL_ID:-claude-sonnet-4-6}
+      # Encrypts users' BYOK keys at rest. Falls back to PLATFORM_API_KEY when
+      # unset — which would make every stored BYOK key undecryptable the moment
+      # you rotate the platform key. Always set it explicitly.
+      API_KEY_ENCRYPTION_SECRET: ${API_KEY_ENCRYPTION_SECRET:?set API_KEY_ENCRYPTION_SECRET in deploy/.env}
+      APP_BASE_URL: https://${DOMAIN}
+      CORS_ORIGINS: https://${DOMAIN}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-1}
+      MAX_RUN_TOKENS: ${MAX_RUN_TOKENS:-}
+      CREDIT_PURCHASE_ENABLED: ${CREDIT_PURCHASE_ENABLED:-true}
+      BLOB_DIR: /data/blobs
+    volumes:
+      # Generated games live here. This volume IS your content — back it up.
+      - blob-data:/data/blobs
+    # Chromium is memory-hungry and spawns many threads per game playtest.
+    shm_size: '1gb'
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+      args:
+        NEXT_PUBLIC_API_URL: https://${DOMAIN:?set DOMAIN in deploy/.env}
+    image: gamehub-web:local
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      # Fallback only. Caddy handles /v1/* before Next sees it (see Caddyfile);
+      # this keeps the Next rewrite correct if you ever front the app directly.
+      API_PROXY_TARGET: http://api:3191
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in deploy/.env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+      - api
+
+volumes:
+  db-data:
+  blob-data:
+  caddy-data:
+  caddy-config:

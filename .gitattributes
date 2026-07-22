@@ -1,0 +1,4 @@
+# Shell scripts are consumed by Linux containers — never let a Windows checkout
+# rewrite them to CRLF (a CRLF shebang fails with "no such file or directory").
+*.sh text eol=lf
+deploy/Caddyfile text eol=lf
