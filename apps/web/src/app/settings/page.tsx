@@ -283,11 +283,23 @@ export default function SettingsPage() {
                         <span className="text-sm font-semibold text-[#f4f4f5]">
                           {meta?.label ?? option}
                         </span>
-                        {meta?.active && (
-                          <span className="rounded-md bg-[#0a0a0a] px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-[#a1a1aa]">
-                            Active
-                          </span>
-                        )}
+                        <span className="flex shrink-0 items-center gap-1.5">
+                          {/* Subscription credentials are harvested from a CLI login on the
+                              machine running the API, so they only ever work in local dev. */}
+                          {isSubscriptionProvider(option) && (
+                            <span
+                              title="Reads a CLI login from the machine running the API — local development only, never a deployed server."
+                              className="rounded-md border border-[#f59e0b]/30 bg-[#f59e0b]/10 px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-[#fbbf24]"
+                            >
+                              Dev only
+                            </span>
+                          )}
+                          {meta?.active && (
+                            <span className="rounded-md bg-[#0a0a0a] px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-[#a1a1aa]">
+                              Active
+                            </span>
+                          )}
+                        </span>
                       </span>
                       <span className="mt-2 block text-xs text-[#71717a]">
                         {option === 'platform'
@@ -478,6 +490,13 @@ function SubscriptionConnect({
         {isClaude
           ? 'Runs on your Claude Code subscription — the real Anthropic API, your prompt, billed to the subscription. Reads the local Claude Code login on this machine.'
           : 'Runs on your ChatGPT/Codex subscription — the real OpenAI Codex API, your prompt, billed to the subscription. Reads the local codex CLI login on this machine.'}
+      </p>
+      <p className="rounded-lg border border-[#f59e0b]/20 bg-[#f59e0b]/5 px-3 py-2 text-xs leading-relaxed text-[#fbbf24]">
+        <span className="font-semibold">Local development only.</span> The credential is harvested
+        from the {isClaude ? 'Claude Code' : 'codex CLI'} login on the machine running the API
+        {isClaude ? ' (macOS keychain only)' : ''}, and refreshing re-reads that same local login.
+        On a deployed server there is nothing to read, so connecting will fail — use an API key
+        instead.
       </p>
       <div className="flex flex-wrap gap-2">
         {!connected && (
