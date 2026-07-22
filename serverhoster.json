@@ -1,5 +1,27 @@
 {
   "schemaVersion": 1,
+  "requires": [
+    {
+      "id": "node",
+      "label": "Node.js 22+",
+      "command": "node",
+      "minVersion": "22",
+      "install": "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs"
+    },
+    {
+      "id": "pnpm",
+      "label": "pnpm 9+",
+      "command": "pnpm",
+      "minVersion": "9",
+      "install": "corepack enable && corepack prepare pnpm@9.15.0 --activate"
+    },
+    {
+      "id": "playwright-chromium",
+      "label": "Playwright Chromium + system libraries",
+      "probe": "ls -d \"$HOME\"/.cache/ms-playwright/chromium-* \"$HOME\"/Library/Caches/ms-playwright/chromium-* 2>/dev/null | grep -q .",
+      "install": "pnpm --filter @playforge/browser-worker exec playwright install --with-deps chromium"
+    }
+  ],
   "services": [
     {
       "name": "Gamehub API",
@@ -8,10 +30,39 @@
       "port": 3191,
       "env": {
         "DATABASE_URL": "postgres://localhost:5432/playforge",
+        "REDIS_URL": "redis://127.0.0.1:6379",
+        "BLOB_DIR": ".playforge-blobs",
+        "PLATFORM_PROVIDER": "anthropic",
+        "PLATFORM_MODEL_ID": "claude-sonnet-4-6",
         "CORS_ORIGINS": "http://localhost:3004 http://127.0.0.1:3004",
-        "APP_BASE_URL": "http://localhost:3004"
+        "APP_BASE_URL": "http://localhost:3004",
+        "MAX_CONCURRENT_RUNS": "1",
+        "CREDIT_PURCHASE_ENABLED": "false"
+      },
+      "requiredSecrets": ["PLATFORM_API_KEY", "API_KEY_ENCRYPTION_SECRET"]
+    },
+    {
+      "name": "Gamehub Worker",
+      "command": "pnpm --filter @playforge/worker start",
+      "workingDir": ".",
+      "env": {
+        "DATABASE_URL": "postgres://localhost:5432/playforge",
+        "REDIS_URL": "redis://127.0.0.1:6379",
+        "BLOB_DIR": ".playforge-blobs",
+        "PLATFORM_PROVIDER": "anthropic",
+        "PLATFORM_MODEL_ID": "claude-sonnet-4-6",
+        "WORKER_CONCURRENCY": "4"
       },
       "requiredSecrets": ["PLATFORM_API_KEY"]
+    },
+    {
+      "name": "Gamehub Browser Worker",
+      "command": "pnpm --filter @playforge/browser-worker start",
+      "workingDir": ".",
+      "env": {
+        "REDIS_URL": "redis://127.0.0.1:6379",
+        "WORKER_CONCURRENCY": "3"
+      }
     },
     {
       "name": "Gamehub Web",
@@ -19,7 +70,8 @@
       "workingDir": ".",
       "port": 3004,
       "env": {
-        "NEXT_PUBLIC_API_URL": "http://localhost:3191"
+        "NEXT_PUBLIC_API_URL": "http://localhost:3191",
+        "API_PROXY_TARGET": "http://localhost:3191"
       }
     }
   ]
