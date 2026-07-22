@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseKeychainBlob, readClaudeCodeKeychainCredentials } from './keychain';
 
 const EMPTY_ENV: NodeJS.ProcessEnv = {};
@@ -61,5 +64,43 @@ describe('readClaudeCodeKeychainCredentials', () => {
 
   it('returns null on non-JSON keychain output', async () => {
     expect(await readClaudeCodeKeychainCredentials({ readRaw: async () => 'not-json' })).toBeNull();
+  });
+
+  // Linux / headless: no Keychain, so the identity comes from Claude Code's
+  // ~/.claude/.credentials.json file. Exercised via the path override so the
+  // real file (and the developer's own login) is never touched. Skipped on
+  // macOS, where the Keychain read runs first and could return a real login,
+  // making the file assertion non-deterministic — the file path is exactly the
+  // non-darwin behavior we're validating.
+  describe.skipIf(process.platform === 'darwin')('credentials file fallback', () => {
+    let dir: string;
+    let file: string;
+
+    beforeEach(async () => {
+      dir = await mkdtemp(join(tmpdir(), 'pf-claude-'));
+      file = join(dir, '.credentials.json');
+    });
+    afterEach(async () => {
+      await rm(dir, { recursive: true, force: true });
+    });
+
+    it('reads the identity from the credentials file when no readRaw is injected', async () => {
+      await writeFile(
+        file,
+        JSON.stringify({ claudeAiOauth: { accessToken: 'sk-ant-oat-file', refreshToken: 'rt-1' } }),
+      );
+      const creds = await readClaudeCodeKeychainCredentials({
+        env: { PLAYFORGE_CLAUDE_CREDENTIALS_FILE: file },
+      });
+      expect(creds?.accessToken).toBe('sk-ant-oat-file');
+      expect(creds?.refreshToken).toBe('rt-1');
+    });
+
+    it('returns null when the credentials file is absent', async () => {
+      const creds = await readClaudeCodeKeychainCredentials({
+        env: { PLAYFORGE_CLAUDE_CREDENTIALS_FILE: join(dir, 'does-not-exist.json') },
+      });
+      expect(creds).toBeNull();
+    });
   });
 });
