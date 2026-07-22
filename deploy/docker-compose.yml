@@ -1,0 +1,168 @@
+name: gamehub
+
+# Single-VM deployment: Postgres + Redis + API + generation worker +
+# browser worker + Next.js web + Caddy (auto-HTTPS).
+#
+# Setting REDIS_URL switches the API out of in-process generation and into
+# queued mode: it enqueues to BullMQ and relays events over Redis Streams,
+# while the `worker` service runs the agent loop and `browser-worker` runs the
+# Chromium pool. This is what bounds concurrency — the API applies only a
+# PER-USER cap (MAX_CONCURRENT_RUNS), so in-process mode has no global ceiling
+# and a traffic burst would run every generation at once. In queued mode the
+# excess waits in Redis instead of exhausting RAM.
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: playforge
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+      POSTGRES_DB: playforge
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    # Deliberately NOT published to the host — only the compose network reaches it.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U playforge -d playforge']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # appendonly so queued-but-unstarted generations survive a restart.
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    image: gamehub-api:local
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://playforge:${POSTGRES_PASSWORD}@db:5432/playforge
+      REDIS_URL: redis://redis:6379
+      PLATFORM_API_KEY: ${PLATFORM_API_KEY:?set PLATFORM_API_KEY in deploy/.env}
+      PLATFORM_PROVIDER: ${PLATFORM_PROVIDER:-anthropic}
+      PLATFORM_MODEL_ID: ${PLATFORM_MODEL_ID:-claude-sonnet-4-6}
+      # Encrypts users' BYOK keys at rest. Falls back to PLATFORM_API_KEY when
+      # unset — which would make every stored BYOK key undecryptable the moment
+      # you rotate the platform key. Always set it explicitly.
+      API_KEY_ENCRYPTION_SECRET: ${API_KEY_ENCRYPTION_SECRET:?set API_KEY_ENCRYPTION_SECRET in deploy/.env}
+      APP_BASE_URL: https://${DOMAIN}
+      CORS_ORIGINS: https://${DOMAIN}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      # PER-USER cap, not global. The global ceiling is WORKER_CONCURRENCY below.
+      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-1}
+      MAX_RUN_TOKENS: ${MAX_RUN_TOKENS:-}
+      CREDIT_PURCHASE_ENABLED: ${CREDIT_PURCHASE_ENABLED:-false}
+      BLOB_DIR: /data/blobs
+    volumes:
+      # Generated games live here. This volume IS your content — back it up.
+      # The worker writes snapshots to the SAME store, so both must mount it.
+      - blob-data:/data/blobs
+
+  # Generation worker — BullMQ consumer running the agent loop. Delegates
+  # runtime-verify / playtest / thumbnail jobs to browser-worker over Redis.
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    image: gamehub-api:local
+    restart: unless-stopped
+    # Dockerfile.api's ENTRYPOINT runs migrations then starts the API, so it
+    # must be replaced wholesale — migrations belong to the API service alone.
+    entrypoint: ['pnpm', '--filter', '@playforge/worker', 'start']
+    depends_on:
+      # service_healthy on api guarantees migrations have already applied.
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://playforge:${POSTGRES_PASSWORD}@db:5432/playforge
+      REDIS_URL: redis://redis:6379
+      PLATFORM_API_KEY: ${PLATFORM_API_KEY}
+      # MUST be set explicitly: worker/src/main.ts defaults to openai/o4-mini,
+      # NOT the API's anthropic/claude defaults. Omitting these would send an
+      # Anthropic key to OpenAI on every platform-funded run.
+      PLATFORM_PROVIDER: ${PLATFORM_PROVIDER:-anthropic}
+      PLATFORM_MODEL_ID: ${PLATFORM_MODEL_ID:-claude-sonnet-4-6}
+      # The global concurrency ceiling. Budget ~1.5 GB per parallel run.
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+      BLOB_DIR: /data/blobs
+    volumes:
+      - blob-data:/data/blobs
+
+  # Chromium pool for runtime-verify, playtest and thumbnail jobs. Boots
+  # untrusted AI-generated game code, so it is isolated in its own container
+  # with no database credentials and no blob mount.
+  browser-worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    image: gamehub-api:local
+    restart: unless-stopped
+    entrypoint: ['pnpm', '--filter', '@playforge/browser-worker', 'start']
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL: redis://redis:6379
+      # Each slot holds a Chromium instance — the memory-hungry number. Keep at
+      # or below WORKER_CONCURRENCY; excess browser jobs simply queue.
+      WORKER_CONCURRENCY: ${BROWSER_WORKER_CONCURRENCY:-3}
+    # Chromium needs far more than Docker's default 64 MB /dev/shm.
+    shm_size: '1gb'
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+      args:
+        NEXT_PUBLIC_API_URL: https://${DOMAIN:?set DOMAIN in deploy/.env}
+    image: gamehub-web:local
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      # Fallback only. Caddy handles /v1/* before Next sees it (see Caddyfile);
+      # this keeps the Next rewrite correct if you ever front the app directly.
+      API_PROXY_TARGET: http://api:3191
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in deploy/.env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+      - api
+
+volumes:
+  db-data:
+  redis-data:
+  blob-data:
+  caddy-data:
+  caddy-config:

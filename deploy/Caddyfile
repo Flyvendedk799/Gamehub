@@ -1,0 +1,28 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	# The API, the SSE build stream, and the game preview/play iframes.
+	#
+	# Routed straight to Fastify rather than through the Next.js rewrite for two
+	# reasons:
+	#   1. SSE — flush_interval -1 disables response buffering, so build events
+	#      reach the browser as they happen instead of arriving in one lump.
+	#   2. Trailing slashes — the directory-style preview routes
+	#      (/v1/runs/:id/preview/) must keep their slash or the game's relative
+	#      asset URLs resolve one level too high. Caddy passes the path verbatim.
+	#
+	# No `encode` here: compressing text/event-stream reintroduces buffering.
+	handle /v1/* {
+		reverse_proxy api:3191 {
+			flush_interval -1
+		}
+	}
+
+	# The Next.js app shell.
+	handle {
+		encode zstd gzip
+		reverse_proxy web:3004
+	}
+}

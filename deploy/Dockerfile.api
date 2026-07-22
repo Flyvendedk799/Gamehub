@@ -1,0 +1,47 @@
+# syntax=docker/dockerfile:1
+
+# Gamehub API — Fastify + in-process generation + Playwright Chromium.
+#
+# The API has no build step: its entrypoint is `tsx src/main.ts`, and it imports
+# worker source directly (`../../worker/src/...`), so the whole workspace is
+# copied in and run from TypeScript.
+#
+# Base is plain Node rather than mcr.microsoft.com/playwright because the
+# published Playwright tags are arch-split (`…-noble` vs `…-noble-arm64`).
+# Letting `playwright install` resolve the browser itself makes this image build
+# correctly on arm64 (Oracle Ampere) and amd64 from one unchanged Dockerfile.
+FROM node:22-bookworm-slim
+
+ENV PNPM_HOME=/pnpm \
+    PATH=/pnpm:$PATH \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+
+WORKDIR /app
+COPY . .
+
+# --prod=false is required, not cosmetic: `tsx` (the API entrypoint) and
+# `drizzle-kit` (the migration runner) are both devDependencies.
+RUN pnpm install --frozen-lockfile --prod=false
+
+# Version-matched Chromium + system libraries, for the agent's runtime-verify /
+# playtest gates, the boot-and-repair loop, and thumbnail capture. Without this
+# the API still runs, but degrades to static-lint-only game validation.
+RUN pnpm --filter @playforge/browser-worker exec playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY deploy/api-entrypoint.sh /usr/local/bin/api-entrypoint.sh
+RUN chmod +x /usr/local/bin/api-entrypoint.sh && mkdir -p /data/blobs
+
+ENV NODE_ENV=production \
+    PORT=3191 \
+    BLOB_DIR=/data/blobs
+
+EXPOSE 3191
+
+# Node 22 has global fetch, so no curl needed in the image.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:3191/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+ENTRYPOINT ["/usr/local/bin/api-entrypoint.sh"]
