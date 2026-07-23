@@ -26,6 +26,16 @@ RUN pnpm install --frozen-lockfile --prod=false
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
+# next.config.mjs bakes the /v1 rewrite DESTINATION into routes-manifest.json at
+# BUILD time (rewrites are compiled, not read at runtime). So when the app is
+# served WITHOUT an external path-router in front (i.e. the Next server itself
+# proxies /v1/* → the API), API_PROXY_TARGET must be a build arg, not just a
+# runtime env — otherwise it bakes the localhost:3191 default and every /v1 call
+# ECONNREFUSEs inside the container. Harmless in the Caddy layout (Caddy handles
+# /v1 before Next ever sees it); required in the single-service layout.
+ARG API_PROXY_TARGET=http://api:3191
+ENV API_PROXY_TARGET=$API_PROXY_TARGET
+
 RUN test -n "$NEXT_PUBLIC_API_URL" || (echo "ERROR: NEXT_PUBLIC_API_URL build-arg is required" && exit 1)
 RUN pnpm --filter @playforge/web build
 
