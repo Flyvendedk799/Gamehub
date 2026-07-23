@@ -86,6 +86,11 @@ services:
     # Dockerfile.api's ENTRYPOINT runs migrations then starts the API, so it
     # must be replaced wholesale — migrations belong to the API service alone.
     entrypoint: ['pnpm', '--filter', '@playforge/worker', 'start']
+    # This service reuses the API image but is NOT an HTTP server, so the
+    # image's inherited HEALTHCHECK (GET :3191/health) always fails and reports a
+    # misleading "unhealthy" even while it happily consumes jobs. Disable it.
+    healthcheck:
+      disable: true
     depends_on:
       # service_healthy on api guarantees migrations have already applied.
       api:
@@ -117,6 +122,10 @@ services:
     image: gamehub-api:local
     restart: unless-stopped
     entrypoint: ['pnpm', '--filter', '@playforge/browser-worker', 'start']
+    # Not an HTTP server — disable the API image's inherited :3191 healthcheck
+    # (see the worker service) so it doesn't report a false "unhealthy".
+    healthcheck:
+      disable: true
     depends_on:
       redis:
         condition: service_healthy
