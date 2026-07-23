@@ -56,6 +56,30 @@ describe('assertGameInvariants', () => {
     expect(result.issues.map((i) => i.invariant)).toContain('restart');
   });
 
+  it('recognizes the Phaser keydown-R restart binding (no false missing-restart)', () => {
+    for (const binding of [
+      `this.input.keyboard.once('keydown-R', () => this.scene.restart());`,
+      `this.input.keyboard.on('keydown-R', reboot);`,
+      `this.rKey = this.input.keyboard.addKey('R');`,
+      `this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);`,
+    ]) {
+      const result = assertGameInvariants(
+        deps([
+          {
+            path: 'src/main.js',
+            content: `
+              let score = 0;
+              function onGameOver() {}
+              function onHit() { score += 1; new Audio('hit.wav').play(); }
+              ${binding}
+            `,
+          },
+        ]),
+      );
+      expect(result.issues.map((i) => i.invariant)).not.toContain('restart');
+    }
+  });
+
   it('warns on missing fail state', () => {
     const result = assertGameInvariants(
       deps([

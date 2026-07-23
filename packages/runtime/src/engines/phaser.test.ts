@@ -233,9 +233,39 @@ describe('phaserAdapter.validate (gameplan §7.6)', () => {
     if (result.ok) return;
     expect(
       result.issues.some(
-        (i) => i.message.includes('"ghost-asset"') && i.message.includes('never loaded'),
+        (i) => i.message.includes('"ghost-asset"') && i.message.includes('no texture source'),
       ),
     ).toBe(true);
+  });
+
+  it('does NOT flag this.add.image for a runtime-baked (canvas / generated) texture', () => {
+    const baked = `
+      import * as Phaser from 'phaser';
+      class PlayScene extends Phaser.Scene {
+        create() {
+          // Textures baked at runtime — valid sources the old lint rejected,
+          // forcing a rewrite to immediate-mode Graphics.
+          const cv = this.textures.createCanvas('chicken', 32, 32);
+          this.textures.addCanvas('terrorist', document.createElement('canvas'));
+          this.make.graphics({ add: false }).fillRect(0, 0, 8, 8).generateTexture('bullet', 8, 8);
+          this.add.image(100, 100, 'chicken');
+          this.add.sprite(200, 200, 'terrorist');
+          this.add.image(50, 50, 'bullet');
+        }
+        update() {}
+      }
+      const game = new Phaser.Game({ type: Phaser.AUTO, scene: [PlayScene] });
+    `;
+    const result = phaserAdapter.validate([
+      { path: 'index.html', content: goodIndex },
+      { path: 'src/main.js', content: baked },
+    ]);
+    // No "no texture source" error for any baked key (other advisory issues, if
+    // any, are irrelevant to this check).
+    const textureErrors = result.ok
+      ? []
+      : result.issues.filter((i) => i.message.includes('texture source'));
+    expect(textureErrors).toEqual([]);
   });
 
   it('#41 — warns (not errors) when scene code references the network', () => {

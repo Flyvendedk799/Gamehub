@@ -185,21 +185,39 @@ function phaserValidate(files: ReadonlyArray<InputFile>): ValidationResult {
       });
     }
 
-    // Load-before-add: this.add.image('key') without this.load.image('key')
-    // somewhere upstream is the most common Phaser mistake.
+    // Load-before-add: this.add.image('key') without a matching texture source
+    // upstream is the most common Phaser mistake. But a texture is "known" if it
+    // comes from the asset pipeline OR is baked at runtime — canvas textures,
+    // generated textures, and base64 are all valid sources. Only counting
+    // this.load.* produced FALSE errors that pushed the agent to abandon
+    // procedural/canvas art for immediate-mode Graphics purely to pass lint.
     const addImageKeys = Array.from(
       allJs.matchAll(/this\.add\.(?:image|sprite)\s*\(\s*[^,]+,\s*[^,]+,\s*['"`]([^'"`]+)['"`]/g),
     ).map((m) => m[1]);
-    const loadImageKeys = new Set(
-      Array.from(
-        allJs.matchAll(/this\.load\.(?:image|spritesheet|atlas)\s*\(\s*['"`]([^'"`]+)['"`]/g),
+    const knownTextureKeys = new Set<string>([
+      // From the asset pipeline.
+      ...Array.from(
+        allJs.matchAll(
+          /this\.load\.(?:image|spritesheet|atlas|svg|aseprite)\s*\(\s*['"`]([^'"`]+)['"`]/g,
+        ),
       ).map((m) => m[1] ?? ''),
-    );
+      // Baked at runtime via the TextureManager (any receiver — this.textures,
+      // scene.textures, game.textures): addCanvas/createCanvas/addBase64/addImage/generate.
+      ...Array.from(
+        allJs.matchAll(
+          /\.textures\.(?:addCanvas|createCanvas|addBase64|addImage|generate)\s*\(\s*['"`]([^'"`]+)['"`]/g,
+        ),
+      ).map((m) => m[1] ?? ''),
+      // graphics.generateTexture('key', w, h) and renderTexture.saveTexture('key').
+      ...Array.from(
+        allJs.matchAll(/\.(?:generateTexture|saveTexture)\s*\(\s*['"`]([^'"`]+)['"`]/g),
+      ).map((m) => m[1] ?? ''),
+    ]);
     for (const key of addImageKeys) {
-      if (key !== undefined && !loadImageKeys.has(key)) {
+      if (key !== undefined && !knownTextureKeys.has(key)) {
         issues.push({
           path: jsFiles[0]?.path ?? 'src/',
-          message: `Asset key "${key}" is added via this.add but never loaded via this.load.image / this.load.spritesheet / this.load.atlas.`,
+          message: `Asset key "${key}" is added via this.add but has no texture source — load it (this.load.image / spritesheet / atlas) or bake it (this.textures.addCanvas / createCanvas, graphics.generateTexture).`,
           severity: 'error',
         });
       }

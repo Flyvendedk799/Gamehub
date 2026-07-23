@@ -418,9 +418,19 @@ export function runHeuristics(
   const fatalA11y = skipHtmlSemantic
     ? scanA11yFatal(src).filter((e) => e.source !== 'a11y.no_main_landmark')
     : scanA11yFatal(src);
+  // Interactivity must be judged across the WHOLE bundle, not just the entry.
+  // A Phaser/Three game's index.html is a near-empty shell that loads
+  // src/main.js via <script>; the keyboard/pointer/controls handlers all live in
+  // the module. Scanning only `src` (the entry) therefore reported "0 interactive
+  // state changes" for essentially every real game. Union the entry with the JS
+  // module contents so the heuristic sees the actual input wiring.
+  const interactivitySrc =
+    options.fileContents && options.fileContents.size > 0
+      ? [src, ...options.fileContents.values()].join('\n')
+      : src;
   return [
     ...scanContentQuality(src, options),
-    ...scanInteractivity(src),
+    ...scanInteractivity(interactivitySrc),
     ...fatalA11y,
     ...(skipHtmlSemantic ? [] : scanA11yAdvisory(src)),
     ...(skipHtmlSemantic ? [] : scanHeadingHierarchy(src)),

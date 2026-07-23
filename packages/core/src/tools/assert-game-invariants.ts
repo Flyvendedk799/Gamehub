@@ -189,6 +189,13 @@ function findStagedUnusedSkills(deps: AssertGameInvariantsDeps): string[] {
 const RESTART_PATTERNS: readonly RegExp[] = [
   /\b(restart|reset|new[_]?game|reset[_]?game)\s*\(/i,
   /K_r\b|key\s*===?\s*['"]r['"]|key\s*===?\s*['"]R['"]|\.code\s*===?\s*['"]KeyR['"]/,
+  // Phaser keyboard bindings for the R restart convention, which the DOM-event
+  // patterns above miss: input.keyboard.once/on('keydown-R', …), addKey('R'),
+  // or Phaser.Input.Keyboard.KeyCodes.R. Their absence made a game that wired
+  // restart on `keydown-R` add a redundant duplicate binding just to pass.
+  /keydown[-_]r\b/i,
+  /addKey\s*\(\s*['"`]r['"`]/i,
+  /KeyCodes\.R\b/,
   /location\.reload\b/,
 ];
 

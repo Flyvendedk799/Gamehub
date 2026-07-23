@@ -57,6 +57,39 @@ export const CONTROLS_RUNTIME_SNIPPET = `<script data-pf="${CONTROLS_RUNTIME_MAR
   });
 })();</script>`;
 
+/** Marker so the defensive debug contract isn't installed twice. */
+export const DEBUG_RUNTIME_MARKER = 'pf-debug-runtime';
+
+/**
+ * Defensive `window.__game.debug` contract — the SAME default the engine
+ * starters embed via `gameGlobalSetupSnippet` (packages/runtime types.ts), so
+ * the served host and the verify/playtest sandbox agree on the full `__game`
+ * shape, not just `controls`+`art`.
+ *
+ * Why this exists at the serving/verify layer: `injectControlsRuntime` already
+ * re-creates `window.__game` and restores `controls`+`art` for an agent-authored
+ * index.html that dropped the starter shim — but it left `debug` absent. That
+ * asymmetry meant `playtest_game` read `window.__game.debug.snapshot` off an
+ * object that had no `debug`, throwing instead of surfacing an honest
+ * `no_debug_contract`. Installing the default here closes the gap.
+ *
+ * Idempotent + honest: it only installs when no real `debug.snapshot` is present
+ * (so a game that wires its own contract wins), and `snapshot()` returns `null`
+ * until state/tracked fields exist — it never fakes a contract. ES5,
+ * self-contained.
+ */
+export const DEBUG_RUNTIME_SNIPPET = `<script data-pf="${DEBUG_RUNTIME_MARKER}">(function(){
+  window.__game = window.__game || {};
+  if (window.__game.debug && typeof window.__game.debug.snapshot === 'function') return;
+  var tracked = {};
+  function read(v){try{return typeof v==='function'?v():v;}catch(e){return null;}}
+  function reflectPos(o){if(!o)return undefined;var x=o.x,y=o.y;if((x===undefined||y===undefined)&&o.position){x=o.position.x;y=o.position.y;}if(x===undefined&&y===undefined)return undefined;return {x:x,y:y};}
+  function track(spec){if(spec&&typeof spec==='object'){for(var k in spec)tracked[k]=spec[k];}return api;}
+  function snapshot(){var st=window.__game.state;var hasState=st&&typeof st==='object'&&Object.keys(st).length>0;var hasTracked=Object.keys(tracked).length>0;if(!hasState&&!hasTracked)return null;var out={};if(hasState){for(var k in st)out[k]=read(st[k]);}for(var t in tracked){if(t==='player'){var p=reflectPos(read(tracked.player));if(p)out.playerPos=p;}else{out[t]=read(tracked[t]);}}return out;}
+  var api={track:track,snapshot:snapshot};
+  window.__game.debug=api;
+})();</script>`;
+
 /** Marker for the end-of-body manifest bridge (separate from the head runtime). */
 export const CONTROLS_MANIFEST_BRIDGE_MARKER = 'pf-controls-manifest-bridge';
 
@@ -120,6 +153,21 @@ export function injectControlsRuntime(html: string): string {
       out = `${out.slice(0, at)}\n${CONTROLS_RUNTIME_SNIPPET}${out.slice(at)}`;
     } else {
       out = `${CONTROLS_RUNTIME_SNIPPET}\n${out}`;
+    }
+  }
+  // Debug contract (window.__game.debug.snapshot/track). Restores the same
+  // default the engine starter embeds, so an agent-authored index.html that
+  // dropped the starter — and the verify/playtest sandbox that loads it — still
+  // expose a readable (honest-null) debug contract instead of throwing on a
+  // missing `debug`. Runs before the game module; idempotent via marker + the
+  // inner "real snapshot already present" guard.
+  if (!out.includes(DEBUG_RUNTIME_MARKER)) {
+    const headOpen = /<head[^>]*>/i.exec(out);
+    if (headOpen?.index !== undefined) {
+      const at = headOpen.index + headOpen[0].length;
+      out = `${out.slice(0, at)}\n${DEBUG_RUNTIME_SNIPPET}${out.slice(at)}`;
+    } else {
+      out = `${DEBUG_RUNTIME_SNIPPET}\n${out}`;
     }
   }
   // Representational-art runtime (window.__game.art). Like the controls runtime, a
