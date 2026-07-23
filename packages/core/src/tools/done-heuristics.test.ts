@@ -93,6 +93,34 @@ describe('scanInteractivity', () => {
   });
 });
 
+describe('runHeuristics — interactivity across the whole bundle', () => {
+  // A real Phaser/Three game's index.html is a near-empty shell loading
+  // src/main.js; the input wiring lives in the module. Scanning only the entry
+  // reported "0 interactive state changes" for essentially every game.
+  const emptyEntry =
+    '<!doctype html><html><head></head><body><script type="module" src="src/main.js"></script></body></html>';
+  const gameModule = `
+    const cursors = this.input.keyboard.createCursorKeys();
+    this.input.on('pointerdown', () => placeTower());
+    window.__game.controls.on('fire', () => shoot());
+  `;
+
+  it('does NOT flag a game whose input lives only in a JS module', () => {
+    const errors = runHeuristics(emptyEntry, new Set(['index.html', 'src/main.js']), {
+      artifactType: 'game',
+      fileContents: new Map([['src/main.js', gameModule]]),
+    });
+    expect(errors.some((e) => e.source === 'interactivity.minimum')).toBe(false);
+  });
+
+  it('still flags a genuinely static entry with no interactive modules', () => {
+    const errors = runHeuristics('<div><h1>Static</h1></div>', new Set(['index.html']), {
+      artifactType: 'game',
+    });
+    expect(errors.some((e) => e.source === 'interactivity.minimum')).toBe(true);
+  });
+});
+
 describe('scanA11yFatal', () => {
   it('flags <button> with no text and no aria-label as button_no_name', () => {
     const r = scanA11yFatal('<button class="x"><svg /></button>');

@@ -43,7 +43,11 @@ import {
 // browser/Vite-only vendor assets (?raw) that have no business in the
 // game-gen worker and won't resolve under its tsconfig.
 import { GAME_ENGINE_ADAPTERS } from '@playforge/runtime/engines';
-import { computeImpliedCost, normalizeEngineCdnUrls } from '@playforge/shared';
+import {
+  computeImpliedCost,
+  injectControlsRuntime,
+  normalizeEngineCdnUrls,
+} from '@playforge/shared';
 import type { ChatMessage } from '@playforge/shared';
 import type { GameSpec, ModelRef } from '@playforge/shared';
 import type { SnapshotStore, WriteResult } from '@playforge/storage';
@@ -546,17 +550,26 @@ export async function runGeneration(
   // entry if inlining isn't possible (no engine chosen / no index.html / error).
   const inlineForVerify = async (fallbackHtml: string): Promise<string> => {
     const engine = state.engine;
-    if (engine !== 'three' && engine !== 'phaser') return fallbackHtml;
+    // Route the verify/playtest HTML through the SAME serve-time injector the
+    // real preview host uses (server.ts). Otherwise the sandbox only gets
+    // whatever `window.__game` the agent's own index.html happened to define: an
+    // agent-authored entry that dropped the starter shim boots fine on the host
+    // (which injects the runtime) but shows "window.__game never appeared" in the
+    // verify sandbox — a FALSE boot failure that burns repair rounds. Injecting
+    // here makes the two environments identical (controls + art + debug contract
+    // present before the game module), so the gate sees what the player sees.
+    const withRuntime = (html: string): string => injectControlsRuntime(html);
+    if (engine !== 'three' && engine !== 'phaser') return withRuntime(fallbackHtml);
     try {
       const files = tree.toSnapshotInput().map((f) => ({
         path: f.path,
         content: Buffer.from(f.bytes),
       }));
-      if (!files.some((f) => f.path === 'index.html')) return fallbackHtml;
-      return await buildGameHtml({ files, engine });
+      if (!files.some((f) => f.path === 'index.html')) return withRuntime(fallbackHtml);
+      return withRuntime(await buildGameHtml({ files, engine }));
     } catch (err) {
       console.warn(`[run-generation] verify inline failed, using raw entry: ${String(err)}`);
-      return fallbackHtml;
+      return withRuntime(fallbackHtml);
     }
   };
 

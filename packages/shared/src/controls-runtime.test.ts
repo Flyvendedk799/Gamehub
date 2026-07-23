@@ -3,6 +3,7 @@ import { ART_RUNTIME_MARKER } from './art-runtime';
 import {
   CONTROLS_MANIFEST_BRIDGE_MARKER,
   CONTROLS_RUNTIME_MARKER,
+  DEBUG_RUNTIME_MARKER,
   injectControlsRuntime,
 } from './controls-runtime';
 
@@ -14,6 +15,19 @@ describe('injectControlsRuntime', () => {
     expect(out).toContain(CONTROLS_RUNTIME_MARKER);
     expect(out.indexOf(CONTROLS_RUNTIME_MARKER)).toBeGreaterThan(out.indexOf('<head>'));
     expect(out.indexOf(CONTROLS_RUNTIME_MARKER)).toBeLessThan(out.indexOf('src/main.js'));
+  });
+
+  it('installs the debug contract before the game module (so verify/playtest matches the host)', () => {
+    const out = injectControlsRuntime(
+      '<!doctype html><html><head></head><body><script type="module" src="src/main.js"></script></body></html>',
+    );
+    expect(out).toContain(DEBUG_RUNTIME_MARKER);
+    expect(out).toContain('window.__game.debug');
+    expect(out.indexOf(DEBUG_RUNTIME_MARKER)).toBeLessThan(out.indexOf('src/main.js'));
+    // Idempotent + honest: only a single injection, and the default returns null
+    // until state/tracked fields exist (no faked contract).
+    const twice = injectControlsRuntime(out);
+    expect(twice.split(DEBUG_RUNTIME_MARKER).length - 1).toBe(1);
   });
 
   it('is idempotent — a second pass injects nothing', () => {

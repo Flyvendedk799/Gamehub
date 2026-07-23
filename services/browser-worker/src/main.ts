@@ -808,13 +808,29 @@ async function dispatchStartInput(page: Page): Promise<void> {
     .evaluate(() => {
       try {
         const c = document.querySelector('canvas');
+        // Aim at the CENTER of the canvas: a (0,0) event misses a centered "click
+        // to start" button or play area, so a corner click often fails to advance
+        // the title screen. Cover the full start-affordance surface — pointer +
+        // full mouse down/up/click, plus Space AND Enter — so games that gate on
+        // any of them reach the play scene (otherwise the playtest samples an
+        // empty title-screen snapshot → 0/0 → no_verdict).
+        const rect = c?.getBoundingClientRect();
+        const clientX = rect ? rect.left + rect.width / 2 : 0;
+        const clientY = rect ? rect.top + rect.height / 2 : 0;
+        const mouseInit: MouseEventInit = { bubbles: true, clientX, clientY, button: 0 };
         for (const target of [window, c].filter(Boolean) as EventTarget[]) {
-          target.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
-          target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          target.dispatchEvent(new MouseEvent('pointerdown', mouseInit));
+          target.dispatchEvent(new MouseEvent('mousedown', mouseInit));
+          target.dispatchEvent(new MouseEvent('mouseup', mouseInit));
+          target.dispatchEvent(new MouseEvent('click', mouseInit));
         }
-        window.dispatchEvent(
-          new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true }),
-        );
+        for (const k of [
+          { code: 'Space', key: ' ' },
+          { code: 'Enter', key: 'Enter' },
+        ]) {
+          window.dispatchEvent(new KeyboardEvent('keydown', { ...k, bubbles: true }));
+          window.dispatchEvent(new KeyboardEvent('keyup', { ...k, bubbles: true }));
+        }
       } catch {
         /* dispatch best-effort */
       }
@@ -1067,6 +1083,17 @@ export async function runThumbnail(
  *  normalised mouseMove (x,y in 0..1) lands somewhere sensible. */
 const PLAYTEST_VIEWPORT = { width: 1280, height: 720 } as const;
 
+// Condition-aware wait extension. A playbook `wait` is a fixed frame budget, but
+// per-game pacing varies wildly — a pre-wave countdown or spawn delay longer than
+// the budget makes the awaited change miss its window, so the game reads as
+// broken (or the agent "fixes" it by speeding the game up to fit the test). When
+// the state hasn't moved at all by the end of the nominal wait, keep ticking in
+// short bursts until it does — or a generous cap. This only ever EXTENDS: a game
+// that already changed within its budget skips it entirely, so nothing is
+// shortened or misgraded.
+const WAIT_EXTEND_CHUNK_FRAMES = 15;
+const WAIT_EXTEND_CAP_FRAMES = 180; // ~3s at 60fps beyond the nominal wait
+
 /** Tick N requestAnimationFrame frames inside the page, resolving once they
  *  have all fired. Bounded by a wall-clock fallback so a page that never
  *  paints (headless can throttle RAF) still resolves — the per-job hard
@@ -1177,6 +1204,17 @@ export async function runPlaytest(
     // Capture any boot-time page errors that fired before the first step.
     bootErrors.push(...drainErrors());
 
+    // Advance past a Title / "click to start" scene BEFORE sampling the baseline.
+    // Most games boot into a menu and only wire their debug state (and spawn
+    // gameplay) once the play scene runs; without this nudge the snapshot stays
+    // empty for the entire playbook → 0/0 → no_verdict, i.e. the game ships
+    // unverified. runRuntimeVerify and runThumbnail already do exactly this; the
+    // playtest path was the sole omission. A few settle frames let the
+    // title→play transition mount before we read the baseline.
+    await dispatchStartInput(page);
+    await tickFrames(page, 8);
+    bootErrors.push(...drainErrors());
+
     const baselineSnapshot = await readSnapshot(page);
     const hasDebugContract = baselineSnapshot !== null;
 
@@ -1207,7 +1245,18 @@ export async function runPlaytest(
           break;
         }
         case 'wait': {
+          const atStart = JSON.stringify(await readSnapshot(page));
           await tickFrames(page, step.frames);
+          // If nothing changed during the nominal wait, the game may simply be
+          // slower than the budget — extend until the state moves or the cap.
+          let extended = 0;
+          while (
+            extended < WAIT_EXTEND_CAP_FRAMES &&
+            JSON.stringify(await readSnapshot(page)) === atStart
+          ) {
+            await tickFrames(page, WAIT_EXTEND_CHUNK_FRAMES);
+            extended += WAIT_EXTEND_CHUNK_FRAMES;
+          }
           break;
         }
       }
