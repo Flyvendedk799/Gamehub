@@ -139,15 +139,18 @@ describe('enqueueRun', () => {
     expect(Buffer.from(seededSprite!)).toEqual(Buffer.from(spriteBytes));
   });
 
-  it('marks a parent-seeded run as editMode, and a fresh run as not', async () => {
+  it('marks a parent-seeded run as editMode + wires the destructive-edit guard; fresh run does neither', async () => {
     const { bus, store } = makePorts();
+    const parentHtml = '<!doctype html><body>a fuller parent document</body>';
     const parent = await store.write([
-      { path: 'index.html', bytes: new TextEncoder().encode('<!doctype html>') },
+      { path: 'index.html', bytes: new TextEncoder().encode(parentHtml) },
     ]);
 
     const captured: Array<boolean | undefined> = [];
+    const parentBytes: Array<number | null | undefined> = [];
     const captureAgent: GenerateFn = async (input, deps) => {
       captured.push((input as { editMode?: boolean }).editMode);
+      parentBytes.push(deps.getParentArtifactBytes ? await deps.getParentArtifactBytes() : undefined);
       await deps.fs?.create('index.html', '<html></html>');
       return emptyOutput();
     };
@@ -178,6 +181,10 @@ describe('enqueueRun', () => {
 
     expect(captured[0]).toBe(true);
     expect(captured[1]).toBeUndefined();
+    // Refine wires the guard, returning the PARENT entry size (captured before edits).
+    expect(parentBytes[0]).toBe(parentHtml.length);
+    // Fresh build has no parent → guard left unwired.
+    expect(parentBytes[1]).toBeUndefined();
   });
 
   it('late subscriber still receives all events via replay', async () => {

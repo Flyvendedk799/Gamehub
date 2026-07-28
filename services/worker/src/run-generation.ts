@@ -432,6 +432,14 @@ export async function runGeneration(
   const generate = ports.generate ?? generateViaAgent;
   const validateScene = ports.validateScene ?? ENGINE_SCENE_VALIDATOR;
   const tree = new WorkingTree(req.initialFiles, req.initialBinaryFiles);
+  // may9 Phase 8b — capture the parent entry-file (index.html) size NOW, before
+  // the agent edits the tree, so the `done` tool's destructive-edit advisory can
+  // compare the refined entry against the parent's and warn on a 40%+ unexplained
+  // shrink (the FPS Wave Defense holographic-HUD regression). Read the seeded
+  // tree, not the live one at done-time (which already holds the edits). Null on
+  // a first-shot build (empty tree) → the advisory stays inert, as intended.
+  const parentEntry = tree.view('index.html');
+  const parentEntryBytes: number | null = parentEntry !== null ? parentEntry.content.length : null;
   // Premium pivot — also seed the premium starter when the engine is PRE-PICKED.
   // The New-design dialog skips choose_engine when the user picked an engine, so the
   // setEngine seed (below) never fires on that common path; seed here too. The
@@ -666,6 +674,10 @@ export async function runGeneration(
     onAskUser: (question) => {
       pendingQuestion = question;
     },
+    // Wire the destructive-edit advisory only on a refine (parent present).
+    ...(parentEntryBytes !== null
+      ? { getParentArtifactBytes: (): number | null => parentEntryBytes }
+      : {}),
     ...(runtimeVerify !== undefined ? { runtimeVerify } : {}),
     gameMode: {
       setEngine: (engine) => {
