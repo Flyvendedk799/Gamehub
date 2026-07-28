@@ -95,6 +95,11 @@ export interface GenerationRequest {
   spec?: GameSpec;
   /** Seed the working tree (e.g. a remix's parent snapshot). */
   initialFiles?: Iterable<readonly [string, string]>;
+  /** Carried-over binary assets (sprites/audio) from the parent snapshot on a
+   *  refine. The text tree can't hold these, so they pass through verbatim into
+   *  the new snapshot — without this, every follow-up edit dropped the game's
+   *  art/audio and the preview 404'd on those files. */
+  initialBinaryFiles?: Iterable<readonly [string, Uint8Array]>;
   /** Provider name (e.g. 'openai') — used to enable image asset generation. */
   provider?: string;
 }
@@ -426,7 +431,7 @@ export async function runGeneration(
 ): Promise<GenerationResult> {
   const generate = ports.generate ?? generateViaAgent;
   const validateScene = ports.validateScene ?? ENGINE_SCENE_VALIDATOR;
-  const tree = new WorkingTree(req.initialFiles);
+  const tree = new WorkingTree(req.initialFiles, req.initialBinaryFiles);
   // Premium pivot — also seed the premium starter when the engine is PRE-PICKED.
   // The New-design dialog skips choose_engine when the user picked an engine, so the
   // setEngine seed (below) never fires on that common path; seed here too. The
