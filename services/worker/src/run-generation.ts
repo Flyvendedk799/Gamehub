@@ -723,6 +723,10 @@ export async function runGeneration(
     ...(req.httpHeaders !== undefined ? { httpHeaders: req.httpHeaders } : {}),
     history,
     artifactType: 'game',
+    // A run seeded from a parent snapshot IS an edit, even on turn 0 before any
+    // repair round has appended to `history` — so the camera-swap guard (and
+    // any other edit-only guard) engages on the actual edit turn.
+    ...(req.initialFiles !== undefined ? { editMode: true } : {}),
     agentBudget: { maxToolCalls, maxWallClockMs },
     // WS-D — pause the agent at the next safe boundary once it has asked a
     // question (the existing continuation seam: agent.ts aborts cleanly when
