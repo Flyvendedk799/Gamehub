@@ -170,6 +170,70 @@ describe('decodeMaybeDataUrl — binary asset sentinels become real bytes', () =
   });
 });
 
+describe('WorkingTree carries binary assets through a refine', () => {
+  // "RIFF...WAVE" — stand-in sprite/audio bytes seeded from a parent snapshot.
+  const spriteBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]);
+  const seed = (): WorkingTree =>
+    new WorkingTree(
+      [
+        ['index.html', '<!doctype html>'],
+        ['src/main.js', "const speed = 1;\nthis.load.image('hero', 'assets/hero.png');"],
+      ],
+      [['assets/hero.png', spriteBytes]],
+    );
+
+  it('passes seeded binary assets through toSnapshotInput verbatim', () => {
+    const snap = seed().toSnapshotInput();
+    const hero = snap.find((f) => f.path === 'assets/hero.png');
+    expect(hero).toBeDefined();
+    expect(Buffer.from(hero!.bytes)).toEqual(Buffer.from(spriteBytes));
+  });
+
+  it('shows binary assets in listDir and counts them in size', () => {
+    const t = seed();
+    expect(t.listDir('assets')).toEqual(['assets/hero.png']);
+    expect(t.listDir('')).toEqual(['assets/hero.png', 'index.html', 'src/main.js']);
+    expect(t.size).toBe(3);
+  });
+
+  it('does NOT expose binary assets to the text editor (view returns null)', () => {
+    // The agent must not str_replace a PNG; it is carried, not edited.
+    expect(seed().view('assets/hero.png')).toBeNull();
+  });
+
+  it('a text file authored at a binary path wins (regenerated asset overrides)', () => {
+    const t = seed();
+    t.create('assets/hero.png', 'data:image/png;base64,aGk='); // agent re-made it
+    const snap = t.toSnapshotInput();
+    const hero = snap.filter((f) => f.path === 'assets/hero.png');
+    expect(hero).toHaveLength(1); // no duplicate entry
+    expect(Buffer.from(hero[0]!.bytes).toString('utf8')).toBe('hi'); // decoded text form, not the seed bytes
+    expect(t.size).toBe(3);
+  });
+
+  it('delete removes a carried-over binary asset', () => {
+    const t = seed();
+    expect(t.delete('assets/hero.png')).toBe(true);
+    expect(t.listDir('assets')).toEqual([]);
+    expect(t.toSnapshotInput().some((f) => f.path === 'assets/hero.png')).toBe(false);
+  });
+
+  it('survives a full edit → persist round-trip with the sprite intact', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const t = seed();
+    // Simulate a refine that only touches text (the historical bug dropped the PNG here).
+    t.strReplace('src/main.js', 'const speed = 1;', 'const speed = 5;');
+    const res = await t.persist(store);
+    expect(Object.keys(res.manifest.files).sort()).toEqual([
+      'assets/hero.png',
+      'index.html',
+      'src/main.js',
+    ]);
+    const bytes = await store.readFile(res.manifest, 'assets/hero.png');
+    expect(Buffer.from(bytes)).toEqual(Buffer.from(spriteBytes));
+  });
+});
+
 describe('WorkingTree persistence to content-addressed storage', () => {
   it('persists the tree and reads files back through the manifest', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());

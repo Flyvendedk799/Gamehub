@@ -84,11 +84,28 @@ function lineAtOffset(text: string, offset: number): number {
 
 export class WorkingTree {
   private readonly files = new Map<string, string>();
+  // Binary assets (sprites, audio) carried VERBATIM from a parent snapshot on a
+  // refine. The text tree can only hold strings, so seeding a follow-up edit
+  // from the parent used to skip every binary file — they never entered the
+  // tree, never re-persisted, and the game lost its art/audio (404 in preview)
+  // after the first edit. Holding them here as bytes preserves them untouched
+  // through the edit and back into the new snapshot. Not exposed to the text
+  // editor tools (an agent must not str_replace a PNG); a text file created at
+  // the same path wins (the agent regenerated the asset).
+  private readonly binary = new Map<string, Uint8Array>();
 
-  constructor(initial?: Iterable<readonly [string, string]>) {
+  constructor(
+    initial?: Iterable<readonly [string, string]>,
+    initialBinary?: Iterable<readonly [string, Uint8Array]>,
+  ) {
     if (initial) {
       for (const [path, content] of initial) {
         this.files.set(assertSafeBundlePath(path), content);
+      }
+    }
+    if (initialBinary) {
+      for (const [path, bytes] of initialBinary) {
+        this.binary.set(assertSafeBundlePath(path), bytes);
       }
     }
   }
@@ -105,6 +122,9 @@ export class WorkingTree {
   create(path: string, content: string): { path: string } {
     assertSafeBundlePath(path);
     this.files.set(path, content);
+    // A text file authored at this path supersedes any carried-over binary asset
+    // (the agent regenerated the sprite/audio as a fresh data-URL).
+    this.binary.delete(path);
     return { path };
   }
 
@@ -112,7 +132,9 @@ export class WorkingTree {
    *  v3.1 dead-skill sweep to drop a provably-unreferenced staged module. */
   delete(path: string): boolean {
     assertSafeBundlePath(path);
-    return this.files.delete(path);
+    const wasText = this.files.delete(path);
+    const wasBinary = this.binary.delete(path);
+    return wasText || wasBinary;
   }
 
   /** TextEditorFsCallbacks.strReplace — oldStr must occur exactly once. */
@@ -245,24 +267,33 @@ export class WorkingTree {
     return { path, totalLines: countLines(updated) };
   }
 
-  /** TextEditorFsCallbacks.listDir — sorted paths under `dir` (''/'.' = root). */
+  /** TextEditorFsCallbacks.listDir — sorted paths under `dir` (''/'.' = root).
+   *  Includes carried-over binary assets so the agent can see (and reference)
+   *  the sprites/audio that came from the parent snapshot. */
   listDir(dir: string): string[] {
     const prefix = dir === '' || dir === '.' || dir === '/' ? '' : `${dir.replace(/\/$/, '')}/`;
-    return [...this.files.keys()].filter((p) => p.startsWith(prefix)).sort();
+    const all = new Set<string>([...this.files.keys(), ...this.binary.keys()]);
+    return [...all].filter((p) => p.startsWith(prefix)).sort();
   }
 
-  /** Current file count. */
+  /** Current file count (text + carried-over binary assets, deduped). */
   get size(): number {
-    return this.files.size;
+    return new Set<string>([...this.files.keys(), ...this.binary.keys()]).size;
   }
 
   /** Snapshot-store input for the current tree. Text files are UTF-8 encoded;
-   *  base64 data-URL asset sentinels are decoded back to their real bytes. */
+   *  base64 data-URL asset sentinels are decoded back to their real bytes.
+   *  Carried-over binary assets pass through verbatim; a text file at the same
+   *  path wins (the agent regenerated that asset this run). */
   toSnapshotInput(): SnapshotInputFile[] {
-    return [...this.files.entries()].map(([path, content]) => ({
-      path,
-      bytes: decodeMaybeDataUrl(content),
-    }));
+    const out = new Map<string, Uint8Array>();
+    for (const [path, bytes] of this.binary.entries()) {
+      out.set(path, bytes);
+    }
+    for (const [path, content] of this.files.entries()) {
+      out.set(path, decodeMaybeDataUrl(content));
+    }
+    return [...out.entries()].map(([path, bytes]) => ({ path, bytes }));
   }
 
   /** Current text files, preserving source content for validation passes. */

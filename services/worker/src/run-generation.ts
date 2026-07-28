@@ -95,6 +95,11 @@ export interface GenerationRequest {
   spec?: GameSpec;
   /** Seed the working tree (e.g. a remix's parent snapshot). */
   initialFiles?: Iterable<readonly [string, string]>;
+  /** Carried-over binary assets (sprites/audio) from the parent snapshot on a
+   *  refine. The text tree can't hold these, so they pass through verbatim into
+   *  the new snapshot — without this, every follow-up edit dropped the game's
+   *  art/audio and the preview 404'd on those files. */
+  initialBinaryFiles?: Iterable<readonly [string, Uint8Array]>;
   /** Provider name (e.g. 'openai') — used to enable image asset generation. */
   provider?: string;
 }
@@ -426,7 +431,15 @@ export async function runGeneration(
 ): Promise<GenerationResult> {
   const generate = ports.generate ?? generateViaAgent;
   const validateScene = ports.validateScene ?? ENGINE_SCENE_VALIDATOR;
-  const tree = new WorkingTree(req.initialFiles);
+  const tree = new WorkingTree(req.initialFiles, req.initialBinaryFiles);
+  // may9 Phase 8b — capture the parent entry-file (index.html) size NOW, before
+  // the agent edits the tree, so the `done` tool's destructive-edit advisory can
+  // compare the refined entry against the parent's and warn on a 40%+ unexplained
+  // shrink (the FPS Wave Defense holographic-HUD regression). Read the seeded
+  // tree, not the live one at done-time (which already holds the edits). Null on
+  // a first-shot build (empty tree) → the advisory stays inert, as intended.
+  const parentEntry = tree.view('index.html');
+  const parentEntryBytes: number | null = parentEntry !== null ? parentEntry.content.length : null;
   // Premium pivot — also seed the premium starter when the engine is PRE-PICKED.
   // The New-design dialog skips choose_engine when the user picked an engine, so the
   // setEngine seed (below) never fires on that common path; seed here too. The
@@ -661,6 +674,10 @@ export async function runGeneration(
     onAskUser: (question) => {
       pendingQuestion = question;
     },
+    // Wire the destructive-edit advisory only on a refine (parent present).
+    ...(parentEntryBytes !== null
+      ? { getParentArtifactBytes: (): number | null => parentEntryBytes }
+      : {}),
     ...(runtimeVerify !== undefined ? { runtimeVerify } : {}),
     gameMode: {
       setEngine: (engine) => {
@@ -718,6 +735,10 @@ export async function runGeneration(
     ...(req.httpHeaders !== undefined ? { httpHeaders: req.httpHeaders } : {}),
     history,
     artifactType: 'game',
+    // A run seeded from a parent snapshot IS an edit, even on turn 0 before any
+    // repair round has appended to `history` — so the camera-swap guard (and
+    // any other edit-only guard) engages on the actual edit turn.
+    ...(req.initialFiles !== undefined ? { editMode: true } : {}),
     agentBudget: { maxToolCalls, maxWallClockMs },
     // WS-D — pause the agent at the next safe boundary once it has asked a
     // question (the existing continuation seam: agent.ts aborts cleanly when

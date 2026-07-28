@@ -258,6 +258,14 @@ export interface GenerateInput {
    *  composeSystemPrompt composes the matching layered prompt and the
    *  agent layer wires deps.gameMode / deps.motionMode. */
   artifactType?: 'design' | 'game' | 'motion' | undefined;
+  /** True when this run EDITS an existing artifact (a refine/remix seeded
+   *  from a parent snapshot), independent of chat `history`. The cloud worker
+   *  seeds the working tree from the parent but does not (yet) thread the prior
+   *  chat transcript, so `history` is empty on a refine's first turn — leaving
+   *  the edit-only guards (e.g. the camera-swap guard) inert on the very turn
+   *  they must protect. When omitted, edit-mode falls back to
+   *  `history.length > 0` (the desktop/design behaviour). */
+  editMode?: boolean | undefined;
   /** gameplan §A6 — engine pin for game-mode runs (set by the New-design
    *  dialog or carried from a prior snapshot). When omitted on a game run
    *  the agent calls `choose_engine` first. */

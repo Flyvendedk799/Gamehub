@@ -104,20 +104,29 @@ export async function enqueueRun(input: EnqueueInput, ports: QueuePorts): Promis
     ports.persistEvent,
   );
 
-  // Seed the working tree from the parent snapshot for iteration.
+  // Seed the working tree from the parent snapshot for iteration. Text files
+  // become editable strings; binary assets (sprites/audio) are carried through
+  // VERBATIM as bytes. Previously the binary files were skipped entirely, so a
+  // follow-up edit re-persisted a snapshot missing the game's art/audio and the
+  // preview 404'd on those files after the first refine.
   let initialFiles: Map<string, string> | undefined;
+  let initialBinaryFiles: Map<string, Uint8Array> | undefined;
   if (input.parentManifestKey) {
     try {
       const manifest = await ports.store.readManifest(input.parentManifestKey);
       const files = new Map<string, string>();
+      const binary = new Map<string, Uint8Array>();
       const TEXT_PREFIXES = ['text/', 'application/json'];
       for (const [path, entry] of Object.entries(manifest.files)) {
+        const bytes = await ports.store.readFile(manifest, path);
         if (TEXT_PREFIXES.some((p) => entry.contentType.startsWith(p))) {
-          const bytes = await ports.store.readFile(manifest, path);
           files.set(path, Buffer.from(bytes).toString());
+        } else {
+          binary.set(path, new Uint8Array(bytes));
         }
       }
       if (files.size > 0) initialFiles = files;
+      if (binary.size > 0) initialBinaryFiles = binary;
     } catch (err) {
       console.warn(
         `[enqueueRun] could not load parent snapshot ${input.parentManifestKey}: ${String(err)}`,
@@ -177,6 +186,7 @@ export async function enqueueRun(input: EnqueueInput, ports: QueuePorts): Promis
         ...(input.engine !== undefined ? { engine: input.engine } : {}),
         ...(input.gameSpec !== undefined ? { spec: input.gameSpec } : {}),
         ...(initialFiles !== undefined ? { initialFiles } : {}),
+        ...(initialBinaryFiles !== undefined ? { initialBinaryFiles } : {}),
       },
       {
         store: ports.store,

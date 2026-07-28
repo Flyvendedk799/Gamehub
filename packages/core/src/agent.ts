@@ -1235,7 +1235,11 @@ export async function generateViaAgent(
     const editBudget = createEditBudget();
     const cameraGuard = createCameraGuard({
       gameMode: isGameMode,
-      editMode: input.history.length > 0,
+      // A cloud refine seeds the tree from a parent but starts with an empty
+      // chat `history`, so history-length alone reads a refine as a first-shot
+      // build and leaves this guard inert on the edit turn. Honour an explicit
+      // editMode signal when the host provides one; else fall back to history.
+      editMode: input.editMode ?? input.history.length > 0,
       userPrompt: input.prompt,
     });
     defaultTools.push(
