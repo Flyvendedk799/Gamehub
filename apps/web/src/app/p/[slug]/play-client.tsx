@@ -217,34 +217,34 @@ export default function PlayClient({
   const displayStar = hoveredStar > 0 ? hoveredStar : selectedStar;
 
   return (
-    <div className="flex flex-col min-h-dvh bg-[#0a0a0a]">
+    <div className="flex flex-col min-h-dvh bg-void">
       {/* Top bar */}
-      <header className="safe-top flex-shrink-0 h-12 border-b border-[#222222] bg-[#111111] flex items-center px-4 gap-4 z-10">
-        <Link href="/" className="flex items-center gap-2 group flex-shrink-0">
+      <header className="safe-top z-10 flex h-14 flex-shrink-0 items-center gap-4 border-b border-hairline bg-chrome px-4">
+        <Link href="/" className="group flex flex-shrink-0 items-center gap-2">
           <BrandMark size={24} />
-          <Wordmark className="text-xs font-semibold text-[#f4f4f5] hidden sm:block group-hover:text-[#6366f1] transition-colors" />
+          <Wordmark className="hidden text-xs text-ink sm:block" />
         </Link>
 
-        <div className="w-px h-5 bg-[#222222] flex-shrink-0" />
+        <div className="h-5 w-px flex-shrink-0 bg-hairline" />
 
-        <div className="flex-1 min-w-0">
-          <span className="text-sm font-medium text-[#a1a1aa] truncate">
+        <div className="min-w-0 flex-1">
+          <span className="truncate text-[15px] font-bold tracking-[-.01em] text-ink">
             {initialTitle ?? slug}
           </span>
         </div>
 
-        <div className="flex items-center gap-3 flex-shrink-0">
+        <div className="flex flex-shrink-0 items-center gap-3">
           <a
             href={gameUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-sm px-4 py-2.5 rounded-lg bg-[#6366f1]/10 hover:bg-[#6366f1]/20 text-[#6366f1] border border-[#6366f1]/20 transition-colors font-medium"
+            className="px-2.5 py-2.5 text-sm font-semibold text-signal transition-colors hover:text-signal-bright"
           >
             Full screen ↗
           </a>
           <Link
             href="/"
-            className="text-sm px-4 py-2.5 rounded-lg bg-[#1a1a1a] hover:bg-[#222222] text-[#a1a1aa] border border-[#2a2a2a] transition-colors font-medium"
+            className="bg-signal px-4 py-2.5 text-sm font-bold text-chrome transition-colors hover:bg-signal-bright"
           >
             Make your own
           </Link>
@@ -269,30 +269,30 @@ export default function PlayClient({
 
       {/* Remix lineage (#3.6) — remix count + "remixed from" attribution. */}
       {(remixCount > 0 || parentSlug) && (
-        <div className="border-t border-[#222222] bg-[#0d0d0d] px-4 py-2 flex items-center gap-3 flex-wrap text-xs">
+        <div className="flex flex-wrap items-center gap-3 border-t border-hairline bg-chrome px-4 py-2 font-mono text-[11px] tracking-[.06em]">
           {parentSlug && (
-            <span className="text-[#71717a] inline-flex items-center gap-1.5">
+            <span className="inline-flex items-center gap-1.5 text-ink-3">
               <ForkIcon />
-              Remixed from{' '}
+              REMIXED FROM{' '}
               <Link
                 href={`/p/${parentSlug}`}
-                className="text-[#6366f1] hover:text-[#818cf8] font-medium transition-colors"
+                className="text-signal transition-colors hover:text-signal-bright"
               >
                 {parentSlug}
               </Link>
             </span>
           )}
-          {remixCount > 0 && parentSlug && <span className="text-[#2a2a2a]">·</span>}
+          {remixCount > 0 && parentSlug && <span className="text-ink-4">·</span>}
           {remixCount > 0 && (
-            <span className="text-[#52525b]">
-              Remixed {remixCount.toLocaleString()} {remixCount === 1 ? 'time' : 'times'}
+            <span className="text-ink-4">
+              REMIXED {remixCount.toLocaleString()} {remixCount === 1 ? 'TIME' : 'TIMES'}
             </span>
           )}
         </div>
       )}
 
       {/* Action bar */}
-      <div className="border-t border-[#222222] bg-[#111111] px-4 py-3 flex items-center gap-4 flex-wrap">
+      <div className="flex flex-wrap items-center gap-4 border-t border-hairline bg-ground px-4 py-3">
         {/* Like button */}
         <button
           type="button"
@@ -300,10 +300,10 @@ export default function PlayClient({
             void handleLike();
           }}
           disabled={liking}
-          className={`flex items-center gap-1.5 text-sm px-4 py-2.5 rounded-lg border transition-colors font-medium disabled:opacity-50 ${
+          className={`flex items-center gap-1.5 border px-4 py-2.5 text-sm font-semibold transition-colors disabled:opacity-50 ${
             liked
-              ? 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20'
-              : 'bg-[#1a1a1a] text-[#71717a] border-[#2a2a2a] hover:text-[#f4f4f5] hover:border-[#333333]'
+              ? 'border-fail text-fail'
+              : 'border-hairline text-ink-4 hover:border-edge hover:text-ink'
           }`}
         >
           <HeartIcon filled={liked} />
@@ -323,8 +323,8 @@ export default function PlayClient({
                 onMouseEnter={() => setHoveredStar(star)}
                 onMouseLeave={() => setHoveredStar(0)}
                 disabled={rating}
-                className="text-lg px-2 py-2 leading-none transition-colors disabled:opacity-50"
-                style={{ color: star <= displayStar ? '#f59e0b' : '#3f3f46' }}
+                className="px-2 py-2 text-lg leading-none transition-colors disabled:opacity-50"
+                style={{ color: star <= displayStar ? '#ffb04d' : '#35393c' }}
                 aria-label={`Rate ${star} star${star === 1 ? '' : 's'}`}
               >
                 ★
@@ -332,7 +332,7 @@ export default function PlayClient({
             ))}
           </div>
           {ratingCount > 0 && (
-            <span className="text-xs text-[#52525b]">
+            <span className="font-mono text-xs text-ink-4">
               {ratingAvg.toFixed(2)} ({ratingCount})
             </span>
           )}
@@ -347,9 +347,9 @@ export default function PlayClient({
             void handleRemix();
           }}
           disabled={remixing}
-          className="text-sm px-4 py-2.5 rounded-lg bg-[#6366f1]/10 hover:bg-[#6366f1]/20 text-[#6366f1] border border-[#6366f1]/20 transition-colors font-medium disabled:opacity-50"
+          className="border border-signal px-4 py-2.5 text-sm font-semibold text-signal transition-colors hover:bg-raised disabled:opacity-50"
         >
-          {remixing ? 'Remixing…' : 'Remix'}
+          {remixing ? 'Remixing…' : '↻ Remix it'}
         </button>
 
         {/* Report */}
@@ -359,7 +359,7 @@ export default function PlayClient({
             void handleReport();
           }}
           disabled={reported}
-          className="text-sm px-4 py-2.5 rounded-lg bg-[#1a1a1a] hover:bg-[#222222] text-[#52525b] hover:text-[#71717a] border border-[#2a2a2a] transition-colors font-medium disabled:opacity-50"
+          className="border border-hairline px-4 py-2.5 text-sm text-ink-4 transition-colors hover:border-edge hover:text-ink-3 disabled:opacity-50"
         >
           {reported ? 'Reported' : 'Report'}
         </button>
@@ -367,20 +367,20 @@ export default function PlayClient({
 
       {/* Leaderboard (#3.8) — top-10 scores reported by the game. */}
       {leaderboard.length > 0 && (
-        <div className="px-4 sm:px-6 lg:px-8 py-8 max-w-3xl mx-auto w-full">
-          <h2 className="text-sm font-semibold text-[#f4f4f5] mb-4 flex items-center gap-2">
+        <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6 lg:px-8">
+          <h2 className="type-label mb-4 flex items-center gap-2 text-ink">
             <TrophyIcon />
             Leaderboard
           </h2>
-          <div className="bg-[#111111] border border-[#222222] rounded-xl overflow-hidden">
+          <div className="overflow-hidden border border-hairline bg-surface">
             {leaderboard.map((entry, i) => (
               <div
                 key={`${entry.userId ?? 'anon'}-${entry.createdAt}-${i}`}
-                className="flex items-center gap-3 px-4 py-2.5 border-b border-[#1a1a1a] last:border-b-0"
+                className="flex items-center gap-3 border-b border-hairline px-4 py-2.5 last:border-b-0"
               >
                 <span
-                  className={`w-6 text-xs font-mono tabular-nums ${
-                    i === 0 ? 'text-[#f59e0b]' : i < 3 ? 'text-[#a1a1aa]' : 'text-[#52525b]'
+                  className={`w-6 font-mono text-xs tabular-nums ${
+                    i === 0 ? 'text-live' : i < 3 ? 'text-ink-2' : 'text-ink-4'
                   }`}
                 >
                   {i + 1}
@@ -388,15 +388,15 @@ export default function PlayClient({
                 {entry.handle ? (
                   <Link
                     href={`/u/${entry.handle}`}
-                    className="text-sm text-[#a1a1aa] hover:text-[#6366f1] transition-colors font-medium truncate"
+                    className="truncate text-sm font-medium text-ink-3 transition-colors hover:text-signal"
                   >
                     @{entry.handle}
                   </Link>
                 ) : (
-                  <span className="text-sm text-[#52525b] italic truncate">anonymous</span>
+                  <span className="truncate text-sm italic text-ink-4">anonymous</span>
                 )}
                 <span className="flex-1" />
-                <span className="text-sm font-semibold text-[#f4f4f5] tabular-nums">
+                <span className="font-mono text-sm font-semibold tabular-nums text-ink">
                   {entry.score.toLocaleString()}
                 </span>
               </div>
@@ -406,8 +406,8 @@ export default function PlayClient({
       )}
 
       {/* Comments section */}
-      <div className="px-4 sm:px-6 lg:px-8 py-8 max-w-3xl mx-auto w-full">
-        <h2 className="text-sm font-semibold text-[#f4f4f5] mb-6">Comments</h2>
+      <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6 lg:px-8">
+        <h2 className="type-label mb-6 text-ink">Comments</h2>
 
         {/* Add comment */}
         <form
@@ -422,13 +422,13 @@ export default function PlayClient({
             placeholder="Leave a comment…"
             rows={3}
             disabled={submitting}
-            className="w-full bg-[#111111] border border-[#222222] rounded-xl px-4 py-3 text-sm text-[#f4f4f5] placeholder-[#52525b] outline-none focus:border-[#6366f1] transition-colors resize-none disabled:opacity-50"
+            className="w-full resize-none border border-hairline bg-surface px-4 py-3 text-sm text-ink placeholder-ink-4 outline-none transition-colors focus:border-signal disabled:opacity-50"
           />
-          <div className="flex justify-end mt-2">
+          <div className="mt-2 flex justify-end">
             <button
               type="submit"
               disabled={submitting || !commentBody.trim()}
-              className="text-xs px-4 py-2 rounded-lg bg-[#6366f1] hover:bg-[#4f46e5] text-white font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              className="bg-signal px-4 py-2 text-xs font-bold text-chrome transition-colors hover:bg-signal-bright disabled:cursor-not-allowed disabled:opacity-40"
             >
               {submitting ? 'Posting…' : 'Post comment'}
             </button>
@@ -439,19 +439,16 @@ export default function PlayClient({
         {commentsLoading && (
           <div className="space-y-3">
             {[1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className="bg-[#111111] border border-[#222222] rounded-xl p-4 animate-pulse"
-              >
-                <div className="h-3 bg-[#1a1a1a] rounded w-1/4 mb-2" />
-                <div className="h-3 bg-[#1a1a1a] rounded w-3/4" />
+              <div key={i} className="animate-pulse border border-hairline bg-surface p-4">
+                <div className="mb-2 h-3 w-1/4 bg-raised" />
+                <div className="h-3 w-3/4 bg-raised" />
               </div>
             ))}
           </div>
         )}
 
         {!commentsLoading && comments.length === 0 && (
-          <p className="text-sm text-[#52525b] text-center py-8">No comments yet. Be the first!</p>
+          <p className="py-8 text-center text-sm text-ink-4">No comments yet. Yours goes first.</p>
         )}
 
         {!commentsLoading && comments.length > 0 && (
@@ -474,22 +471,22 @@ function CommentCard({ comment }: { comment: HubComment }) {
   });
 
   return (
-    <div className="bg-[#111111] border border-[#222222] rounded-xl p-4">
-      <div className="flex items-center gap-2 mb-2">
+    <div className="border border-hairline bg-surface p-4">
+      <div className="mb-2 flex items-center gap-2">
         {comment.authorHandle ? (
           // Author-resolved (#3.9): link the @handle to the creator profile.
           <Link
             href={`/u/${comment.authorHandle}`}
-            className="text-xs text-[#71717a] hover:text-[#6366f1] transition-colors font-medium"
+            className="text-xs font-medium text-ink-3 transition-colors hover:text-signal"
           >
             {comment.authorDisplayName ?? `@${comment.authorHandle}`}
           </Link>
         ) : (
-          <span className="text-xs text-[#52525b] font-mono">{comment.userId.slice(0, 8)}</span>
+          <span className="font-mono text-xs text-ink-4">{comment.userId.slice(0, 8)}</span>
         )}
-        <span className="text-xs text-[#3f3f46]">{date}</span>
+        <span className="font-mono text-[10px] tracking-[.06em] text-ink-4">{date}</span>
       </div>
-      <p className="text-sm text-[#a1a1aa] leading-relaxed">{comment.body}</p>
+      <p className="text-sm leading-relaxed text-ink-3">{comment.body}</p>
     </div>
   );
 }
@@ -501,7 +498,7 @@ function TrophyIcon() {
       height="13"
       viewBox="0 0 24 24"
       fill="none"
-      stroke="#f59e0b"
+      stroke="#ffb04d"
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"

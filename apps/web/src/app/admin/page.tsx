@@ -37,10 +37,10 @@ interface Metrics {
 
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
-    <div className="bg-[#111111] border border-[#222222] rounded-xl p-5">
-      <p className="text-xs text-[#52525b] font-medium uppercase tracking-wide mb-1">{label}</p>
-      <p className="text-2xl font-bold text-[#f4f4f5] tabular-nums">{value}</p>
-      {sub && <p className="text-xs text-[#71717a] mt-1">{sub}</p>}
+    <div className="border border-hairline bg-surface p-5">
+      <p className="type-label-xs mb-2 tracking-[.14em] text-ink-4">{label}</p>
+      <p className="font-mono text-2xl font-bold tabular-nums text-ink">{value}</p>
+      {sub && <p className="mt-1 text-xs text-ink-4">{sub}</p>}
     </div>
   );
 }
@@ -49,13 +49,13 @@ function Bar({ value, max, color }: { value: number; max: number; color: string 
   const pct = max > 0 ? Math.round((value / max) * 100) : 0;
   return (
     <div className="flex items-center gap-3">
-      <div className="flex-1 h-2 bg-[#1a1a1a] rounded-full overflow-hidden">
+      <div className="h-0.5 flex-1 overflow-hidden bg-hairline">
         <div
-          className="h-full rounded-full transition-all duration-500"
+          className="h-full transition-all duration-500"
           style={{ width: `${pct}%`, background: color }}
         />
       </div>
-      <span className="text-xs text-[#71717a] w-8 text-right">{pct}%</span>
+      <span className="w-8 text-right font-mono text-xs text-ink-4">{pct}%</span>
     </div>
   );
 }
@@ -100,23 +100,24 @@ export default function AdminDashboard() {
   const hub = metrics?.hub;
 
   return (
-    <div className="min-h-dvh bg-[#0a0a0a] text-[#f4f4f5] p-6 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
+    <div className="mx-auto min-h-dvh max-w-4xl bg-ground p-6 text-ink">
+      <div className="mb-8 flex items-center justify-between border-b border-hairline pb-5">
         <div>
-          <h1 className="text-xl font-bold">Build Health Dashboard</h1>
+          <div className="type-label mb-2 text-ink-4">Operations</div>
+          <h1 className="type-title text-xl text-ink">Build health</h1>
           {lastRefresh && (
-            <p className="text-xs text-[#52525b] mt-0.5">
-              Last updated {lastRefresh.toLocaleTimeString()} · refreshes every 15s
+            <p className="mt-1 font-mono text-[10px] tracking-[.08em] text-ink-4">
+              UPDATED {lastRefresh.toLocaleTimeString()} · REFRESHES EVERY 15S
             </p>
           )}
         </div>
-        <a href="/" className="text-xs text-[#52525b] hover:text-[#a1a1aa] transition-colors">
+        <a href="/" className="text-xs text-ink-4 transition-colors hover:text-ink-3">
           ← Back to PlayerZero
         </a>
       </div>
 
       {/* Token input */}
-      <div className="flex gap-3 mb-8">
+      <div className="mb-8 flex gap-3">
         <input
           type="password"
           value={token}
@@ -125,20 +126,20 @@ export default function AdminDashboard() {
             if (e.key === 'Enter') void fetchMetrics(token);
           }}
           placeholder="Admin token (leave blank if none configured)"
-          className="flex-1 bg-[#111111] border border-[#222222] rounded-lg px-4 py-3 text-sm text-[#f4f4f5] placeholder-[#3f3f46] outline-none focus:border-[#6366f1] transition-colors"
+          className="flex-1 border border-hairline bg-surface px-4 py-3 text-sm text-ink placeholder-ink-4 outline-none transition-colors focus:border-signal"
         />
         <button
           type="button"
           onClick={() => void fetchMetrics(token)}
           disabled={loading}
-          className="px-4 py-3 rounded-lg bg-[#6366f1] hover:bg-[#4f46e5] text-white text-sm font-medium transition-colors disabled:opacity-50"
+          className="bg-signal px-4 py-3 text-sm font-bold text-chrome transition-colors hover:bg-signal-bright disabled:opacity-50"
         >
           {loading ? 'Loading…' : 'Fetch'}
         </button>
       </div>
 
       {error && (
-        <div className="mb-6 bg-rose-500/10 border border-rose-500/20 rounded-xl px-4 py-3 text-sm text-rose-400">
+        <div className="mb-6 border border-fail/40 bg-fail/10 px-4 py-3 text-sm text-fail">
           {error === 'forbidden' ? 'Invalid admin token' : error}
         </div>
       )}
@@ -147,9 +148,7 @@ export default function AdminDashboard() {
         <div className="space-y-8">
           {/* Generation runs */}
           <section>
-            <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wide mb-4">
-              Generation Runs
-            </h2>
+            <h2 className="type-label mb-4 text-ink-3">Generation runs</h2>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
               <StatCard label="Total" value={runs?.total ?? 0} />
               <StatCard label="Completed" value={runs?.completed ?? 0} />
@@ -157,24 +156,24 @@ export default function AdminDashboard() {
               <StatCard label="Active" value={runs?.active ?? 0} sub="queued + running" />
             </div>
             {runs && runs.total > 0 && (
-              <div className="bg-[#111111] border border-[#222222] rounded-xl p-5 space-y-3">
+              <div className="space-y-3 border border-hairline bg-surface p-5">
                 <div>
-                  <div className="flex justify-between text-xs mb-1.5">
-                    <span className="text-[#71717a]">Success rate</span>
-                    <span className="text-emerald-400 font-medium">
+                  <div className="mb-1.5 flex justify-between font-mono text-xs">
+                    <span className="text-ink-4">SUCCESS RATE</span>
+                    <span className="font-medium text-pass">
                       {Math.round(runs.successRate * 100)}%
                     </span>
                   </div>
-                  <Bar value={runs.completed} max={runs.total} color="#10b981" />
+                  <Bar value={runs.completed} max={runs.total} color="#b6f24a" />
                 </div>
                 <div>
-                  <div className="flex justify-between text-xs mb-1.5">
-                    <span className="text-[#71717a]">Failure rate</span>
-                    <span className="text-rose-400 font-medium">
+                  <div className="mb-1.5 flex justify-between font-mono text-xs">
+                    <span className="text-ink-4">FAILURE RATE</span>
+                    <span className="font-medium text-fail">
                       {Math.round((runs.failed / runs.total) * 100)}%
                     </span>
                   </div>
-                  <Bar value={runs.failed} max={runs.total} color="#f43f5e" />
+                  <Bar value={runs.failed} max={runs.total} color="#ff5d3b" />
                 </div>
               </div>
             )}
@@ -183,9 +182,7 @@ export default function AdminDashboard() {
           {/* Community Hub */}
           {hub && (
             <section>
-              <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wide mb-4">
-                Community Hub
-              </h2>
+              <h2 className="type-label mb-4 text-ink-3">Community hub</h2>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <StatCard label="Published" value={hub.totalPublished} />
                 <StatCard label="Total Plays" value={hub.totalPlays.toLocaleString()} />
@@ -198,9 +195,7 @@ export default function AdminDashboard() {
           {/* BullMQ queue depth */}
           {metrics.queue && (
             <section>
-              <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wide mb-4">
-                Generation Queue (BullMQ)
-              </h2>
+              <h2 className="type-label mb-4 text-ink-3">Generation queue (BullMQ)</h2>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <StatCard label="Waiting" value={metrics.queue.waiting} />
                 <StatCard label="Active" value={metrics.queue.active} />
@@ -212,9 +207,7 @@ export default function AdminDashboard() {
 
           {/* Presence */}
           <section>
-            <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wide mb-4">
-              Realtime Presence
-            </h2>
+            <h2 className="type-label mb-4 text-ink-3">Realtime presence</h2>
             <div className="grid grid-cols-2 gap-3">
               <StatCard label="Projects with viewers" value={metrics.presenceProjects} />
               <StatCard label="Connected sockets" value={metrics.connectedSockets} />
@@ -224,7 +217,7 @@ export default function AdminDashboard() {
       )}
 
       {!metrics && !error && !loading && (
-        <div className="text-center py-20 text-[#52525b] text-sm">
+        <div className="py-20 text-center text-sm text-ink-4">
           Enter your admin token and click Fetch to load metrics.
         </div>
       )}

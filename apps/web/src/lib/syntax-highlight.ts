@@ -245,18 +245,20 @@ export function highlightToHtml(code: string, lang: HiLang): string {
   }
 }
 
-/** Token color CSS for the dark theme. Injected once by FilesPanel. */
+/** Token color CSS for the dark theme, drawn from the PlayerZero accent set
+ *  (signal cyan / lime / amber / red + the ink ramp) so code reads as part of
+ *  the same instrument as the rest of the console. Injected once by FilesPanel. */
 export const CODE_HIGHLIGHT_CSS = `
-.pf-code { color: #d4d4d8; }
-.pf-code .tok-comment { color: #5c6370; font-style: italic; }
-.pf-code .tok-string { color: #98c379; }
-.pf-code .tok-keyword { color: #c678dd; }
-.pf-code .tok-number { color: #d19a66; }
-.pf-code .tok-tag { color: #e06c75; }
-.pf-code .tok-attr { color: #d19a66; }
-.pf-code .tok-punct { color: #abb2bf; }
+.pf-code { color: #c8ccce; }
+.pf-code .tok-comment { color: #5b6165; font-style: italic; }
+.pf-code .tok-string { color: #b6f24a; }
+.pf-code .tok-keyword { color: #46e6f0; }
+.pf-code .tok-number { color: #ffb04d; }
+.pf-code .tok-tag { color: #ff5d3b; }
+.pf-code .tok-attr { color: #ffb04d; }
+.pf-code .tok-punct { color: #8b9095; }
 /* Edit mode: a transparent-text <textarea> sits over the highlighted <pre>, so
    the code stays colored while typing. Only the caret + selection show through. */
-.pf-editor { color: transparent; caret-color: #f4f4f5; }
-.pf-editor::selection { background: rgba(129,140,248,0.35); color: transparent; }
+.pf-editor { color: transparent; caret-color: #f2f4f5; }
+.pf-editor::selection { background: rgba(70,230,240,0.3); color: transparent; }
 `;

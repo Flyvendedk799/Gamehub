@@ -38,55 +38,48 @@ export function GameCard({
   return (
     <Link
       href={`/p/${game.slug}`}
-      className="group bg-[#111111] border border-[#222222] rounded-xl overflow-hidden hover:border-[#333333] transition-colors block"
+      className="group block border border-hairline bg-surface transition-colors hover:border-signal"
     >
-      {/* Thumbnail / gradient placeholder */}
-      <div className="relative aspect-video w-full overflow-hidden bg-[#0a0a0a]">
+      {/* Thumbnail / duotone placeholder */}
+      <div className="relative aspect-video w-full overflow-hidden bg-void">
         {thumb ? (
           // eslint-disable-next-line @next/next/no-img-element -- thumbnails come
           // from an external API origin; next/image needs allowlisted domains.
-          <img
-            src={thumb}
-            alt={game.title}
-            loading="lazy"
-            className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
-          />
+          <img src={thumb} alt={game.title} loading="lazy" className="h-full w-full object-cover" />
         ) : (
           <div
-            className="w-full h-full flex items-center justify-center"
+            className="flex h-full w-full items-center justify-center"
             style={{ background: placeholderGradient(game.seedId) }}
           >
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <polygon points="6,4 19,12 6,20" fill="rgba(255,255,255,0.85)" />
-            </svg>
+            <span className="type-label-xs tracking-[.12em] text-signal/70">No capture</span>
           </div>
         )}
 
         {/* Genre badge overlaid on the thumbnail */}
         {game.genre && (
-          <span className="absolute top-2 left-2 text-xs md:text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded-md bg-black/50 backdrop-blur-sm text-[#e4e4e7] border border-white/10">
+          <span className="type-label-xs absolute left-2 top-2 border border-edge bg-black/50 px-2 py-1 tracking-[.14em] text-ink-2 backdrop-blur-sm">
             {game.genre.replace(/_/g, ' ')}
           </span>
         )}
       </div>
 
       {/* Body */}
-      <div className="p-4">
-        <h2 className="text-xs sm:text-sm font-semibold text-[#f4f4f5] truncate group-hover:text-[#6366f1] transition-colors">
+      <div className="border-t border-hairline p-4">
+        <h2 className="truncate text-xs font-bold tracking-[-.01em] text-ink sm:text-sm">
           {game.title}
         </h2>
-        <p className="text-[10px] sm:text-xs text-[#52525b] mt-1.5">
+        <p className="mt-1.5 font-mono text-[10px] tracking-[.06em] text-ink-4 sm:text-[11px]">
           {game.playCount !== undefined ? (
             <>
-              {game.playCount.toLocaleString()} {game.playCount === 1 ? 'play' : 'plays'}
+              {game.playCount.toLocaleString()} {game.playCount === 1 ? 'PLAY' : 'PLAYS'}
             </>
           ) : (
-            'Published'
+            'PUBLISHED'
           )}
           {hasRating && game.ratingAvg !== undefined && (
             <>
               {' '}
-              &middot; ★ {game.ratingAvg.toFixed(1)} ({game.ratingCount})
+              &middot; {game.ratingAvg.toFixed(1)}★ ({game.ratingCount})
             </>
           )}
         </p>
@@ -104,7 +97,7 @@ export function GameCard({
                   e.stopPropagation();
                   onTagClick(t);
                 }}
-                className="text-xs px-3 py-1.5 md:text-[10px] md:px-2 md:py-0.5 rounded-full bg-[#1a1a1a] text-[#71717a] border border-[#222222] hover:text-[#6366f1] hover:border-[#6366f1]/40 transition-colors"
+                className="border border-hairline px-3 py-1.5 font-mono text-xs text-ink-4 transition-colors hover:border-signal hover:text-signal md:px-2 md:py-0.5 md:text-[10px]"
               >
                 #{t}
               </button>

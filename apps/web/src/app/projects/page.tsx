@@ -21,42 +21,45 @@ export default function ProjectsPage() {
   }, []);
 
   return (
-    <div className="min-h-dvh bg-[#0a0a0a]">
-      <main className="max-w-5xl mx-auto px-6 py-10">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
-          <h1 className="text-2xl font-bold text-[#f4f4f5]">Your projects</h1>
+    <div className="min-h-dvh bg-ground">
+      <main className="mx-auto max-w-5xl px-6 py-10 md:py-14">
+        <div className="mb-8 flex flex-col gap-4 border-b border-hairline pb-4 sm:flex-row sm:items-baseline sm:justify-between">
+          <h1 className="type-title text-2xl text-ink">Your projects</h1>
           <Link
             href="/"
-            className="inline-flex items-center justify-center gap-1.5 px-4 py-3 text-base w-full sm:w-auto sm:px-3 sm:py-1.5 sm:text-sm bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-lg transition-all"
+            className="inline-flex w-full items-center justify-center gap-1.5 bg-signal px-4 py-3 text-base font-bold text-chrome transition-colors hover:bg-signal-bright sm:w-auto sm:px-4 sm:py-1.5 sm:text-sm"
           >
             + New game
           </Link>
         </div>
 
         {loading && (
-          <div className="flex items-center gap-3 text-[#a1a1aa]">
+          <div className="flex items-center gap-3 font-mono text-[11px] tracking-[.12em] text-ink-3">
             <PulseIcon />
-            Loading projects…
+            LOADING PROJECTS…
           </div>
         )}
 
         {error && (
-          <div className="text-[#ef4444] bg-[#ef4444]/10 border border-[#ef4444]/20 rounded-lg px-4 py-3 text-sm">
+          <div className="border border-fail/40 bg-fail/10 px-4 py-3 text-sm text-fail">
             {error}
           </div>
         )}
 
         {!loading && !error && projects.length === 0 && (
-          <div className="text-center py-24 border border-dashed border-[#222222] rounded-2xl">
-            <p className="text-[#52525b] text-sm">No projects yet.</p>
-            <Link href="/" className="mt-4 inline-block text-sm text-[#6366f1] hover:underline">
+          <div className="border border-dashed border-hairline py-24 text-center">
+            <p className="text-sm text-ink-4">Slot zero is empty.</p>
+            <Link
+              href="/"
+              className="mt-4 inline-block text-sm text-signal transition-colors hover:text-signal-bright"
+            >
               Build your first game →
             </Link>
           </div>
         )}
 
         {!loading && projects.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {projects.map((project) => (
               <ProjectCard key={project.id} project={project} />
             ))}
@@ -70,8 +73,8 @@ export default function ProjectsPage() {
 function PulseIcon() {
   return (
     <span className="relative flex h-2 w-2">
-      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#6366f1] opacity-75" />
-      <span className="relative inline-flex rounded-full h-2 w-2 bg-[#6366f1]" />
+      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-signal opacity-75" />
+      <span className="relative inline-flex h-2 w-2 rounded-full bg-signal" />
     </span>
   );
 }

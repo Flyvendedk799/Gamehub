@@ -166,12 +166,12 @@ export function SocialOutroExportButton({ previewRef, format, fileBaseName }: Ex
         type="button"
         onClick={() => void exportVideo()}
         disabled={recording}
-        className="flex items-center justify-center gap-2 h-11 md:h-10 px-4 rounded-lg bg-[#46e6f0] text-[#06181a] text-sm font-semibold hover:bg-[#5beef7] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+        className="flex items-center justify-center gap-2 h-11 md:h-10 px-4 rounded bg-signal text-chrome text-sm font-bold hover:bg-signal-bright transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
       >
         {!recording && state.kind !== 'done' && <span aria-hidden="true">↓</span>}
         {label}
       </button>
-      {state.kind === 'error' && <p className="text-[11px] text-[#ef4444]">{state.message}</p>}
+      {state.kind === 'error' && <p className="text-[11px] text-fail">{state.message}</p>}
     </div>
   );
 }

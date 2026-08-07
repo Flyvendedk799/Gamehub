@@ -24,16 +24,19 @@ export function resolveThumbnailUrl(url: string | null | undefined): string | nu
   return trimmed;
 }
 
-/** Curated dark-friendly gradient stops, chosen to read well on `#0a0a0a`. */
+/** Curated fallback stops: dark duotones tinted toward the PlayerZero accent
+ *  hues (signal cyan, lime, amber, red) so an empty slot reads as a quiet
+ *  surface, not a marketing gradient — per the identity board's "no gradient
+ *  fills" rule these stay within the surface ramp's value range. */
 const GRADIENTS: ReadonlyArray<readonly [string, string]> = [
-  ['#6366f1', '#8b5cf6'],
-  ['#0ea5e9', '#6366f1'],
-  ['#ec4899', '#8b5cf6'],
-  ['#f59e0b', '#ef4444'],
-  ['#10b981', '#0ea5e9'],
-  ['#8b5cf6', '#ec4899'],
-  ['#14b8a6', '#6366f1'],
-  ['#ef4444', '#f59e0b'],
+  ['#101112', '#1c1f21'],
+  ['#0e1b1d', '#14282b'],
+  ['#131710', '#1d2614'],
+  ['#1a150d', '#2a2012'],
+  ['#1b100c', '#2a1712'],
+  ['#0e1418', '#142028'],
+  ['#121017', '#1c1826'],
+  ['#101410', '#182018'],
 ];
 
 /** Stable hash so a given seed always lands on the same gradient. */

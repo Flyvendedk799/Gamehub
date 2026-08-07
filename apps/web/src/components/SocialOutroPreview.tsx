@@ -23,7 +23,13 @@ import {
   formatTokenCount,
   publicShareUrl,
 } from '@/lib/social-outro';
-import { BRAND_COLORS, BRAND_MARK, BRAND_NAME, BRAND_WORDMARK } from '@playforge/shared/brand';
+import {
+  BRAND_COLORS,
+  BRAND_FONTS,
+  BRAND_MARK,
+  BRAND_NAME,
+  BRAND_WORDMARK,
+} from '@playforge/shared/brand';
 import type { SocialOutroSummary } from '@playforge/shared/social-outro';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 
@@ -56,16 +62,21 @@ const CARD_W = 1080;
 const MARGIN = 80;
 const CONTENT_W = 920;
 
-const FONT_DISPLAY = "'Space Grotesk', system-ui, sans-serif";
-const FONT_MONO = "'JetBrains Mono', ui-monospace, monospace";
+const FONT_DISPLAY = BRAND_FONTS.display; // 'Archivo', system-ui, sans-serif
+const FONT_MONO = BRAND_FONTS.mono;
 
-const COLOR_BG = BRAND_COLORS.base; // #0a0a0a
-const COLOR_TEXT = BRAND_COLORS.text; // #f4f5f7
-const COLOR_MUTED = BRAND_COLORS.muted; // rgba(244,245,247,.55)
+const COLOR_BG = BRAND_COLORS.base; // #0a0b0c
+const COLOR_TEXT = BRAND_COLORS.text; // #f2f4f5
+const COLOR_MUTED = BRAND_COLORS.muted; // #8b9095
 const COLOR_CYAN = BRAND_COLORS.cyan; // #46e6f0
 const COLOR_LIME = BRAND_COLORS.lime; // #b6f24a
 const COLOR_AMBER = BRAND_COLORS.amber; // #ffb04d
-const COLOR_INDIGO = BRAND_COLORS.indigo; // #7c83ff
+
+/** Apply the Archivo width axis where the 2D context supports it (Chromium).
+ *  The wordmark voice is Expanded; falls back silently to normal width. */
+function setFontStretch(ctx: CanvasRenderingContext2D, stretch: CanvasFontStretch): void {
+  if ('fontStretch' in ctx) ctx.fontStretch = stretch;
+}
 
 interface Layout {
   cardW: number;
@@ -189,37 +200,30 @@ function roundRectPath(
 
 // ─── brand mark + wordmark ───────────────────────────────────────────────────
 
-/** The P0 logomark tile: rounded square, dark fill, hairline border, "P0". */
+/** The Slot Zero logomark (identity board, direction A): a sharp square with a
+ *  signal-cyan hairline frame holding a lone "0" — empty by design. */
 function drawBrandMark(ctx: CanvasRenderingContext2D, x: number, y: number, size: number): void {
   ctx.save();
-  roundRectPath(ctx, x, y, size, size, size * 0.23);
-  ctx.fillStyle = BRAND_COLORS.baseAlt; // #0a0a0c
-  ctx.fill();
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-  ctx.stroke();
+  ctx.fillStyle = BRAND_COLORS.chrome;
+  ctx.fillRect(x, y, size, size);
+  const line = Math.max(1, size * 0.025); // 1.5px at the board's 60px reference
+  ctx.lineWidth = line;
+  ctx.strokeStyle = COLOR_CYAN;
+  ctx.strokeRect(x + line / 2, y + line / 2, size - line, size - line);
 
-  const fontSize = size * 0.48;
-  const letterSpacing = size * -0.03;
-  ctx.font = `700 ${fontSize}px ${FONT_DISPLAY}`;
+  ctx.font = `800 ${size * 0.43}px ${FONT_DISPLAY}`;
+  setFontStretch(ctx, 'semi-expanded');
   ctx.textBaseline = 'middle';
-  ctx.textAlign = 'left';
-  const head = BRAND_MARK.head; // "P"
-  const accent = BRAND_MARK.accent; // "0"
-  const total = measureSpacedText(ctx, head + accent, letterSpacing);
-  const cx = x + size / 2;
-  const cy = y + size / 2 + size * 0.02; // small optical nudge
-  let cursor = cx - total / 2;
+  ctx.textAlign = 'center';
   ctx.fillStyle = COLOR_TEXT;
-  cursor = drawSpacedText(ctx, head, cursor, cy, letterSpacing) + letterSpacing;
-  ctx.fillStyle = COLOR_CYAN;
-  drawSpacedText(ctx, accent, cursor, cy, letterSpacing);
+  ctx.fillText(BRAND_MARK.glyph, x + size / 2, y + size / 2 + size * 0.02); // optical nudge
   ctx.restore();
 }
 
 /**
- * The "PlayerZero" wordmark (head in base tone, accent in cyan), left-anchored
- * at (x,y) on a middle baseline. Returns the x cursor after the last glyph.
+ * The "PLAYERZERO" wordmark (head in base tone, accent in cyan; Archivo
+ * Expanded 800, uppercase), left-anchored at (x,y) on a middle baseline.
+ * Returns the x cursor after the last glyph.
  */
 function drawWordmark(
   ctx: CanvasRenderingContext2D,
@@ -229,15 +233,36 @@ function drawWordmark(
   letterSpacing: number,
 ): number {
   ctx.save();
-  ctx.font = `700 ${fontSize}px ${FONT_DISPLAY}`;
+  ctx.font = `800 ${fontSize}px ${FONT_DISPLAY}`;
+  setFontStretch(ctx, 'expanded');
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
   ctx.fillStyle = COLOR_TEXT;
-  let cursor = drawSpacedText(ctx, BRAND_WORDMARK.head, x, y, letterSpacing) + letterSpacing;
+  let cursor =
+    drawSpacedText(ctx, BRAND_WORDMARK.head.toUpperCase(), x, y, letterSpacing) + letterSpacing;
   ctx.fillStyle = COLOR_CYAN;
-  cursor = drawSpacedText(ctx, BRAND_WORDMARK.accent, cursor, y, letterSpacing);
+  cursor = drawSpacedText(ctx, BRAND_WORDMARK.accent.toUpperCase(), cursor, y, letterSpacing);
   ctx.restore();
   return cursor;
+}
+
+/** Width of the full uppercase wordmark at `fontSize`/`letterSpacing`, measured
+ *  with the same font settings drawWordmark uses. */
+function measureWordmark(
+  ctx: CanvasRenderingContext2D,
+  fontSize: number,
+  letterSpacing: number,
+): number {
+  ctx.save();
+  ctx.font = `800 ${fontSize}px ${FONT_DISPLAY}`;
+  setFontStretch(ctx, 'expanded');
+  const w = measureSpacedText(
+    ctx,
+    (BRAND_WORDMARK.head + BRAND_WORDMARK.accent).toUpperCase(),
+    letterSpacing,
+  );
+  ctx.restore();
+  return w;
 }
 
 // ─── derived metric targets ──────────────────────────────────────────────────
@@ -344,10 +369,16 @@ function drawChip(d: DrawContext, opacity: number): void {
   const markSize = 46;
   const y = L.chipTop;
   drawBrandMark(ctx, MARGIN, y, markSize);
-  ctx.font = `400 19px ${FONT_MONO}`;
+  ctx.font = `500 19px ${FONT_MONO}`;
   ctx.fillStyle = COLOR_MUTED;
   ctx.textBaseline = 'middle';
-  drawSpacedText(ctx, `BUILT WITH ${BRAND_NAME}`, MARGIN + markSize + 14, y + markSize / 2, 4);
+  drawSpacedText(
+    ctx,
+    `BUILT WITH ${BRAND_NAME.toUpperCase()}`,
+    MARGIN + markSize + 14,
+    y + markSize / 2,
+    4,
+  );
   ctx.restore();
 }
 
@@ -389,7 +420,7 @@ function drawThumbPlaceholder(
   h: number,
 ): void {
   ctx.save();
-  ctx.fillStyle = '#0d0d10';
+  ctx.fillStyle = BRAND_COLORS.chrome;
   ctx.fillRect(x, y, w, h);
   // 45-degree hatch: lines every 15px, 2px wide.
   ctx.save();
@@ -425,11 +456,11 @@ function drawThumb(d: DrawContext, t: number): void {
   const h = L.thumbH;
 
   ctx.save();
-  // Frame clip + bg.
-  roundRectPath(ctx, x, y, w, h, 14);
+  // Frame clip + bg (2px radius — board geometry: radius 2, never more).
+  roundRectPath(ctx, x, y, w, h, 2);
   ctx.save();
   ctx.clip();
-  ctx.fillStyle = '#111111';
+  ctx.fillStyle = BRAND_COLORS.ground;
   ctx.fillRect(x, y, w, h);
 
   const innerScale = lerp(1.06, 1.0, outCubic(seg(t, 0, 1.5)));
@@ -464,7 +495,7 @@ function drawThumb(d: DrawContext, t: number): void {
     ctx.globalAlpha = hudOp;
     const hx = x + 20;
     const hy = y + 20 + 8; // baseline-ish center
-    ctx.fillStyle = '#ff5d57';
+    ctx.fillStyle = BRAND_COLORS.red;
     ctx.beginPath();
     ctx.arc(hx + 4.5, hy, 4.5, 0, Math.PI * 2);
     ctx.fill();
@@ -515,10 +546,10 @@ function drawThumb(d: DrawContext, t: number): void {
     const bw = w - 52;
     const bh = 6;
     const by = y + h - 26 - bh;
-    roundRectPath(ctx, bx, by, bw, bh, 3);
+    roundRectPath(ctx, bx, by, bw, bh, 2);
     ctx.fillStyle = 'rgba(255,255,255,0.2)';
     ctx.fill();
-    roundRectPath(ctx, bx, by, bw * 0.62, bh, 3);
+    roundRectPath(ctx, bx, by, bw * 0.62, bh, 2);
     ctx.fillStyle = COLOR_CYAN;
     ctx.fill();
     ctx.restore();
@@ -748,20 +779,20 @@ function drawLockup(d: DrawContext, t: number): void {
   const btnH = L.ctaH;
 
   // Filled: "▶ Play it now".
-  roundRectPath(ctx, x, top, btnW, btnH, 9);
+  roundRectPath(ctx, x, top, btnW, btnH, 2);
   ctx.fillStyle = COLOR_CYAN;
   ctx.fill();
-  ctx.fillStyle = '#06181a';
-  ctx.font = `600 ${L.ctaFont}px ${FONT_DISPLAY}`;
+  ctx.fillStyle = BRAND_COLORS.onCyan;
+  ctx.font = `700 ${L.ctaFont}px ${FONT_DISPLAY}`;
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'center';
   ctx.fillText('▶ Play it now', x + btnW / 2, top + btnH / 2);
 
   // Outline: "↻ Remix it".
   const x2 = x + btnW + gap;
-  roundRectPath(ctx, x2, top, btnW, btnH, 9);
+  roundRectPath(ctx, x2, top, btnW, btnH, 2);
   ctx.lineWidth = 1.5;
-  ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+  ctx.strokeStyle = BRAND_COLORS.edge;
   ctx.stroke();
   ctx.fillStyle = COLOR_TEXT;
   ctx.fillText('↻ Remix it', x2 + btnW / 2, top + btnH / 2);
@@ -769,23 +800,22 @@ function drawLockup(d: DrawContext, t: number): void {
 
   // Row below (margin-top 24).
   const rowY = top + btnH + 24 + L.urlSize / 2 + 6;
-  // Left: indigo ↗ + display url (omit entirely if null).
+  // Left: signal-cyan ↗ + display url (omit entirely if null).
   if (displayUrl) {
     ctx.font = `400 ${L.urlSize}px ${FONT_MONO}`;
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = COLOR_INDIGO;
+    ctx.fillStyle = COLOR_CYAN;
     ctx.fillText('↗', x, rowY);
     const arrowW = ctx.measureText('↗').width;
     ctx.fillStyle = 'rgba(244,245,247,0.72)';
     ctx.fillText(displayUrl, x + arrowW + 11, rowY);
   }
 
-  // Right (margin-left auto): P0 mark (40px) + "PlayerZero" wordmark.
+  // Right (margin-left auto): Slot Zero mark (40px) + "PLAYERZERO" wordmark.
   const markSize = 40;
   const wmFont = 30;
   const wmLs = -1;
-  ctx.font = `700 ${wmFont}px ${FONT_DISPLAY}`;
-  const wmW = measureSpacedText(ctx, BRAND_WORDMARK.head + BRAND_WORDMARK.accent, wmLs);
+  const wmW = measureWordmark(ctx, wmFont, wmLs);
   const rightBlockW = markSize + 13 + wmW;
   const rightX = x + CONTENT_W - rightBlockW;
   const markY = rowY - markSize / 2;
@@ -824,7 +854,7 @@ function drawBrandBeat(d: DrawContext, t: number): void {
     ctx.restore();
   }
 
-  // Big lockup: P0 mark (180) + "PlayerZero" (106px, ls -3); scale .4->1 + rotate -10->0.
+  // Big lockup: Slot Zero mark (180) + "PLAYERZERO" (106px, ls -3); scale .4->1 + rotate -10->0.
   const scale = lerp(0.4, 1, outBack(seg(t, 6.55, 7.2)));
   const rotate = lerp(-10, 0, outCubic(seg(t, 6.55, 7.4))) * (Math.PI / 180);
   ctx.save();
@@ -833,8 +863,7 @@ function drawBrandBeat(d: DrawContext, t: number): void {
   const wmFont = 106;
   const wmLs = -3;
   const gap = 36;
-  ctx.font = `700 ${wmFont}px ${FONT_DISPLAY}`;
-  const wmW = measureSpacedText(ctx, BRAND_WORDMARK.head + BRAND_WORDMARK.accent, wmLs);
+  const wmW = measureWordmark(ctx, wmFont, wmLs);
   const blockW = markSize + gap + wmW;
   const lockupCY = cy + 30;
   ctx.translate(cx, lockupCY);
@@ -994,7 +1023,7 @@ const SocialOutroPreview = forwardRef<SocialOutroPreviewHandle, SocialOutroPrevi
 
       if (typeof document !== 'undefined' && 'fonts' in document) {
         const wanted = [
-          '700 84px "Space Grotesk"',
+          '800 84px "Archivo"',
           '400 19px "JetBrains Mono"',
           '700 64px "JetBrains Mono"',
         ];
@@ -1053,7 +1082,7 @@ const SocialOutroPreview = forwardRef<SocialOutroPreviewHandle, SocialOutroPrevi
             objectFit: 'contain',
             aspectRatio: `${L.cardW} / ${L.cardH}`,
             margin: '0 auto',
-            borderRadius: 14,
+            borderRadius: 2,
           }}
         />
       </div>

@@ -200,7 +200,7 @@ export function ControlsPanel({
   if (!manifest) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
-        <p className="text-sm text-[#71717a] max-w-xs leading-relaxed">
+        <p className="max-w-xs text-sm leading-relaxed text-ink-3">
           This game reads input directly, so its keys aren't mappable yet. Map them once and you can
           rebind live from here — no AI needed after that.
         </p>
@@ -208,12 +208,12 @@ export function ControlsPanel({
           <button
             type="button"
             onClick={onMapWithAI}
-            className="rounded-lg bg-[#6366f1] px-4 py-2.5 md:py-2 text-sm font-medium text-white transition-colors hover:bg-[#4f46e5]"
+            className="bg-signal px-4 py-2.5 text-sm font-bold text-chrome transition-colors hover:bg-signal-bright md:py-2"
           >
             Map controls with AI
           </button>
         )}
-        <p className="text-[11px] text-[#52525b] max-w-xs leading-relaxed">
+        <p className="max-w-xs text-[11px] leading-relaxed text-ink-4">
           Runs once to wire a rebindable controls layer (and fix any inverted keys). New games map
           their controls automatically.
         </p>
@@ -223,12 +223,12 @@ export function ControlsPanel({
 
   return (
     <div className="h-full overflow-y-auto scrollbar-thin px-4 py-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs font-mono uppercase tracking-widest text-[#52525b]">Controls</h3>
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="type-label text-ink">Controls</h3>
         <button
           type="button"
           onClick={reset}
-          className="px-3 py-2 text-xs text-[#818cf8] hover:text-[#a5b4fc] transition-colors"
+          className="px-3 py-2 text-xs text-ink-3 transition-colors hover:text-signal"
         >
           Reset to defaults
         </button>
@@ -236,42 +236,36 @@ export function ControlsPanel({
 
       {/* Controller support — one click auto-maps the current controls onto a
           standard gamepad; afterwards each action shows its pad button as a chip. */}
-      <div className="mb-3 rounded-xl border border-[#222222] bg-[#0f0f0f] px-3.5 py-3">
+      <div className="mb-3 border border-hairline bg-surface px-3.5 py-3">
         {controllerMapped ? (
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-sm">🎮</span>
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-[#f4f4f5]">
-                  {gamepadConnected ? 'Controller connected' : 'Controller mapped'}
-                </p>
-                <p className="text-[11px] text-[#71717a] leading-relaxed">
-                  {gamepadConnected
-                    ? 'Your controller is driving the game.'
-                    : 'Connect a controller and press a button to start.'}
-                </p>
-              </div>
+            <div className="min-w-0">
+              <p className="type-label-xs tracking-[.1em] text-pass">
+                {gamepadConnected ? 'Controller connected' : 'Controller mapped'}
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-ink-3">
+                {gamepadConnected
+                  ? 'Your controller is driving the game.'
+                  : 'Connect a controller and press a button to start.'}
+              </p>
             </div>
             <button
               type="button"
               onClick={addControllerSupport}
-              className="flex-shrink-0 text-[11px] px-3 py-1.5 rounded-lg border border-[#27272a] text-[#a1a1aa] hover:text-[#d4d4d8] hover:border-[#3f3f46] transition-colors"
+              className="flex-shrink-0 border border-hairline px-3 py-1.5 text-[11px] text-ink-3 transition-colors hover:border-edge hover:text-ink"
             >
               Re-map
             </button>
           </div>
         ) : (
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-sm">🎮</span>
-              <p className="text-xs text-[#a1a1aa] leading-relaxed">
-                Add controller support — auto-maps these controls onto a gamepad.
-              </p>
-            </div>
+            <p className="min-w-0 text-xs leading-relaxed text-ink-3">
+              Add controller support — auto-maps these controls onto a gamepad.
+            </p>
             <button
               type="button"
               onClick={addControllerSupport}
-              className="flex-shrink-0 rounded-lg bg-[#6366f1] px-3.5 py-2 text-xs font-medium text-white transition-colors hover:bg-[#4f46e5]"
+              className="flex-shrink-0 bg-signal px-3.5 py-2 text-xs font-bold text-chrome transition-colors hover:bg-signal-bright"
             >
               Add controller support
             </button>
@@ -281,52 +275,47 @@ export function ControlsPanel({
 
       <ul className="space-y-2">
         {manifest.actions.map((action) => (
-          <li
-            key={action.id}
-            className="rounded-xl border border-[#222222] bg-[#0f0f0f] px-3.5 py-3"
-          >
+          <li key={action.id} className="border border-hairline bg-surface px-3.5 py-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-[#f4f4f5]">{action.label}</p>
+                <p className="text-sm font-semibold text-ink">{action.label}</p>
                 {action.description && (
-                  <p className="mt-0.5 text-xs text-[#71717a] leading-relaxed">
-                    {action.description}
-                  </p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-ink-3">{action.description}</p>
                 )}
               </div>
               {action.pointer ? (
-                <span className="flex-shrink-0 text-[11px] px-2.5 py-1 rounded-lg bg-[#18181b] border border-[#27272a] text-[#a1a1aa] capitalize">
+                <span className="flex-shrink-0 border border-edge px-2.5 py-1 font-mono text-[11px] capitalize text-ink-2">
                   Mouse · {action.pointer}
                 </span>
               ) : (
                 <button
                   type="button"
                   onClick={() => setCapturing(action.id)}
-                  className="flex-shrink-0 text-xs px-3 py-2 md:text-[11px] md:py-1 rounded-lg border border-[#6366f1]/30 text-[#818cf8] hover:bg-[#6366f1]/10 transition-colors"
+                  className="flex-shrink-0 border border-signal px-3 py-2 font-mono text-xs text-signal transition-colors hover:bg-raised md:py-1 md:text-[11px]"
                 >
                   {capturing === action.id ? 'Press a key, click, or button…' : '+ Add bind'}
                 </button>
               )}
             </div>
             {action.pointer ? (
-              <p className="mt-2 text-[11px] text-[#52525b] italic">
+              <p className="mt-2 text-[11px] italic text-ink-4">
                 Move the mouse to {action.pointer} — drag, or click to capture the pointer.
               </p>
             ) : (
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {(bindings[action.id] ?? []).length === 0 ? (
-                  <span className="text-[11px] text-[#52525b] italic">unbound</span>
+                  <span className="text-[11px] italic text-ink-4">unbound</span>
                 ) : (
                   (bindings[action.id] ?? []).map((code) => (
                     <span
                       key={code}
-                      className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-1 rounded-md bg-[#18181b] border border-[#27272a] text-[#d4d4d8]"
+                      className="inline-flex items-center gap-1 border border-edge px-2 py-1 font-mono text-[11px] text-ink-2"
                     >
                       {keyLabel(code)}
                       <button
                         type="button"
                         onClick={() => removeKey(action.id, code)}
-                        className="tap-target inline-flex items-center justify-center md:min-h-0 md:min-w-0 text-[#52525b] hover:text-[#ef4444] transition-colors"
+                        className="tap-target inline-flex items-center justify-center text-ink-4 transition-colors hover:text-fail md:min-h-0 md:min-w-0"
                         aria-label={`Remove ${keyLabel(code)} from ${action.label}`}
                       >
                         ✕

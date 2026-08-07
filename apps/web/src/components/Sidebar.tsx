@@ -13,6 +13,10 @@ import { useEffect, useState } from 'react';
  *  instance directly so the nav is present there too. The remaining chromeless
  *  views (public play page, auth, onboarding) render without it.
  *
+ *  Visual language (identity board 1b): a 232px chrome-dark rail on a shared
+ *  hairline; text-only items whose active state is a 2px signal left border on
+ *  a raised surface; mono section labels; the credits block pinned to the foot.
+ *
  *  Responsive: an in-flow sticky rail at md+; an off-canvas overlay drawer below
  *  md, toggled by `open` and slid in/out with a transform. `onNavigate` lets the
  *  shell close the drawer when a link is tapped on mobile. */
@@ -67,32 +71,20 @@ export default function Sidebar({
   const navItems: Array<{
     href: string;
     label: string;
-    icon: React.ReactNode;
     match: (p: string) => boolean;
   }> = [
-    {
-      href: '/',
-      label: 'New game',
-      icon: <PlusIcon />,
-      match: (p) => p === '/',
-    },
+    { href: '/', label: 'New game', match: (p) => p === '/' },
     {
       href: '/projects',
       label: 'My projects',
-      icon: <GridIcon />,
       match: (p) => p === '/projects' || p.startsWith('/projects/'),
     },
-    {
-      href: '/hub',
-      label: 'Community hub',
-      icon: <CompassIcon />,
-      match: (p) => p.startsWith('/hub'),
-    },
+    { href: '/hub', label: 'Community hub', match: (p) => p.startsWith('/hub') },
   ];
 
   return (
     <aside
-      className={`safe-top safe-left fixed inset-y-0 left-0 z-50 flex h-dvh w-60 shrink-0 flex-col border-r border-[#1a1a1a] bg-[#0c0c0c] transition-transform duration-200 md:sticky md:top-0 md:z-40 md:translate-x-0 ${
+      className={`safe-top safe-left fixed inset-y-0 left-0 z-50 flex h-dvh w-[232px] shrink-0 flex-col border-r border-hairline bg-chrome transition-transform duration-200 md:sticky md:top-0 md:z-40 md:translate-x-0 ${
         open ? 'translate-x-0' : '-translate-x-full'
       }`}
     >
@@ -100,14 +92,15 @@ export default function Sidebar({
       <Link
         href="/"
         onClick={onNavigate}
-        className="flex items-center gap-2 px-4 h-14 border-b border-[#1a1a1a] text-[#f4f4f5] hover:text-white transition-colors"
+        className="flex h-[60px] items-center gap-2.5 border-b border-hairline px-5 text-ink transition-colors hover:text-white"
       >
         <BrandMark size={26} className="flex-shrink-0" />
-        <Wordmark className="text-sm font-semibold" />
+        <Wordmark className="text-[15px]" />
       </Link>
 
       {/* Primary nav */}
-      <nav className="flex flex-col gap-1 p-3">
+      <nav className="flex flex-col gap-0.5 px-3 py-5">
+        <div className="type-label-xs px-2.5 pb-2.5 text-ink-4">Workspace</div>
         {navItems.map((item) => {
           const active = item.match(pathname);
           return (
@@ -115,13 +108,12 @@ export default function Sidebar({
               key={item.href}
               href={item.href}
               onClick={onNavigate}
-              className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all ${
+              className={`flex items-center gap-3 border-l-2 px-2.5 py-2.5 text-sm transition-colors ${
                 active
-                  ? 'bg-[#6366f1]/10 text-[#f4f4f5] font-medium'
-                  : 'text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#161616]'
+                  ? 'border-signal bg-raised font-semibold text-ink'
+                  : 'border-transparent text-ink-3 hover:bg-surface hover:text-ink'
               }`}
             >
-              <span className={active ? 'text-[#818cf8]' : 'text-[#52525b]'}>{item.icon}</span>
               {item.label}
             </Link>
           );
@@ -131,44 +123,41 @@ export default function Sidebar({
       <div className="flex-1" />
 
       {/* Footer — credits + account */}
-      <div className="border-t border-[#1a1a1a] p-3">
+      <div className="border-t border-hairline px-5 py-4">
         {handle ? (
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col">
             {balance !== null && (
-              <span
-                className="mb-1 flex items-center gap-1.5 px-3 py-1.5 text-xs text-[#a1a1aa] rounded-lg bg-[#161616] border border-[#222222] font-mono"
-                title={`${balance} credits remaining`}
-              >
-                <span className="text-[#f59e0b]">◆</span>
-                {balance.toLocaleString()} credits
-              </span>
+              <div className="mb-4" title={`${balance} credits remaining`}>
+                <div className="type-label-xs text-ink-4">Credits</div>
+                <div className="mt-1.5 flex items-baseline gap-2">
+                  <span className="font-mono text-xl font-bold text-ink">
+                    {balance.toLocaleString()}
+                  </span>
+                </div>
+              </div>
             )}
             <Link
               href={`/u/${handle}`}
               onClick={onNavigate}
-              className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#161616] transition-all"
+              className="-mx-2.5 flex items-center gap-2.5 border-l-2 border-transparent px-2.5 py-2 text-[13px] text-ink-3 transition-colors hover:bg-surface hover:text-ink"
             >
-              <span className="text-[#6366f1] font-mono">@</span>
-              <span className="truncate">{handle}</span>
+              <span className="inline-flex h-[22px] w-[22px] flex-none items-center justify-center border border-edge font-mono text-[10px] text-signal">
+                {handle.charAt(0).toUpperCase()}
+              </span>
+              <span className="truncate">@{handle}</span>
             </Link>
             <Link
               href="/settings"
               onClick={onNavigate}
-              className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#161616] transition-all"
+              className="-mx-2.5 flex items-center gap-2.5 border-l-2 border-transparent px-2.5 py-2 text-[13px] text-ink-3 transition-colors hover:bg-surface hover:text-ink"
             >
-              <span className="text-[#52525b]">
-                <GearIcon />
-              </span>
               Settings
             </Link>
             <button
               type="button"
               onClick={handleLogout}
-              className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-[#71717a] hover:text-[#ef4444] hover:bg-[#ef4444]/10 transition-all"
+              className="-mx-2.5 flex items-center gap-2.5 border-l-2 border-transparent px-2.5 py-2 text-left text-[13px] text-ink-4 transition-colors hover:bg-surface hover:text-fail"
             >
-              <span>
-                <SignOutIcon />
-              </span>
               Sign out
             </button>
           </div>
@@ -177,14 +166,14 @@ export default function Sidebar({
             <Link
               href="/auth/login"
               onClick={onNavigate}
-              className="w-full text-center px-3 py-2 text-sm text-[#a1a1aa] hover:text-[#f4f4f5] rounded-lg hover:bg-[#161616] transition-all"
+              className="w-full border border-edge px-3 py-2 text-center text-sm font-semibold text-ink transition-colors hover:border-signal hover:text-signal"
             >
               Sign in
             </Link>
             <Link
               href="/auth/register"
               onClick={onNavigate}
-              className="w-full text-center px-3 py-2 text-sm bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-lg transition-all"
+              className="w-full bg-signal px-3 py-2 text-center text-sm font-bold text-chrome transition-colors hover:bg-signal-bright"
             >
               Sign up
             </Link>
@@ -192,102 +181,5 @@ export default function Sidebar({
         )}
       </div>
     </aside>
-  );
-}
-
-function PlusIcon() {
-  return (
-    <svg
-      className="w-4 h-4"
-      fill="none"
-      stroke="currentColor"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-    </svg>
-  );
-}
-
-function GridIcon() {
-  return (
-    <svg
-      className="w-4 h-4"
-      fill="none"
-      stroke="currentColor"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"
-      />
-    </svg>
-  );
-}
-
-function CompassIcon() {
-  return (
-    <svg
-      className="w-4 h-4"
-      fill="none"
-      stroke="currentColor"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="9" strokeWidth={2} />
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M15.5 8.5l-2 5-5 2 2-5 5-2z"
-      />
-    </svg>
-  );
-}
-
-function GearIcon() {
-  return (
-    <svg
-      className="w-4 h-4"
-      fill="none"
-      stroke="currentColor"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.827 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.827 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.827-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.827-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-      />
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-      />
-    </svg>
-  );
-}
-
-function SignOutIcon() {
-  return (
-    <svg
-      className="w-4 h-4"
-      fill="none"
-      stroke="currentColor"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-      />
-    </svg>
   );
 }

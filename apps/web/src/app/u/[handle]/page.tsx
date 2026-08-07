@@ -78,24 +78,24 @@ export default function CreatorProfilePage() {
   }
 
   return (
-    <div className="min-h-dvh bg-[#0a0a0a]">
-      <main className="max-w-5xl mx-auto px-6 py-10">
+    <div className="min-h-dvh bg-ground">
+      <main className="mx-auto max-w-5xl px-6 py-10 md:py-14">
         {/* Loading skeleton */}
         {loading && (
           <div className="animate-pulse">
-            <div className="h-8 bg-[#111111] rounded w-48 mb-2" />
-            <div className="h-4 bg-[#111111] rounded w-24 mb-10" />
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="mb-2 h-8 w-48 bg-surface" />
+            <div className="mb-10 h-4 w-24 bg-surface" />
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {Array.from({ length: 3 }).map((_, i) => (
                 <div
                   // biome-ignore lint/suspicious/noArrayIndexKey: static skeleton list, never reordered
                   key={i}
-                  className="bg-[#111111] border border-[#222222] rounded-xl overflow-hidden"
+                  className="overflow-hidden border border-hairline bg-surface"
                 >
-                  <div className="aspect-video w-full bg-[#1a1a1a]" />
+                  <div className="aspect-video w-full bg-raised" />
                   <div className="p-4">
-                    <div className="h-4 bg-[#1a1a1a] rounded w-3/4 mb-3" />
-                    <div className="h-3 bg-[#1a1a1a] rounded w-1/3" />
+                    <div className="mb-3 h-4 w-3/4 bg-raised" />
+                    <div className="h-3 w-1/3 bg-raised" />
                   </div>
                 </div>
               ))}
@@ -105,7 +105,7 @@ export default function CreatorProfilePage() {
 
         {/* Error state */}
         {!loading && error && (
-          <div className="text-[#ef4444] bg-[#ef4444]/10 border border-[#ef4444]/20 rounded-lg px-4 py-3 text-sm">
+          <div className="border border-fail/40 bg-fail/10 px-4 py-3 text-sm text-fail">
             {error}
           </div>
         )}
@@ -114,39 +114,39 @@ export default function CreatorProfilePage() {
         {!loading && !error && (
           <>
             {/* Hero */}
-            <div className="mb-10 flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:flex-wrap">
+            <div className="mb-10 flex flex-col gap-6 border-b border-hairline pb-8 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-4">
               <div className="flex items-start gap-4">
                 {profile?.avatarUrl ? (
                   <img
                     src={profile.avatarUrl}
                     alt=""
-                    className="h-14 w-14 rounded-lg border border-[#222222] object-cover"
+                    className="h-14 w-14 border border-hairline object-cover"
                   />
                 ) : (
-                  <div className="flex h-14 w-14 items-center justify-center rounded-lg border border-[#222222] bg-[#111111] text-lg font-semibold text-[#818cf8]">
+                  <div className="flex h-14 w-14 items-center justify-center border border-edge bg-surface font-mono text-lg text-signal">
                     {(profile?.displayName ?? handle).slice(0, 1).toUpperCase()}
                   </div>
                 )}
                 <div>
-                  <h1 className="text-3xl font-bold text-[#f4f4f5] tracking-tight">
+                  <h1 className="type-display text-3xl text-ink sm:text-4xl">
                     {profile?.displayName ?? `@${handle}`}
                   </h1>
-                  <p className="mt-1 text-sm text-[#71717a]">@{handle}</p>
+                  <p className="mt-1.5 font-mono text-[11px] tracking-[.06em] text-ink-4">
+                    @{handle}
+                  </p>
                   {profile?.bio && (
-                    <p className="mt-3 max-w-xl text-sm leading-6 text-[#a1a1aa]">{profile.bio}</p>
+                    <p className="mt-3 max-w-xl text-sm leading-6 text-ink-3">{profile.bio}</p>
                   )}
                 </div>
               </div>
               <div>
-                <p className="text-sm text-[#52525b] mt-1">
-                  {games.length} published {games.length === 1 ? 'game' : 'games'}
+                <p className="mt-1 font-mono text-[11px] tracking-[.08em] text-ink-4">
+                  {games.length} PUBLISHED {games.length === 1 ? 'GAME' : 'GAMES'}
                   {profile && (
                     <>
                       {' · '}
-                      <span className="text-[#71717a]">
-                        {followerCount.toLocaleString()}{' '}
-                        {followerCount === 1 ? 'follower' : 'followers'}
-                      </span>
+                      {followerCount.toLocaleString()}{' '}
+                      {followerCount === 1 ? 'FOLLOWER' : 'FOLLOWERS'}
                     </>
                   )}
                 </p>
@@ -160,10 +160,10 @@ export default function CreatorProfilePage() {
                     void handleToggleFollow();
                   }}
                   disabled={followBusy}
-                  className={`text-sm px-4 py-3 sm:text-xs sm:py-2 rounded-lg border transition-colors font-medium disabled:opacity-50 ${
+                  className={`px-4 py-3 text-sm font-semibold transition-colors disabled:opacity-50 sm:py-2 sm:text-xs ${
                     following
-                      ? 'bg-[#1a1a1a] text-[#a1a1aa] border-[#2a2a2a] hover:text-[#f4f4f5] hover:border-[#333333]'
-                      : 'bg-[#6366f1] hover:bg-[#4f46e5] text-white border-transparent'
+                      ? 'border border-edge text-ink-3 hover:border-signal hover:text-signal'
+                      : 'bg-signal font-bold text-chrome hover:bg-signal-bright'
                   }`}
                 >
                   {following ? 'Following' : 'Follow'}
@@ -173,17 +173,15 @@ export default function CreatorProfilePage() {
 
             {/* Thumbnail gallery (#3.1) */}
             {games.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-24 border border-dashed border-[#222222] rounded-2xl text-center">
-                <div className="w-12 h-12 rounded-xl bg-[#111111] border border-[#222222] flex items-center justify-center mb-4">
-                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                    <polygon points="4,2.5 16,10 4,17.5" fill="#3f3f46" />
-                  </svg>
+              <div className="flex flex-col items-center justify-center border border-dashed border-hairline py-24 text-center">
+                <div className="mb-5 flex h-12 w-12 items-center justify-center border-[1.5px] border-signal text-lg font-extrabold text-ink">
+                  0
                 </div>
-                <p className="text-sm font-medium text-[#71717a]">No public games yet</p>
-                <p className="text-xs text-[#52525b] mt-1">Check back later!</p>
+                <p className="text-sm font-semibold text-ink-2">No public games yet</p>
+                <p className="mt-1 text-xs text-ink-4">Check back soon.</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
                 {games.map((game) => (
                   <GameCard key={game.id} game={toCardData(game)} />
                 ))}

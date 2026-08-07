@@ -1,5 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <rect x="1" y="1" width="62" height="62" rx="15" fill="#0a0a0c" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
-  <text x="32" y="33" text-anchor="middle" dominant-baseline="central"
-    font-family="'Space Grotesk', system-ui, Arial, sans-serif" font-weight="700" font-size="31" letter-spacing="-2" fill="#f4f5f7">P<tspan fill="#46e6f0">0</tspan></text>
+  <!-- PlayerZero "Slot Zero" mark (identity board, direction A): a sharp square
+       with a signal-cyan hairline frame holding a lone 0 — empty by design.
+       The 0 is drawn as geometry (not text) so it renders identically without
+       webfonts at favicon sizes. -->
+  <rect width="64" height="64" fill="#0d0e10"/>
+  <rect x="2" y="2" width="60" height="60" fill="none" stroke="#46e6f0" stroke-width="4"/>
+  <ellipse cx="32" cy="32" rx="10.5" ry="14.5" fill="none" stroke="#f2f4f5" stroke-width="6"/>
 </svg>

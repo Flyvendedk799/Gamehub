@@ -98,27 +98,33 @@ export default function HubPage() {
   const genreChips = useMemo(() => knownGenres, [knownGenres]);
 
   return (
-    <div className="flex flex-col min-h-dvh bg-[#0a0a0a]">
+    <div className="flex flex-col min-h-dvh bg-ground">
       {/* Main content */}
-      <main className="flex-1 px-4 sm:px-6 lg:px-8 py-8 max-w-7xl mx-auto w-full">
+      <main className="flex-1 px-4 sm:px-6 lg:px-8 py-8 md:py-12 max-w-7xl mx-auto w-full">
         {/* Page heading + sort controls */}
-        <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
+        <div className="flex items-end justify-between mb-8 gap-4 flex-wrap border-b border-hairline pb-5">
           <div>
-            <h1 className="text-xl font-semibold text-[#f4f4f5]">Community Hub</h1>
-            <p className="text-sm text-[#52525b] mt-0.5">Discover games built with PlayerZero</p>
+            <div className="type-label mb-3 text-ink-4">Community hub</div>
+            <h1 className="type-display text-3xl text-ink sm:text-4xl">Play what people built</h1>
+            <p className="mt-2.5 text-sm text-ink-3">
+              Discover, play, rate, and remix games built with PlayerZero.
+            </p>
           </div>
 
           {/* #3.3 — sort tabs */}
-          <div className="flex items-center gap-1 bg-[#111111] border border-[#222222] rounded-lg p-0.5">
-            <span className="text-xs text-[#52525b] px-2">Sort:</span>
-            {SORTS.map((s) => (
+          <div className="flex items-center font-mono text-[11px] tracking-[.1em]">
+            {SORTS.map((s, i) => (
               <button
                 key={s.id}
                 type="button"
                 onClick={() => setSort(s.id)}
                 disabled={isSearching}
-                className={`text-sm px-4 py-2.5 md:text-xs md:px-3 md:py-1.5 rounded-md transition-colors font-medium disabled:opacity-40 ${
-                  sort === s.id ? 'bg-[#6366f1] text-white' : 'text-[#71717a] hover:text-[#f4f4f5]'
+                className={`border px-3.5 py-2.5 uppercase transition-colors disabled:opacity-40 md:py-1.5 ${
+                  i > 0 ? 'border-l-0' : ''
+                } ${
+                  sort === s.id
+                    ? 'border-signal border-l bg-raised text-signal'
+                    : 'border-hairline text-ink-4 hover:text-ink-2'
                 }`}
               >
                 {s.label}
@@ -129,7 +135,7 @@ export default function HubPage() {
 
         {/* Search box (#26) */}
         <div className="mb-4 relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#52525b] pointer-events-none">
+          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-4 pointer-events-none">
             <svg
               width="14"
               height="14"
@@ -149,14 +155,14 @@ export default function HubPage() {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search games…"
             aria-label="Search games"
-            className="w-full bg-[#111111] border border-[#222222] rounded-lg pl-9 pr-9 py-2.5 text-sm text-[#f4f4f5] placeholder-[#52525b] outline-none focus:border-[#6366f1] transition-colors"
+            className="w-full bg-surface border border-hairline pl-10 pr-9 py-3 text-sm text-ink placeholder-ink-4 outline-none focus:border-signal transition-colors"
           />
           {query && (
             <button
               type="button"
               onClick={() => setQuery('')}
               aria-label="Clear search"
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-[#52525b] hover:text-[#a1a1aa] text-sm tap-target inline-flex items-center justify-center md:min-h-0 md:min-w-0"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-4 hover:text-ink text-sm tap-target inline-flex items-center justify-center md:min-h-0 md:min-w-0"
             >
               ✕
             </button>
@@ -170,10 +176,10 @@ export default function HubPage() {
             <button
               type="button"
               onClick={() => setGenre('')}
-              className={`text-sm px-4 py-2.5 md:text-xs md:px-3 md:py-1.5 rounded-full border transition-colors font-medium ${
+              className={`font-mono text-sm md:text-[11px] tracking-[.1em] uppercase px-4 py-2.5 md:px-3 md:py-1.5 border transition-colors ${
                 genre === ''
-                  ? 'bg-[#6366f1] text-white border-[#6366f1]'
-                  : 'bg-[#111111] text-[#71717a] border-[#222222] hover:text-[#f4f4f5] hover:border-[#333333]'
+                  ? 'bg-signal text-chrome border-signal'
+                  : 'text-ink-4 border-hairline hover:text-ink-2 hover:border-edge'
               }`}
             >
               All
@@ -183,10 +189,10 @@ export default function HubPage() {
                 key={g}
                 type="button"
                 onClick={() => setGenre(genre === g ? '' : g)}
-                className={`text-sm px-4 py-2.5 md:text-xs md:px-3 md:py-1.5 rounded-full border transition-colors font-medium ${
+                className={`font-mono text-sm md:text-[11px] tracking-[.1em] uppercase px-4 py-2.5 md:px-3 md:py-1.5 border transition-colors ${
                   genre === g
-                    ? 'bg-[#6366f1] text-white border-[#6366f1]'
-                    : 'bg-[#111111] text-[#71717a] border-[#222222] hover:text-[#f4f4f5] hover:border-[#333333]'
+                    ? 'bg-signal text-chrome border-signal'
+                    : 'text-ink-4 border-hairline hover:text-ink-2 hover:border-edge'
                 }`}
               >
                 {g.replace(/_/g, ' ')}
@@ -198,11 +204,11 @@ export default function HubPage() {
               <button
                 type="button"
                 onClick={() => setTag('')}
-                className="text-sm px-4 py-2.5 md:text-xs md:px-3 md:py-1.5 rounded-full border bg-[#6366f1]/10 text-[#6366f1] border-[#6366f1]/30 font-medium inline-flex items-center gap-1.5"
+                className="font-mono text-sm md:text-[11px] tracking-[.1em] px-4 py-2.5 md:px-3 md:py-1.5 border border-signal text-signal inline-flex items-center gap-1.5"
                 aria-label={`Remove tag filter ${tag}`}
               >
                 #{tag}{' '}
-                <span className="text-[#6366f1]/70 tap-target inline-flex items-center justify-center md:min-h-0 md:min-w-0">
+                <span className="tap-target inline-flex items-center justify-center md:min-h-0 md:min-w-0">
                   ✕
                 </span>
               </button>
@@ -212,17 +218,17 @@ export default function HubPage() {
 
         {/* Loading skeleton */}
         {loading && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {Array.from({ length: 6 }).map((_, i) => (
               <div
                 // biome-ignore lint/suspicious/noArrayIndexKey: static skeleton list, never reordered
                 key={i}
-                className="bg-[#111111] border border-[#222222] rounded-xl overflow-hidden animate-pulse"
+                className="bg-surface border border-hairline overflow-hidden animate-pulse"
               >
-                <div className="aspect-video w-full bg-[#1a1a1a]" />
+                <div className="aspect-video w-full bg-raised" />
                 <div className="p-4">
-                  <div className="h-4 bg-[#1a1a1a] rounded w-3/4 mb-3" />
-                  <div className="h-3 bg-[#1a1a1a] rounded w-1/2" />
+                  <div className="h-4 bg-raised w-3/4 mb-3" />
+                  <div className="h-3 bg-raised w-1/2" />
                 </div>
               </div>
             ))}
@@ -232,29 +238,27 @@ export default function HubPage() {
         {/* Empty state */}
         {!loading && games.length === 0 && (
           <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="w-12 h-12 rounded-xl bg-[#111111] border border-[#222222] flex items-center justify-center mb-4">
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                <polygon points="4,2.5 16,10 4,17.5" fill="#3f3f46" />
-              </svg>
+            <div className="mb-5 flex h-12 w-12 items-center justify-center border-[1.5px] border-signal text-lg font-extrabold text-ink">
+              0
             </div>
             {isSearching ? (
               <>
-                <p className="text-sm font-medium text-[#71717a]">
+                <p className="text-sm font-semibold text-ink-2">
                   No games match “{debouncedQuery.trim()}”
                 </p>
-                <p className="text-xs text-[#52525b] mt-1">Try a different search.</p>
+                <p className="text-xs text-ink-4 mt-1">Try a different search.</p>
                 <button
                   type="button"
                   onClick={() => setQuery('')}
-                  className="mt-6 text-xs px-4 py-2 rounded-lg bg-[#1a1a1a] hover:bg-[#222222] text-[#a1a1aa] border border-[#222222] font-medium transition-colors"
+                  className="mt-6 text-xs px-4 py-2 border border-edge text-ink font-semibold hover:border-signal hover:text-signal transition-colors"
                 >
                   Clear search
                 </button>
               </>
             ) : filtersActive ? (
               <>
-                <p className="text-sm font-medium text-[#71717a]">No games match this filter</p>
-                <p className="text-xs text-[#52525b] mt-1">
+                <p className="text-sm font-semibold text-ink-2">No games match this filter</p>
+                <p className="text-xs text-ink-4 mt-1">
                   Try a different genre or clear the filter.
                 </p>
                 <button
@@ -263,18 +267,18 @@ export default function HubPage() {
                     setGenre('');
                     setTag('');
                   }}
-                  className="mt-6 text-xs px-4 py-2 rounded-lg bg-[#1a1a1a] hover:bg-[#222222] text-[#a1a1aa] border border-[#222222] font-medium transition-colors"
+                  className="mt-6 text-xs px-4 py-2 border border-edge text-ink font-semibold hover:border-signal hover:text-signal transition-colors"
                 >
                   Clear filters
                 </button>
               </>
             ) : (
               <>
-                <p className="text-sm font-medium text-[#71717a]">No games published yet</p>
-                <p className="text-xs text-[#52525b] mt-1">Be the first!</p>
+                <p className="text-sm font-semibold text-ink-2">No games published yet</p>
+                <p className="text-xs text-ink-4 mt-1">Yours goes first.</p>
                 <Link
                   href="/"
-                  className="mt-6 text-xs px-4 py-2 rounded-lg bg-[#6366f1] hover:bg-[#4f46e5] text-white font-medium transition-colors"
+                  className="mt-6 text-xs px-4 py-2 bg-signal text-chrome font-bold hover:bg-signal-bright transition-colors"
                 >
                   Build a game
                 </Link>
@@ -285,7 +289,7 @@ export default function HubPage() {
 
         {/* Game gallery (#3.1) */}
         {!loading && games.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {games.map((game) => (
               <GameCard
                 key={game.id}

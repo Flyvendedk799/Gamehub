@@ -279,77 +279,68 @@ export function PreviewPane({
   }
 
   return (
-    <div className="relative flex flex-col h-full bg-[#0a0a0a]">
-      {/* Toolbar */}
-      <div className="flex-shrink-0 px-4 py-2 border-b border-[#222222] bg-[#111111] flex items-center gap-3">
-        <div className="flex gap-1.5">
-          <div className="w-3 h-3 rounded-full bg-[#ef4444]/60" />
-          <div className="w-3 h-3 rounded-full bg-[#f59e0b]/60" />
-          <div className="w-3 h-3 rounded-full bg-[#22c55e]/60" />
-        </div>
+    <div className="relative flex flex-col h-full bg-void">
+      {/* Toolbar (board 1c: mono tab group + breadcrumb + tools on one hairline) */}
+      <div className="flex-shrink-0 px-3.5 py-2 border-b border-hairline bg-ground flex items-center gap-3 font-mono text-[11px] tracking-[.1em]">
         {previewUrl && (
-          <span className="flex-1 text-center text-xs font-mono text-[#52525b] truncate">
+          <div className="flex">
+            <button
+              type="button"
+              onClick={() => switchView('preview')}
+              aria-pressed={view === 'preview'}
+              className={`px-3 py-2.5 text-xs md:py-1.5 md:text-[11px] border transition-colors ${
+                view === 'preview'
+                  ? 'border-signal bg-raised text-signal'
+                  : 'border-hairline text-ink-3 hover:text-ink'
+              }`}
+            >
+              preview
+            </button>
+            <button
+              type="button"
+              onClick={() => switchView('controls')}
+              aria-pressed={view === 'controls'}
+              className={`px-3 py-2.5 text-xs md:py-1.5 md:text-[11px] border border-l-0 transition-colors ${
+                view === 'controls'
+                  ? 'border-signal border-l bg-raised text-signal'
+                  : 'border-hairline text-ink-3 hover:text-ink'
+              }`}
+            >
+              controls
+            </button>
+            <button
+              type="button"
+              onClick={() => switchView('files')}
+              aria-pressed={view === 'files'}
+              className={`px-3 py-2.5 text-xs md:py-1.5 md:text-[11px] border border-l-0 transition-colors ${
+                view === 'files'
+                  ? 'border-signal border-l bg-raised text-signal'
+                  : 'border-hairline text-ink-3 hover:text-ink'
+              }`}
+            >
+              files
+            </button>
+          </div>
+        )}
+        {previewUrl ? (
+          <span className="hidden flex-1 truncate text-center text-ink-4 sm:block">
             preview · {previewUrl.split('/').pop() ?? 'index.html'}
           </span>
-        )}
-        {!previewUrl && (
-          <span className="flex-1 text-center text-xs font-mono text-[#3f3f46]">no preview</span>
+        ) : (
+          <span className="flex-1 text-center text-ink-4">no preview</span>
         )}
         <div className="flex items-center gap-2">
-          {previewUrl && (
-            <div className="flex rounded-md border border-[#222222] overflow-hidden text-[10px] font-mono">
-              <button
-                type="button"
-                onClick={() => switchView('preview')}
-                aria-pressed={view === 'preview'}
-                className={`px-3 py-2.5 text-xs md:px-2.5 md:py-1 md:text-[10px] transition-colors ${
-                  view === 'preview'
-                    ? 'bg-[#6366f1]/20 text-[#818cf8]'
-                    : 'bg-[#1a1a1a] text-[#52525b] hover:text-[#a1a1aa]'
-                }`}
-              >
-                preview
-              </button>
-              <button
-                type="button"
-                onClick={() => switchView('controls')}
-                aria-pressed={view === 'controls'}
-                className={`px-3 py-2.5 text-xs md:px-2.5 md:py-1 md:text-[10px] border-l border-[#222222] transition-colors ${
-                  view === 'controls'
-                    ? 'bg-[#6366f1]/20 text-[#818cf8]'
-                    : 'bg-[#1a1a1a] text-[#52525b] hover:text-[#a1a1aa]'
-                }`}
-              >
-                controls
-              </button>
-              <button
-                type="button"
-                onClick={() => switchView('files')}
-                aria-pressed={view === 'files'}
-                className={`px-3 py-2.5 text-xs md:px-2.5 md:py-1 md:text-[10px] border-l border-[#222222] transition-colors ${
-                  view === 'files'
-                    ? 'bg-[#6366f1]/20 text-[#818cf8]'
-                    : 'bg-[#1a1a1a] text-[#52525b] hover:text-[#a1a1aa]'
-                }`}
-              >
-                files
-              </button>
-            </div>
-          )}
           {hasTweaks && previewUrl && view === 'preview' && (
             <button
               type="button"
               onClick={() => setShowTweaks((v) => !v)}
               aria-pressed={showTweaks}
               aria-label="Toggle live tweaks panel"
-              className={`
-                text-xs px-3 py-2.5 md:text-[10px] md:px-2 md:py-1 rounded border transition-colors font-mono
-                ${
-                  showTweaks
-                    ? 'bg-[#6366f1]/20 text-[#6366f1] border-[#6366f1]/40'
-                    : 'bg-[#1a1a1a] text-[#52525b] border-[#222222] hover:text-[#a1a1aa]'
-                }
-              `}
+              className={`border px-3 py-2.5 text-xs transition-colors md:px-2.5 md:py-1.5 md:text-[11px] ${
+                showTweaks
+                  ? 'border-signal text-signal'
+                  : 'border-hairline text-ink-3 hover:text-ink'
+              }`}
             >
               ⚙ tweaks
             </button>
@@ -364,20 +355,17 @@ export function PreviewPane({
                   ? 'Changes were made — reload to see them in the game'
                   : 'Reload the preview'
               }
-              className={`
-                relative text-xs px-3 py-2.5 md:text-[10px] md:px-2 md:py-1 rounded border transition-colors font-mono
-                ${
-                  previewStale
-                    ? 'bg-[#6366f1]/20 text-[#818cf8] border-[#6366f1]/40'
-                    : 'bg-[#1a1a1a] text-[#52525b] border-[#222222] hover:text-[#a1a1aa]'
-                }
-              `}
+              className={`relative border px-3 py-2.5 text-xs transition-colors md:px-2.5 md:py-1.5 md:text-[11px] ${
+                previewStale
+                  ? 'border-signal text-signal'
+                  : 'border-hairline text-ink-3 hover:text-ink'
+              }`}
             >
               ↻{previewStale ? ' refresh' : ''}
               {previewStale && (
                 <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#6366f1] opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-[#818cf8]" />
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-signal opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-signal" />
                 </span>
               )}
             </button>
@@ -387,7 +375,7 @@ export function PreviewPane({
               href={previewUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-[10px] px-3 py-2.5 inline-flex md:px-0 md:py-0 text-[#6366f1] hover:text-[#818cf8] transition-colors font-mono"
+              className="inline-flex px-3 py-2.5 text-xs text-signal transition-colors hover:text-signal-bright md:px-0 md:py-0 md:text-[11px]"
             >
               open ↗
             </a>
@@ -428,15 +416,15 @@ export function PreviewPane({
           {/* Live crash/freeze banner — the running game's runtime beacon reported
               an uncaught error or a dead render loop. One click repairs it. */}
           {runtimeIssue && !issueDismissed && view === 'preview' && (
-            <div className="absolute bottom-0 left-0 right-0 z-20 m-3 rounded-xl border border-[#ef4444]/40 bg-[#1a0f0f]/95 px-4 py-3 shadow-lg backdrop-blur">
-              <div className="flex items-start justify-between gap-3">
+            <div className="absolute inset-x-0 bottom-0 z-20 border-t border-fail bg-[#16100f]/95 px-4 py-3 backdrop-blur">
+              <div className="flex items-center justify-between gap-3.5">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-[#fca5a5]">
+                  <p className="text-[13px] font-semibold text-fail">
                     {runtimeIssue.kind === 'crash'
-                      ? '⚠️ Your game hit an error while playing'
-                      : '⚠️ Your game stopped responding'}
+                      ? 'Your game hit an error while playing'
+                      : 'Your game stopped responding'}
                   </p>
-                  <p className="mt-0.5 line-clamp-2 break-words font-mono text-[11px] leading-relaxed text-[#a1a1aa]">
+                  <p className="mt-1 line-clamp-2 break-words font-mono text-[11px] leading-relaxed text-ink-3">
                     {runtimeIssue.message}
                   </p>
                 </div>
@@ -452,7 +440,7 @@ export function PreviewPane({
                         );
                         setIssueDismissed(true);
                       }}
-                      className="rounded-lg bg-[#ef4444] px-3.5 py-2 text-xs font-medium text-white transition-colors hover:bg-[#dc2626]"
+                      className="bg-fail px-4 py-2 text-[13px] font-bold text-[#16100f] transition-colors hover:opacity-90"
                     >
                       Fix it
                     </button>
@@ -461,7 +449,7 @@ export function PreviewPane({
                     type="button"
                     onClick={() => setIssueDismissed(true)}
                     aria-label="Dismiss"
-                    className="rounded-lg border border-[#3f3f46] px-2.5 py-2 text-xs text-[#a1a1aa] transition-colors hover:text-[#d4d4d8]"
+                    className="border border-edge px-3 py-2 text-[13px] text-ink-3 transition-colors hover:text-ink"
                   >
                     ✕
                   </button>
@@ -472,7 +460,7 @@ export function PreviewPane({
 
           {/* Controls tab — overlays the (still-running) game so rebinds apply live */}
           {view === 'controls' && previewUrl && !hasError && (
-            <div className="absolute inset-0 z-10 bg-[#0a0a0a]">
+            <div className="absolute inset-0 z-10 bg-void">
               <ControlsPanel
                 manifest={controlsManifest}
                 onApply={applyControls}
@@ -490,7 +478,7 @@ export function PreviewPane({
 
           {/* Files tab — overlays the (still-running) game like Controls does */}
           {view === 'files' && previewUrl && !hasError && (
-            <div className="absolute inset-0 z-10 bg-[#0a0a0a]">
+            <div className="absolute inset-0 z-10 bg-void">
               <FilesPanel
                 projectId={projectId ?? ''}
                 previewUrl={previewUrl}
@@ -510,8 +498,8 @@ export function PreviewPane({
                 <>
                   <IdleGraphic />
                   <div className="text-center">
-                    <p className="text-[#3f3f46] text-sm">Preview will appear here</p>
-                    <p className="mt-1 text-[#2a2a2a] text-xs">Start a build to see your game</p>
+                    <p className="text-sm text-ink-3">Slot zero is empty</p>
+                    <p className="mt-1 text-xs text-ink-4">Start a build to see your game here</p>
                   </div>
                 </>
               )}
@@ -521,28 +509,13 @@ export function PreviewPane({
           {/* Error state */}
           {hasError && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-8">
-              <div className="w-12 h-12 rounded-full bg-[#ef4444]/10 border border-[#ef4444]/20 flex items-center justify-center">
-                <svg
-                  width="20"
-                  height="20"
-                  viewBox="0 0 20 20"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M10 6v4M10 14h.01M19 10a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
-                    stroke="#ef4444"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
+              <div className="flex h-12 w-12 items-center justify-center border-[1.5px] border-fail font-mono text-lg text-fail">
+                ✗
               </div>
               <div className="text-center">
-                <p className="text-[#ef4444] text-sm font-medium">Build failed</p>
+                <p className="type-label text-fail">Build failed</p>
                 {errorMessage && (
-                  <p className="mt-2 text-[#a1a1aa] text-xs font-mono max-w-sm break-all">
+                  <p className="mt-2 max-w-sm break-all font-mono text-xs text-ink-3">
                     {errorMessage}
                   </p>
                 )}
@@ -553,21 +526,19 @@ export function PreviewPane({
 
         {/* Tweak panel — slides in from the right of the preview */}
         {showTweaks && hasTweaks && (
-          <div className="w-56 flex-shrink-0 bg-[#0f0f0f] border-l border-[#222222] overflow-y-auto flex flex-col">
-            <div className="px-3 py-2 border-b border-[#1a1a1a] flex items-center justify-between">
-              <span className="text-[10px] font-semibold text-[#52525b] uppercase tracking-wider">
-                Live tweaks
-              </span>
+          <div className="flex w-56 flex-shrink-0 flex-col overflow-y-auto border-l border-hairline bg-chrome">
+            <div className="flex items-center justify-between border-b border-hairline px-4 py-3">
+              <span className="type-label-xs text-ink">Live tweaks</span>
               <button
                 type="button"
                 onClick={() => setShowTweaks(false)}
                 aria-label="Close live tweaks panel"
-                className="text-[#3f3f46] hover:text-[#52525b] text-xs"
+                className="text-xs text-ink-4 hover:text-ink"
               >
                 ✕
               </button>
             </div>
-            <div className="flex-1 px-3 py-3 flex flex-col gap-4">
+            <div className="flex flex-1 flex-col gap-5 px-4 py-4">
               {Object.entries(tweakSchema).map(([key, entry]) => (
                 <TweakControl
                   key={key}
@@ -600,18 +571,18 @@ function TweakControl({ tweakKey, entry, value, onChange }: TweakControlProps) {
     .trim();
 
   if (entry.kind === 'color') {
-    const colorVal = typeof value === 'string' ? value : '#6366f1';
+    const colorVal = typeof value === 'string' ? value : '#46e6f0';
     return (
-      <div className="flex flex-col gap-1.5">
-        <span className="text-[10px] text-[#52525b] capitalize">{label}</span>
-        <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-2">
+        <span className="type-label-xs tracking-[.12em] text-ink-3">{label}</span>
+        <div className="flex items-center gap-2.5">
           <input
             type="color"
             value={colorVal}
             onChange={(e) => onChange(e.target.value)}
-            className="w-8 h-6 rounded cursor-pointer border border-[#222222] bg-transparent"
+            className="h-5 w-7 cursor-pointer border border-edge bg-transparent"
           />
-          <span className="text-[10px] font-mono text-[#3f3f46]">{colorVal}</span>
+          <span className="font-mono text-[11px] text-ink-4">{colorVal.toUpperCase()}</span>
         </div>
       </div>
     );
@@ -623,10 +594,10 @@ function TweakControl({ tweakKey, entry, value, onChange }: TweakControlProps) {
     const max = entry.max ?? 100;
     const step = entry.step ?? 1;
     return (
-      <div className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] text-[#52525b] capitalize">{label}</span>
-          <span className="text-[10px] font-mono text-[#3f3f46]">
+          <span className="type-label-xs tracking-[.12em] text-ink-3">{label}</span>
+          <span className="font-mono text-[11px] text-ink">
             {numVal}
             {entry.unit ?? ''}
           </span>
@@ -638,7 +609,7 @@ function TweakControl({ tweakKey, entry, value, onChange }: TweakControlProps) {
           step={step}
           value={numVal}
           onChange={(e) => onChange(Number(e.target.value))}
-          className="w-full accent-[#6366f1]"
+          className="w-full accent-[#46e6f0]"
         />
       </div>
     );
@@ -649,7 +620,7 @@ function TweakControl({ tweakKey, entry, value, onChange }: TweakControlProps) {
     const switchId = `tweak-${tweakKey}`;
     return (
       <div className="flex items-center justify-between">
-        <span id={switchId} className="text-[10px] text-[#52525b] capitalize">
+        <span id={switchId} className="type-label-xs tracking-[.12em] text-ink-3">
           {label}
         </span>
         <button
@@ -659,16 +630,14 @@ function TweakControl({ tweakKey, entry, value, onChange }: TweakControlProps) {
           aria-labelledby={switchId}
           aria-label={`Toggle ${label}`}
           onClick={() => onChange(!boolVal)}
-          className={`
-            w-8 h-4 rounded-full transition-colors relative flex-shrink-0
-            ${boolVal ? 'bg-[#6366f1]' : 'bg-[#222222]'}
-          `}
+          className={`relative h-3.5 w-[30px] flex-shrink-0 transition-colors ${
+            boolVal ? 'bg-signal' : 'bg-hairline'
+          }`}
         >
           <span
-            className={`
-            absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform
-            ${boolVal ? 'translate-x-4' : 'translate-x-0.5'}
-          `}
+            className={`absolute top-0.5 h-2.5 w-2.5 bg-chrome transition-transform ${
+              boolVal ? 'translate-x-[17px]' : 'translate-x-0.5'
+            }`}
           />
         </button>
       </div>
@@ -680,12 +649,11 @@ function TweakControl({ tweakKey, entry, value, onChange }: TweakControlProps) {
 
 // ─── Animations ───────────────────────────────────────────────────────────────
 
+/** The empty slot: the Slot Zero mark itself (identity board, direction A). */
 function IdleGraphic() {
   return (
-    <div className="w-16 h-16 rounded-2xl border border-[#1a1a1a] bg-[#111111] flex items-center justify-center">
-      <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
-        <polygon points="5,3 23,14 5,25" fill="#2a2a2a" />
-      </svg>
+    <div className="flex h-14 w-14 items-center justify-center border-[1.5px] border-signal text-[22px] font-extrabold text-ink">
+      0
     </div>
   );
 }

@@ -19,15 +19,17 @@ import { useEffect, useRef, useState } from 'react';
 export default function HomePage() {
   const router = useRouter();
   const [prompt, setPrompt] = useState('');
+  const [engine, setEngine] = useState<Engine>('phaser');
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [recent, setRecent] = useState<Project[] | null>(null);
   const [authed, setAuthed] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Lovable-style dashboard: when signed in, the home is a compact dashboard (tight
-  // greeting + build box + your recent projects). Logged-out visitors get the full
-  // marketing hero. `authed` drives that split; it's set client-side post-mount.
+  // Signed in, the home is the production console's dashboard (identity board
+  // 1b: kicker + display greeting + prompt slot + idea grid + recent projects).
+  // Logged-out visitors get the marketing hero. `authed` drives that split;
+  // it's set client-side post-mount.
   useEffect(() => {
     const ok = isAuthenticated();
     setAuthed(ok);
@@ -46,12 +48,12 @@ export default function HomePage() {
   }, []);
 
   /**
-   * Shared build path (#3.5). The homepage form and the example chips both flow
+   * Shared build path (#3.5). The dashboard form and the idea chips both flow
    * through here so a chip click runs the exact same auth-aware / pending-prompt
-   * logic as typing a prompt. `engine` defaults to phaser for free-text submits;
-   * chips pass the brief's mapped engine.
+   * logic as typing a prompt. Typed submits carry the engine chip selection;
+   * idea chips pass the brief's mapped engine.
    */
-  async function startBuild(rawPrompt: string, engine: Engine = 'phaser') {
+  async function startBuild(rawPrompt: string, buildEngine: Engine = 'phaser') {
     const trimmed = rawPrompt.trim();
     if (!trimmed) return;
 
@@ -70,7 +72,7 @@ export default function HomePage() {
     try {
       const name = deriveProjectName(trimmed);
 
-      const { project } = await createProject(name, engine);
+      const { project } = await createProject(name, buildEngine);
       const { runId } = await generateGame(project.id, trimmed);
 
       router.push(`/projects/${project.id}?runId=${runId}`);
@@ -82,10 +84,10 @@ export default function HomePage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    await startBuild(prompt);
+    await startBuild(prompt, engine);
   }
 
-  // #3.5 — one-click build from an example chip: submit the real brief through
+  // #3.5 — one-click build from an idea chip: submit the real brief through
   // the same path (auth-aware, pending-prompt) as a typed prompt. No need to
   // populate the textarea first; the click IS the submit.
   function useExample(brief: GameExampleBrief) {
@@ -95,69 +97,58 @@ export default function HomePage() {
   const isLoading = status === 'loading';
   const hasRecent = recent !== null && recent.length > 0;
 
-  return (
-    <main
-      className={`flex min-h-dvh flex-col items-center px-4 py-16 bg-[#0a0a0a] ${
-        authed ? '' : 'justify-center'
-      }`}
-    >
-      {authed ? (
-        /* Signed-in: compact dashboard greeting (the sidebar carries the brand) */
-        <div className="mb-8 w-full max-w-2xl text-center">
-          <h1 className="text-2xl sm:text-3xl font-bold text-[#f4f4f5]">
-            What do you want to build?
-          </h1>
-        </div>
-      ) : (
-        /* Logged-out: full marketing hero */
-        <div className="mb-12 text-center">
-          <div className="inline-flex items-center gap-3 mb-4">
-            <BrandMark size={40} />
-            <Wordmark className="text-2xl font-semibold tracking-tight text-[#f4f4f5]" />
+  const promptForm = (
+    <form onSubmit={handleSubmit} className="w-full">
+      <div className="border border-hairline bg-surface transition-colors focus-within:border-signal">
+        <textarea
+          ref={textareaRef}
+          value={prompt}
+          onChange={(e) => {
+            setPrompt(e.target.value);
+            if (status === 'error') setStatus('idle');
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              void handleSubmit(e);
+            }
+          }}
+          placeholder="Describe the game you want. Genre, mechanics, art style…"
+          rows={3}
+          disabled={isLoading}
+          className="w-full resize-none bg-transparent px-6 pb-2 pt-6 text-lg leading-normal text-ink placeholder-ink-4 outline-none disabled:opacity-50"
+        />
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline py-3.5 pl-6 pr-4">
+          {/* Engine chips — the typed submit builds with the selected engine */}
+          <div className="flex gap-2 font-mono text-[11px] tracking-[.1em]">
+            {(
+              [
+                ['phaser', 'PHASER 2D'],
+                ['threejs', 'THREE.JS 3D'],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setEngine(value)}
+                aria-pressed={engine === value}
+                className={`border px-3 py-[7px] transition-colors ${
+                  engine === value
+                    ? 'border-signal bg-raised text-signal'
+                    : 'border-hairline text-ink-4 hover:text-ink-3'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-          <h1 className="text-4xl sm:text-5xl font-bold text-[#f4f4f5] leading-tight">
-            Build games with AI
-          </h1>
-          <p className="mt-4 text-lg text-[#a1a1aa] max-w-md mx-auto">
-            Describe the game you want. PlayerZero writes the code, builds it, and gives you
-            something you can play instantly.
-          </p>
-        </div>
-      )}
-
-      {/* Form */}
-      <form onSubmit={handleSubmit} className="w-full max-w-2xl">
-        <div className="relative rounded-2xl border border-[#222222] bg-[#111111] shadow-2xl shadow-black/50 overflow-hidden focus-within:border-[#6366f1] transition-colors duration-200">
-          <textarea
-            ref={textareaRef}
-            value={prompt}
-            onChange={(e) => {
-              setPrompt(e.target.value);
-              if (status === 'error') setStatus('idle');
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                void handleSubmit(e);
-              }
-            }}
-            placeholder="What game do you want to build? Describe the genre, mechanics, art style…"
-            rows={5}
-            disabled={isLoading}
-            className="w-full bg-transparent px-5 pt-5 pb-2 text-[#f4f4f5] placeholder-[#52525b] text-base resize-none outline-none disabled:opacity-50"
-          />
-          <div className="flex items-center justify-between px-5 pb-4 pt-2">
-            <span className="hidden sm:inline text-xs text-[#52525b]">⌘ + Enter to submit</span>
+          <div className="flex items-center gap-4">
+            <span className="hidden font-mono text-[11px] tracking-[.08em] text-ink-4 sm:inline">
+              ⌘ ENTER
+            </span>
             <button
               type="submit"
               disabled={isLoading || !prompt.trim()}
-              className="
-                inline-flex items-center gap-2 px-5 py-3 sm:py-2.5 rounded-xl
-                bg-[#6366f1] hover:bg-[#4f46e5] active:bg-[#4338ca]
-                text-white font-medium text-sm
-                transition-all duration-150
-                disabled:opacity-40 disabled:cursor-not-allowed
-                shadow-lg shadow-indigo-500/20
-              "
+              className="inline-flex items-center gap-2 bg-signal px-6 py-3 text-sm font-bold text-chrome transition-colors hover:bg-signal-bright disabled:cursor-not-allowed disabled:opacity-40"
             >
               {isLoading ? (
                 <>
@@ -165,79 +156,121 @@ export default function HomePage() {
                   Building…
                 </>
               ) : (
-                'Build it →'
+                'Build it'
               )}
             </button>
           </div>
         </div>
+      </div>
 
-        {status === 'error' && (
-          <div className="mt-3 flex items-start gap-2 text-sm text-[#ef4444] bg-[#ef4444]/10 border border-[#ef4444]/20 rounded-lg px-4 py-3">
-            <span className="mt-0.5 flex-shrink-0">⚠</span>
-            <span>{errorMsg}</span>
-          </div>
-        )}
-      </form>
-
-      {/* Example chips — one-click builds (#3.5) */}
-      <div className="mt-8 w-full max-w-2xl">
-        <p className="text-xs text-[#52525b] uppercase tracking-widest mb-3 text-center">
-          Or build one of these in one click
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {GAME_EXAMPLE_BRIEFS.map((brief) => (
-            <button
-              key={brief.slug}
-              type="button"
-              onClick={() => useExample(brief)}
-              disabled={isLoading}
-              title={brief.brief}
-              className="
-                group flex items-center justify-between gap-2 text-left
-                bg-[#111111] hover:bg-[#161616]
-                border border-[#222222] hover:border-[#6366f1]/40
-                rounded-xl px-4 py-3
-                transition-all duration-150
-                disabled:opacity-40 disabled:cursor-not-allowed
-              "
-            >
-              <span className="text-sm text-[#a1a1aa] group-hover:text-[#f4f4f5] truncate">
-                {brief.label}
-              </span>
-              <span className="flex-shrink-0 text-xs text-[#52525b] group-hover:text-[#6366f1] opacity-0 group-hover:opacity-100 transition-opacity">
-                Build →
-              </span>
-            </button>
-          ))}
+      {status === 'error' && (
+        <div className="mt-3 flex items-start gap-2 border border-fail/40 bg-fail/10 px-4 py-3 text-sm text-fail">
+          <span className="mt-0.5 flex-shrink-0">⚠</span>
+          <span>{errorMsg}</span>
         </div>
-      </div>
-
-      {/* Recent projects — the dashboard hub (signed-in only) */}
-      {hasRecent && recent && (
-        <section className="mt-16 w-full max-w-5xl">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-[#f4f4f5] uppercase tracking-wider">
-              Recent projects
-            </h2>
-            <Link
-              href="/projects"
-              className="text-xs text-[#71717a] hover:text-[#6366f1] transition-colors"
-            >
-              View all →
-            </Link>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {recent.slice(0, 6).map((project) => (
-              <ProjectCard key={project.id} project={project} />
-            ))}
-          </div>
-        </section>
       )}
+    </form>
+  );
 
-      {/* Footer */}
-      <div className="mt-16 flex items-center gap-4">
-        <p className="text-xs text-[#3f3f46]">PlayerZero — Phase 0 · Dev build</p>
+  const ideaGrid = (
+    <div className="w-full">
+      <div className="grid grid-cols-1 gap-px border border-hairline bg-hairline sm:grid-cols-2 lg:grid-cols-4">
+        {GAME_EXAMPLE_BRIEFS.slice(0, 4).map((brief) => (
+          <button
+            key={brief.slug}
+            type="button"
+            onClick={() => useExample(brief)}
+            disabled={isLoading}
+            title={brief.brief}
+            className="bg-ground px-4 py-4 text-left transition-colors hover:bg-surface disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <div className="type-label-xs mb-2 text-signal">{brief.genre}</div>
+            <div className="text-sm leading-snug text-ink-2">{brief.label}</div>
+          </button>
+        ))}
       </div>
+    </div>
+  );
+
+  return (
+    <main className="min-h-dvh bg-ground">
+      {authed ? (
+        /* Signed in — the console dashboard (board 1b) */
+        <div className="mx-auto w-full max-w-[1100px] px-5 py-12 sm:px-10 md:py-16 lg:px-[72px]">
+          <div className="flex flex-wrap items-end justify-between gap-8">
+            <div>
+              <div className="type-label mb-4 text-ink-4">Slot zero · Ready</div>
+              <h1 className="type-display text-4xl text-ink sm:text-5xl md:text-6xl">
+                What are we
+                <br />
+                building today?
+              </h1>
+            </div>
+            {recent !== null && (
+              <div className="text-right font-mono text-[11px] leading-8 tracking-[.1em] text-ink-4">
+                <div>
+                  {recent.length} PROJECT{recent.length === 1 ? '' : 'S'}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-11">{promptForm}</div>
+          <div className="mt-5">{ideaGrid}</div>
+
+          {/* Recent projects */}
+          {hasRecent && recent && (
+            <section className="mt-16">
+              <div className="flex items-baseline justify-between border-b border-hairline pb-3.5">
+                <h2 className="type-title text-2xl text-ink">Recent projects</h2>
+                <Link
+                  href="/projects"
+                  className="font-mono text-[11px] tracking-[.14em] text-ink-3 transition-colors hover:text-signal"
+                >
+                  ALL {recent.length} →
+                </Link>
+              </div>
+              <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                {recent.slice(0, 6).map((project) => (
+                  <ProjectCard key={project.id} project={project} />
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+      ) : (
+        /* Logged out — marketing hero in the same identity */
+        <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col items-center justify-center px-5 py-16">
+          <div className="mb-12 text-center">
+            <div className="mb-6 inline-flex items-center gap-3">
+              <BrandMark size={40} />
+              <Wordmark className="text-2xl text-ink" />
+            </div>
+            <h1 className="type-display text-4xl text-ink sm:text-6xl">
+              Build the game
+              <br />
+              you describe
+            </h1>
+            <p className="mx-auto mt-6 max-w-md text-lg leading-relaxed text-ink-3">
+              Describe the game you want. PlayerZero writes the code, builds it, and hands you
+              something you can play instantly.
+            </p>
+          </div>
+
+          {promptForm}
+          <div className="mt-6 w-full">
+            <p className="type-label mb-3 text-center text-ink-4">Or build one of these</p>
+            {ideaGrid}
+          </div>
+
+          {/* Footer */}
+          <div className="mt-16 flex items-center gap-4">
+            <p className="font-mono text-[11px] tracking-[.08em] text-ink-4">
+              PLAYERZERO — PHASE 0 · DEV BUILD
+            </p>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

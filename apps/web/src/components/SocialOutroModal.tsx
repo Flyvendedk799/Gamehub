@@ -112,13 +112,13 @@ export function SocialOutroModal({
         aria-modal="true"
         aria-label="Share your game"
         tabIndex={-1}
-        className="w-full max-w-[600px] max-h-[90dvh] overflow-y-auto scrollbar-thin rounded-2xl border border-[#242426] bg-[#121214] shadow-2xl outline-none"
+        className="w-full max-w-[600px] max-h-[90dvh] overflow-y-auto scrollbar-thin rounded border border-hairline bg-ground outline-none"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#1f1f22]">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-hairline">
           <div>
-            <h2 className="text-sm font-semibold text-[#f4f5f7]">Share your game</h2>
-            <p className="text-[11px] text-[#71717a] mt-0.5">
+            <h2 className="type-title text-sm text-ink">Share your game</h2>
+            <p className="text-[11px] text-ink-3 mt-0.5">
               A 10-second outro that proves you built it with AI.
             </p>
           </div>
@@ -126,7 +126,7 @@ export function SocialOutroModal({
             type="button"
             onClick={onClose}
             aria-label="Close share dialog"
-            className="text-[#52525b] hover:text-[#a1a1aa] text-lg leading-none tap-target inline-flex items-center justify-center md:min-h-0 md:min-w-0"
+            className="text-ink-4 hover:text-ink text-lg leading-none tap-target inline-flex items-center justify-center md:min-h-0 md:min-w-0 transition-colors"
           >
             ✕
           </button>
@@ -137,11 +137,11 @@ export function SocialOutroModal({
 
           {!loading && error && (
             <div className="flex flex-col items-center gap-3 py-10 text-center">
-              <p className="text-sm text-[#ef4444]">{error}</p>
+              <p className="text-sm text-fail">{error}</p>
               <button
                 type="button"
                 onClick={onReload}
-                className="text-xs px-3 py-1.5 rounded-lg border border-[#46e6f0]/30 text-[#46e6f0] hover:bg-[#46e6f0]/10 transition-colors"
+                className="text-xs px-3 py-1.5 rounded border border-edge text-ink hover:border-signal hover:text-signal transition-colors"
               >
                 Try again
               </button>
@@ -152,8 +152,8 @@ export function SocialOutroModal({
             <div className="flex flex-col gap-4">
               {/* Format selector */}
               <div className="flex items-center gap-3">
-                <span className="text-[11px] text-[#71717a] uppercase tracking-wider">Format</span>
-                <div className="flex rounded-md border border-[#242426] overflow-hidden text-[11px] font-mono">
+                <span className="type-label text-ink-4">Format</span>
+                <div className="flex rounded border border-hairline overflow-hidden text-[11px] font-mono">
                   {(
                     [
                       ['9x16', '9:16'],
@@ -165,10 +165,10 @@ export function SocialOutroModal({
                       type="button"
                       onClick={() => setFormat(val)}
                       aria-pressed={format === val}
-                      className={`px-4 py-2.5 md:px-3 md:py-1 transition-colors ${
+                      className={`px-4 py-2.5 md:px-3 md:py-1 tracking-[.1em] transition-colors ${
                         format === val
-                          ? 'bg-[#46e6f0]/15 text-[#46e6f0]'
-                          : 'bg-[#1a1a1a] text-[#52525b] hover:text-[#a1a1aa]'
+                          ? 'bg-signal text-chrome'
+                          : 'bg-surface text-ink-4 hover:text-ink-2'
                       }`}
                     >
                       {label}
@@ -178,7 +178,7 @@ export function SocialOutroModal({
               </div>
 
               {/* Preview */}
-              <div className="flex justify-center rounded-xl border border-[#1f1f22] bg-[#0a0a0a] p-4">
+              <div className="flex justify-center rounded border border-hairline bg-void p-4">
                 <SocialOutroPreview
                   ref={previewRef}
                   summary={previewSummary}
@@ -193,7 +193,7 @@ export function SocialOutroModal({
                 <button
                   type="button"
                   onClick={() => previewRef.current?.replay()}
-                  className="flex items-center gap-2 h-11 md:h-10 px-4 rounded-lg border border-[#2c2c2e] text-sm text-[#f4f5f7] hover:bg-[#1a1a1a] transition-colors"
+                  className="flex items-center gap-2 h-11 md:h-10 px-4 rounded border border-edge text-sm font-semibold text-ink hover:border-signal hover:text-signal transition-colors"
                 >
                   <span aria-hidden="true">↻</span> Replay
                 </button>
@@ -214,28 +214,28 @@ export function SocialOutroModal({
                       value={copyUrl}
                       aria-label="Public play link"
                       onFocus={(e) => e.currentTarget.select()}
-                      className={`flex-1 min-w-0 text-xs font-mono px-3 py-2 rounded-lg bg-[#0e0e10] text-[#a1a1aa] border transition-colors ${
-                        copied ? 'border-[#b6f24a] text-[#b6f24a]' : 'border-[#242426]'
+                      className={`flex-1 min-w-0 text-xs font-mono px-3 py-2 rounded bg-surface text-ink-3 border transition-colors ${
+                        copied ? 'border-pass text-pass' : 'border-hairline'
                       }`}
                     />
                     <button
                       type="button"
                       onClick={copyLink}
-                      className={`text-xs px-3 h-11 md:h-auto md:py-2 rounded-lg border font-medium transition-colors ${
+                      className={`text-xs px-3 h-11 md:h-auto md:py-2 rounded border font-medium transition-colors ${
                         copied
-                          ? 'border-[#b6f24a] bg-[#b6f24a]/10 text-[#b6f24a]'
-                          : 'border-[#242426] bg-[#1a1a1a] text-[#a1a1aa] hover:text-[#f4f5f7]'
+                          ? 'border-pass text-pass'
+                          : 'border-hairline bg-surface text-ink-3 hover:text-ink'
                       }`}
                     >
                       {copied ? 'Copied' : 'Copy'}
                     </button>
                   </div>
-                  <p className="text-[11px] text-[#52525b]">
+                  <p className="text-[11px] text-ink-4">
                     Anyone with the link can play it now or remix it.
                   </p>
                 </div>
               ) : (
-                <p className="text-[11px] text-[#52525b]">
+                <p className="text-[11px] text-ink-4">
                   Publish your game to get a shareable play link for the outro.
                 </p>
               )}
@@ -250,14 +250,14 @@ export function SocialOutroModal({
 function OutroSkeleton() {
   return (
     <div className="flex flex-col gap-4 animate-pulse">
-      <div className="h-4 w-24 bg-[#1a1a1a] rounded" />
-      <div className="h-[420px] bg-[#141416] rounded-xl border border-[#1f1f22]" />
+      <div className="h-4 w-24 bg-raised rounded" />
+      <div className="h-[420px] bg-surface rounded border border-hairline" />
       <div className="flex gap-3">
-        <div className="h-10 w-24 bg-[#1a1a1a] rounded-lg" />
+        <div className="h-10 w-24 bg-raised rounded" />
         <div className="flex-1" />
-        <div className="h-10 w-36 bg-[#1a1a1a] rounded-lg" />
+        <div className="h-10 w-36 bg-raised rounded" />
       </div>
-      <div className="h-9 bg-[#1a1a1a] rounded-lg" />
+      <div className="h-9 bg-raised rounded" />
     </div>
   );
 }

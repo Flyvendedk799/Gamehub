@@ -20,6 +20,7 @@ import {
 } from '@/lib/api';
 import { hydrateHistoryEvents, lastPreviewUrlFromHistory } from '@/lib/chat-hydration';
 import { API_BASE } from '@/lib/config';
+import { engineLabel } from '@/lib/engine-label';
 import { TRANSPORT_LOST_MESSAGE } from '@/lib/event-normalize';
 import type { Project, RunCompleteEvent, RunErrorEvent, SseEvent } from '@/lib/types';
 import { useCollab } from '@/lib/use-collab';
@@ -378,7 +379,7 @@ export default function BuilderPage() {
   const isBuilding = isStreaming;
 
   return (
-    <div className="flex h-[100dvh] overflow-hidden bg-[#0a0a0a]">
+    <div className="flex h-[100dvh] overflow-hidden bg-void">
       {/* Persistent main navigation — the same rail used across the whole site.
           In-flow on desktop; an off-canvas drawer below md (opened by the header
           hamburger, closed by tapping the backdrop or any nav link). */}
@@ -393,15 +394,15 @@ export default function BuilderPage() {
       )}
 
       <div className="flex flex-col flex-1 min-w-0 h-full overflow-hidden">
-        {/* Top nav bar */}
-        <header className="flex-shrink-0 h-12 border-b border-[#222222] bg-[#111111] flex items-center px-4 gap-3 z-10 safe-top">
+        {/* Top nav bar (board 1c: chrome bar on a shared hairline) */}
+        <header className="flex-shrink-0 h-14 border-b border-hairline bg-chrome flex items-center px-4 gap-3 z-10 safe-top">
           {/* Mobile-only: open the nav drawer. On desktop the in-flow rail carries
             the brand + navigation, so the header leads straight into the title. */}
           <button
             type="button"
             aria-label="Open menu"
             onClick={() => setNavOpen(true)}
-            className="md:hidden tap-target -ml-1 inline-flex items-center justify-center rounded-lg text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#1a1a1a] transition-colors"
+            className="md:hidden tap-target -ml-1 inline-flex items-center justify-center text-ink-3 hover:text-ink hover:bg-surface transition-colors"
           >
             <svg
               className="w-5 h-5"
@@ -421,34 +422,41 @@ export default function BuilderPage() {
 
           <Link href="/" className="md:hidden flex items-center gap-2 group flex-shrink-0">
             <BrandMark size={24} />
-            <Wordmark className="text-xs text-[#f4f4f5] hidden sm:block" />
+            <Wordmark className="text-xs text-ink hidden sm:block" />
           </Link>
 
-          <div className="md:hidden w-px h-5 bg-[#222222] flex-shrink-0" />
+          <div className="md:hidden w-px h-5 bg-hairline flex-shrink-0" />
 
-          <div className="flex-1 min-w-0">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             {project ? (
-              <h1 className="text-sm font-medium text-[#f4f4f5] truncate">{project.name}</h1>
+              <>
+                <h1 className="truncate text-[15px] font-bold tracking-[-.01em] text-ink">
+                  {project.name}
+                </h1>
+                <span className="type-label-xs hidden flex-shrink-0 border border-hairline px-2 py-1 tracking-[.14em] text-ink-4 sm:inline-block">
+                  {engineLabel(project.engine)}
+                </span>
+              </>
             ) : (
-              <div className="h-3.5 w-40 bg-[#1a1a1a] rounded animate-pulse" />
+              <div className="h-3.5 w-40 animate-pulse rounded bg-raised" />
             )}
           </div>
 
           {/* Status indicator stays visible on every width. */}
           {reconnecting ? (
-            <output className="flex items-center gap-1.5 text-xs text-[#f59e0b] font-mono flex-shrink-0">
-              <PulseRing color="#f59e0b" />
-              <span className="hidden sm:inline">reconnecting</span>
+            <output className="flex flex-shrink-0 items-center gap-2 border border-live px-2.5 py-1 font-mono text-[11px] tracking-[.12em] text-live">
+              <PulseRing />
+              <span className="hidden sm:inline">RECONNECTING</span>
             </output>
           ) : isBuilding ? (
-            <output className="flex items-center gap-1.5 text-xs text-[#6366f1] font-mono flex-shrink-0">
+            <output className="flex flex-shrink-0 items-center gap-2 border border-live px-2.5 py-1 font-mono text-[11px] tracking-[.12em] text-live">
               <PulseRing />
-              <span className="hidden sm:inline">building</span>
+              <span className="hidden sm:inline">BUILDING</span>
             </output>
           ) : null}
 
-          {/* Desktop action cluster — unchanged, just gated to md+. */}
-          <div className="hidden md:flex items-center gap-3 flex-shrink-0">
+          {/* Desktop action cluster — unchanged behavior, board 1c styling. */}
+          <div className="hidden md:flex items-center gap-2.5 flex-shrink-0">
             {previewUrl && (
               <>
                 {/* Full screen — icon-only on small screens */}
@@ -456,12 +464,7 @@ export default function BuilderPage() {
                   href={previewUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="
-                  text-xs px-2 py-1.5 md:px-3 rounded-lg
-                  bg-[#6366f1]/10 hover:bg-[#6366f1]/20
-                  text-[#6366f1] border border-[#6366f1]/20
-                  transition-colors font-medium
-                "
+                  className="px-2 py-1.5 text-xs font-semibold text-signal transition-colors hover:text-signal-bright md:px-2.5"
                   title="Full screen"
                 >
                   <span className="hidden md:inline">Full screen </span>↗
@@ -470,13 +473,7 @@ export default function BuilderPage() {
                 <a
                   href={`${BASE}/v1/projects/${projectId}/game.zip`}
                   download
-                  className="
-                  hidden md:inline-flex
-                  text-xs px-3 py-1.5 rounded-lg
-                  bg-[#1a1a1a] hover:bg-[#222222]
-                  text-[#a1a1aa] border border-[#222222]
-                  transition-colors font-medium
-                "
+                  className="hidden border border-hairline px-3 py-1.5 text-xs font-semibold text-ink-3 transition-colors hover:border-edge hover:text-ink md:inline-flex"
                 >
                   Download ↓
                 </a>
@@ -485,13 +482,7 @@ export default function BuilderPage() {
                   type="button"
                   onClick={openSocialOutro}
                   disabled={isStreaming}
-                  className="
-                  text-xs px-2 py-1.5 md:px-3 rounded-lg
-                  bg-[#46e6f0]/10 hover:bg-[#46e6f0]/20
-                  text-[#46e6f0] border border-[#46e6f0]/20
-                  transition-colors font-medium
-                  disabled:opacity-40 disabled:cursor-not-allowed
-                "
+                  className="border border-hairline px-2 py-1.5 text-xs font-semibold text-ink-3 transition-colors hover:border-signal hover:text-signal disabled:cursor-not-allowed disabled:opacity-40 md:px-3"
                   title="Create a shareable outro"
                 >
                   <span className="hidden md:inline">Share </span>↗
@@ -501,12 +492,7 @@ export default function BuilderPage() {
                     href={publishUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="
-                    text-xs px-3 py-1.5 rounded-lg
-                    bg-emerald-500/10 hover:bg-emerald-500/20
-                    text-emerald-400 border border-emerald-500/20
-                    transition-colors font-medium
-                  "
+                    className="border border-pass px-3 py-1.5 text-xs font-semibold text-pass transition-colors hover:bg-pass/10"
                   >
                     Published ↗
                   </a>
@@ -517,13 +503,7 @@ export default function BuilderPage() {
                       void handlePublish();
                     }}
                     disabled={isPublishing || isStreaming}
-                    className="
-                    text-xs px-3 py-1.5 rounded-lg
-                    bg-emerald-500/10 hover:bg-emerald-500/20
-                    text-emerald-400 border border-emerald-500/20
-                    transition-colors font-medium
-                    disabled:opacity-40 disabled:cursor-not-allowed
-                  "
+                    className="border border-edge px-4 py-1.5 text-xs font-semibold text-ink transition-colors hover:border-signal hover:text-signal disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {isPublishing ? 'Publishing…' : 'Publish'}
                   </button>
@@ -535,34 +515,30 @@ export default function BuilderPage() {
               <button
                 type="button"
                 onClick={() => setShowTimeline((v) => !v)}
-                className={`
-                hidden md:inline-flex
-                text-xs px-3 py-1.5 rounded-lg border transition-colors font-medium
-                ${
+                className={`hidden border px-3 py-1.5 text-xs font-semibold transition-colors md:inline-flex ${
                   showTimeline
-                    ? 'bg-[#6366f1]/20 text-[#6366f1] border-[#6366f1]/40'
-                    : 'bg-[#1a1a1a] hover:bg-[#222222] text-[#a1a1aa] border-[#222222]'
-                }
-              `}
+                    ? 'border-signal text-signal'
+                    : 'border-hairline text-ink-3 hover:border-edge hover:text-ink'
+                }`}
               >
                 History ({snapshots.length})
               </button>
             )}
             {(viewerCount > 1 || (collabConnected && peerCount > 0)) && (
               <span
-                className="flex items-center gap-1 text-xs text-emerald-400 font-medium"
+                className="flex items-center gap-1.5 font-mono text-[11px] tracking-[.08em] text-pass"
                 title="Live collaborators"
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-pass" />
                 <span className="hidden sm:inline">
-                  {Math.max(viewerCount - 1, peerCount)} with you
+                  {Math.max(viewerCount - 1, peerCount)} WITH YOU
                 </span>
               </span>
             )}
             {/* All projects link — hidden on small screens */}
             <Link
               href="/projects"
-              className="hidden md:inline text-xs text-[#52525b] hover:text-[#a1a1aa] transition-colors"
+              className="hidden text-xs text-ink-4 transition-colors hover:text-ink-3 md:inline"
             >
               All projects
             </Link>
@@ -576,7 +552,7 @@ export default function BuilderPage() {
               aria-haspopup="menu"
               aria-expanded={mobileMenuOpen}
               onClick={() => setMobileMenuOpen((v) => !v)}
-              className="tap-target inline-flex items-center justify-center rounded-lg text-lg text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#1a1a1a] transition-colors"
+              className="tap-target inline-flex items-center justify-center text-lg text-ink-3 hover:text-ink hover:bg-surface transition-colors"
             >
               ⋯
             </button>
@@ -591,7 +567,7 @@ export default function BuilderPage() {
                 />
                 <div
                   role="menu"
-                  className="absolute right-0 top-full mt-1 w-56 rounded-xl border border-[#222222] bg-[#111111] py-1 z-30 shadow-2xl"
+                  className="absolute right-0 top-full z-30 mt-1 w-56 border border-hairline bg-ground py-1"
                 >
                   {previewUrl && (
                     <>
@@ -600,7 +576,7 @@ export default function BuilderPage() {
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={() => setMobileMenuOpen(false)}
-                        className="block w-full px-4 py-3 text-left text-sm text-[#f4f4f5] hover:bg-[#1a1a1a]"
+                        className="block w-full px-4 py-3 text-left text-sm text-ink hover:bg-surface"
                       >
                         Full screen ↗
                       </a>
@@ -611,7 +587,7 @@ export default function BuilderPage() {
                           openSocialOutro();
                         }}
                         disabled={isStreaming}
-                        className="block w-full px-4 py-3 text-left text-sm text-[#46e6f0] hover:bg-[#1a1a1a] disabled:opacity-40"
+                        className="block w-full px-4 py-3 text-left text-sm text-signal hover:bg-surface disabled:opacity-40"
                       >
                         Share ↗
                       </button>
@@ -619,7 +595,7 @@ export default function BuilderPage() {
                         href={`${BASE}/v1/projects/${projectId}/game.zip`}
                         download
                         onClick={() => setMobileMenuOpen(false)}
-                        className="block w-full px-4 py-3 text-left text-sm text-[#a1a1aa] hover:bg-[#1a1a1a]"
+                        className="block w-full px-4 py-3 text-left text-sm text-ink-3 hover:bg-surface"
                       >
                         Download ↓
                       </a>
@@ -629,7 +605,7 @@ export default function BuilderPage() {
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={() => setMobileMenuOpen(false)}
-                          className="block w-full px-4 py-3 text-left text-sm text-emerald-400 hover:bg-[#1a1a1a]"
+                          className="block w-full px-4 py-3 text-left text-sm text-pass hover:bg-surface"
                         >
                           Published ↗
                         </a>
@@ -641,7 +617,7 @@ export default function BuilderPage() {
                             void handlePublish();
                           }}
                           disabled={isPublishing || isStreaming}
-                          className="block w-full px-4 py-3 text-left text-sm text-emerald-400 hover:bg-[#1a1a1a] disabled:opacity-40"
+                          className="block w-full px-4 py-3 text-left text-sm text-pass hover:bg-surface disabled:opacity-40"
                         >
                           {isPublishing ? 'Publishing…' : 'Publish'}
                         </button>
@@ -655,7 +631,7 @@ export default function BuilderPage() {
                         setMobileMenuOpen(false);
                         setShowTimeline((v) => !v);
                       }}
-                      className="block w-full px-4 py-3 text-left text-sm text-[#a1a1aa] hover:bg-[#1a1a1a]"
+                      className="block w-full px-4 py-3 text-left text-sm text-ink-3 hover:bg-surface"
                     >
                       History ({snapshots.length})
                     </button>
@@ -663,7 +639,7 @@ export default function BuilderPage() {
                   <Link
                     href="/projects"
                     onClick={() => setMobileMenuOpen(false)}
-                    className="block w-full px-4 py-3 text-left text-sm text-[#a1a1aa] hover:bg-[#1a1a1a]"
+                    className="block w-full px-4 py-3 text-left text-sm text-ink-3 hover:bg-surface"
                   >
                     All projects
                   </Link>
@@ -677,7 +653,7 @@ export default function BuilderPage() {
         {loadError && (
           <div
             role="alert"
-            className="flex-shrink-0 px-4 py-2 bg-[#ef4444]/10 border-b border-[#ef4444]/20 text-xs text-[#ef4444] flex items-center gap-2"
+            className="flex-shrink-0 px-4 py-2 bg-fail/10 border-b border-fail/30 text-xs text-fail flex items-center gap-2"
           >
             <span className="opacity-70">⚠</span>
             <span>{loadError}</span>
@@ -747,14 +723,14 @@ export default function BuilderPage() {
 
           {/* Version timeline overlay */}
           {showTimeline && (
-            <div className="absolute top-0 right-0 h-full w-full md:w-72 bg-[#111111] border-l border-[#222222] flex flex-col z-20">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-[#222222]">
-                <span className="text-xs font-semibold text-[#f4f4f5]">Version history</span>
+            <div className="absolute top-0 right-0 z-20 flex h-full w-full flex-col border-l border-hairline bg-chrome md:w-72">
+              <div className="flex items-center justify-between border-b border-hairline px-4 py-3">
+                <span className="type-label-xs text-ink">Version history</span>
                 <button
                   type="button"
                   onClick={() => setShowTimeline(false)}
                   aria-label="Close version history"
-                  className="tap-target md:min-h-0 md:min-w-0 inline-flex items-center justify-center text-[#52525b] hover:text-[#a1a1aa] text-sm -mr-2"
+                  className="tap-target md:min-h-0 md:min-w-0 -mr-2 inline-flex items-center justify-center text-sm text-ink-4 hover:text-ink"
                 >
                   ✕
                 </button>
@@ -763,29 +739,30 @@ export default function BuilderPage() {
                 {snapshots.map((snap) => (
                   <div
                     key={snap.id}
-                    className="px-4 py-3 border-b border-[#1a1a1a] hover:bg-[#1a1a1a] group"
+                    className="group border-b border-hairline px-4 py-3 hover:bg-surface"
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 mb-1">
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-1 flex items-center gap-1.5">
                           <span
-                            className={`
-                          text-[10px] px-1.5 py-0.5 rounded font-mono font-medium
-                          ${snap.type === 'initial' ? 'bg-[#6366f1]/20 text-[#6366f1]' : 'bg-[#1a1a1a] text-[#52525b]'}
-                        `}
+                            className={`px-1.5 py-0.5 font-mono text-[10px] font-medium ${
+                              snap.type === 'initial'
+                                ? 'border border-signal text-signal'
+                                : 'border border-hairline text-ink-4'
+                            }`}
                           >
                             v{snap.seq + 1}
                           </span>
                           {snap.engine && (
-                            <span className="text-[10px] text-[#52525b] font-mono">
-                              {snap.engine}
+                            <span className="font-mono text-[10px] tracking-[.08em] text-ink-4">
+                              {engineLabel(snap.engine)}
                             </span>
                           )}
                         </div>
                         {snap.prompt && (
-                          <p className="text-xs text-[#a1a1aa] truncate leading-4">{snap.prompt}</p>
+                          <p className="truncate text-xs leading-4 text-ink-3">{snap.prompt}</p>
                         )}
-                        <p className="text-[10px] text-[#3f3f46] mt-1">
+                        <p className="mt-1 font-mono text-[10px] text-ink-4">
                           {new Date(snap.createdAt).toLocaleString(undefined, {
                             month: 'short',
                             day: 'numeric',
@@ -800,14 +777,7 @@ export default function BuilderPage() {
                           void handleRevert(snap.id);
                         }}
                         disabled={isReverting !== null || isStreaming}
-                        className="
-                        text-xs px-3 py-2 md:text-[10px] md:px-2 md:py-1 rounded
-                        bg-[#6366f1]/10 hover:bg-[#6366f1]/20
-                        text-[#6366f1] border border-[#6366f1]/20
-                        transition-colors font-medium flex-shrink-0
-                        md:opacity-0 md:group-hover:opacity-100
-                        disabled:opacity-30 disabled:cursor-not-allowed
-                      "
+                        className="flex-shrink-0 border border-edge px-3 py-2 text-xs font-semibold text-ink transition-colors hover:border-signal hover:text-signal disabled:cursor-not-allowed disabled:opacity-30 md:px-2 md:py-1 md:text-[10px] md:opacity-0 md:group-hover:opacity-100"
                       >
                         {isReverting === snap.id ? '…' : 'Restore'}
                       </button>
@@ -821,13 +791,15 @@ export default function BuilderPage() {
 
         {/* Mobile bottom tab bar — toggles the full-height Build / Play panels.
           Owns the home-indicator inset for the whole builder (safe-bottom). */}
-        <nav className="md:hidden flex-shrink-0 grid grid-cols-2 border-t border-[#222222] bg-[#111111] safe-bottom">
+        <nav className="md:hidden flex-shrink-0 grid grid-cols-2 border-t border-hairline bg-chrome safe-bottom">
           <button
             type="button"
             onClick={() => setMobileTab('build')}
             aria-pressed={mobileTab === 'build'}
-            className={`min-h-12 text-sm font-medium transition-colors ${
-              mobileTab === 'build' ? 'text-[#6366f1] bg-[#6366f1]/5' : 'text-[#71717a]'
+            className={`min-h-12 border-t-2 text-sm font-semibold transition-colors ${
+              mobileTab === 'build'
+                ? 'border-signal bg-raised text-ink'
+                : 'border-transparent text-ink-4'
             }`}
           >
             Build
@@ -836,13 +808,15 @@ export default function BuilderPage() {
             type="button"
             onClick={() => setMobileTab('play')}
             aria-pressed={mobileTab === 'play'}
-            className={`relative min-h-12 text-sm font-medium transition-colors ${
-              mobileTab === 'play' ? 'text-[#6366f1] bg-[#6366f1]/5' : 'text-[#71717a]'
+            className={`relative min-h-12 border-t-2 text-sm font-semibold transition-colors ${
+              mobileTab === 'play'
+                ? 'border-signal bg-raised text-ink'
+                : 'border-transparent text-ink-4'
             }`}
           >
             Play
             {previewUrl && mobileTab !== 'play' && (
-              <span className="absolute top-2.5 right-[calc(50%-1.75rem)] w-1.5 h-1.5 rounded-full bg-[#6366f1] animate-pulse" />
+              <span className="absolute top-2.5 right-[calc(50%-1.75rem)] h-1.5 w-1.5 animate-pulse rounded-full bg-signal" />
             )}
           </button>
         </nav>
@@ -862,7 +836,7 @@ export default function BuilderPage() {
   );
 }
 
-function PulseRing({ color = '#6366f1' }: { color?: string }) {
+function PulseRing({ color = '#ffb04d' }: { color?: string }) {
   return (
     <span className="relative flex h-1.5 w-1.5">
       <span

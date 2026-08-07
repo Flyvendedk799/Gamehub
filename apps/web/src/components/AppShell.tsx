@@ -61,12 +61,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       <div className="flex flex-1 min-w-0 flex-col">
         {/* Mobile top bar — hamburger + brand (the sidebar carries it on desktop) */}
-        <header className="md:hidden safe-top sticky top-0 z-30 flex items-center gap-3 h-14 px-4 border-b border-[#1a1a1a] bg-[#0a0a0a]/90 backdrop-blur">
+        <header className="md:hidden safe-top sticky top-0 z-30 flex items-center gap-3 h-14 px-4 border-b border-hairline bg-chrome/90 backdrop-blur">
           <button
             type="button"
             aria-label="Open menu"
             onClick={() => setOpen(true)}
-            className="p-3 -ml-3 tap-target inline-flex items-center justify-center text-[#a1a1aa] hover:text-[#f4f4f5] rounded-lg hover:bg-[#161616] transition-all"
+            className="p-3 -ml-3 tap-target inline-flex items-center justify-center text-ink-3 hover:text-ink hover:bg-surface transition-colors"
           >
             <svg
               className="w-5 h-5"
@@ -83,9 +83,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               />
             </svg>
           </button>
-          <Link href="/" className="flex items-center gap-2 text-[#f4f4f5]">
+          <Link href="/" className="flex items-center gap-2 text-ink">
             <BrandMark size={22} className="flex-shrink-0" />
-            <Wordmark className="text-sm font-semibold" />
+            <Wordmark className="text-sm" />
           </Link>
         </header>
 

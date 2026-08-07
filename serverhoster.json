@@ -71,7 +71,8 @@
       "port": 3004,
       "env": {
         "NEXT_PUBLIC_API_URL": "http://localhost:3191",
-        "API_PROXY_TARGET": "http://localhost:3191"
+        "API_PROXY_TARGET": "http://localhost:3191",
+        "NEXT_PUBLIC_SITE_URL": "http://localhost:3004"
       }
     }
   ]

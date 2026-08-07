@@ -22,10 +22,10 @@ const MODEL_OPTIONS: Record<AccountProvider, string[]> = {
   'codex-subscription': [],
 };
 
-function providerAccent(provider: AccountProvider): string {
-  if (provider === 'anthropic') return 'border-[#f59e0b] bg-[#f59e0b]/10';
-  if (provider === 'openai') return 'border-[#22c55e] bg-[#22c55e]/10';
-  return 'border-[#6366f1] bg-[#6366f1]/10';
+// One interactive color (signal) — a selected card is not a provider-brand
+// moment, it's a selection state (identity board: signal is rationed).
+function providerAccent(_provider: AccountProvider): string {
+  return 'border-signal bg-raised';
 }
 
 function OnboardingForm() {
@@ -112,24 +112,24 @@ function OnboardingForm() {
   const modelOptions = MODEL_OPTIONS[provider];
 
   return (
-    <main className="min-h-dvh safe-bottom bg-[#0a0a0a] px-4 py-10">
+    <main className="min-h-dvh safe-bottom bg-void px-4 py-10">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
         <header className="flex items-center justify-between">
-          <Link href="/" className="inline-flex items-center gap-2">
+          <Link href="/" className="inline-flex items-center gap-2.5">
             <BrandMark size={32} />
-            <Wordmark className="text-lg font-semibold text-[#f4f4f5]" />
+            <Wordmark className="text-lg text-ink" />
           </Link>
-          <Link href="/" className="text-sm text-[#71717a] hover:text-[#f4f4f5]">
+          <Link href="/" className="text-sm text-ink-4 hover:text-ink">
             Later
           </Link>
         </header>
 
-        <section className="space-y-2">
-          <p className="text-sm font-medium text-[#818cf8]">Account setup</p>
-          <h1 className="text-3xl font-bold tracking-tight text-[#f4f4f5]">
+        <section className="space-y-3">
+          <p className="type-label text-ink-4">Account setup</p>
+          <h1 className="type-display text-3xl text-ink sm:text-4xl">
             Choose your builder provider
           </h1>
-          <p className="max-w-2xl text-sm leading-6 text-[#a1a1aa]">
+          <p className="max-w-2xl text-sm leading-6 text-ink-3">
             Use included credits, or connect Claude or OpenAI with your own key.
           </p>
         </section>
@@ -145,14 +145,12 @@ function OnboardingForm() {
                   type="button"
                   onClick={() => chooseProvider(option)}
                   disabled={disabled}
-                  className={`min-h-28 rounded-lg border p-4 text-left transition-all ${
-                    selected ? providerAccent(option) : 'border-[#222222] bg-[#111111]'
-                  } hover:border-[#818cf8] disabled:cursor-not-allowed disabled:opacity-50`}
+                  className={`min-h-28 border p-4 text-left transition-colors ${
+                    selected ? providerAccent(option) : 'border-hairline bg-surface'
+                  } hover:border-signal disabled:cursor-not-allowed disabled:opacity-50`}
                 >
-                  <span className="block text-sm font-semibold text-[#f4f4f5]">
-                    {meta?.label ?? option}
-                  </span>
-                  <span className="mt-3 block text-xs text-[#71717a]">
+                  <span className="block text-sm font-bold text-ink">{meta?.label ?? option}</span>
+                  <span className="mt-3 block font-mono text-[10px] tracking-[.12em] text-ink-4 uppercase">
                     {option === 'platform'
                       ? 'Included'
                       : meta?.configured
@@ -165,9 +163,12 @@ function OnboardingForm() {
           </div>
 
           {provider !== 'platform' && (
-            <div className="grid gap-4 rounded-lg border border-[#222222] bg-[#111111] p-5 sm:grid-cols-[1fr_180px]">
+            <div className="grid gap-4 border border-hairline bg-ground p-5 sm:grid-cols-[1fr_180px]">
               <div>
-                <label htmlFor="apiKey" className="mb-1.5 block text-sm font-medium text-[#a1a1aa]">
+                <label
+                  htmlFor="apiKey"
+                  className="type-label-xs mb-2 block tracking-[.14em] text-ink-3"
+                >
                   API key
                 </label>
                 <input
@@ -183,14 +184,14 @@ function OnboardingForm() {
                         ? 'sk-ant-...'
                         : 'sk-...'
                   }
-                  className="w-full rounded-lg border border-[#222222] bg-[#0a0a0a] px-4 py-3 text-sm text-[#f4f4f5] outline-none transition-colors placeholder:text-[#52525b] focus:border-[#6366f1] disabled:opacity-50"
+                  className="w-full border border-hairline bg-surface px-4 py-3 text-sm text-ink outline-none transition-colors placeholder:text-ink-4 focus:border-signal disabled:opacity-50"
                 />
                 {activeProvider?.keyHelpUrl && (
                   <a
                     href={activeProvider.keyHelpUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="mt-2 inline-block text-xs text-[#818cf8] hover:text-[#a5b4fc]"
+                    className="mt-2 inline-block text-xs text-signal hover:text-signal-bright"
                   >
                     Get a key
                   </a>
@@ -198,7 +199,10 @@ function OnboardingForm() {
               </div>
 
               <div>
-                <label htmlFor="model" className="mb-1.5 block text-sm font-medium text-[#a1a1aa]">
+                <label
+                  htmlFor="model"
+                  className="type-label-xs mb-2 block tracking-[.14em] text-ink-3"
+                >
                   Model
                 </label>
                 <select
@@ -206,7 +210,7 @@ function OnboardingForm() {
                   value={modelId}
                   onChange={(e) => setModelId(e.target.value)}
                   disabled={disabled}
-                  className="w-full rounded-lg border border-[#222222] bg-[#0a0a0a] px-3 py-3 text-sm text-[#f4f4f5] outline-none transition-colors focus:border-[#6366f1] disabled:opacity-50"
+                  className="w-full border border-hairline bg-surface px-3 py-3 text-sm text-ink outline-none transition-colors focus:border-signal disabled:opacity-50"
                 >
                   {modelOptions.map((model) => (
                     <option key={model} value={model}>
@@ -219,10 +223,10 @@ function OnboardingForm() {
           )}
 
           {provider === 'platform' && (
-            <div className="rounded-lg border border-[#222222] bg-[#111111] p-5">
+            <div className="border border-hairline bg-ground p-5">
               <label
                 htmlFor="platformModel"
-                className="mb-1.5 block text-sm font-medium text-[#a1a1aa]"
+                className="type-label-xs mb-2 block tracking-[.14em] text-ink-3"
               >
                 Model
               </label>
@@ -233,13 +237,13 @@ function OnboardingForm() {
                     ?.defaultModelId ?? ''
                 }
                 disabled
-                className="w-full rounded-lg border border-[#222222] bg-[#0a0a0a] px-4 py-3 text-sm text-[#71717a]"
+                className="w-full border border-hairline bg-surface px-4 py-3 font-mono text-sm text-ink-3"
               />
             </div>
           )}
 
           {status === 'error' && errorMsg && (
-            <div className="rounded-lg border border-[#ef4444]/20 bg-[#ef4444]/10 px-4 py-3 text-sm text-[#fca5a5]">
+            <div className="border border-fail/40 bg-fail/10 px-4 py-3 text-sm text-fail">
               {errorMsg}
             </div>
           )}
@@ -247,16 +251,16 @@ function OnboardingForm() {
           <div className="flex items-center justify-end gap-3">
             <Link
               href="/"
-              className="rounded-lg px-4 py-3 sm:py-2.5 text-sm font-medium text-[#a1a1aa] hover:bg-[#161616] hover:text-[#f4f4f5]"
+              className="px-4 py-3 text-sm font-semibold text-ink-3 transition-colors hover:text-ink sm:py-2.5"
             >
               Skip
             </Link>
             <button
               type="submit"
               disabled={disabled}
-              className="rounded-lg bg-[#6366f1] px-5 py-3 sm:py-2.5 text-sm font-medium text-white shadow-lg shadow-indigo-500/20 transition-colors hover:bg-[#4f46e5] disabled:cursor-not-allowed disabled:opacity-40"
+              className="bg-signal px-6 py-3 text-sm font-bold text-chrome transition-colors hover:bg-signal-bright disabled:cursor-not-allowed disabled:opacity-40 sm:py-2.5"
             >
-              {status === 'saving' ? 'Saving...' : 'Continue'}
+              {status === 'saving' ? 'Saving…' : 'Continue'}
             </button>
           </div>
         </form>

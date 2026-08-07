@@ -29,13 +29,10 @@ function isSubscriptionProvider(
   return p === 'claude-subscription' || p === 'codex-subscription';
 }
 
-function providerBorder(provider: AccountProvider, selected: boolean): string {
-  if (!selected) return 'border-[#222222] bg-[#111111]';
-  if (provider === 'anthropic' || provider === 'claude-subscription')
-    return 'border-[#f59e0b] bg-[#f59e0b]/10';
-  if (provider === 'openai' || provider === 'codex-subscription')
-    return 'border-[#22c55e] bg-[#22c55e]/10';
-  return 'border-[#6366f1] bg-[#6366f1]/10';
+// One interactive color (signal) — selection is a state, not a provider-brand
+// moment (identity board: signal cyan is rationed).
+function providerBorder(_provider: AccountProvider, selected: boolean): string {
+  return selected ? 'border-signal bg-raised' : 'border-hairline bg-surface';
 }
 
 export default function SettingsPage() {
@@ -154,36 +151,36 @@ export default function SettingsPage() {
   const disabled = loading || savingProfile || savingProvider;
 
   return (
-    <main className="min-h-dvh bg-[#0a0a0a] px-4 py-10">
+    <main className="min-h-dvh bg-ground px-4 py-10 md:py-14">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
-        <header className="flex flex-wrap items-end justify-between gap-4">
+        <header className="flex flex-wrap items-end justify-between gap-4 border-b border-hairline pb-5">
           <div>
-            <p className="text-sm font-medium text-[#818cf8]">Account</p>
-            <h1 className="mt-2 text-3xl font-bold tracking-tight text-[#f4f4f5]">Settings</h1>
+            <p className="type-label text-ink-4">Account</p>
+            <h1 className="type-display mt-3 text-3xl text-ink sm:text-4xl">Settings</h1>
           </div>
           {settings && (
             <Link
               href={`/u/${settings.user.handle}`}
-              className="rounded-lg border border-[#222222] px-4 py-3 text-sm text-[#a1a1aa] hover:border-[#6366f1] hover:text-[#f4f4f5]"
+              className="border border-edge px-4 py-3 text-sm font-semibold text-ink transition-colors hover:border-signal hover:text-signal"
             >
               View public profile
             </Link>
           )}
         </header>
 
-        {loading && <div className="text-sm text-[#71717a]">Loading settings...</div>}
+        {loading && <div className="text-sm text-ink-3">Loading settings…</div>}
 
         {!loading && (
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.9fr)]">
             <form
               onSubmit={saveProfile}
-              className="space-y-5 rounded-lg border border-[#222222] bg-[#111111] p-6"
+              className="space-y-5 border border-hairline bg-surface p-6"
             >
               <div>
-                <h2 className="text-lg font-semibold text-[#f4f4f5]">Profile</h2>
+                <h2 className="type-title text-lg text-ink">Profile</h2>
                 {settings && (
-                  <p className="mt-1 text-sm text-[#71717a]">
-                    @{settings.user.handle} / {settings.user.email}
+                  <p className="mt-1.5 font-mono text-[11px] tracking-[.06em] text-ink-4">
+                    @{settings.user.handle} · {settings.user.email}
                   </p>
                 )}
               </div>
@@ -191,7 +188,7 @@ export default function SettingsPage() {
               <div>
                 <label
                   htmlFor="displayName"
-                  className="mb-1.5 block text-sm font-medium text-[#a1a1aa]"
+                  className="type-label-xs mb-2 block tracking-[.14em] text-ink-3"
                 >
                   Display name
                 </label>
@@ -201,12 +198,15 @@ export default function SettingsPage() {
                   onChange={(e) => setDisplayName(e.target.value)}
                   disabled={disabled}
                   maxLength={80}
-                  className="w-full rounded-lg border border-[#222222] bg-[#0a0a0a] px-4 py-3 text-sm text-[#f4f4f5] outline-none transition-colors focus:border-[#6366f1] disabled:opacity-50"
+                  className="w-full border border-hairline bg-ground px-4 py-3 text-sm text-ink outline-none transition-colors focus:border-signal disabled:opacity-50"
                 />
               </div>
 
               <div>
-                <label htmlFor="bio" className="mb-1.5 block text-sm font-medium text-[#a1a1aa]">
+                <label
+                  htmlFor="bio"
+                  className="type-label-xs mb-2 block tracking-[.14em] text-ink-3"
+                >
                   Bio
                 </label>
                 <textarea
@@ -216,7 +216,7 @@ export default function SettingsPage() {
                   disabled={disabled}
                   rows={5}
                   maxLength={280}
-                  className="w-full resize-none rounded-lg border border-[#222222] bg-[#0a0a0a] px-4 py-3 text-sm text-[#f4f4f5] outline-none transition-colors placeholder:text-[#52525b] focus:border-[#6366f1] disabled:opacity-50"
+                  className="w-full resize-none border border-hairline bg-ground px-4 py-3 text-sm text-ink outline-none transition-colors placeholder:text-ink-4 focus:border-signal disabled:opacity-50"
                   placeholder="What do you like building?"
                 />
               </div>
@@ -224,7 +224,7 @@ export default function SettingsPage() {
               <div>
                 <label
                   htmlFor="avatarUrl"
-                  className="mb-1.5 block text-sm font-medium text-[#a1a1aa]"
+                  className="type-label-xs mb-2 block tracking-[.14em] text-ink-3"
                 >
                   Avatar URL
                 </label>
@@ -234,7 +234,7 @@ export default function SettingsPage() {
                   value={avatarUrl}
                   onChange={(e) => setAvatarUrl(e.target.value)}
                   disabled={disabled}
-                  className="w-full rounded-lg border border-[#222222] bg-[#0a0a0a] px-4 py-3 text-sm text-[#f4f4f5] outline-none transition-colors placeholder:text-[#52525b] focus:border-[#6366f1] disabled:opacity-50"
+                  className="w-full border border-hairline bg-ground px-4 py-3 text-sm text-ink outline-none transition-colors placeholder:text-ink-4 focus:border-signal disabled:opacity-50"
                   placeholder="https://..."
                 />
               </div>
@@ -243,18 +243,18 @@ export default function SettingsPage() {
                 <button
                   type="submit"
                   disabled={disabled || displayName.trim().length === 0}
-                  className="rounded-lg bg-[#6366f1] px-5 py-3 text-sm font-medium text-white shadow-lg shadow-indigo-500/20 transition-colors hover:bg-[#4f46e5] disabled:cursor-not-allowed disabled:opacity-40"
+                  className="bg-signal px-5 py-3 text-sm font-bold text-chrome transition-colors hover:bg-signal-bright disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {savingProfile ? 'Saving...' : 'Save profile'}
+                  {savingProfile ? 'Saving…' : 'Save profile'}
                 </button>
               </div>
             </form>
 
             <form
               onSubmit={saveProvider}
-              className="space-y-5 rounded-lg border border-[#222222] bg-[#111111] p-6"
+              className="space-y-5 border border-hairline bg-surface p-6"
             >
-              <h2 className="text-lg font-semibold text-[#f4f4f5]">Build provider</h2>
+              <h2 className="type-title text-lg text-ink">Build provider</h2>
 
               <div className="grid gap-3">
                 {(
@@ -274,34 +274,32 @@ export default function SettingsPage() {
                       type="button"
                       onClick={() => chooseProvider(option)}
                       disabled={disabled}
-                      className={`rounded-lg border p-4 text-left transition-all ${providerBorder(
+                      className={`border p-4 text-left transition-colors ${providerBorder(
                         option,
                         selected,
-                      )} hover:border-[#818cf8] disabled:cursor-not-allowed disabled:opacity-50`}
+                      )} hover:border-signal disabled:cursor-not-allowed disabled:opacity-50`}
                     >
                       <span className="flex items-center justify-between gap-3">
-                        <span className="text-sm font-semibold text-[#f4f4f5]">
-                          {meta?.label ?? option}
-                        </span>
+                        <span className="text-sm font-bold text-ink">{meta?.label ?? option}</span>
                         <span className="flex shrink-0 items-center gap-1.5">
                           {/* Subscription credentials are harvested from a CLI login on the
                               machine running the API, so they only ever work in local dev. */}
                           {isSubscriptionProvider(option) && (
                             <span
                               title="Reads a CLI login from the machine running the API — local development only, never a deployed server."
-                              className="rounded-md border border-[#f59e0b]/30 bg-[#f59e0b]/10 px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-[#fbbf24]"
+                              className="border border-live px-2 py-1 font-mono text-[10px] uppercase tracking-[.12em] text-live"
                             >
                               Dev only
                             </span>
                           )}
                           {meta?.active && (
-                            <span className="rounded-md bg-[#0a0a0a] px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-[#a1a1aa]">
+                            <span className="border border-hairline px-2 py-1 font-mono text-[10px] uppercase tracking-[.12em] text-ink-3">
                               Active
                             </span>
                           )}
                         </span>
                       </span>
-                      <span className="mt-2 block text-xs text-[#71717a]">
+                      <span className="mt-2 block text-xs text-ink-4">
                         {option === 'platform'
                           ? 'Included credits'
                           : isSubscriptionProvider(option)
@@ -337,7 +335,7 @@ export default function SettingsPage() {
                   <div>
                     <label
                       htmlFor="apiKey"
-                      className="mb-1.5 block text-sm font-medium text-[#a1a1aa]"
+                      className="type-label-xs mb-2 block tracking-[.14em] text-ink-3"
                     >
                       API key
                     </label>
@@ -354,14 +352,14 @@ export default function SettingsPage() {
                             ? 'sk-ant-...'
                             : 'sk-...'
                       }
-                      className="w-full rounded-lg border border-[#222222] bg-[#0a0a0a] px-4 py-3 text-sm text-[#f4f4f5] outline-none transition-colors placeholder:text-[#52525b] focus:border-[#6366f1] disabled:opacity-50"
+                      className="w-full border border-hairline bg-ground px-4 py-3 text-sm text-ink outline-none transition-colors placeholder:text-ink-4 focus:border-signal disabled:opacity-50"
                     />
                     {activeProvider?.keyHelpUrl && (
                       <a
                         href={activeProvider.keyHelpUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className="mt-2 inline-block text-xs text-[#818cf8] hover:text-[#a5b4fc]"
+                        className="mt-2 inline-block text-xs text-signal hover:text-signal-bright"
                       >
                         Get a key
                       </a>
@@ -371,7 +369,7 @@ export default function SettingsPage() {
                   <div>
                     <label
                       htmlFor="model"
-                      className="mb-1.5 block text-sm font-medium text-[#a1a1aa]"
+                      className="type-label-xs mb-2 block tracking-[.14em] text-ink-3"
                     >
                       Model
                     </label>
@@ -380,7 +378,7 @@ export default function SettingsPage() {
                       value={modelId}
                       onChange={(e) => setModelId(e.target.value)}
                       disabled={disabled}
-                      className="w-full rounded-lg border border-[#222222] bg-[#0a0a0a] px-3 py-3 text-sm text-[#f4f4f5] outline-none transition-colors focus:border-[#6366f1] disabled:opacity-50"
+                      className="w-full border border-hairline bg-ground px-3 py-3 text-sm text-ink outline-none transition-colors focus:border-signal disabled:opacity-50"
                     >
                       {MODEL_OPTIONS[provider].map((model) => (
                         <option key={model} value={model}>
@@ -396,7 +394,7 @@ export default function SettingsPage() {
                 <div>
                   <label
                     htmlFor="platformModel"
-                    className="mb-1.5 block text-sm font-medium text-[#a1a1aa]"
+                    className="type-label-xs mb-2 block tracking-[.14em] text-ink-3"
                   >
                     Model
                   </label>
@@ -407,7 +405,7 @@ export default function SettingsPage() {
                         ?.defaultModelId ?? ''
                     }
                     disabled
-                    className="w-full rounded-lg border border-[#222222] bg-[#0a0a0a] px-4 py-3 text-sm text-[#71717a]"
+                    className="w-full border border-hairline bg-ground px-4 py-3 font-mono text-sm text-ink-3"
                   />
                 </div>
               )}
@@ -420,7 +418,7 @@ export default function SettingsPage() {
                     type="button"
                     onClick={() => removeKey(provider as 'anthropic' | 'openai')}
                     disabled={disabled}
-                    className="rounded-lg px-4 py-3 text-sm font-medium text-[#f87171] hover:bg-[#ef4444]/10 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="px-4 py-3 text-sm font-semibold text-fail transition-colors hover:bg-fail/10 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     Remove key
                   </button>
@@ -430,9 +428,9 @@ export default function SettingsPage() {
                 <button
                   type="submit"
                   disabled={disabled}
-                  className="rounded-lg bg-[#6366f1] px-5 py-3 text-sm font-medium text-white shadow-lg shadow-indigo-500/20 transition-colors hover:bg-[#4f46e5] disabled:cursor-not-allowed disabled:opacity-40"
+                  className="bg-signal px-5 py-3 text-sm font-bold text-chrome transition-colors hover:bg-signal-bright disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {savingProvider ? 'Saving...' : 'Save provider'}
+                  {savingProvider ? 'Saving…' : 'Save provider'}
                 </button>
               </div>
             </form>
@@ -440,12 +438,12 @@ export default function SettingsPage() {
         )}
 
         {notice && (
-          <div className="rounded-lg border border-[#22c55e]/20 bg-[#22c55e]/10 px-4 py-3 text-sm text-[#86efac]">
+          <div className="border border-pass/40 bg-pass/10 px-4 py-3 text-sm text-pass">
             {notice}
           </div>
         )}
         {errorMsg && (
-          <div className="rounded-lg border border-[#ef4444]/20 bg-[#ef4444]/10 px-4 py-3 text-sm text-[#fca5a5]">
+          <div className="border border-fail/40 bg-fail/10 px-4 py-3 text-sm text-fail">
             {errorMsg}
           </div>
         )}
@@ -486,12 +484,12 @@ function SubscriptionConnect({
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-[#a1a1aa]">
+      <p className="text-sm text-ink-3">
         {isClaude
           ? 'Runs on your Claude Code subscription — the real Anthropic API, your prompt, billed to the subscription. Reads the local Claude Code login on this machine.'
           : 'Runs on your ChatGPT/Codex subscription — the real OpenAI Codex API, your prompt, billed to the subscription. Reads the local codex CLI login on this machine.'}
       </p>
-      <p className="rounded-lg border border-[#f59e0b]/20 bg-[#f59e0b]/5 px-3 py-2 text-xs leading-relaxed text-[#fbbf24]">
+      <p className="border border-live/40 bg-live/5 px-3 py-2 text-xs leading-relaxed text-live">
         <span className="font-semibold">Local development only.</span> The credential is harvested
         from the {isClaude ? 'Claude Code' : 'codex CLI'} login on the machine running the API
         {isClaude ? ' (macOS keychain only)' : ''}, and refreshing re-reads that same local login.
@@ -504,7 +502,7 @@ function SubscriptionConnect({
             type="button"
             disabled={busy || disabled}
             onClick={() => run('connect')}
-            className="rounded-lg bg-[#6366f1] px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-[#4f46e5] disabled:cursor-not-allowed disabled:opacity-40"
+            className="bg-signal px-4 py-3 text-sm font-bold text-chrome transition-colors hover:bg-signal-bright disabled:cursor-not-allowed disabled:opacity-40"
           >
             {busy ? 'Connecting…' : 'Connect'}
           </button>
@@ -515,7 +513,7 @@ function SubscriptionConnect({
               type="button"
               disabled={busy || disabled}
               onClick={() => run('reauth')}
-              className="rounded-lg border border-[#6366f1]/40 bg-[#6366f1]/10 px-4 py-3 text-sm font-medium text-[#818cf8] transition-colors hover:bg-[#6366f1]/20 disabled:cursor-not-allowed disabled:opacity-40"
+              className="border border-signal px-4 py-3 text-sm font-semibold text-signal transition-colors hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40"
             >
               {busy ? 'Re-authing…' : 'Re-auth'}
             </button>
@@ -523,14 +521,14 @@ function SubscriptionConnect({
               type="button"
               disabled={busy || disabled}
               onClick={() => run('disconnect')}
-              className="rounded-lg border border-[#222222] px-4 py-3 text-sm text-[#a1a1aa] transition-colors hover:bg-[#1a1a1a] disabled:cursor-not-allowed disabled:opacity-40"
+              className="border border-hairline px-4 py-3 text-sm text-ink-3 transition-colors hover:border-edge hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
             >
               Disconnect
             </button>
           </>
         )}
       </div>
-      {err && <p className="text-sm text-[#fca5a5]">{err}</p>}
+      {err && <p className="text-sm text-fail">{err}</p>}
     </div>
   );
 }

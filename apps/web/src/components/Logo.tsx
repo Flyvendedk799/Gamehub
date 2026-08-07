@@ -2,9 +2,11 @@ import { BRAND_COLORS, BRAND_FONTS, BRAND_MARK, BRAND_WORDMARK } from '@playforg
 
 /**
  * PlayerZero brand primitives — one source of truth for the logo across the app.
- * `BrandMark` is the rounded-square "P0" tile; `Wordmark` is "Player" + cyan
- * "Zero"; `Logo` is the mark + wordmark lockup. Colors/typography come from the
- * shared brand tokens so the site can never drift from the brand.
+ * `BrandMark` is direction A "Slot Zero" from the identity board: a sharp square
+ * with a signal-cyan hairline frame holding a lone "0" — the empty slot you
+ * build from. `Wordmark` is "PLAYER" + cyan "ZERO" in Archivo Expanded 800;
+ * `Logo` is the mark + wordmark lockup. Colors/typography come from the shared
+ * brand tokens so the site can never drift from the brand.
  */
 
 export function BrandMark({ size = 28, className }: { size?: number; className?: string }) {
@@ -15,35 +17,39 @@ export function BrandMark({ size = 28, className }: { size?: number; className?:
       style={{
         width: size,
         height: size,
-        borderRadius: size * 0.23,
-        background: BRAND_COLORS.baseAlt,
-        border: '1px solid rgba(255,255,255,0.1)',
+        border: `${Math.max(1, size * 0.025)}px solid ${BRAND_COLORS.cyan}`,
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
         flex: 'none',
         fontFamily: BRAND_FONTS.display,
-        fontWeight: 700,
-        fontSize: size * 0.48,
+        fontWeight: 800,
+        fontStretch: '112%',
+        fontSize: size * 0.43,
         lineHeight: 1,
-        letterSpacing: size * -0.03,
         color: BRAND_COLORS.text,
         userSelect: 'none',
       }}
     >
-      {BRAND_MARK.head}
-      <span style={{ color: BRAND_COLORS.cyan }}>{BRAND_MARK.accent}</span>
+      {BRAND_MARK.glyph}
     </span>
   );
 }
 
-/** "Player" (inherits the surrounding text color) + cyan "Zero". Size comes from
- *  the parent via `className` (font-size); weight + tracking are brand-fixed. */
+/** "PLAYER" (inherits the surrounding text color) + cyan "ZERO", uppercase in
+ *  Archivo Expanded. Size comes from the parent via `className` (font-size);
+ *  weight + width + tracking are brand-fixed. */
 export function Wordmark({ className = '' }: { className?: string }) {
   return (
     <span
       className={className}
-      style={{ fontFamily: BRAND_FONTS.display, fontWeight: 700, letterSpacing: '-0.02em' }}
+      style={{
+        fontFamily: BRAND_FONTS.display,
+        fontWeight: 800,
+        fontStretch: '118%',
+        letterSpacing: '-0.03em',
+        textTransform: 'uppercase',
+      }}
     >
       {BRAND_WORDMARK.head}
       <span style={{ color: BRAND_COLORS.cyan }}>{BRAND_WORDMARK.accent}</span>
@@ -61,7 +67,7 @@ export function Logo({
   wordmarkClassName?: string;
 }) {
   return (
-    <span className={`inline-flex items-center gap-2 ${className}`}>
+    <span className={`inline-flex items-center gap-2.5 ${className}`}>
       <BrandMark size={markSize} />
       <Wordmark className={wordmarkClassName} />
     </span>

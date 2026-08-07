@@ -82,25 +82,21 @@ export function ChatPanel({
   const filesByTerminal = useMemo(() => computeFilesByTerminal(events), [events]);
 
   return (
-    <div className="flex flex-col h-full bg-[#111111] border-r border-[#222222]">
+    <div className="flex flex-col h-full bg-chrome border-r border-hairline">
       {/* Header */}
-      <div className="flex-shrink-0 px-4 py-2.5 md:py-3 border-b border-[#222222] flex items-center gap-2">
-        <span className="text-xs font-mono uppercase tracking-widest text-[#52525b]">
-          Build log
-        </span>
+      <div className="flex-shrink-0 px-4 py-2.5 md:py-3 border-b border-hairline flex items-center justify-between gap-2">
+        <span className="type-label text-ink">Build log</span>
         {reconnecting ? (
-          <output className="flex items-center gap-1.5 text-xs text-[#f59e0b]">
-            <PulseIcon color="#f59e0b" />
-            Reconnecting…
+          <output className="flex items-center gap-1.5 font-mono text-[11px] tracking-[.12em] text-live">
+            <PulseIcon />
+            RECONNECTING…
           </output>
         ) : isStreaming ? (
-          <output className="flex items-center gap-1.5 text-xs text-[#6366f1]">
+          <output className="flex items-center gap-1.5 font-mono text-[11px] tracking-[.12em] text-live">
             <PulseIcon />
-            Running
+            RUNNING
             {startedAt !== null && (
-              <span className="font-mono tabular-nums text-[#52525b]">
-                · {formatElapsed(nowMs - startedAt)}
-              </span>
+              <span className="tabular-nums text-ink-4">· {formatElapsed(nowMs - startedAt)}</span>
             )}
           </output>
         ) : null}
@@ -109,20 +105,20 @@ export function ChatPanel({
       {/* Event stream */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto scrollbar-thin px-3 md:px-4 py-3 md:py-4 space-y-1"
+        className="flex-1 overflow-y-auto scrollbar-thin px-3 md:px-4 py-4 space-y-3"
       >
         {events.length === 0 && (
-          <div className="flex items-center justify-center h-full text-[#3f3f46] text-sm">
-            Waiting for your first build…
+          <div className="flex items-center justify-center h-full text-ink-4 text-sm">
+            Describe a change to start your first build.
           </div>
         )}
         {renderItems.map((item, idx) =>
           item.kind === 'text' ? (
-            <div
-              key={item.key}
-              className="text-sm text-[#f4f4f5] leading-relaxed whitespace-pre-wrap py-1"
-            >
-              {item.text}
+            <div key={item.key} className="py-1">
+              <div className="type-label-xs mb-1.5 text-signal">Agent</div>
+              <div className="border-l-2 border-signal pl-3.5 text-sm leading-relaxed text-ink-2 whitespace-pre-wrap">
+                {item.text}
+              </div>
             </div>
           ) : (
             <EventRow
@@ -144,20 +140,20 @@ export function ChatPanel({
       </div>
 
       {/* Input */}
-      <div className="flex-shrink-0 border-t border-[#222222] p-3 md:p-4">
+      <div className="flex-shrink-0 border-t border-hairline bg-ground p-3 md:p-4">
         <div className="flex gap-2 md:gap-3 items-end">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isStreaming ? 'Building…' : 'Iterate on your game…'}
+            placeholder={isStreaming ? 'Building…' : 'Ask for a change…'}
             disabled={isStreaming}
             rows={2}
             className="
-              flex-1 bg-[#0a0a0a] border border-[#222222] rounded-xl
-              px-3 py-2 md:py-2.5 text-sm text-[#f4f4f5] placeholder-[#52525b]
+              flex-1 bg-surface border border-hairline
+              px-3.5 py-2.5 text-sm text-ink placeholder-ink-4
               resize-none outline-none
-              focus:border-[#6366f1] transition-colors
+              focus:border-signal transition-colors
               disabled:opacity-40 disabled:cursor-not-allowed
             "
           />
@@ -166,9 +162,9 @@ export function ChatPanel({
             onClick={handleSend}
             disabled={isStreaming || !input.trim()}
             className="
-              flex-shrink-0 px-3 md:px-4 py-2 md:py-2.5 min-h-11 md:min-h-0 rounded-xl
-              bg-[#6366f1] hover:bg-[#4f46e5] active:bg-[#4338ca]
-              text-white text-sm font-medium
+              flex-shrink-0 px-3 md:px-4 py-2 md:py-2.5 min-h-11 md:min-h-0
+              bg-signal hover:bg-signal-bright
+              text-chrome text-sm font-bold
               transition-colors duration-150
               disabled:opacity-40 disabled:cursor-not-allowed
             "
@@ -176,7 +172,10 @@ export function ChatPanel({
             Send
           </button>
         </div>
-        <p className="mt-1.5 text-[10px] text-[#3f3f46] hidden sm:block">⌘ + Enter to send</p>
+        <div className="mt-2 hidden items-center justify-between font-mono text-[10px] tracking-[.1em] text-ink-4 sm:flex">
+          <span>⌘ ENTER TO SEND</span>
+          {isStreaming && <span className="text-live">STREAMING</span>}
+        </div>
       </div>
     </div>
   );
@@ -223,7 +222,7 @@ function EventRow({
 }) {
   switch (event.type) {
     case 'agent_start':
-      return <StatusChip label="Agent started" color="indigo" />;
+      return <StatusChip label="Agent started" color="signal" />;
 
     // Per-turn markers are agent-loop internals (and the agent emits them with
     // no turnIndex → "Turn NaN"). They wrap every single tool call, drowning the
@@ -233,12 +232,12 @@ function EventRow({
       return null;
 
     case 'agent_end':
-      return <StatusChip label="Agent finished" color="green" />;
+      return <StatusChip label="Agent finished" color="pass" />;
 
     case 'run_complete':
       return (
         <div className="space-y-1.5">
-          <StatusChip label="Build complete — game ready" color="green" />
+          <StatusChip label="Build complete — game ready" color="pass" />
           {changedFiles && changedFiles.length > 0 && <ChangedFilesSummary paths={changedFiles} />}
         </div>
       );
@@ -246,22 +245,17 @@ function EventRow({
     case 'run_error':
       return (
         <div className="space-y-2">
-          <div className="flex items-start gap-2 font-mono text-xs text-[#ef4444] bg-[#ef4444]/5 border border-[#ef4444]/10 rounded-lg px-3 py-2">
-            <span className="opacity-60 flex-shrink-0">ERR</span>
+          <div className="flex items-start gap-2 border border-fail bg-fail/5 px-3 py-2 font-mono text-xs text-fail">
+            <span className="flex-shrink-0 opacity-60">ERR</span>
             <span className="break-all">{event.error}</span>
           </div>
           {onFixError && isLatest && (
             <button
               type="button"
               onClick={() => onFixError(event.error)}
-              className="
-                inline-flex items-center gap-1.5 text-sm px-4 py-2.5 md:text-xs md:px-3 md:py-1.5 rounded-lg
-                bg-[#ef4444]/10 hover:bg-[#ef4444]/20
-                text-[#f87171] border border-[#ef4444]/20
-                transition-colors font-medium
-              "
+              className="inline-flex items-center gap-1.5 bg-fail px-4 py-2.5 text-sm font-bold text-chrome transition-colors hover:opacity-90 md:px-3 md:py-1.5 md:text-xs"
             >
-              ↻ Fix this error
+              ↻ Fix it
             </button>
           )}
         </div>
@@ -280,17 +274,12 @@ function EventRow({
       }
       return (
         <div className="space-y-2">
-          <StatusChip label="Paused — long build checkpointed" color="indigo" />
+          <StatusChip label="Paused — long build checkpointed" color="signal" />
           {onResume && isLatest && (
             <button
               type="button"
               onClick={() => onResume()}
-              className="
-                inline-flex items-center gap-1.5 text-sm px-4 py-2.5 md:text-xs md:px-3 md:py-1.5 rounded-lg
-                bg-[#6366f1]/10 hover:bg-[#6366f1]/20
-                text-[#818cf8] border border-[#6366f1]/20
-                transition-colors font-medium
-              "
+              className="inline-flex items-center gap-1.5 border border-signal px-4 py-2.5 text-sm font-semibold text-signal transition-colors hover:bg-raised md:px-3 md:py-1.5 md:text-xs"
             >
               ▶ Resume build
             </button>
@@ -306,8 +295,9 @@ function EventRow({
 
     case 'user_message':
       return (
-        <div className="flex justify-end py-1">
-          <div className="max-w-[85%] rounded-xl rounded-br-sm bg-[#6366f1]/15 border border-[#6366f1]/25 px-3 py-2 text-sm text-[#e0e7ff] leading-relaxed whitespace-pre-wrap">
+        <div className="py-1">
+          <div className="type-label-xs mb-1.5 text-ink-4">You</div>
+          <div className="border-l-2 border-edge pl-3.5 text-sm leading-relaxed text-ink whitespace-pre-wrap">
             {event.content}
           </div>
         </div>
@@ -315,7 +305,7 @@ function EventRow({
 
     case 'message_update':
       return (
-        <div className="text-sm text-[#f4f4f5] leading-relaxed py-1 whitespace-pre-wrap">
+        <div className="border-l-2 border-signal pl-3.5 py-1 text-sm leading-relaxed text-ink-2 whitespace-pre-wrap">
           {event.content}
         </div>
       );
@@ -324,7 +314,7 @@ function EventRow({
       // Coalesced into a single bubble upstream by buildRenderItems (#51);
       // a standalone delta should still render rather than vanish.
       return (
-        <span className="text-sm text-[#f4f4f5] leading-relaxed whitespace-pre-wrap">
+        <span className="text-sm text-ink-2 leading-relaxed whitespace-pre-wrap">
           {event.delta}
         </span>
       );
@@ -333,13 +323,13 @@ function EventRow({
       // Usually folded into the coalesced narration block by buildRenderItems;
       // render standalone snapshots too so the AI's prose never vanishes.
       return (
-        <p className="text-sm text-[#d4d4d8] leading-relaxed py-0.5 whitespace-pre-wrap">
+        <p className="border-l-2 border-signal pl-3.5 py-0.5 text-sm leading-relaxed text-ink-2 whitespace-pre-wrap">
           {event.text}
         </p>
       );
 
     case 'thinking_delta':
-      return <span className="text-xs text-[#52525b] italic leading-relaxed">{event.delta}</span>;
+      return <span className="text-xs italic leading-relaxed text-ink-4">{event.delta}</span>;
 
     case 'tool_use':
       return <ToolChip label={event.label ?? event.toolName} status={event.status} />;
@@ -376,27 +366,25 @@ function GameSpecCard({
   event: Extract<SseEvent, { type: 'game_spec' }>;
 }) {
   return (
-    <div className="rounded-xl border border-[#6366f1]/25 bg-[#6366f1]/5 px-3.5 py-3 space-y-1.5">
+    <div className="space-y-1.5 border border-hairline bg-surface px-3.5 py-3">
       <div className="flex items-center gap-2">
-        <span className="text-[10px] font-mono uppercase tracking-widest text-[#818cf8]">
+        <span className="type-label-xs text-signal">
           {event.amend ? "Updating what I'm building" : "Here's what I'm building"}
         </span>
       </div>
-      {event.genre && (
-        <p className="text-sm text-[#f4f4f5] font-medium capitalize">{event.genre}</p>
-      )}
+      {event.genre && <p className="text-sm font-semibold capitalize text-ink">{event.genre}</p>}
       {(event.winCondition || event.loseCondition) && (
         <dl className="space-y-1 text-xs">
           {event.winCondition && (
             <div className="flex gap-2">
-              <dt className="text-[#22c55e] font-mono flex-shrink-0">Win</dt>
-              <dd className="text-[#a1a1aa]">{event.winCondition}</dd>
+              <dt className="flex-shrink-0 font-mono text-pass">win</dt>
+              <dd className="text-ink-3">{event.winCondition}</dd>
             </div>
           )}
           {event.loseCondition && (
             <div className="flex gap-2">
-              <dt className="text-[#ef4444] font-mono flex-shrink-0">Lose</dt>
-              <dd className="text-[#a1a1aa]">{event.loseCondition}</dd>
+              <dt className="flex-shrink-0 font-mono text-fail">lose</dt>
+              <dd className="text-ink-3">{event.loseCondition}</dd>
             </div>
           )}
         </dl>
@@ -409,17 +397,20 @@ function GameSpecCard({
 
 function ChangedFilesSummary({ paths }: { paths: string[] }) {
   return (
-    <div className="rounded-lg border border-[#222222] bg-[#0f0f0f] px-3 py-2">
-      <p className="text-[10px] font-mono uppercase tracking-widest text-[#52525b] mb-1.5">
-        Changed {paths.length} {paths.length === 1 ? 'file' : 'files'}
-      </p>
-      <ul className="space-y-0.5">
+    <div className="border border-hairline bg-surface">
+      <div className="flex items-center justify-between border-b border-hairline px-3 py-2">
+        <span className="type-label-xs tracking-[.14em] text-ink-3">
+          Changed {paths.length} {paths.length === 1 ? 'file' : 'files'}
+        </span>
+        <span className="font-mono text-[10px] text-pass">+{paths.length}</span>
+      </div>
+      <ul className="py-1.5">
         {paths.map((p) => (
           <li
             key={p}
-            className="text-xs font-mono text-[#a1a1aa] break-all flex items-center gap-1.5"
+            className="flex items-center gap-2.5 break-all px-3 py-1 font-mono text-xs text-ink-3"
           >
-            <span className="text-[#22c55e]">+</span>
+            <span className="text-signal">write</span>
             {p}
           </li>
         ))}
@@ -433,10 +424,10 @@ function ChangedFilesSummary({ paths }: { paths: string[] }) {
 function PlanCard({ event }: { event: Extract<SseEvent, { type: 'plan' }> }) {
   const done = event.items.filter((i) => i.checked).length;
   return (
-    <div className="rounded-xl border border-[#6366f1]/25 bg-[#6366f1]/5 px-3.5 py-3 space-y-2">
+    <div className="space-y-2 border border-hairline bg-surface px-3.5 py-3">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-mono uppercase tracking-widest text-[#818cf8]">Plan</span>
-        <span className="text-[10px] font-mono text-[#52525b]">
+        <span className="type-label-xs text-signal">Plan</span>
+        <span className="font-mono text-[10px] text-ink-4">
           {done}/{event.items.length}
         </span>
       </div>
@@ -445,12 +436,10 @@ function PlanCard({ event }: { event: Extract<SseEvent, { type: 'plan' }> }) {
           <li
             key={`${i}-${item.text}`}
             className={`flex items-start gap-2 text-sm leading-relaxed ${
-              item.checked ? 'text-[#52525b] line-through' : 'text-[#e4e4e7]'
+              item.checked ? 'text-ink-4 line-through' : 'text-ink-2'
             }`}
           >
-            <span
-              className={`mt-0.5 flex-shrink-0 ${item.checked ? 'text-[#22c55e]' : 'text-[#3f3f46]'}`}
-            >
+            <span className={`mt-0.5 flex-shrink-0 ${item.checked ? 'text-pass' : 'text-ink-4'}`}>
               {item.checked ? '✓' : '○'}
             </span>
             <span>{item.text}</span>
@@ -478,13 +467,11 @@ function AskQuestionCard({
     setAnswer('');
   };
   return (
-    <div className="rounded-xl border border-[#f59e0b]/30 bg-[#f59e0b]/5 px-3.5 py-3 space-y-2">
-      <span className="text-[10px] font-mono uppercase tracking-widest text-[#fbbf24]">
-        Question for you
-      </span>
-      <p className="text-sm text-[#f4f4f5] leading-relaxed">{question}</p>
+    <div className="space-y-2 border border-live bg-surface px-3.5 py-3">
+      <span className="type-label-xs text-live">Question for you</span>
+      <p className="text-sm leading-relaxed text-ink">{question}</p>
       {onAnswer && (
-        <div className="flex gap-2 items-end">
+        <div className="flex items-end gap-2">
           <textarea
             value={answer}
             onChange={(e) => setAnswer(e.target.value)}
@@ -493,13 +480,13 @@ function AskQuestionCard({
             }}
             placeholder="Type your answer…"
             rows={2}
-            className="flex-1 bg-[#0a0a0a] border border-[#222222] rounded-lg px-3 py-2 text-sm text-[#f4f4f5] placeholder-[#52525b] resize-none outline-none focus:border-[#f59e0b] transition-colors"
+            className="flex-1 resize-none border border-hairline bg-ground px-3 py-2 text-sm text-ink placeholder-ink-4 outline-none transition-colors focus:border-live"
           />
           <button
             type="button"
             onClick={submit}
             disabled={!answer.trim()}
-            className="flex-shrink-0 px-3 py-2 min-h-11 md:min-h-0 rounded-lg bg-[#f59e0b] hover:bg-[#d97706] text-[#1a1a1a] text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="min-h-11 flex-shrink-0 bg-live px-3 py-2 text-sm font-bold text-chrome transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 md:min-h-0"
           >
             Send
           </button>
@@ -520,21 +507,19 @@ function ToolChip({
   status: 'start' | 'done' | 'error';
   isResult?: boolean;
 }) {
-  const icon = status === 'done' ? '✓' : status === 'error' ? '✗' : '●';
+  const verb = status === 'done' ? 'pass' : status === 'error' ? 'fail' : 'run';
 
-  const colorClass =
-    status === 'done'
-      ? 'text-[#22c55e] border-[#22c55e]/20 bg-[#22c55e]/5'
-      : status === 'error'
-        ? 'text-[#ef4444] border-[#ef4444]/20 bg-[#ef4444]/5'
-        : 'text-[#6366f1] border-[#6366f1]/20 bg-[#6366f1]/5 animate-pulse';
+  const verbClass =
+    status === 'done' ? 'text-pass' : status === 'error' ? 'text-fail' : 'text-live';
 
   return (
     <div
-      className={`inline-flex items-center gap-1.5 font-mono text-[11px] border rounded-md px-2 py-1 ${colorClass} ${isResult ? 'opacity-70' : ''}`}
+      className={`flex items-center gap-2.5 px-1 py-0.5 font-mono text-xs text-ink-3 ${
+        status === 'start' ? 'bg-raised' : ''
+      } ${isResult ? 'opacity-70' : ''}`}
     >
-      <span>{icon}</span>
-      <span>{label}</span>
+      <span className={verbClass}>{verb}</span>
+      <span className="break-all">{label}</span>
     </div>
   );
 }
@@ -547,17 +532,17 @@ function StatusChip({
   dim = false,
 }: {
   label: string;
-  color: 'indigo' | 'green';
+  color: 'signal' | 'pass';
   dim?: boolean;
 }) {
   const colorMap = {
-    indigo: 'text-[#6366f1]',
-    green: 'text-[#22c55e]',
+    signal: 'text-signal',
+    pass: 'text-pass',
   };
 
   return (
     <div
-      className={`flex items-center gap-2 text-xs font-mono ${colorMap[color]} ${dim ? 'opacity-40' : ''}`}
+      className={`flex items-center gap-2 font-mono text-xs ${colorMap[color]} ${dim ? 'opacity-40' : ''}`}
     >
       <span className="text-[8px]">◆</span>
       <span>{label}</span>
@@ -567,7 +552,7 @@ function StatusChip({
 
 // ─── Pulse dot ───────────────────────────────────────────────────────────────
 
-function PulseIcon({ color = '#6366f1' }: { color?: string }) {
+function PulseIcon({ color = '#ffb04d' }: { color?: string }) {
   return (
     <span className="relative flex h-1.5 w-1.5">
       <span

@@ -121,10 +121,10 @@ export function FilesPanel({
   );
 
   return (
-    <div className="flex h-full w-full bg-[#0a0a0a]">
+    <div className="flex h-full w-full bg-void">
       {/* ── LEFT sidebar (tree). Drawer under md, fixed column md+ ── */}
       <aside
-        className={`${treeOpen ? 'flex' : 'hidden'} md:flex w-full md:w-60 md:min-w-[15rem] md:flex-shrink-0 flex-col border-r border-[#222222] bg-[#0f0f0f] absolute md:relative inset-0 md:inset-auto z-20 md:z-auto`}
+        className={`${treeOpen ? 'flex' : 'hidden'} md:flex w-full md:w-60 md:min-w-[15rem] md:flex-shrink-0 flex-col border-r border-hairline bg-chrome absolute md:relative inset-0 md:inset-auto z-20 md:z-auto`}
       >
         <FileTreeSidebar
           tree={tree}
@@ -144,12 +144,12 @@ export function FilesPanel({
       </aside>
 
       {/* ── RIGHT content ── */}
-      <section className="flex-1 min-w-0 flex flex-col bg-[#0a0a0a]">
+      <section className="flex-1 min-w-0 flex flex-col bg-void">
         {/* Mobile-only "show files" bar */}
         <button
           type="button"
           onClick={() => setTreeOpen(true)}
-          className="md:hidden flex-shrink-0 px-4 py-3 text-left text-xs md:py-2 font-mono text-[#818cf8] border-b border-[#222222] bg-[#0f0f0f]"
+          className="md:hidden flex-shrink-0 px-4 py-3 text-left text-xs md:py-2 font-mono text-signal border-b border-hairline bg-chrome"
         >
           Files ▸
         </button>
@@ -204,20 +204,18 @@ function FileTreeSidebar({
   return (
     <>
       {/* Overview summary */}
-      <div className="flex-shrink-0 px-3 py-3 border-b border-[#1a1a1a]">
+      <div className="flex-shrink-0 px-3 py-3 border-b border-hairline">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[10px] font-semibold uppercase tracking-widest text-[#52525b]">
-            Project files
-          </span>
+          <span className="type-label-xs text-ink">Project files</span>
           {engine && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#6366f1]/15 text-[#818cf8] border border-[#6366f1]/25 font-mono capitalize">
-              {engine === 'three' ? 'Three.js' : 'Phaser'}
+            <span className="type-label-xs border border-hairline px-2 py-0.5 tracking-[.1em] text-ink-4">
+              {engine === 'three' ? 'Three.js 3D' : 'Phaser 2D'}
             </span>
           )}
         </div>
-        <p className="mt-1.5 text-[11px] text-[#71717a]">
+        <p className="mt-1.5 font-mono text-[11px] tracking-[.06em] text-ink-4">
           {listState === 'ready'
-            ? `${files.length} ${files.length === 1 ? 'file' : 'files'} · ${formatBytes(totalBytes)}`
+            ? `${files.length} ${files.length === 1 ? 'FILE' : 'FILES'} · ${formatBytes(totalBytes).toUpperCase()}`
             : 'The code behind your game'}
         </p>
       </div>
@@ -227,24 +225,24 @@ function FileTreeSidebar({
         {listState === 'loading' && (
           <div className="px-3 py-4 space-y-2">
             {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="h-3.5 bg-[#1a1a1a] rounded animate-pulse" />
+              <div key={i} className="h-3.5 bg-raised rounded animate-pulse" />
             ))}
           </div>
         )}
         {listState === 'empty' && (
           <div className="px-3 py-6 text-center">
-            <p className="text-[11px] text-[#52525b] leading-relaxed">
+            <p className="text-[11px] text-ink-4 leading-relaxed">
               Build a game first to see its files here.
             </p>
           </div>
         )}
         {listState === 'error' && (
           <div className="px-3 py-6 text-center">
-            <p className="text-[11px] text-[#ef4444] leading-relaxed">{listError}</p>
+            <p className="text-[11px] text-fail leading-relaxed">{listError}</p>
             <button
               type="button"
               onClick={onRetry}
-              className="mt-2 text-[11px] text-[#818cf8] hover:text-[#a5b4fc] transition-colors"
+              className="mt-2 text-[11px] text-signal hover:text-signal-bright transition-colors"
             >
               Try again
             </button>
@@ -264,7 +262,7 @@ function FileTreeSidebar({
 
       {/* Download whole project */}
       {listState === 'ready' && (
-        <div className="flex-shrink-0 p-2.5 border-t border-[#1a1a1a]">
+        <div className="flex-shrink-0 p-2.5 border-t border-hairline">
           <DownloadZipButton projectId={projectId} />
         </div>
       )}
@@ -294,10 +292,10 @@ function TreeNode({ node, depth, selectedPath, onSelect }: TreeNodeProps) {
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
           style={indent}
-          className="w-full flex items-center gap-1.5 pr-2 py-2.5 px-3 md:py-1 text-left text-[12px] text-[#a1a1aa] hover:bg-[#161616] transition-colors"
+          className="w-full flex items-center gap-1.5 pr-2 py-2.5 px-3 md:py-1 text-left font-mono text-[12px] text-ink-3 hover:bg-surface transition-colors"
         >
-          <span className="text-[#52525b] w-2.5 inline-block">{open ? '▾' : '▸'}</span>
-          <span className="text-[#6b7280]">📁</span>
+          <span className="text-ink-4 w-2.5 inline-block">{open ? '▾' : '▸'}</span>
+          <span className="text-ink-4">▤</span>
           <span className="truncate">{node.name}</span>
         </button>
         {open &&
@@ -324,17 +322,15 @@ function TreeNode({ node, depth, selectedPath, onSelect }: TreeNodeProps) {
       onClick={() => onSelect(node.path)}
       style={indent}
       aria-pressed={selected}
-      className={`w-full flex items-center gap-1.5 pr-2 py-2.5 px-3 md:py-1 text-left text-[12px] transition-colors ${
-        selected
-          ? 'bg-[#1a1a1a] text-[#818cf8]'
-          : 'text-[#a1a1aa] hover:bg-[#161616] hover:text-[#d4d4d8]'
+      className={`w-full flex items-center gap-1.5 pr-2 py-2.5 px-3 md:py-1 text-left font-mono text-[12px] transition-colors ${
+        selected ? 'bg-raised text-ink' : 'text-ink-3 hover:bg-surface hover:text-ink-2'
       }`}
     >
       <span className="w-2.5 inline-block" />
       <KindGlyph kind={kind} />
       <span className="truncate">{node.name}</span>
       {isEntry && (
-        <span className="ml-auto flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded bg-[#6366f1]/15 text-[#818cf8] font-mono">
+        <span className="ml-auto flex-shrink-0 font-mono text-[9px] tracking-[.1em] px-1.5 py-0.5 border border-signal text-signal">
           entry
         </span>
       )}
@@ -342,15 +338,17 @@ function TreeNode({ node, depth, selectedPath, onSelect }: TreeNodeProps) {
   );
 }
 
+// File-kind glyphs stay within the brand accent set (signal/live/pass/fail +
+// ink steps) so the tree reads as one instrument, not a rainbow.
 const KIND_GLYPH: Record<FileKind, { glyph: string; color: string }> = {
-  html: { glyph: '◆', color: '#e06c75' },
-  js: { glyph: '◆', color: '#d19a66' },
-  css: { glyph: '◆', color: '#56b6c2' },
-  json: { glyph: '◆', color: '#98c379' },
-  image: { glyph: '◆', color: '#c678dd' },
-  audio: { glyph: '◆', color: '#61afef' },
-  model: { glyph: '◆', color: '#e5c07b' },
-  other: { glyph: '◇', color: '#52525b' },
+  html: { glyph: '◆', color: '#ff5d3b' },
+  js: { glyph: '◆', color: '#ffb04d' },
+  css: { glyph: '◆', color: '#46e6f0' },
+  json: { glyph: '◆', color: '#b6f24a' },
+  image: { glyph: '◆', color: '#7ff0f8' },
+  audio: { glyph: '◆', color: '#c8ccce' },
+  model: { glyph: '◆', color: '#8b9095' },
+  other: { glyph: '◇', color: '#5b6165' },
 };
 
 function KindGlyph({ kind }: { kind: FileKind }) {
@@ -395,12 +393,12 @@ function DownloadZipButton({ projectId }: { projectId: string }) {
         type="button"
         onClick={() => void download()}
         disabled={downloading}
-        className="w-full text-xs px-3 py-2.5 md:text-[11px] md:py-2 rounded-lg bg-[#1a1a1a] hover:bg-[#222222] text-[#a1a1aa] border border-[#222222] transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+        className="w-full text-xs px-3 py-2.5 md:text-[11px] md:py-2 border border-hairline hover:border-edge text-ink-3 hover:text-ink transition-colors font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
       >
         {downloading ? 'Preparing…' : 'Download your game (.zip)'}
         {!downloading && <span aria-hidden="true">↓</span>}
       </button>
-      {error && <p className="mt-1.5 text-[10px] text-[#ef4444] text-center">{error}</p>}
+      {error && <p className="mt-1.5 text-[10px] text-fail text-center">{error}</p>}
     </div>
   );
 }
@@ -410,16 +408,16 @@ function DownloadZipButton({ projectId }: { projectId: string }) {
 function EmptyViewer({ state }: { state: 'loading' | 'ready' | 'empty' | 'error' }) {
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-3 px-8 text-center">
-      <div className="w-12 h-12 rounded-xl border border-[#1a1a1a] bg-[#111111] flex items-center justify-center text-[#2a2a2a] text-xl">
+      <div className="w-12 h-12 border border-hairline bg-surface flex items-center justify-center text-ink-4 font-mono text-lg">
         {'<>'}
       </div>
-      <p className="text-[#52525b] text-sm">
+      <p className="text-ink-3 text-sm">
         {state === 'empty'
           ? 'Build a game first to browse its files.'
           : 'Select a file to view its code'}
       </p>
       {state === 'ready' && (
-        <p className="text-[#3f3f46] text-xs max-w-xs leading-relaxed">
+        <p className="text-ink-4 text-xs max-w-xs leading-relaxed">
           index.html is your game&apos;s main file — start there.
         </p>
       )}
@@ -549,28 +547,24 @@ function FileViewer({ projectId, entry, onSaved, isBuilding, onDirtyChange }: Fi
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       {/* Toolbar */}
-      <div className="flex-shrink-0 px-3 py-2 border-b border-[#222222] bg-[#0f0f0f] flex items-center gap-3">
+      <div className="flex-shrink-0 px-3 py-2 border-b border-hairline bg-ground flex items-center gap-3">
         <div className="flex-1 min-w-0 flex items-center gap-1 text-[11px] font-mono truncate">
           {segments.map((seg, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: breadcrumb segments are positional and stable for a given path
             <span key={`${seg}-${i}`} className="flex items-center gap-1">
-              {i > 0 && <span className="text-[#3f3f46]">/</span>}
-              <span className={i === segments.length - 1 ? 'text-[#d4d4d8]' : 'text-[#52525b]'}>
-                {seg}
-              </span>
+              {i > 0 && <span className="text-ink-4">/</span>}
+              <span className={i === segments.length - 1 ? 'text-ink-2' : 'text-ink-4'}>{seg}</span>
             </span>
           ))}
           {dirty && (
-            <span
-              className="ml-1 text-[#f59e0b]"
-              title="Unsaved changes"
-              aria-label="Unsaved changes"
-            >
+            <span className="ml-1 text-live" title="Unsaved changes" aria-label="Unsaved changes">
               ●
             </span>
           )}
           {savedFlash && (
-            <span className="ml-1 text-[#22c55e] text-[10px]">Saved ✓ · preview updated</span>
+            <span className="ml-1 text-pass text-[10px] tracking-[.08em]">
+              SAVED ✓ · PREVIEW UPDATED
+            </span>
           )}
         </div>
 
@@ -579,7 +573,7 @@ function FileViewer({ projectId, entry, onSaved, isBuilding, onDirtyChange }: Fi
             <button
               type="button"
               onClick={() => void navigator.clipboard?.writeText(load.data.content ?? '')}
-              className="text-xs px-3 py-2.5 md:text-[10px] md:px-2 md:py-1 rounded border border-[#222222] bg-[#1a1a1a] text-[#a1a1aa] hover:text-[#f4f4f5] transition-colors font-mono"
+              className="text-xs px-3 py-2.5 md:text-[10px] md:px-2 md:py-1 border border-hairline text-ink-3 hover:text-ink hover:border-edge transition-colors font-mono"
             >
               Copy
             </button>
@@ -595,14 +589,14 @@ function FileViewer({ projectId, entry, onSaved, isBuilding, onDirtyChange }: Fi
                   onClick={() => void save()}
                   disabled={!dirty || saving || isBuilding}
                   title={isBuilding ? 'Saving is paused while your game is building' : undefined}
-                  className="text-xs px-3 py-2.5 md:text-[10px] md:px-2.5 md:py-1 rounded bg-[#6366f1] text-white hover:bg-[#4f46e5] transition-colors font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="text-xs px-3 py-2.5 md:text-[10px] md:px-2.5 md:py-1 bg-signal text-chrome hover:bg-signal-bright transition-colors font-bold disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {saving ? 'Saving…' : 'Save'}
                 </button>
                 <button
                   type="button"
                   onClick={guardedExitEdit}
-                  className="text-xs px-3 py-2.5 md:text-[10px] md:px-2 md:py-1 rounded border border-[#222222] bg-[#1a1a1a] text-[#a1a1aa] hover:text-[#f4f4f5] transition-colors"
+                  className="text-xs px-3 py-2.5 md:text-[10px] md:px-2 md:py-1 border border-hairline text-ink-3 hover:text-ink hover:border-edge transition-colors"
                 >
                   Cancel
                 </button>
@@ -613,7 +607,7 @@ function FileViewer({ projectId, entry, onSaved, isBuilding, onDirtyChange }: Fi
                 onClick={() => setEditing(true)}
                 disabled={isBuilding}
                 title={isBuilding ? 'Editing is paused while your game is building' : undefined}
-                className="text-xs px-3 py-2.5 md:text-[10px] md:px-2.5 md:py-1 rounded border border-[#6366f1]/30 text-[#818cf8] hover:bg-[#6366f1]/10 transition-colors font-mono disabled:opacity-40 disabled:cursor-not-allowed"
+                className="text-xs px-3 py-2.5 md:text-[10px] md:px-2.5 md:py-1 border border-signal text-signal hover:bg-raised transition-colors font-mono disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Edit
               </button>
@@ -622,12 +616,12 @@ function FileViewer({ projectId, entry, onSaved, isBuilding, onDirtyChange }: Fi
       </div>
 
       {editing && isBuilding && (
-        <div className="flex-shrink-0 px-3 py-1.5 text-[11px] text-[#f59e0b] bg-[#f59e0b]/10 border-b border-[#f59e0b]/20">
+        <div className="flex-shrink-0 px-3 py-1.5 text-[11px] text-live bg-live/10 border-b border-live/30">
           Your game is building — saving resumes when it finishes.
         </div>
       )}
       {saveError && (
-        <div className="flex-shrink-0 px-3 py-1.5 text-[11px] text-[#ef4444] bg-[#ef4444]/10 border-b border-[#ef4444]/20">
+        <div className="flex-shrink-0 px-3 py-1.5 text-[11px] text-fail bg-fail/10 border-b border-fail/30">
           {saveError}
         </div>
       )}
@@ -635,12 +629,10 @@ function FileViewer({ projectId, entry, onSaved, isBuilding, onDirtyChange }: Fi
       {/* Body */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {load.kind === 'loading' && (
-          <div className="h-full flex items-center justify-center text-[#52525b] text-sm">
-            Loading…
-          </div>
+          <div className="h-full flex items-center justify-center text-ink-4 text-sm">Loading…</div>
         )}
         {load.kind === 'error' && (
-          <div className="h-full flex items-center justify-center text-[#ef4444] text-sm px-6 text-center">
+          <div className="h-full flex items-center justify-center text-fail text-sm px-6 text-center">
             {load.message}
           </div>
         )}
@@ -685,9 +677,9 @@ function FileBody({ entry, data }: { entry: ProjectFileEntry; data: ReadProjectF
         <img
           src={`data:${data.contentType};base64,${data.content}`}
           alt={entry.path}
-          className="max-w-full max-h-[70%] object-contain rounded border border-[#222222] bg-[#0a0a0a]"
+          className="max-w-full max-h-[70%] object-contain rounded border border-hairline bg-void"
         />
-        <p className="text-[11px] text-[#71717a] font-mono">
+        <p className="text-[11px] text-ink-3 font-mono">
           {entry.path.split('/').pop()} · {formatBytes(data.size)}
         </p>
         <style>
@@ -705,7 +697,7 @@ function FileBody({ entry, data }: { entry: ProjectFileEntry; data: ReadProjectF
       <div className="h-full flex flex-col items-center justify-center gap-3 p-6">
         {/* biome-ignore lint/a11y/useMediaCaption: a generated game sound effect has no captions track */}
         <audio controls src={`data:${data.contentType};base64,${data.content}`} className="w-72" />
-        <p className="text-[11px] text-[#71717a] font-mono">
+        <p className="text-[11px] text-ink-3 font-mono">
           {entry.path.split('/').pop()} · {formatBytes(data.size)}
         </p>
       </div>
@@ -732,7 +724,7 @@ function BinaryNotice({
 }) {
   return (
     <div className="h-full flex flex-col items-center justify-center gap-3 px-6 text-center">
-      <p className="text-[#a1a1aa] text-sm">{label}</p>
+      <p className="text-ink-3 text-sm">{label}</p>
       <DownloadFileButton entry={entry} data={data} />
     </div>
   );
@@ -778,7 +770,7 @@ function CodeSurface({
     <div
       ref={gutterRef}
       aria-hidden="true"
-      className="flex-shrink-0 select-none overflow-hidden text-right px-3 py-3 text-[#3f3f46] bg-[#0c0c0c] border-r border-[#1a1a1a]"
+      className="flex-shrink-0 select-none overflow-hidden text-right px-3 py-3 text-ink-4 bg-chrome border-r border-hairline"
     >
       {Array.from({ length: lineCount }, (_, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: line numbers are positional and stable
@@ -793,7 +785,7 @@ function CodeSurface({
         <div className="flex min-w-full font-mono text-[12px] leading-[1.5]">
           <div
             aria-hidden="true"
-            className="flex-shrink-0 select-none text-right px-3 py-3 text-[#3f3f46] bg-[#0c0c0c] border-r border-[#1a1a1a]"
+            className="flex-shrink-0 select-none text-right px-3 py-3 text-ink-4 bg-chrome border-r border-hairline"
           >
             {Array.from({ length: lineCount }, (_, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: line numbers are positional and stable
@@ -890,7 +882,7 @@ function DownloadFileButton({
       type="button"
       onClick={download}
       disabled={disabled}
-      className="text-xs px-3 py-2.5 md:text-[10px] md:px-2 md:py-1 rounded border border-[#222222] bg-[#1a1a1a] text-[#a1a1aa] hover:text-[#f4f4f5] transition-colors font-mono disabled:opacity-40 disabled:cursor-not-allowed"
+      className="text-xs px-3 py-2.5 md:text-[10px] md:px-2 md:py-1 border border-hairline text-ink-3 hover:text-ink hover:border-edge transition-colors font-mono disabled:opacity-40 disabled:cursor-not-allowed"
     >
       Download
     </button>

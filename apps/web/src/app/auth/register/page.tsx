@@ -39,21 +39,24 @@ export default function RegisterPage() {
   }
 
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center px-4 bg-[#0a0a0a] safe-top safe-bottom">
+    <main className="flex min-h-dvh flex-col items-center justify-center bg-void px-4 safe-top safe-bottom">
       <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <Link href="/" className="inline-flex items-center gap-2 mb-6 group">
+        <div className="mb-8 text-center">
+          <Link href="/" className="group mb-7 inline-flex items-center gap-2.5">
             <BrandMark size={32} />
-            <Wordmark className="text-lg font-semibold text-[#f4f4f5] group-hover:text-white transition-colors" />
+            <Wordmark className="text-lg text-ink transition-colors group-hover:text-white" />
           </Link>
-          <h1 className="text-2xl font-bold text-[#f4f4f5]">Create an account</h1>
-          <p className="mt-1 text-sm text-[#71717a]">Start building games with AI</p>
+          <h1 className="type-title text-2xl text-ink">Create an account</h1>
+          <p className="mt-1.5 text-sm text-ink-3">Describe a game. Play it minutes later.</p>
         </div>
 
-        <div className="bg-[#111111] border border-[#222222] rounded-2xl p-6 shadow-2xl shadow-black/50">
+        <div className="border border-hairline bg-ground p-6">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-[#a1a1aa] mb-1.5">
+              <label
+                htmlFor="email"
+                className="type-label-xs mb-2 block tracking-[.14em] text-ink-3"
+              >
                 Email
               </label>
               <input
@@ -64,17 +67,20 @@ export default function RegisterPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={status === 'loading'}
-                className="w-full bg-[#0a0a0a] border border-[#222222] rounded-xl px-4 py-3 text-[#f4f4f5] placeholder-[#52525b] text-sm outline-none focus:border-[#6366f1] transition-colors disabled:opacity-50"
+                className="w-full border border-hairline bg-surface px-4 py-3 text-sm text-ink placeholder-ink-4 outline-none transition-colors focus:border-signal disabled:opacity-50"
                 placeholder="you@example.com"
               />
             </div>
 
             <div>
-              <label htmlFor="handle" className="block text-sm font-medium text-[#a1a1aa] mb-1.5">
+              <label
+                htmlFor="handle"
+                className="type-label-xs mb-2 block tracking-[.14em] text-ink-3"
+              >
                 Username
               </label>
               <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#52525b] text-sm select-none">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 select-none text-sm text-ink-4">
                   @
                 </span>
                 <input
@@ -89,7 +95,7 @@ export default function RegisterPage() {
                     setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))
                   }
                   disabled={status === 'loading'}
-                  className="w-full bg-[#0a0a0a] border border-[#222222] rounded-xl pl-8 pr-4 py-3 text-[#f4f4f5] placeholder-[#52525b] text-sm outline-none focus:border-[#6366f1] transition-colors disabled:opacity-50"
+                  className="w-full border border-hairline bg-surface py-3 pl-8 pr-4 text-sm text-ink placeholder-ink-4 outline-none transition-colors focus:border-signal disabled:opacity-50"
                   placeholder="yourname"
                 />
               </div>
@@ -98,9 +104,9 @@ export default function RegisterPage() {
             <div>
               <label
                 htmlFor="displayName"
-                className="block text-sm font-medium text-[#a1a1aa] mb-1.5"
+                className="type-label-xs mb-2 block tracking-[.14em] text-ink-3"
               >
-                Display name <span className="text-[#52525b] font-normal">(optional)</span>
+                Display name <span className="normal-case text-ink-4">(optional)</span>
               </label>
               <input
                 id="displayName"
@@ -109,13 +115,16 @@ export default function RegisterPage() {
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 disabled={status === 'loading'}
-                className="w-full bg-[#0a0a0a] border border-[#222222] rounded-xl px-4 py-3 text-[#f4f4f5] placeholder-[#52525b] text-sm outline-none focus:border-[#6366f1] transition-colors disabled:opacity-50"
+                className="w-full border border-hairline bg-surface px-4 py-3 text-sm text-ink placeholder-ink-4 outline-none transition-colors focus:border-signal disabled:opacity-50"
                 placeholder="Your Name"
               />
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-[#a1a1aa] mb-1.5">
+              <label
+                htmlFor="password"
+                className="type-label-xs mb-2 block tracking-[.14em] text-ink-3"
+              >
                 Password
               </label>
               <input
@@ -127,13 +136,13 @@ export default function RegisterPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={status === 'loading'}
-                className="w-full bg-[#0a0a0a] border border-[#222222] rounded-xl px-4 py-3 text-[#f4f4f5] placeholder-[#52525b] text-sm outline-none focus:border-[#6366f1] transition-colors disabled:opacity-50"
+                className="w-full border border-hairline bg-surface px-4 py-3 text-sm text-ink placeholder-ink-4 outline-none transition-colors focus:border-signal disabled:opacity-50"
                 placeholder="Min 8 characters"
               />
             </div>
 
             {status === 'error' && (
-              <div className="flex items-start gap-2 text-sm text-[#ef4444] bg-[#ef4444]/10 border border-[#ef4444]/20 rounded-lg px-4 py-3">
+              <div className="flex items-start gap-2 border border-fail/40 bg-fail/10 px-4 py-3 text-sm text-fail">
                 <span className="mt-0.5 flex-shrink-0">⚠</span>
                 <span>{errorMsg}</span>
               </div>
@@ -142,18 +151,18 @@ export default function RegisterPage() {
             <button
               type="submit"
               disabled={status === 'loading'}
-              className="w-full py-4 rounded-xl bg-[#6366f1] hover:bg-[#4f46e5] active:bg-[#4338ca] text-white font-medium text-sm transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-indigo-500/20"
+              className="w-full bg-signal py-4 text-sm font-bold text-chrome transition-colors hover:bg-signal-bright disabled:cursor-not-allowed disabled:opacity-40"
             >
               {status === 'loading' ? 'Creating account…' : 'Create account'}
             </button>
           </form>
         </div>
 
-        <p className="mt-4 text-center text-sm text-[#52525b]">
+        <p className="mt-4 text-center text-sm text-ink-4">
           Already have an account?{' '}
           <Link
             href="/auth/login"
-            className="inline-block py-2 px-3 text-[#6366f1] hover:text-[#818cf8] transition-colors"
+            className="inline-block px-3 py-2 text-signal transition-colors hover:text-signal-bright"
           >
             Sign in
           </Link>
