@@ -70,6 +70,15 @@ services:
       MAX_RUN_TOKENS: ${MAX_RUN_TOKENS:-}
       CREDIT_PURCHASE_ENABLED: ${CREDIT_PURCHASE_ENABLED:-false}
       BLOB_DIR: /data/blobs
+      # Transactional email (password reset). When SMTP_HOST is set the API
+      # sends real mail via SMTP (Cloudflare Email); otherwise it logs the reset
+      # link (console transport). Set these in deploy/.env.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USER: ${SMTP_USER:-api_token}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@playerzero.online}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-PlayerZero}
     volumes:
       # Generated games live here. This volume IS your content — back it up.
       # The worker writes snapshots to the SAME store, so both must mount it.
