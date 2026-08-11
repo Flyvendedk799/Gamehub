@@ -48,7 +48,7 @@ import {
   DrizzleRunRepo,
   DrizzleSnapshotRepo,
 } from './drizzle-repos';
-import { ConsoleEmailTransport, type EmailPort } from './email';
+import { ConsoleEmailTransport, SmtpEmailTransport, type EmailPort } from './email';
 import { DrizzleHubRepo } from './hub-repo';
 import { type InProcessBrowserJobs, makeInProcessBrowserJobs } from './in-process-browser';
 import { DrizzlePublishRepo } from './publish-repo';
@@ -165,8 +165,9 @@ async function main() {
 
   // Phase 6.2 — password-reset email. Console transport is the dev default
   // (logs the reset link); a real provider swaps in behind EmailPort later.
-  const email: EmailPort | undefined =
-    (process.env['EMAIL_TRANSPORT'] ?? 'console') === 'console'
+  const email: EmailPort | undefined = process.env['SMTP_HOST']
+    ? new SmtpEmailTransport()
+    : (process.env['EMAIL_TRANSPORT'] ?? 'console') === 'console'
       ? new ConsoleEmailTransport()
       : undefined;
 

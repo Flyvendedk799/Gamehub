@@ -12,6 +12,8 @@
  * what would have been sent without touching the network.
  */
 
+import nodemailer, { type Transporter } from 'nodemailer';
+
 /** A single outbound email. Plain-text body is required; HTML is optional. */
 export interface EmailMessage {
   to: string;
@@ -51,6 +53,47 @@ export class CapturingEmailTransport implements EmailPort {
 
   async send(message: EmailMessage): Promise<void> {
     this.sent.push(message);
+  }
+}
+
+/**
+ * Production transport: sends over SMTP via nodemailer, using the credentials
+ * injected by the host (ServerHoster -> Cloudflare Email:
+ * smtp.mx.cloudflare.net:465, user "api_token"). Reads SMTP_* from the
+ * environment and supplies the From identity nodemailer's EmailMessage lacks.
+ * If SMTP is not fully configured it degrades to a no-op rather than throwing,
+ * so a partial env can never turn the reset route into a 500.
+ */
+export class SmtpEmailTransport implements EmailPort {
+  private transport: Transporter | null = null;
+
+  private getTransport(): Transporter | null {
+    if (this.transport) return this.transport;
+    const host = process.env['SMTP_HOST'];
+    const pass = process.env['SMTP_PASSWORD'];
+    if (!host || !pass) return null;
+    const port = Number(process.env['SMTP_PORT']) || 465;
+    this.transport = nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465, // 465 = implicit TLS (Cloudflare SMTP)
+      auth: { user: process.env['SMTP_USER'] ?? 'api_token', pass },
+    });
+    return this.transport;
+  }
+
+  async send(message: EmailMessage): Promise<void> {
+    const transport = this.getTransport();
+    if (!transport) return;
+    const from = process.env['SMTP_FROM'] ?? 'noreply@playerzero.online';
+    const fromName = process.env['SMTP_FROM_NAME'] ?? 'PlayerZero';
+    await transport.sendMail({
+      from: `"${fromName}" <${from}>`,
+      to: message.to,
+      subject: message.subject,
+      text: message.text,
+      ...(message.html ? { html: message.html } : {}),
+    });
   }
 }
 
