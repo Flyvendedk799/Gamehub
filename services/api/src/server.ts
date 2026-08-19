@@ -67,6 +67,8 @@ import type { CloudSaveRepo } from './cloud-save-repo';
 import type { CreditPurchaseProvider } from './credit-purchase';
 import { type EmailPort, buildPasswordResetEmail } from './email';
 import type { HubRepo } from './hub-repo';
+import type { JamRepo } from './jam-repo';
+import { registerJamRoutes } from './jam-routes';
 import type { PublishRepo } from './publish-repo';
 import type { Engine, ProjectRepo, Visibility } from './repo';
 import type { Run, RunRepo } from './run-repo';
@@ -300,6 +302,12 @@ export interface ServerDeps {
   publishRepo?: PublishRepo;
   /** Optional: enables community hub routes. */
   hubRepo?: HubRepo;
+  /**
+   * Optional (Game Jam): party-room store. When set, enables the /v1/jams/*
+   * routes and the room WebSocket. Omitted in deployments that don't want the
+   * party surface; the rest of the API is unaffected either way.
+   */
+  jamRepo?: JamRepo;
   /** Optional: max concurrent runs per user (default 1 free / 3 pro — enforced if set). */
   maxConcurrentRunsPerUser?: number;
   /** Optional: admin token for moderation endpoints. */
@@ -1818,37 +1826,42 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   // ── generation enqueue ────────────────────────────────────────────────────
 
-  app.post('/v1/projects/:id/generate', async (req, reply) => {
-    const user = await requireUser(req, reply);
-    if (!user) return;
-    const { id } = req.params as { id: string };
-    const project = await deps.repo.get(id);
-    if (!project || project.ownerId !== user.userId) {
-      return reply.code(404).send({ error: 'not_found' });
-    }
-    const body = (req.body ?? {}) as { prompt?: unknown };
-    if (typeof body.prompt !== 'string' || body.prompt.trim() === '') {
-      return reply.code(400).send({ error: 'prompt_required' });
-    }
-    if (body.prompt.length > 8000) {
-      return reply.code(400).send({ error: 'prompt_too_long', max: 8000 });
-    }
+  /**
+   * Start a generation run for a project the caller owns: enforce the
+   * concurrent-run cap, resolve credentials, reserve credits, log the prompt to
+   * chat, and enqueue.
+   *
+   * Extracted from POST /v1/projects/:id/generate so Game Jam can start a build
+   * from a compiled room brief through the EXACT same path — same run cap, same
+   * credit reservation, same continuation/edit seeding. A second copy of this
+   * logic would be a second place for the credit ledger to drift.
+   *
+   * Returns a discriminated result rather than writing the reply, so callers
+   * shape their own response envelope.
+   */
+  async function startGeneration(
+    project: import('./repo').Project,
+    userId: string,
+    prompt: string,
+  ): Promise<{ ok: true; runId: string } | { ok: false; status: number; body: unknown }> {
     // Concurrent run cap — reject if the user already has too many active runs.
     if (deps.maxConcurrentRunsPerUser !== undefined) {
-      const active = await deps.runRepo.countActiveByUser(user.userId);
+      const active = await deps.runRepo.countActiveByUser(userId);
       if (active >= deps.maxConcurrentRunsPerUser) {
-        return reply
-          .code(429)
-          .send({ error: 'concurrent_run_limit', active, limit: deps.maxConcurrentRunsPerUser });
+        return {
+          ok: false,
+          status: 429,
+          body: { error: 'concurrent_run_limit', active, limit: deps.maxConcurrentRunsPerUser },
+        };
       }
     }
 
-    const generationCredentials = await resolveGenerationCredentials(user.userId);
+    const generationCredentials = await resolveGenerationCredentials(userId);
     if (!generationCredentials.ok) {
-      return reply.code(generationCredentials.status).send(generationCredentials.body);
+      return { ok: false, status: generationCredentials.status, body: generationCredentials.body };
     }
 
-    const run = await deps.runRepo.create({ projectId: project.id, userId: user.userId });
+    const run = await deps.runRepo.create({ projectId: project.id, userId });
 
     // Atomic credit RESERVATION (replaces the old non-atomic balance pre-check).
     // A per-user Postgres advisory lock serializes concurrent generate calls so
@@ -1865,11 +1878,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       try {
         const { schema: s } = await import('@playforge/db');
         await deps.authDb.transaction(async (tx) => {
-          await tx.execute(drizzleSql`SELECT pg_advisory_xact_lock(hashtext(${user.userId}))`);
+          await tx.execute(drizzleSql`SELECT pg_advisory_xact_lock(hashtext(${userId}))`);
           const [row] = await tx
             .select({ bal: drizzleSql<number>`COALESCE(SUM(${s.creditLedger.delta}), 0)` })
             .from(s.creditLedger)
-            .where(drizzleEq(s.creditLedger.userId, user.userId));
+            .where(drizzleEq(s.creditLedger.userId, userId));
           const balance = Number(row?.bal ?? 0);
           if (!decideAffordability(balance).ok) {
             throw new InsufficientCreditsError(balance, CREDITS_PER_RUN);
@@ -1877,7 +1890,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           await tx
             .insert(s.creditLedger)
             .values({
-              userId: user.userId,
+              userId,
               delta: -CREDITS_PER_RUN,
               reason: 'reservation',
               runId: run.id,
@@ -1890,18 +1903,20 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         // failure: also fail the run and surface a 500.
         await deps.runRepo.updateStatus(run.id, 'failed').catch(() => {});
         if (err instanceof InsufficientCreditsError) {
-          return reply
-            .code(402)
-            .send({ error: 'insufficient_credits', balance: err.balance, required: err.required });
+          return {
+            ok: false,
+            status: 402,
+            body: { error: 'insufficient_credits', balance: err.balance, required: err.required },
+          };
         }
         console.error(`[generate] credit reservation failed for run ${run.id}:`, err);
-        return reply.code(500).send({ error: 'reservation_failed' });
+        return { ok: false, status: 500, body: { error: 'reservation_failed' } };
       }
     }
 
     // Persist the user's prompt to chat history so it survives page reloads.
     if (deps.chatRepo) {
-      void deps.chatRepo.add(project.id, 'user', { text: body.prompt.trim(), runId: run.id });
+      void deps.chatRepo.add(project.id, 'user', { text: prompt, runId: run.id });
     }
 
     // Check for a paused continuation from a previous run on this project.
@@ -1920,8 +1935,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     void deps.enqueue({
       runId: run.id,
       projectId: project.id,
-      userId: user.userId,
-      prompt: body.prompt.trim(),
+      userId,
+      prompt,
       ...(generationCredentials.model !== undefined ? { model: generationCredentials.model } : {}),
       ...(generationCredentials.apiKey !== undefined
         ? { apiKey: generationCredentials.apiKey }
@@ -1944,7 +1959,28 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       // untrusted-content safety header before passing the prompt to the agent.
       ...(project.remixOfProjectId !== null ? { isRemix: true } : {}),
     });
-    return reply.code(202).send({ runId: run.id });
+    return { ok: true, runId: run.id };
+  }
+
+  app.post('/v1/projects/:id/generate', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { id } = req.params as { id: string };
+    const project = await deps.repo.get(id);
+    if (!project || project.ownerId !== user.userId) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    const body = (req.body ?? {}) as { prompt?: unknown };
+    if (typeof body.prompt !== 'string' || body.prompt.trim() === '') {
+      return reply.code(400).send({ error: 'prompt_required' });
+    }
+    if (body.prompt.length > 8000) {
+      return reply.code(400).send({ error: 'prompt_too_long', max: 8000 });
+    }
+
+    const started = await startGeneration(project, user.userId, body.prompt.trim());
+    if (!started.ok) return reply.code(started.status).send(started.body);
+    return reply.code(202).send({ runId: started.runId });
   });
 
   // ── SSE event relay ───────────────────────────────────────────────────────
@@ -3679,6 +3715,25 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       });
     });
   });
+
+  // ── Game Jam (party mode) ─────────────────────────────────────────────────
+  // Registered only when a jam store is wired. The jam surface reuses this
+  // server's session auth and — critically — the SAME `startGeneration` path a
+  // solo build takes, so a party build is metered, capped and credited exactly
+  // like any other run.
+  if (deps.jamRepo) {
+    registerJamRoutes(app, {
+      jamRepo: deps.jamRepo,
+      projectRepo: deps.repo,
+      publishRepo: deps.publishRepo,
+      bus: deps.bus,
+      // WebSockets can't set headers, so the room socket authenticates via
+      // ?token= like the SSE relay does.
+      authenticate: (req) => authenticateRequest(req, { allowQueryToken: true }),
+      startGeneration,
+      createProject: (input) => deps.repo.create(input),
+    });
+  }
 
   // ── admin metrics (autoscaling signal) ────────────────────────────────────
 

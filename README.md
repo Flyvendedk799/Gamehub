@@ -18,6 +18,13 @@ Cloud-native AI game builder — describe a game in natural language, get a real
   offline E2E builds a red-square game (agent→fs→snapshot→stream), no infra/keys (13 tests)
 - ✅ `@playforge/api` — Fastify: health + authenticated projects CRUD over a repo
   interface + pluggable auth (5 inject() tests) (5 tests)
+- ✅ **Game Jam (party mode)** — 2–8 people join a room from their phones with a
+  4-character code (guests need no account), answer prompt cards round by round,
+  hype each other's ideas, and the whole pile compiles into ONE brief that builds
+  a local-multiplayer couch co-op game the room plays together. Shared schemas +
+  compiler in `@playforge/shared/game-jam`, `jams`/`jam_players`/`jam_answers`/
+  `jam_votes` tables (migration 0017), `/v1/jams/*` REST + room WebSocket, and
+  `/jam` + `/jam/:code` in the web app (117 tests)
 - ⬜ **Needs live infra** (Postgres + Redis + provider key): Drizzle-backed repo,
   BullMQ consumer, Redis pub/sub → SSE relay, Clerk auth, live red-square run + preview
 

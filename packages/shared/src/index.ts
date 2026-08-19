@@ -802,6 +802,7 @@ export * from './art-runtime';
 export * from './controls-gamepad';
 export * from './runtime-beacon';
 export * from './brand';
+export * from './game-jam';
 export {
   SOCIAL_OUTRO_SCHEMA_VERSION,
   SocialOutroProjectSchema,

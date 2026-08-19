@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react';
  * views where a nav rail would intrude:
  *   - /auth/*            — login / register
  *   - /onboarding        — first-run setup
+ *   - /jam/:code         — a live party room, driven from a phone in one hand
  *   - /projects/:id      — the full-screen game builder/editor, which embeds its
  *                          own Sidebar instance (in-flow rail + hamburger drawer)
  *                          so the main nav is present there too, without the
@@ -27,6 +28,9 @@ function isChromeless(pathname: string): boolean {
     pathname.startsWith('/auth/') ||
     pathname.startsWith('/onboarding') ||
     pathname.startsWith('/projects/') || // the editor (/projects/:id); the list (/projects) keeps the rail
+    // A jam ROOM is a phone-in-one-hand surface — a nav rail would steal the
+    // thumb zone. The /jam landing keeps the rail so it's findable from the app.
+    /^\/jam\/[^/]+/.test(pathname) ||
     pathname.startsWith('/p/')
   );
 }
