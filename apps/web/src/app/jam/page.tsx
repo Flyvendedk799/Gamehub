@@ -17,10 +17,12 @@ import {
   createJam,
   describeJamError,
   getRememberedJamName,
+  joinJam,
   listMyJams,
   rememberJamName,
   saveJamSeat,
 } from '@/lib/jam';
+import { jamHaptic } from '@/lib/jam-feedback';
 import {
   JAM_DEFAULT_ROUNDS,
   JAM_MAX_NAME_LEN,
@@ -93,14 +95,33 @@ export default function JamLandingPage() {
     }
   }
 
-  function handleJoin(e: React.FormEvent) {
+  /**
+   * Join in ONE step. Taking the code and the name together and joining right
+   * here means a player goes from "someone read me a code" to seated in a
+   * single screen — and a wrong code fails HERE, with the field still in front
+   * of them, instead of bouncing them into a room that doesn't exist.
+   *
+   * A shared `/jam/CODE` link skips this entirely: the room page asks for a
+   * name and nothing else.
+   */
+  async function handleJoin(e: React.FormEvent) {
     e.preventDefault();
     const clean = normalizeJamCode(code);
-    if (clean.length < 4 || busy) return;
-    // The room page owns the join form — it already handles the "I have a code
-    // but no seat yet" state, so a shared link and this button land identically.
-    if (name.trim()) rememberJamName(name.trim());
-    router.push(`/jam/${clean}`);
+    const trimmed = name.trim();
+    if (clean.length < 4 || !trimmed || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      rememberJamName(trimmed);
+      const { seat } = await joinJam(clean, trimmed);
+      saveJamSeat(clean, seat);
+      jamHaptic('locked');
+      router.push(`/jam/${clean}`);
+    } catch (err) {
+      jamHaptic('error');
+      setError(describeJamError(err));
+      setBusy(false);
+    }
   }
 
   return (
@@ -186,12 +207,25 @@ export default function JamLandingPage() {
               maxLength={4}
               className="mt-2 w-full border border-hairline bg-surface px-5 py-6 text-center font-mono text-[44px] font-bold uppercase tracking-[.3em] text-ink placeholder-ink-4/40 outline-none transition-colors focus:border-signal"
             />
+
+            <label htmlFor="jam-join-name" className="type-label-xs mt-7 block text-ink-4">
+              Your name in the room
+            </label>
+            <input
+              id="jam-join-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Maya"
+              maxLength={JAM_MAX_NAME_LEN}
+              className="mt-2 w-full border border-hairline bg-surface px-4 py-4 text-lg text-ink placeholder-ink-4 outline-none transition-colors focus:border-signal"
+            />
+
             <button
               type="submit"
-              disabled={code.length < 4}
-              className="tap-target mt-4 w-full bg-signal px-6 py-4 text-base font-bold text-chrome transition-colors hover:bg-signal-bright disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={code.length < 4 || !name.trim() || busy}
+              className="tap-target mt-6 w-full bg-signal px-6 py-4 text-base font-bold text-chrome transition-colors hover:bg-signal-bright disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Join the jam
+              {busy ? 'Joining…' : "I'm in"}
             </button>
             <BackButton onClick={() => setMode('pick')} />
           </form>

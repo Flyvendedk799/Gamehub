@@ -90,6 +90,14 @@ export interface JamRouteContext {
   ): Promise<{ ok: true; runId: string } | { ok: false; status: number; body: unknown }>;
   /** Create the project a finished jam builds into. */
   createProject(input: { ownerId: string; name: string; engine: Engine }): Promise<Project>;
+  /**
+   * Terminal state of the jam's run, for healing a room stuck in `building`.
+   * The room normally learns a build finished from the bus watcher, but that
+   * watcher lives in one API process: restart it, or route the room to a
+   * different instance, and nobody is listening. Without this the party stares
+   * at a spinner forever for a game that finished minutes ago.
+   */
+  getRunStatus?: (runId: string) => Promise<string | null>;
   /** Wall clock, injectable so timer behaviour is testable. */
   now?: () => number;
 }
@@ -187,6 +195,63 @@ export function registerJamRoutes(app: FastifyInstance, ctx: JamRouteContext): v
     return typeof q === 'string' && q.length > 0 ? q : null;
   }
 
+  /**
+   * Heal a room whose real state has drifted from its stored phase, and return
+   * the corrected snapshot.
+   *
+   * Two things can strand a party, and neither is worth a scheduler:
+   *
+   *  - **An expired round.** The answer deadline passes while the host is
+   *    holding a drink. Rather than a timer job we expire LAZILY: the next time
+   *    anyone touches the room — and every client polls — the round flips to the
+   *    reveal. Clients also refresh the moment their countdown hits zero, so in
+   *    practice the room turns over within a second of the deadline.
+   *  - **A finished build nobody heard about.** The bus watcher that flips
+   *    `building` → `ready` lives in one process; restart it and the room waits
+   *    forever. Reading the run's own status closes that hole.
+   *
+   * Idempotent and cheap: it compares, and only writes when a transition is
+   * genuinely due, so running it on every request costs nothing in steady state.
+   */
+  async function reconcileRoom(jamId: string, state: JamState): Promise<JamState> {
+    if (state.phase === 'prompt' && state.deadlineAt !== null && state.deadlineAt <= now()) {
+      await ctx.jamRepo.setPhase(jamId, 'reveal', { deadlineAt: null });
+      toastLocal(jamId, 'phase', "Time's up");
+      const fresh = await ctx.jamRepo.getState(jamId);
+      if (fresh) {
+        await announce(jamId);
+        return fresh;
+      }
+    }
+
+    if (state.phase === 'building' && state.runId !== null && ctx.getRunStatus) {
+      const status = await ctx.getRunStatus(state.runId).catch(() => null);
+      // `paused` stays in `building` — a paused run is resumable, and bouncing
+      // the room out of the build screen would read as failure.
+      const settled =
+        status === 'completed'
+          ? 'ready'
+          : status === 'failed' || status === 'canceled'
+            ? 'reveal'
+            : null;
+      if (settled !== null) {
+        await ctx.jamRepo.setPhase(jamId, settled);
+        toastLocal(
+          jamId,
+          'phase',
+          settled === 'ready' ? 'Your game is ready' : 'The build failed — try again',
+        );
+        const fresh = await ctx.jamRepo.getState(jamId);
+        if (fresh) {
+          await announce(jamId);
+          return fresh;
+        }
+      }
+    }
+
+    return state;
+  }
+
   /** Resolve `:code` to a live room, or reply 404. */
   async function requireRoom(
     req: FastifyRequest,
@@ -207,7 +272,7 @@ export function registerJamRoutes(app: FastifyInstance, ctx: JamRouteContext): v
       await reply.code(404).send({ error: 'jam_not_found' });
       return null;
     }
-    return { jamId, state };
+    return { jamId, state: await reconcileRoom(jamId, state) };
   }
 
   /** Resolve `:code` + the seat token, or reply 404/401. */
@@ -258,6 +323,22 @@ export function registerJamRoutes(app: FastifyInstance, ctx: JamRouteContext): v
   /** Is this the last card in the plan? Then `next` builds instead of advancing. */
   function isFinalRound(state: JamState): boolean {
     return state.round >= state.roundPromptIds.length - 1;
+  }
+
+  /**
+   * Who inherits the room when the host leaves.
+   *
+   * Prefers a SIGNED-IN player: building creates a project and spends credits,
+   * so only an account holder can actually finish the jam. Falling back to a
+   * guest still beats leaving nobody in charge — they can run the rounds, and
+   * the build button tells them to sign in — but an account holder means the
+   * room can go all the way through without anyone noticing the handoff.
+   */
+  function pickHeir(state: JamState, leavingPlayerId: string): JamState['players'][number] | null {
+    const remaining = state.players
+      .filter((p) => p.id !== leavingPlayerId)
+      .sort((a, b) => a.seat - b.seat);
+    return remaining.find((p) => p.userId !== null) ?? remaining[0] ?? null;
   }
 
   // ── routes ────────────────────────────────────────────────────────────────
@@ -554,8 +635,21 @@ export function registerJamRoutes(app: FastifyInstance, ctx: JamRouteContext): v
   app.post('/v1/jams/:code/leave', async (req, reply) => {
     const seat = await requireSeat(req, reply);
     if (!seat) return;
+    const leaver = seat.state.players.find((p) => p.id === seat.playerId);
     await ctx.jamRepo.leave(seat.jamId, seat.playerId);
-    toastLocal(seat.jamId, 'leave', 'Someone left', seat.playerId);
+
+    // Start / next / build are all host-only, so a host who walks out would
+    // otherwise leave everyone else stuck in a room nobody can advance. Hand it
+    // to whoever is still here.
+    if (seat.isHost) {
+      const heir = pickHeir(seat.state, seat.playerId);
+      if (heir) {
+        await ctx.jamRepo.transferHost(seat.jamId, heir.id);
+        toastLocal(seat.jamId, 'phase', `${heir.name} is the host now`, heir.id);
+      }
+    }
+
+    toastLocal(seat.jamId, 'leave', `${leaver?.name ?? 'Someone'} left`, seat.playerId);
     await announce(seat.jamId);
     return reply.send({ ok: true });
   });

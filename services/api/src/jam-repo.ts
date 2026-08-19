@@ -92,6 +92,12 @@ export interface JamRepo {
   resolveSeat(jamId: string, token: string): Promise<JamPlayer | null>;
   /** Mark a player as having left. The row stays so their ideas keep attribution. */
   leave(jamId: string, playerId: string): Promise<void>;
+  /**
+   * Hand the room to another seat. Called when the host leaves — without this a
+   * host who closes their phone BRICKS the room: start/next/build are all
+   * host-only, so everyone else is left in a lobby nobody can advance.
+   */
+  transferHost(jamId: string, playerId: string): Promise<void>;
   setPhase(jamId: string, phase: JamPhase, patch?: JamPhasePatch): Promise<void>;
   /** Upsert this player's answer for a round (re-submitting EDITS). */
   submitAnswer(input: {
@@ -346,6 +352,16 @@ export class InMemoryJamRepo implements JamRepo {
     if (!row || row.leftAt !== null) return;
     row.leftAt = this.now();
     jam.updatedAt = row.leftAt;
+  }
+
+  async transferHost(jamId: string, playerId: string): Promise<void> {
+    const jam = this.byId.get(jamId);
+    if (!jam) return;
+    const next = jam.players.find((p) => p.id === playerId && p.leftAt === null);
+    if (!next) return;
+    for (const p of jam.players) p.isHost = p.id === playerId;
+    jam.hostPlayerId = playerId;
+    jam.updatedAt = this.now();
   }
 
   async setPhase(jamId: string, phase: JamPhase, patch?: JamPhasePatch): Promise<void> {

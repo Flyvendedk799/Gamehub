@@ -16,8 +16,11 @@
  * happens to also work on a laptop, not the other way round.
  */
 
+import JamBriefPreview from '@/components/JamBriefPreview';
 import JamPlayerDots from '@/components/JamPlayerDots';
+import JamProgressStrip from '@/components/JamProgressStrip';
 import JamRevealCard from '@/components/JamRevealCard';
+import JamStorySoFar from '@/components/JamStorySoFar';
 import { publishProject } from '@/lib/api';
 import {
   JamError,
@@ -40,8 +43,10 @@ import {
   submitJamAnswer,
   voteJamAnswer,
 } from '@/lib/jam';
+import { jamHaptic, useJamBeat, useJamWakeLock } from '@/lib/jam-feedback';
 import { useJamCountdown, useJamRoom } from '@/lib/use-jam-room';
 import {
+  JAM_KEYBOARD_SEATS,
   JAM_MAX_ANSWER_LEN,
   JAM_MAX_NAME_LEN,
   JAM_MIN_PLAYERS,
@@ -77,6 +82,8 @@ export default function JamRoomPage() {
   const [seatReady, setSeatReady] = useState(false);
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
+  /** Host is looking at the compiled brief before committing a build. */
+  const [confirmingBuild, setConfirmingBuild] = useState(false);
 
   // Read the stored seat once on mount — a refresh mid-jam must not eject you.
   useEffect(() => {
@@ -126,6 +133,7 @@ export default function JamRoomPage() {
         if (err instanceof JamError && err.code === 'jam_seat_invalid') {
           dropSeat();
         }
+        jamHaptic('error');
         setActionError(describeJamError(err));
       } finally {
         setBusy(false);
@@ -140,6 +148,24 @@ export default function JamRoomPage() {
     setSeat(fresh);
     refresh();
   }
+
+  // Beats worth feeling. Each keys off a value that only changes on a real
+  // transition, and `useJamBeat` swallows the first render — so a phone that
+  // reconnects on round 4 doesn't buzz for a round that started minutes ago.
+  const phase = state?.phase ?? null;
+  useJamBeat(phase === 'prompt' ? `round-${state?.round}` : null, 'round');
+  useJamBeat(phase === 'reveal' ? `reveal-${state?.round}` : null, 'reveal');
+  useJamBeat(phase === 'ready' ? 'ready' : null, 'ready');
+
+  // A jam is a lot of looking at a phone without touching it. Hold the screen
+  // awake while the room is actually running, and let it sleep once it's over.
+  useJamWakeLock(seat !== null && phase !== null && phase !== 'ended' && phase !== 'ready');
+
+  // Leaving the reveal cancels a half-open build confirmation, so a host who
+  // opened the preview and then advanced doesn't come back to a stale screen.
+  useEffect(() => {
+    if (phase !== 'reveal') setConfirmingBuild(false);
+  }, [phase]);
 
   if (!code) {
     return (
@@ -211,6 +237,14 @@ export default function JamRoomPage() {
             onSubmit={(text) => act(() => submitJamAnswer(code, seatToken as string, text))}
             onReveal={() => act(() => revealJamRound(code, seatToken as string))}
           />
+        ) : state.phase === 'reveal' && confirmingBuild ? (
+          <JamBriefPreview
+            code={code}
+            seatToken={seatToken as string}
+            busy={busy}
+            onConfirm={() => act(() => buildJam(code, seatToken as string))}
+            onCancel={() => setConfirmingBuild(false)}
+          />
         ) : state.phase === 'reveal' ? (
           <RevealPanel
             state={state}
@@ -219,7 +253,7 @@ export default function JamRoomPage() {
             busy={busy}
             onVote={(answerId) => act(() => voteJamAnswer(code, seatToken as string, answerId))}
             onNext={() => act(() => nextJamRound(code, seatToken as string))}
-            onBuild={() => act(() => buildJam(code, seatToken as string))}
+            onBuild={() => setConfirmingBuild(true)}
           />
         ) : state.phase === 'building' ? (
           <BuildingPanel state={state} toasts={toasts} isHost={isHost} />
@@ -327,6 +361,15 @@ function RoomHeader({
         {roundLabel && <span className="type-label-xs flex-none text-ink-4">{roundLabel}</span>}
         <JamPlayerDots players={state.players} me={me} />
       </div>
+      {(state.phase === 'prompt' || state.phase === 'reveal') && (
+        <div className="mx-auto w-full max-w-[560px] px-5 pb-2.5">
+          <JamProgressStrip
+            promptIds={state.roundPromptIds}
+            current={state.round}
+            phase={state.phase}
+          />
+        </div>
+      )}
     </header>
   );
 }
@@ -457,6 +500,11 @@ function LobbyPanel({
   const [copied, setCopied] = useState(false);
   const enough = state.players.length >= JAM_MIN_PLAYERS;
 
+  // A buzz each time someone walks in. The host is usually reading the code out
+  // loud with the phone at arm's length, so a felt confirmation beats a visual
+  // one they aren't looking at.
+  useJamBeat(state.players.length, 'tap');
+
   async function share() {
     const url = jamInviteUrl(code);
     const shareData = { title: 'Join my Game Jam', text: `Room code ${code}`, url };
@@ -576,11 +624,15 @@ function PromptPanel({
   const answered = state.answeredPlayerIds.length;
   const total = state.players.length;
   const iAnswered = mine !== undefined;
+  // Naming the stragglers turns a number into social pressure, which is exactly
+  // the mechanic a party game wants — "waiting on Sam" gets Sam typing.
+  const waitingOn = state.players.filter((p) => !state.answeredPlayerIds.includes(p.id));
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = text.trim();
     if (!trimmed || busy) return;
+    jamHaptic('locked');
     onSubmit(trimmed);
     setText('');
   }
@@ -596,7 +648,7 @@ function PromptPanel({
                 remaining <= 10 ? 'text-fail' : 'text-ink'
               }`}
             >
-              {remaining}s
+              {remaining === 0 ? "TIME'S UP" : `${remaining}s`}
             </span>
           </div>
           <div className="mt-2 h-0.5 w-full bg-hairline">
@@ -627,7 +679,11 @@ function PromptPanel({
             <p className="mt-2 text-lg leading-snug text-ink">{mine?.text}</p>
           </div>
           <p className="mt-4 text-center text-[13px] text-ink-3">
-            Waiting on {Math.max(0, total - answered)} more…
+            {waitingOn.length === 0
+              ? 'Everyone is in.'
+              : waitingOn.length <= 2
+                ? `Waiting on ${waitingOn.map((p) => p.name).join(' and ')}…`
+                : `Waiting on ${waitingOn.length} more…`}
           </p>
           <ChangeAnswer
             onChange={(next) => onSubmit(next)}
@@ -696,6 +752,14 @@ function PromptPanel({
           Skip the wait — show what&apos;s in
         </button>
       )}
+
+      <JamStorySoFar
+        roundPromptIds={state.roundPromptIds}
+        currentRound={state.round}
+        answers={state.answers}
+        players={state.players}
+        colorHex={colorHex}
+      />
     </div>
   );
 }
@@ -776,6 +840,18 @@ function RevealPanel({
   const answers = state.answers.filter((a) => a.round === state.round);
   const isFinal = state.round >= state.roundPromptIds.length - 1;
   const byId = new Map(state.players.map((p) => [p.id, p]));
+  const totalVotes = answers.reduce((sum, a) => sum + a.votes, 0);
+  const leader = answers.reduce<(typeof answers)[number] | null>(
+    (best, a) => (best === null || a.votes > best.votes ? a : best),
+    null,
+  );
+
+  // Which cards THIS device has hyped. The room state deliberately never says
+  // who voted for what — so nobody plays to the crowd — which also means the
+  // only honest source for your own checkmarks is local.
+  const [voted, setVoted] = useState<Set<string>>(new Set());
+  // biome-ignore lint/correctness/useExhaustiveDependencies: state.round is the reset trigger, not a read dependency — a new round must start with no checkmarks.
+  useEffect(() => setVoted(new Set()), [state.round]);
 
   return (
     <div className="pt-8">
@@ -791,7 +867,7 @@ function RevealPanel({
             Nobody got an answer in for this one. It happens.
           </p>
         )}
-        {answers.map((answer) => {
+        {answers.map((answer, i) => {
           const author = byId.get(answer.playerId);
           return (
             <JamRevealCard
@@ -801,33 +877,70 @@ function RevealPanel({
               authorName={author?.name ?? 'Someone'}
               authorColor={colorHex(author?.color ?? 'cyan')}
               isMine={answer.playerId === me}
+              isLeading={leader !== null && leader.id === answer.id && answer.votes > 0}
+              youVoted={voted.has(answer.id)}
+              revealIndex={i}
               disabled={busy}
-              onVote={() => onVote(answer.id)}
+              onVote={() => {
+                setVoted((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(answer.id)) next.delete(answer.id);
+                  else next.add(answer.id);
+                  return next;
+                });
+                jamHaptic('tap');
+                onVote(answer.id);
+              }}
             />
           );
         })}
       </div>
+
+      {/* Something live for the players who aren't the host. Without this the
+          non-host reveal is a dead screen and people put their phones down. */}
+      {answers.length > 0 && (
+        <p className="mt-5 text-center font-mono text-[11px] tracking-[.12em] text-ink-4">
+          {totalVotes === 0
+            ? 'NOBODY HAS HYPED ANYTHING YET'
+            : `${totalVotes} HYPE${totalVotes === 1 ? '' : 'S'} SO FAR`}
+        </p>
+      )}
 
       {isHost ? (
         <button
           type="button"
           onClick={isFinal ? onBuild : onNext}
           disabled={busy}
-          className="tap-target mt-9 w-full bg-signal px-6 py-4 text-base font-bold text-chrome transition-colors hover:bg-signal-bright disabled:cursor-not-allowed disabled:opacity-40"
+          className="tap-target mt-6 w-full bg-signal px-6 py-4 text-base font-bold text-chrome transition-colors hover:bg-signal-bright disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {busy ? 'Working…' : isFinal ? 'Build our game' : 'Next question'}
+          {busy ? 'Working…' : isFinal ? 'See what we made' : 'Next question'}
         </button>
       ) : (
-        <p className="mt-9 text-center font-mono text-[11px] tracking-[.14em] text-ink-4">
+        <p className="mt-6 text-center font-mono text-[11px] tracking-[.14em] text-ink-4">
           {isFinal ? 'HOST IS ABOUT TO BUILD IT' : 'WAITING FOR THE NEXT QUESTION'}
         </p>
       )}
+
+      <JamStorySoFar
+        roundPromptIds={state.roundPromptIds}
+        currentRound={state.round}
+        answers={state.answers}
+        players={state.players}
+        colorHex={colorHex}
+      />
     </div>
   );
 }
 
 // ── building ─────────────────────────────────────────────────────────────────
 
+/**
+ * A typical jam build runs a couple of minutes. That is a LONG time to hold a
+ * room's attention with a spinner, so this screen does three things a spinner
+ * can't: it counts up (progress you can trust even when the agent is quiet), it
+ * shows what the agent is actually doing right now, and it hands the room
+ * something to read — their own ideas, scrolling past — while they wait.
+ */
 function BuildingPanel({
   state,
   toasts,
@@ -838,24 +951,64 @@ function BuildingPanel({
   isHost: boolean;
 }) {
   const latest = toasts[toasts.length - 1]?.message ?? 'Warming up the engine…';
+  const [elapsed, setElapsed] = useState(0);
+  const [ideaIndex, setIdeaIndex] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // The room's own ideas, cycling. Watching your answer go by while the thing
+  // is being built is the moment the jam pays off for the people who aren't
+  // the host and have nothing to press.
+  const ideas = useMemo(
+    () => state.answers.filter((a) => a.text.trim() !== '').map((a) => a.text),
+    [state.answers],
+  );
+  useEffect(() => {
+    if (ideas.length === 0) return;
+    const id = setInterval(() => setIdeaIndex((i) => (i + 1) % ideas.length), 3500);
+    return () => clearInterval(id);
+  }, [ideas.length]);
+
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+
   return (
-    <div className="pt-16 text-center">
+    <div className="pt-14 text-center">
       <div className="mx-auto mb-8 h-14 w-14 animate-spin border-2 border-hairline border-t-signal" />
       <h2 className="type-display text-[32px] leading-tight text-ink">
         Building
         <br />
         {state.title ?? 'your game'}
       </h2>
-      <p className="mt-5 text-[15px] text-ink-3">
-        Every idea in this room is going in. This takes a couple of minutes — stay on this screen
-        and watch.
+
+      <p className="mt-4 font-mono text-2xl font-bold tabular-nums text-ink-3">
+        {mins}:{secs.toString().padStart(2, '0')}
       </p>
-      <p className="mt-8 truncate font-mono text-[11px] tracking-[.12em] text-signal">{latest}</p>
+      <p className="mt-3 text-[15px] leading-relaxed text-ink-3">
+        Every idea in this room is going in. Usually a couple of minutes.
+      </p>
+
+      <p className="mt-7 truncate font-mono text-[11px] tracking-[.12em] text-signal">{latest}</p>
+
+      {ideas.length > 0 && (
+        <div className="mt-10 border-t border-hairline pt-6">
+          <div className="type-label-xs text-ink-4">Going in</div>
+          <p
+            key={ideaIndex}
+            className="mt-3 min-h-[3rem] text-[17px] leading-snug text-ink-2 transition-opacity duration-500"
+          >
+            &ldquo;{ideas[ideaIndex] ?? ideas[0]}&rdquo;
+          </p>
+        </div>
+      )}
 
       {isHost && state.projectId && (
         <Link
           href={`/projects/${state.projectId}`}
-          className="tap-target mt-10 inline-block w-full border border-edge px-6 py-3.5 text-sm font-semibold text-ink-3 transition-colors hover:border-signal hover:text-signal"
+          className="tap-target mt-8 inline-block w-full border border-edge px-6 py-3.5 text-sm font-semibold text-ink-3 transition-colors hover:border-signal hover:text-signal"
         >
           Watch the full build log
         </Link>
@@ -907,6 +1060,32 @@ function ReadyPanel({
         {state.players.length} players, one screen. Gather round whichever device has the biggest
         screen and hit play.
       </p>
+
+      {/* The compiled brief assigns controls by seat, so the room can sort out
+          who sits where BEFORE crowding one keyboard — otherwise the first
+          thirty seconds of every game is four people finding their keys. */}
+      <div className="mt-8 border-t border-hairline pt-6 text-left">
+        <div className="type-label-xs text-ink-4">Who plays what</div>
+        <ul className="mt-3 flex flex-col gap-px border border-hairline bg-hairline">
+          {state.players.map((p, i) => (
+            <li key={p.id} className="flex items-center gap-3 bg-ground px-4 py-3">
+              <span
+                className="h-3 w-3 flex-none"
+                style={{ backgroundColor: colorHex(p.color) }}
+                aria-hidden="true"
+              />
+              <span className="min-w-0 flex-1 truncate text-[15px] text-ink">{p.name}</span>
+              <span className="flex-none font-mono text-[11px] text-ink-3">
+                {JAM_KEYBOARD_SEATS[i]?.label ?? 'gamepad / touch'}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-3 text-[12px] leading-relaxed text-ink-4">
+          Gamepads work too — player {'\u2116'} uses gamepad {'\u2116'}. On a phone or tablet each
+          player gets their own on-screen zone.
+        </p>
+      </div>
 
       {state.playSlug ? (
         <>

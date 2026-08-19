@@ -20,20 +20,22 @@ function makeApp(over?: {
   bus?: InMemoryEventBus;
   enqueue?: EnqueueFn;
   repo?: InMemoryProjectRepo;
+  runRepo?: InMemoryRunRepo;
   publishRepo?: InMemoryPublishRepo;
 }) {
   const jamRepo = over?.jamRepo ?? new InMemoryJamRepo();
   const repo = over?.repo ?? new InMemoryProjectRepo();
+  const runRepo = over?.runRepo ?? new InMemoryRunRepo();
   const app = buildServer({
     repo,
     auth: new HeaderAuthenticator(),
     bus: over?.bus ?? new InMemoryEventBus(),
-    runRepo: new InMemoryRunRepo(),
+    runRepo,
     enqueue: over?.enqueue ?? (async () => {}),
     jamRepo,
     ...(over?.publishRepo !== undefined ? { publishRepo: over.publishRepo } : {}),
   });
-  return { app, jamRepo, repo };
+  return { app, jamRepo, repo, runRepo };
 }
 
 /** Open a room and return the host's code + seat. */
@@ -900,5 +902,252 @@ describe('jam: multi-instance fan-out', () => {
 
     expect(seen.length).toBeGreaterThanOrEqual(2);
     expect(seen[0]).toMatchObject({ type: 'jam_dirty', jamId });
+  });
+});
+
+describe('jam: healing a stranded room', () => {
+  /** A jam mid-round with a timer, so the deadline can be walked past. */
+  async function timedJam(overrides?: { answerSeconds?: number }) {
+    const jamRepo = new InMemoryJamRepo();
+    const { app } = makeApp({ jamRepo });
+    const { code, jamId, seat } = await hostJam(app, {
+      rounds: 3,
+      answerSeconds: overrides?.answerSeconds ?? 60,
+    });
+    const guest = await joinJam(app, code, 'Tobi');
+    await app.inject({
+      method: 'POST',
+      url: `/v1/jams/${code}/start`,
+      headers: seatHeaders(seat.token),
+    });
+    return { app, jamRepo, code, jamId, host: seat, guest: guest.seat };
+  }
+
+  it('flips an expired round to the reveal on the next touch — no scheduler', async () => {
+    const { app, jamRepo, code, jamId, host } = await timedJam();
+    await app.inject({
+      method: 'POST',
+      url: `/v1/jams/${code}/answer`,
+      headers: seatHeaders(host.token),
+      payload: { text: 'a sinking submarine' },
+    });
+    // Walk the deadline into the past — the room is still stored as `prompt`.
+    await jamRepo.setPhase(jamId, 'prompt', { deadlineAt: Date.now() - 1000 });
+
+    const view = await app.inject({ method: 'GET', url: `/v1/jams/${code}` });
+    const state = (view.json() as { state: { phase: string; deadlineAt: number | null } }).state;
+    expect(state.phase).toBe('reveal');
+    expect(state.deadlineAt).toBeNull();
+  });
+
+  it('reveals what was submitted when the round times out', async () => {
+    const { app, jamRepo, code, jamId, host } = await timedJam();
+    await app.inject({
+      method: 'POST',
+      url: `/v1/jams/${code}/answer`,
+      headers: seatHeaders(host.token),
+      payload: { text: 'a sinking submarine' },
+    });
+    await jamRepo.setPhase(jamId, 'prompt', { deadlineAt: Date.now() - 1000 });
+
+    // The guest never answered; the one idea that landed is still revealed.
+    const view = await app.inject({ method: 'GET', url: `/v1/jams/${code}` });
+    const answers = (view.json() as { state: { answers: Array<{ text: string }> } }).state.answers;
+    expect(answers).toHaveLength(1);
+    expect(answers[0]?.text).toBe('a sinking submarine');
+  });
+
+  it('leaves a live round alone', async () => {
+    const { app, code } = await timedJam();
+    const view = await app.inject({ method: 'GET', url: `/v1/jams/${code}` });
+    expect((view.json() as { state: { phase: string } }).state.phase).toBe('prompt');
+  });
+
+  it('never expires an untimed jam', async () => {
+    const { app, code } = await timedJam({ answerSeconds: 0 });
+    const view = await app.inject({ method: 'GET', url: `/v1/jams/${code}` });
+    const state = (view.json() as { state: { phase: string; deadlineAt: number | null } }).state;
+    expect(state.deadlineAt).toBeNull();
+    expect(state.phase).toBe('prompt');
+  });
+
+  it('settles a room whose build finished while nobody was listening', async () => {
+    const runRepo = new InMemoryRunRepo();
+    const jamRepo = new InMemoryJamRepo();
+    const { app, repo } = makeApp({ jamRepo, runRepo });
+    const { code, jamId, seat } = await hostJam(app);
+    const project = await repo.create({ ownerId: 'alice', name: 'Crab Depth 9' });
+    const run = await runRepo.create({ projectId: project.id, userId: 'alice' });
+    await jamRepo.attachBuild(jamId, project.id, run.id);
+    await jamRepo.setPhase(jamId, 'building');
+    // The run finished, but this process never saw the bus event (restart, or a
+    // different instance carried the watcher).
+    await runRepo.updateStatus(run.id, 'completed');
+
+    const view = await app.inject({
+      method: 'GET',
+      url: `/v1/jams/${code}`,
+      headers: seatHeaders(seat.token),
+    });
+    expect((view.json() as { state: { phase: string } }).state.phase).toBe('ready');
+  });
+
+  it('drops a failed build back to the reveal so the room can retry', async () => {
+    const runRepo = new InMemoryRunRepo();
+    const jamRepo = new InMemoryJamRepo();
+    const { app, repo } = makeApp({ jamRepo, runRepo });
+    const { code, jamId, seat } = await hostJam(app);
+    const project = await repo.create({ ownerId: 'alice', name: 'Doomed' });
+    const run = await runRepo.create({ projectId: project.id, userId: 'alice' });
+    await jamRepo.attachBuild(jamId, project.id, run.id);
+    await jamRepo.setPhase(jamId, 'building');
+    await runRepo.updateStatus(run.id, 'failed');
+
+    const view = await app.inject({
+      method: 'GET',
+      url: `/v1/jams/${code}`,
+      headers: seatHeaders(seat.token),
+    });
+    expect((view.json() as { state: { phase: string } }).state.phase).toBe('reveal');
+  });
+
+  it('keeps a still-running build on the build screen', async () => {
+    const runRepo = new InMemoryRunRepo();
+    const jamRepo = new InMemoryJamRepo();
+    const { app, repo } = makeApp({ jamRepo, runRepo });
+    const { code, jamId, seat } = await hostJam(app);
+    const project = await repo.create({ ownerId: 'alice', name: 'In Progress' });
+    const run = await runRepo.create({ projectId: project.id, userId: 'alice' });
+    await jamRepo.attachBuild(jamId, project.id, run.id);
+    await jamRepo.setPhase(jamId, 'building');
+    await runRepo.updateStatus(run.id, 'running');
+
+    const view = await app.inject({
+      method: 'GET',
+      url: `/v1/jams/${code}`,
+      headers: seatHeaders(seat.token),
+    });
+    expect((view.json() as { state: { phase: string } }).state.phase).toBe('building');
+  });
+});
+
+describe('jam: the host leaving must not brick the room', () => {
+  it('hands the room to a remaining player', async () => {
+    const { app } = makeApp();
+    const { code, seat } = await hostJam(app);
+    const guest = await joinJam(app, code, 'Tobi');
+
+    await app.inject({
+      method: 'POST',
+      url: `/v1/jams/${code}/leave`,
+      headers: seatHeaders(seat.token),
+    });
+
+    const view = await app.inject({ method: 'GET', url: `/v1/jams/${code}` });
+    const state = (
+      view.json() as {
+        state: {
+          hostPlayerId: string;
+          players: Array<{ id: string; isHost: boolean; name: string }>;
+        };
+      }
+    ).state;
+    expect(state.hostPlayerId).toBe(guest.seat?.playerId);
+    expect(state.players.find((p) => p.isHost)?.name).toBe('Tobi');
+  });
+
+  it('lets the new host actually run the jam', async () => {
+    const { app } = makeApp();
+    const { code, seat } = await hostJam(app);
+    const guest = await joinJam(app, code, 'Tobi');
+    await joinJam(app, code, 'Sam');
+    await app.inject({
+      method: 'POST',
+      url: `/v1/jams/${code}/leave`,
+      headers: seatHeaders(seat.token),
+    });
+
+    const started = await app.inject({
+      method: 'POST',
+      url: `/v1/jams/${code}/start`,
+      headers: seatHeaders(guest.seat?.token ?? ''),
+    });
+    expect(started.statusCode).toBe(200);
+  });
+
+  it('prefers a signed-in heir, since only an account can pay for the build', async () => {
+    const { app } = makeApp();
+    const { code, seat } = await hostJam(app);
+    // A guest takes the earlier seat; a signed-in player takes the later one.
+    await joinJam(app, code, 'GuestFirst');
+    const signedIn = await app.inject({
+      method: 'POST',
+      url: `/v1/jams/${code}/join`,
+      headers: AS_BOB,
+      payload: { name: 'Bob' },
+    });
+    const bobSeat = (signedIn.json() as { seat: { playerId: string } }).seat;
+
+    await app.inject({
+      method: 'POST',
+      url: `/v1/jams/${code}/leave`,
+      headers: seatHeaders(seat.token),
+    });
+
+    const view = await app.inject({ method: 'GET', url: `/v1/jams/${code}` });
+    expect((view.json() as { state: { hostPlayerId: string } }).state.hostPlayerId).toBe(
+      bobSeat.playerId,
+    );
+  });
+
+  it('falls back to a guest heir rather than leaving nobody in charge', async () => {
+    const { app } = makeApp();
+    const { code, seat } = await hostJam(app);
+    const guest = await joinJam(app, code, 'Tobi');
+    await app.inject({
+      method: 'POST',
+      url: `/v1/jams/${code}/leave`,
+      headers: seatHeaders(seat.token),
+    });
+    const view = await app.inject({ method: 'GET', url: `/v1/jams/${code}` });
+    expect((view.json() as { state: { hostPlayerId: string } }).state.hostPlayerId).toBe(
+      guest.seat?.playerId,
+    );
+  });
+
+  it('leaves the host pointer alone when a non-host leaves', async () => {
+    const { app } = makeApp();
+    const { code, seat } = await hostJam(app);
+    const guest = await joinJam(app, code, 'Tobi');
+    await app.inject({
+      method: 'POST',
+      url: `/v1/jams/${code}/leave`,
+      headers: seatHeaders(guest.seat?.token ?? ''),
+    });
+    const view = await app.inject({ method: 'GET', url: `/v1/jams/${code}` });
+    expect((view.json() as { state: { hostPlayerId: string } }).state.hostPlayerId).toBe(
+      seat.playerId,
+    );
+  });
+
+  it('does not hand the room to someone who already walked out', async () => {
+    const { app } = makeApp();
+    const { code, seat } = await hostJam(app);
+    const guest = await joinJam(app, code, 'Tobi');
+    await app.inject({
+      method: 'POST',
+      url: `/v1/jams/${code}/leave`,
+      headers: seatHeaders(guest.seat?.token ?? ''),
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/v1/jams/${code}/leave`,
+      headers: seatHeaders(seat.token),
+    });
+    // Everyone is gone; the room simply has no players rather than a ghost host.
+    const view = await app.inject({ method: 'GET', url: `/v1/jams/${code}` });
+    const state = (view.json() as { state: { players: unknown[]; hostPlayerId: string } }).state;
+    expect(state.players).toHaveLength(0);
+    expect(state.hostPlayerId).not.toBe(guest.seat?.playerId);
   });
 });

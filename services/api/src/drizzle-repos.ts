@@ -773,6 +773,27 @@ export class DrizzleJamRepo implements JamRepo {
     await this.touch(jamId);
   }
 
+  async transferHost(jamId: string, playerId: string): Promise<void> {
+    // Only to a seat that is still in the room — handing the room to someone who
+    // already walked out would brick it just as thoroughly as not handing it on.
+    const [next] = await this.db
+      .select({ id: schema.jamPlayers.id })
+      .from(schema.jamPlayers)
+      .where(
+        and(
+          eq(schema.jamPlayers.jamId, jamId),
+          eq(schema.jamPlayers.id, playerId),
+          isNull(schema.jamPlayers.leftAt),
+        ),
+      )
+      .limit(1);
+    if (!next) return;
+    await this.db
+      .update(schema.jams)
+      .set({ hostPlayerId: playerId, updatedAt: new Date() })
+      .where(eq(schema.jams.id, jamId));
+  }
+
   async setPhase(jamId: string, phase: JamPhase, patch?: JamPhasePatch): Promise<void> {
     await this.db
       .update(schema.jams)

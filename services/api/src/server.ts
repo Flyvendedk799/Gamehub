@@ -3732,6 +3732,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       authenticate: (req) => authenticateRequest(req, { allowQueryToken: true }),
       startGeneration,
       createProject: (input) => deps.repo.create(input),
+      // Lets a room stranded in `building` heal itself: the bus watcher that
+      // normally settles the phase lives in one process, so a restart (or a
+      // player routed to another instance) would otherwise leave the party
+      // watching a spinner for a game that finished.
+      getRunStatus: async (runId) => (await deps.runRepo.get(runId))?.status ?? null,
     });
   }
 

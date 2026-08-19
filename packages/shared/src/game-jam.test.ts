@@ -3,6 +3,7 @@ import {
   JAM_CODE_ALPHABET,
   JAM_CODE_LENGTH,
   JAM_DEFAULT_CONFIG,
+  JAM_KEYBOARD_SEATS,
   JAM_MAX_ANSWER_LEN,
   JAM_MAX_NAME_LEN,
   JAM_MAX_ROUNDS,
@@ -423,5 +424,31 @@ describe('canCompileJam', () => {
 describe('jamChannel', () => {
   it('namespaces a room off the run channels', () => {
     expect(jamChannel('abc')).toBe('jam:abc');
+  });
+});
+
+describe('JAM_KEYBOARD_SEATS', () => {
+  it('is the single source for both the brief and the room UI', () => {
+    const { prompt } = compileJamBrief(
+      state({
+        players: Array.from({ length: 4 }, (_, i) =>
+          player({ id: `p${i}`, name: `P${i}`, seat: i, color: jamColorForSeat(i).id }),
+        ),
+        answers: [answer({ id: 'a1', promptId: 'setting', playerId: 'p0', text: 'a mall' })],
+      }),
+    );
+    // Every seat's brief text must actually reach the agent, and its label must
+    // describe the same keys — a mismatch tells a player the wrong controls.
+    for (const seat of JAM_KEYBOARD_SEATS) {
+      expect(prompt).toContain(seat.brief);
+    }
+    expect(JAM_KEYBOARD_SEATS[0]?.label).toBe('WASD + Space');
+    expect(JAM_KEYBOARD_SEATS[0]?.brief).toContain('WASD');
+    expect(JAM_KEYBOARD_SEATS[3]?.label).toContain('Numpad');
+    expect(JAM_KEYBOARD_SEATS[3]?.brief).toContain('Numpad');
+  });
+
+  it('caps at four, the practical ceiling for one keyboard', () => {
+    expect(JAM_KEYBOARD_SEATS).toHaveLength(4);
   });
 });

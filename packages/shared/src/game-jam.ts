@@ -465,16 +465,24 @@ const SLOT_HEADING: Record<JamPromptSlot, string> = {
 };
 
 /**
- * Per-player keyboard layouts baked into the brief. Four distinct schemes on
- * one keyboard is the practical ceiling for couch play; a 5th+ player shares
- * via gamepad or a passed phone, which the touch-zone requirement covers.
+ * Per-seat keyboard assignments. Four distinct schemes on one keyboard is the
+ * practical ceiling for couch play; a 5th+ player shares via gamepad or a
+ * passed phone, which the touch-zone requirement covers.
+ *
+ * Exported because BOTH sides need it and they must never disagree: `brief`
+ * tells the agent what to implement, `label` tells the room what to expect on
+ * the "who plays what" screen. A player told they're on IJKL and then handed a
+ * game that thinks they're on the numpad has been lied to by a mismatch between
+ * two hardcoded lists — so there is only one list.
  */
-const KEYBOARD_LAYOUTS = [
-  'P1 = WASD to move, Space to act',
-  'P2 = Arrow keys to move, Enter to act',
-  'P3 = IJKL to move, N to act',
-  'P4 = Numpad 8/4/5/6 to move, Numpad 0 to act',
-];
+export const JAM_KEYBOARD_SEATS = [
+  { label: 'WASD + Space', brief: 'P1 = WASD to move, Space to act' },
+  { label: 'Arrows + Enter', brief: 'P2 = Arrow keys to move, Enter to act' },
+  { label: 'IJKL + N', brief: 'P3 = IJKL to move, N to act' },
+  { label: 'Numpad + 0', brief: 'P4 = Numpad 8/4/5/6 to move, Numpad 0 to act' },
+] as const;
+
+const KEYBOARD_LAYOUTS = JAM_KEYBOARD_SEATS.map((s) => s.brief);
 
 export interface CompiledJamBrief {
   /** Project name — the room's title, or a fallback built from the setting. */

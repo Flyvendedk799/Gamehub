@@ -49,6 +49,8 @@ export function jamReconnectDelay(attempt: number): number {
 const POLL_INTERVAL_MS = 2500;
 /** Slow heartbeat even while live, so a silently-dead socket self-heals. */
 const LIVE_POLL_INTERVAL_MS = 20_000;
+/** How often to re-nudge a round whose deadline has passed but hasn't turned over. */
+const RETRY_EXPIRY_MS = 1500;
 const MAX_TOASTS = 4;
 
 export function useJamRoom(code: string | null, seatToken: string | null): JamRoomState {
@@ -184,6 +186,40 @@ export function useJamRoom(code: string | null, seatToken: string | null): JamRo
       if (timer) clearTimeout(timer);
     };
   }, [code, seatToken, refreshTick]);
+
+  // ── deadline tripwire ─────────────────────────────────────────────────────
+  // The server expires a round LAZILY — a passed deadline only turns over when
+  // something touches the room. Rather than wait for the next poll (up to 20s
+  // while the socket is healthy, which would leave the party staring at 0s), we
+  // touch it ourselves the moment the clock runs out. Every client does this;
+  // the first one through flips the room and the broadcast carries the rest.
+  const deadlineAt = state?.phase === 'prompt' ? state.deadlineAt : null;
+  useEffect(() => {
+    if (deadlineAt === null) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    // Self-re-arming on purpose. Firing once would be enough IF the phone's
+    // clock agreed with the server's, but it often doesn't — a phone running a
+    // few seconds fast nudges too early, gets a still-`prompt` room back, and
+    // would then sit at "time's up" until the next slow poll (up to 20s while
+    // the socket is healthy). So we keep nudging on a slow beat until the round
+    // actually turns over, at which point `deadlineAt` goes null and this stops.
+    const arm = () => {
+      const msLeft = deadlineAt - Date.now();
+      timer = setTimeout(
+        () => {
+          refresh();
+          arm();
+        },
+        msLeft > 0 ? msLeft + 250 : RETRY_EXPIRY_MS,
+      );
+    };
+
+    arm();
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [deadlineAt, refresh]);
 
   return useMemo(
     () => ({ state, live, error, toasts, refresh }),

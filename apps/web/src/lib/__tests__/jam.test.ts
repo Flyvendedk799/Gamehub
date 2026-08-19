@@ -152,3 +152,59 @@ describe('jam reconnect backoff', () => {
     }
   });
 });
+
+describe('jam haptics', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('fires a distinct pattern per beat', async () => {
+    const vibrate = vi.fn();
+    vi.stubGlobal('navigator', { vibrate });
+    vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
+    const { jamHaptic } = await import('../jam-feedback');
+
+    jamHaptic('locked');
+    jamHaptic('ready');
+    expect(vibrate).toHaveBeenCalledTimes(2);
+    expect(vibrate.mock.calls[0]?.[0]).not.toEqual(vibrate.mock.calls[1]?.[0]);
+  });
+
+  it('stays silent when the viewer asked for reduced motion', async () => {
+    const vibrate = vi.fn();
+    vi.stubGlobal('navigator', { vibrate });
+    vi.stubGlobal('window', { matchMedia: () => ({ matches: true }) });
+    const { jamHaptic } = await import('../jam-feedback');
+
+    jamHaptic('ready');
+    expect(vibrate).not.toHaveBeenCalled();
+  });
+
+  it('no-ops where vibration does not exist (iOS Safari, desktop)', async () => {
+    vi.stubGlobal('navigator', {});
+    vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
+    const { jamHaptic } = await import('../jam-feedback');
+    expect(() => jamHaptic('round')).not.toThrow();
+  });
+
+  it('swallows a permissions-policy throw rather than breaking the round', async () => {
+    vi.stubGlobal('navigator', {
+      vibrate: () => {
+        throw new Error('blocked by permissions policy');
+      },
+    });
+    vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) });
+    const { jamHaptic } = await import('../jam-feedback');
+    expect(() => jamHaptic('tap')).not.toThrow();
+  });
+
+  it('reports the reduced-motion preference for the reveal animation', async () => {
+    vi.stubGlobal('window', { matchMedia: (q: string) => ({ matches: q.includes('reduce') }) });
+    const { prefersReducedMotion } = await import('../jam-feedback');
+    expect(prefersReducedMotion()).toBe(true);
+  });
+
+  it('treats a browser with no matchMedia as motion-friendly', async () => {
+    vi.stubGlobal('window', {});
+    const { prefersReducedMotion } = await import('../jam-feedback');
+    expect(prefersReducedMotion()).toBe(false);
+  });
+});
