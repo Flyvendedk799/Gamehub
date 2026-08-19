@@ -45,6 +45,14 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: 'hourly',
       priority: 0.9,
     },
+    {
+      // The Game Jam landing. Individual rooms (/jam/:code) are deliberately
+      // absent: they're short-lived, private to whoever holds the code, and
+      // recycle their codes — nothing a crawler should hold onto.
+      url: `${SITE_URL}/jam`,
+      changeFrequency: 'weekly',
+      priority: 0.8,
+    },
     ...games,
   ];
 }

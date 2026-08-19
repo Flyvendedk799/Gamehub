@@ -44,11 +44,12 @@ import { type CreditPurchaseProvider, MockCreditProvider } from './credit-purcha
 import {
   DrizzleChatRepo,
   DrizzleCloudSaveRepo,
+  DrizzleJamRepo,
   DrizzleProjectRepo,
   DrizzleRunRepo,
   DrizzleSnapshotRepo,
 } from './drizzle-repos';
-import { ConsoleEmailTransport, SmtpEmailTransport, type EmailPort } from './email';
+import { ConsoleEmailTransport, type EmailPort, SmtpEmailTransport } from './email';
 import { DrizzleHubRepo } from './hub-repo';
 import { type InProcessBrowserJobs, makeInProcessBrowserJobs } from './in-process-browser';
 import { DrizzlePublishRepo } from './publish-repo';
@@ -233,6 +234,7 @@ async function main() {
   const publishRepo = new DrizzlePublishRepo(db);
   const hubRepo = new DrizzleHubRepo(db);
   const cloudSaveRepo = new DrizzleCloudSaveRepo(db);
+  const jamRepo = new DrizzleJamRepo(db);
 
   let queue: Queue | undefined;
   let browserQueue: BrowserJobQueue | undefined;
@@ -487,6 +489,7 @@ async function main() {
     store,
     snapshotRepo,
     cloudSaveRepo,
+    jamRepo,
     // Durable build-feed backfill — the SSE relay replays these on (re)connect
     // so the log survives a refresh / API restart.
     loadRunEvents: async (runId: string) => {

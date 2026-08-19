@@ -11,6 +11,10 @@ import {
   engineKind,
   follows,
   gameScores,
+  jamAnswers,
+  jamPlayers,
+  jamVotes,
+  jams,
   passwordResetTokens,
   projects,
   publishedGames,
@@ -225,6 +229,82 @@ describe('schema', () => {
       'user_id',
       'project_id',
       'save_key',
+    ]);
+  });
+
+  it('jams hold the room code, phase, config and the build it produced', () => {
+    const cfg = getTableConfig(jams);
+    expect(cfg.name).toBe('jams');
+    expect(columnNames(jams)).toEqual(
+      expect.arrayContaining([
+        'id',
+        'code',
+        'host_user_id',
+        'host_player_id',
+        'phase',
+        'config',
+        'round_prompt_ids',
+        'round',
+        'deadline_at',
+        'project_id',
+        'run_id',
+        'play_slug',
+        'ended_at',
+      ]),
+    );
+    expect(indexNames(jams)).toEqual(
+      expect.arrayContaining(['jams_live_code_key', 'jams_host_created_idx']),
+    );
+    // Codes are 4 chars from a 23-symbol alphabet, so they MUST be recyclable:
+    // the uniqueness is scoped to live rooms (partial predicate in 0017).
+    const codeKey = cfg.indexes.find((i) => i.config.name === 'jams_live_code_key');
+    expect(codeKey?.config.unique).toBe(true);
+  });
+
+  it('jam_players seat guests (nullable user) behind a hashed seat token', () => {
+    const cfg = getTableConfig(jamPlayers);
+    expect(cfg.name).toBe('jam_players');
+    expect(columnNames(jamPlayers)).toEqual(
+      expect.arrayContaining([
+        'jam_id',
+        'user_id',
+        'token_hash',
+        'name',
+        'color',
+        'seat',
+        'left_at',
+      ]),
+    );
+    // Guests join by code with no account — the seat is the identity.
+    expect(cfg.columns.find((c) => c.name === 'user_id')?.notNull).toBe(false);
+    // The raw seat token is never persisted, only its hash.
+    expect(columnNames(jamPlayers)).not.toContain('token');
+    expect(indexNames(jamPlayers)).toEqual(
+      expect.arrayContaining(['jam_players_token_hash_key', 'jam_players_jam_seat_key']),
+    );
+  });
+
+  it('jam_answers keep one editable answer per player per round', () => {
+    const cfg = getTableConfig(jamAnswers);
+    expect(cfg.name).toBe('jam_answers');
+    expect(columnNames(jamAnswers)).toEqual(
+      expect.arrayContaining(['jam_id', 'player_id', 'round', 'prompt_id', 'text']),
+    );
+    const roundKey = cfg.indexes.find((i) => i.config.name === 'jam_answers_player_round_key');
+    expect(roundKey?.config.unique).toBe(true);
+    expect(roundKey?.config.columns.map((c) => (c as { name: string }).name)).toEqual([
+      'jam_id',
+      'player_id',
+      'round',
+    ]);
+  });
+
+  it('jam_votes are idempotent per (answer, voter)', () => {
+    const cfg = getTableConfig(jamVotes);
+    expect(cfg.name).toBe('jam_votes');
+    expect(cfg.primaryKeys[0]?.columns.map((c) => c.name)).toEqual([
+      'answer_id',
+      'voter_player_id',
     ]);
   });
 });

@@ -19,6 +19,10 @@ export default function robots(): MetadataRoute.Robots {
           '/onboarding',
           '/admin',
           '/auth/',
+          // Individual jam rooms only — the /jam landing stays crawlable. Rooms
+          // are short-lived, private to whoever holds the code, and their codes
+          // recycle, so an indexed room URL is worse than useless.
+          '/jam/',
           '/v1/', // same-origin API proxy — never crawlable content
         ],
       },

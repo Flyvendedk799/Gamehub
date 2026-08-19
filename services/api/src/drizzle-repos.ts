@@ -7,10 +7,31 @@
  */
 import { randomUUID } from 'node:crypto';
 import { type Db, schema } from '@playforge/db';
-import type { ChatMessageKind } from '@playforge/shared';
+import {
+  type ChatMessageKind,
+  JAM_MAX_PLAYERS,
+  type JamPhase,
+  type JamPlayer,
+  type JamState,
+  generateJamCode,
+  jamColorForSeat,
+  jamRoundPlan,
+} from '@playforge/shared';
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { ChatMessage, ChatRepo } from './chat-repo';
 import type { CloudSaveRepo } from './cloud-save-repo';
+import {
+  type CreateJamInput,
+  type JamJoinFailure,
+  type JamPhasePatch,
+  type JamRepo,
+  type JamSeat,
+  type JamSummary,
+  type JoinJamInput,
+  assembleJamState,
+  hashJamToken,
+  mintJamToken,
+} from './jam-repo';
 import type { CreateProjectInput, Engine, Project, ProjectRepo, Visibility } from './repo';
 import type {
   CreateRunInput,
@@ -498,5 +519,402 @@ export class DrizzleCloudSaveRepo implements CloudSaveRepo {
     await this.db
       .delete(schema.cloudSaves)
       .where(and(eq(schema.cloudSaves.userId, userId), eq(schema.cloudSaves.projectId, projectId)));
+  }
+}
+
+// ── JamRepo ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Drizzle-backed Game Jam room store.
+ *
+ * Reads assemble the broadcastable `JamState` from four tables (room, players,
+ * answers, vote counts) in one round of queries and hand it to the shared
+ * `assembleJamState`, so the wire shape is identical to the in-memory repo the
+ * route tests run against.
+ */
+export class DrizzleJamRepo implements JamRepo {
+  constructor(private readonly db: Db) {}
+
+  /**
+   * A room code free among LIVE rooms. The partial unique index is the real
+   * guarantee (a concurrent create still 23505s and we retry); this pre-check
+   * just keeps the common path from burning an insert.
+   */
+  private async freshCode(): Promise<string> {
+    for (let i = 0; i < 50; i++) {
+      const code = generateJamCode();
+      const [taken] = await this.db
+        .select({ id: schema.jams.id })
+        .from(schema.jams)
+        .where(and(eq(schema.jams.code, code), isNull(schema.jams.endedAt)))
+        .limit(1);
+      if (!taken) return code;
+    }
+    throw new Error('jam_code_space_exhausted');
+  }
+
+  async create(input: CreateJamInput): Promise<{ state: JamState; seat: JamSeat }> {
+    const token = mintJamToken();
+    const roundPromptIds = jamRoundPlan(input.config.rounds).map((c) => c.id);
+
+    // Retry on the live-code unique violation: two hosts can pick the same code
+    // between the pre-check and the insert, and the loser should just get a new
+    // code rather than a 500.
+    let jamId: string | null = null;
+    for (let attempt = 0; attempt < 5 && jamId === null; attempt++) {
+      const code = await this.freshCode();
+      try {
+        const [row] = await this.db
+          .insert(schema.jams)
+          .values({ code, hostUserId: input.hostUserId, config: input.config, roundPromptIds })
+          .returning({ id: schema.jams.id });
+        jamId = row?.id ?? null;
+      } catch (err) {
+        const code23505 = (err as { code?: string } | null)?.code === '23505';
+        if (!code23505 || attempt === 4) throw err;
+      }
+    }
+    if (jamId === null) throw new Error('jam_create_failed');
+
+    const [player] = await this.db
+      .insert(schema.jamPlayers)
+      .values({
+        jamId,
+        userId: input.hostUserId,
+        tokenHash: hashJamToken(token),
+        name: input.hostName,
+        color: jamColorForSeat(0).id,
+        seat: 0,
+      })
+      .returning({ id: schema.jamPlayers.id });
+    const playerId = player?.id;
+    if (playerId === undefined) throw new Error('jam_host_seat_failed');
+
+    await this.db
+      .update(schema.jams)
+      .set({ hostPlayerId: playerId })
+      .where(eq(schema.jams.id, jamId));
+
+    const state = await this.getState(jamId);
+    if (!state) throw new Error('jam_create_failed');
+    return { state, seat: { playerId, token } };
+  }
+
+  async findLiveIdByCode(code: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ id: schema.jams.id })
+      .from(schema.jams)
+      .where(and(eq(schema.jams.code, code), isNull(schema.jams.endedAt)))
+      .limit(1);
+    return row?.id ?? null;
+  }
+
+  async getState(jamId: string): Promise<JamState | null> {
+    const [jam] = await this.db
+      .select()
+      .from(schema.jams)
+      .where(eq(schema.jams.id, jamId))
+      .limit(1);
+    if (!jam) return null;
+
+    const playerRows = await this.db
+      .select()
+      .from(schema.jamPlayers)
+      .where(eq(schema.jamPlayers.jamId, jamId))
+      .orderBy(asc(schema.jamPlayers.seat));
+
+    const answerRows = await this.db
+      .select({
+        id: schema.jamAnswers.id,
+        round: schema.jamAnswers.round,
+        promptId: schema.jamAnswers.promptId,
+        playerId: schema.jamAnswers.playerId,
+        text: schema.jamAnswers.text,
+        createdAt: schema.jamAnswers.createdAt,
+        votes: sql<number>`(
+          SELECT count(*)::int FROM ${schema.jamVotes}
+          WHERE ${schema.jamVotes.answerId} = ${schema.jamAnswers.id}
+        )`,
+      })
+      .from(schema.jamAnswers)
+      .where(eq(schema.jamAnswers.jamId, jamId))
+      .orderBy(asc(schema.jamAnswers.round), asc(schema.jamAnswers.createdAt));
+
+    return assembleJamState({
+      id: jam.id,
+      code: jam.code,
+      hostPlayerId: jam.hostPlayerId ?? '',
+      phase: jam.phase,
+      config: jam.config,
+      round: jam.round,
+      roundPromptIds: jam.roundPromptIds,
+      players: playerRows
+        .filter((p) => p.leftAt === null)
+        .map((p) => ({
+          id: p.id,
+          userId: p.userId ?? null,
+          name: p.name,
+          color: p.color,
+          seat: p.seat,
+          isHost: p.id === jam.hostPlayerId,
+          connected: false,
+          joinedAt: p.joinedAt.toISOString(),
+        })),
+      answers: answerRows.map((a) => ({
+        id: a.id,
+        round: a.round,
+        promptId: a.promptId,
+        playerId: a.playerId,
+        text: a.text,
+        votes: Number(a.votes ?? 0),
+        createdAt: a.createdAt.toISOString(),
+      })),
+      deadlineAt: jam.deadlineAt?.getTime() ?? null,
+      projectId: jam.projectId ?? null,
+      runId: jam.runId ?? null,
+      playSlug: jam.playSlug ?? null,
+      createdAt: jam.createdAt.toISOString(),
+      updatedAt: jam.updatedAt.toISOString(),
+    });
+  }
+
+  async join(
+    jamId: string,
+    input: JoinJamInput,
+  ): Promise<{ seat: JamSeat } | { error: JamJoinFailure }> {
+    const [jam] = await this.db
+      .select({ phase: schema.jams.phase, endedAt: schema.jams.endedAt })
+      .from(schema.jams)
+      .where(eq(schema.jams.id, jamId))
+      .limit(1);
+    if (!jam || jam.endedAt !== null) return { error: 'closed' };
+    // Late joins are welcome while the room is still writing ideas; once the
+    // build starts the roster is baked into the brief, so the room is closed.
+    if (jam.phase === 'building' || jam.phase === 'ready' || jam.phase === 'ended') {
+      return { error: 'closed' };
+    }
+
+    const token = mintJamToken();
+    // Seat numbers never recycle within a room, so a rejoining player can't
+    // steal a departed player's color mid-jam. The (jam_id, seat) unique index
+    // makes concurrent joins safe: the loser retries onto the next seat.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const [agg] = await this.db
+        .select({
+          active: sql<number>`count(*) FILTER (WHERE ${schema.jamPlayers.leftAt} IS NULL)::int`,
+          nextSeat: sql<number>`COALESCE(MAX(${schema.jamPlayers.seat}) + 1, 0)::int`,
+        })
+        .from(schema.jamPlayers)
+        .where(eq(schema.jamPlayers.jamId, jamId));
+      if ((agg?.active ?? 0) >= JAM_MAX_PLAYERS) return { error: 'full' };
+      const seat = agg?.nextSeat ?? 0;
+      try {
+        const [row] = await this.db
+          .insert(schema.jamPlayers)
+          .values({
+            jamId,
+            userId: input.userId,
+            tokenHash: hashJamToken(token),
+            name: input.name,
+            color: jamColorForSeat(seat).id,
+            seat,
+          })
+          .returning({ id: schema.jamPlayers.id });
+        if (row?.id !== undefined) return { seat: { playerId: row.id, token } };
+      } catch (err) {
+        if ((err as { code?: string } | null)?.code !== '23505') throw err;
+      }
+    }
+    return { error: 'full' };
+  }
+
+  async resolveSeat(jamId: string, token: string): Promise<JamPlayer | null> {
+    const [jam] = await this.db
+      .select({ hostPlayerId: schema.jams.hostPlayerId })
+      .from(schema.jams)
+      .where(eq(schema.jams.id, jamId))
+      .limit(1);
+    if (!jam) return null;
+    const [row] = await this.db
+      .select()
+      .from(schema.jamPlayers)
+      .where(
+        and(
+          eq(schema.jamPlayers.jamId, jamId),
+          eq(schema.jamPlayers.tokenHash, hashJamToken(token)),
+          isNull(schema.jamPlayers.leftAt),
+        ),
+      )
+      .limit(1);
+    if (!row) return null;
+    return {
+      id: row.id,
+      userId: row.userId ?? null,
+      name: row.name,
+      color: row.color,
+      seat: row.seat,
+      isHost: row.id === jam.hostPlayerId,
+      connected: false,
+      joinedAt: row.joinedAt.toISOString(),
+    };
+  }
+
+  async leave(jamId: string, playerId: string): Promise<void> {
+    await this.db
+      .update(schema.jamPlayers)
+      .set({ leftAt: new Date() })
+      .where(
+        and(
+          eq(schema.jamPlayers.jamId, jamId),
+          eq(schema.jamPlayers.id, playerId),
+          isNull(schema.jamPlayers.leftAt),
+        ),
+      );
+    await this.touch(jamId);
+  }
+
+  async transferHost(jamId: string, playerId: string): Promise<void> {
+    // Only to a seat that is still in the room — handing the room to someone who
+    // already walked out would brick it just as thoroughly as not handing it on.
+    const [next] = await this.db
+      .select({ id: schema.jamPlayers.id })
+      .from(schema.jamPlayers)
+      .where(
+        and(
+          eq(schema.jamPlayers.jamId, jamId),
+          eq(schema.jamPlayers.id, playerId),
+          isNull(schema.jamPlayers.leftAt),
+        ),
+      )
+      .limit(1);
+    if (!next) return;
+    await this.db
+      .update(schema.jams)
+      .set({ hostPlayerId: playerId, updatedAt: new Date() })
+      .where(eq(schema.jams.id, jamId));
+  }
+
+  async setPhase(jamId: string, phase: JamPhase, patch?: JamPhasePatch): Promise<void> {
+    await this.db
+      .update(schema.jams)
+      .set({
+        phase,
+        updatedAt: new Date(),
+        ...(patch?.round !== undefined ? { round: patch.round } : {}),
+        ...(patch?.deadlineAt !== undefined
+          ? { deadlineAt: patch.deadlineAt === null ? null : new Date(patch.deadlineAt) }
+          : {}),
+        ...(phase === 'ended' ? { endedAt: new Date() } : {}),
+      })
+      .where(eq(schema.jams.id, jamId));
+  }
+
+  async submitAnswer(input: {
+    jamId: string;
+    playerId: string;
+    round: number;
+    promptId: string;
+    text: string;
+  }): Promise<void> {
+    await this.db
+      .insert(schema.jamAnswers)
+      .values({
+        jamId: input.jamId,
+        playerId: input.playerId,
+        round: input.round,
+        promptId: input.promptId,
+        text: input.text,
+      })
+      // Re-submitting EDITS the existing answer instead of stacking a second
+      // one — what a player expects when fixing a typo before the reveal.
+      .onConflictDoUpdate({
+        target: [schema.jamAnswers.jamId, schema.jamAnswers.playerId, schema.jamAnswers.round],
+        set: { text: input.text, promptId: input.promptId },
+      });
+    await this.touch(input.jamId);
+  }
+
+  async toggleVote(jamId: string, answerId: string, voterPlayerId: string): Promise<boolean> {
+    const deleted = await this.db
+      .delete(schema.jamVotes)
+      .where(
+        and(
+          eq(schema.jamVotes.answerId, answerId),
+          eq(schema.jamVotes.voterPlayerId, voterPlayerId),
+        ),
+      )
+      .returning({ answerId: schema.jamVotes.answerId });
+    if (deleted.length > 0) {
+      await this.touch(jamId);
+      return false;
+    }
+    await this.db.insert(schema.jamVotes).values({ answerId, voterPlayerId }).onConflictDoNothing();
+    await this.touch(jamId);
+    return true;
+  }
+
+  async attachBuild(jamId: string, projectId: string, runId: string): Promise<void> {
+    await this.db
+      .update(schema.jams)
+      .set({ projectId, runId, updatedAt: new Date() })
+      .where(eq(schema.jams.id, jamId));
+  }
+
+  async setPlaySlug(jamId: string, playSlug: string): Promise<void> {
+    await this.db
+      .update(schema.jams)
+      .set({ playSlug, updatedAt: new Date() })
+      .where(eq(schema.jams.id, jamId));
+  }
+
+  async end(jamId: string): Promise<void> {
+    await this.setPhase(jamId, 'ended');
+  }
+
+  async listByHost(hostUserId: string): Promise<JamSummary[]> {
+    const rows = await this.db
+      .select({
+        id: schema.jams.id,
+        code: schema.jams.code,
+        phase: schema.jams.phase,
+        projectId: schema.jams.projectId,
+        playSlug: schema.jams.playSlug,
+        createdAt: schema.jams.createdAt,
+        playerCount: sql<number>`(
+          SELECT count(*)::int FROM ${schema.jamPlayers}
+          WHERE ${schema.jamPlayers.jamId} = ${schema.jams.id}
+            AND ${schema.jamPlayers.leftAt} IS NULL
+        )`,
+        title: sql<string | null>`(
+          SELECT ${schema.jamAnswers.text} FROM ${schema.jamAnswers}
+          WHERE ${schema.jamAnswers.jamId} = ${schema.jams.id}
+            AND ${schema.jamAnswers.promptId} = 'title'
+          ORDER BY ${schema.jamAnswers.createdAt} ASC
+          LIMIT 1
+        )`,
+      })
+      .from(schema.jams)
+      .where(eq(schema.jams.hostUserId, hostUserId))
+      .orderBy(desc(schema.jams.createdAt))
+      .limit(50);
+
+    return rows.map((r) => ({
+      id: r.id,
+      code: r.code,
+      phase: r.phase,
+      playerCount: Number(r.playerCount ?? 0),
+      title: r.title ?? null,
+      projectId: r.projectId ?? null,
+      playSlug: r.playSlug ?? null,
+      createdAt: r.createdAt.toISOString(),
+    }));
+  }
+
+  /** Bump `updated_at` so pollers/broadcasts see the room changed. */
+  private async touch(jamId: string): Promise<void> {
+    await this.db
+      .update(schema.jams)
+      .set({ updatedAt: new Date() })
+      .where(eq(schema.jams.id, jamId));
   }
 }

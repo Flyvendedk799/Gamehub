@@ -79,6 +79,7 @@ export default function Sidebar({
       label: 'My projects',
       match: (p) => p === '/projects' || p.startsWith('/projects/'),
     },
+    { href: '/jam', label: 'Game Jam', match: (p) => p.startsWith('/jam') },
     { href: '/hub', label: 'Community hub', match: (p) => p.startsWith('/hub') },
   ];
 
