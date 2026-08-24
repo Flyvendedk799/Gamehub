@@ -48,6 +48,21 @@ export interface BuildReport {
   // v3 P10a — cache-weighted cost:
   costUsd?: number;
   cacheHitRate?: number;
+  // Modular scaffold (BUILD_SPEED §1/§2) — how much of the seeded module set is
+  // still on disk at ship, and the file-size shape that drives view:mutation cost.
+  scaffoldSeeded?: number;
+  scaffoldSurvived?: number;
+  scaffoldDeleted?: string[];
+  entryFileLines?: number;
+  maxFileLines?: number;
+  maxFileLinesPath?: string | null;
+  // Agent restarts (BUILD_SPEED §6) — chunk boundaries, each one re-establishing
+  // context. Measured before anything is done about them.
+  agentStarts?: number;
+  agentRestarts?: number;
+  restartReestablishTokens?: number;
+  restartReestablishShare?: number;
+  restartSegmentTurns?: number[];
   recommendedButUnused?: string[]; // skills the engine recommended but the agent never opened
   engineEscaped?: boolean; // declared an engine but built with a different runtime (decoy)
   capabilities?: {

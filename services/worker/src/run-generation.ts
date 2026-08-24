@@ -22,18 +22,24 @@ import {
   type GenerateInput,
   type GenerateOutput,
   type GenerateViaAgentDeps,
-  PREMIUM_STARTERS,
+  MAX_VISUAL_CRITIQUES,
+  PREMIUM_STARTER_FILES,
   PREMIUM_STARTER_PATH,
   type PlaytestStep,
   type PlaytesterInput,
   type PlaytesterOutput,
   type RepairVerdict,
   type ShipReason,
+  type StarterEngine,
+  type VisualCritique,
   buildInteractivityFloorPlan,
   buildRepairVerdict,
+  buildVisualCritiquePrompt,
+  buildVisualRepairInstruction,
   decideRepairAction,
   detectInteractivityResponse,
   generateViaAgent,
+  parseVisualCritique,
   recommendSkills,
   resolveMaxRepairRounds,
   selectGamePlaytestPlan,
@@ -126,7 +132,34 @@ export interface BrowserJobsPort {
     htmlContent: string,
     steps: ReadonlyArray<PlaytestStep>,
   ): Promise<PlaytestVerdict | null>;
+  /**
+   * BUILD_SPEED §3 — one frame of the running game, base64 PNG. Optional so an
+   * older queue node (or an offline test) simply yields no visual critique rather
+   * than failing the run. `null` when no frame could be captured.
+   */
+  screenshot?(htmlContent: string): Promise<GameFrame | null>;
 }
+
+/** A captured frame of the running game. */
+export interface GameFrame {
+  /** Base64-encoded PNG (no data: prefix). */
+  pngBase64: string;
+  width: number;
+  height: number;
+}
+
+/**
+ * BUILD_SPEED §3 — the vision call. Given a frame and the brief, return the model's
+ * raw critique text (parsed by `parseVisualCritique`), or null when no vision model
+ * is available. Injected by the worker's main.ts against the run's own credential;
+ * offline tests inject a stub or omit it, and the run then skips the critique
+ * entirely rather than degrading.
+ */
+export type VisionCriticFn = (input: {
+  pngBase64: string;
+  mimeType: string;
+  prompt: string;
+}) => Promise<string | null>;
 
 /** Minimal runtime-verify verdict the worker consumes from the browser-jobs
  *  round-trip (a subset of the browser-worker RuntimeVerifyResult). */
@@ -264,6 +297,13 @@ export interface GenerationPorts {
    * most recent and writes it whether the run finishes or throws.
    */
   onUsage?: (usage: RunTokenUsage) => void;
+  /**
+   * BUILD_SPEED §3 — the vision model used for the bounded visual critique. When
+   * omitted (or when the browser-jobs port cannot screenshot), the run ships
+   * exactly as before: no frame is ever looked at. Capped at
+   * `MAX_VISUAL_CRITIQUES` calls per run by construction.
+   */
+  visionCritic?: VisionCriticFn;
 }
 
 export interface GenerationResult {
@@ -310,6 +350,41 @@ export interface GenerationResult {
  * this, the cloud worker handed the agent a permissive pass, so the headline
  * "win/lose-validated, anti-slop" guarantee ran on nothing server-side.
  */
+/**
+ * Seed the premium MODULAR starter for `engine` into an empty working tree.
+ *
+ * Two things changed with the modular scaffold (docs/BUILD_SPEED_FROM_BOXER_RUNS.md
+ * §1/§2) and both matter here:
+ *
+ *  - it is a SET of files, not one — a thin `src/main.js` bootstrap plus the
+ *    engine (`src/engine/core.js`) and one small module per concern, so the
+ *    agent edits a 60-line file instead of re-reading a 1400-line one;
+ *  - the engine is WRITTEN, never recommended. Run 2 proved a recommendation is
+ *    read after the agent has already committed to its own architecture.
+ *
+ * Per-file `view === null` guard, not a whole-set one: a remix arrives with its
+ * own `src/main.js`, and clobbering it would delete the user's game. Anything
+ * already on disk wins; only the gaps are filled. So a remix of a single-file
+ * game keeps its single file — it is NOT retro-fitted with scaffold modules it
+ * never imports (they would be swept as dead code anyway).
+ */
+export function seedPremiumStarter(
+  tree: { view(path: string): unknown; create(path: string, content: string): unknown },
+  engine: StarterEngine,
+): string[] {
+  // A tree that already has an entry module is somebody's project (a remix, or an
+  // agent that wrote its own). Seed nothing — a partial overlay of scaffold modules
+  // onto a foreign entry is dead weight at best and a broken import at worst.
+  if (tree.view(PREMIUM_STARTER_PATH) !== null) return [];
+  const seeded: string[] = [];
+  for (const [path, content] of Object.entries(PREMIUM_STARTER_FILES[engine])) {
+    if (tree.view(path) !== null) continue;
+    tree.create(path, content);
+    seeded.push(path);
+  }
+  return seeded;
+}
+
 /**
  * True for verify-only asset/XHR-load failures introduced by inlining a
  * multi-file game for the boot gate (relative asset paths can't resolve under
@@ -465,11 +540,14 @@ export async function runGeneration(
   // The New-design dialog skips choose_engine when the user picked an engine, so the
   // setEngine seed (below) never fires on that common path; seed here too. The
   // tree.view===null guard skips remixes (their src/main.js already exists).
-  if (
-    (req.engine === 'three' || req.engine === 'phaser' || req.engine === 'canvas2d') &&
-    tree.view(PREMIUM_STARTER_PATH) === null
-  ) {
-    tree.create(PREMIUM_STARTER_PATH, PREMIUM_STARTERS[req.engine]);
+  //
+  // Every seeded path is remembered so the run can report how much of the scaffold
+  // SURVIVED to ship. That is the guardrail the modular-scaffold change is measured
+  // by: `skillsImported` says nothing (run 2 proved it rises while nothing is used),
+  // but a scaffold that gets deleted or bypassed shows up here immediately.
+  const seededStarterPaths = new Set<string>();
+  if (req.engine === 'three' || req.engine === 'phaser' || req.engine === 'canvas2d') {
+    for (const path of seedPremiumStarter(tree, req.engine)) seededStarterPaths.add(path);
   }
 
   // Hard run ceiling (#18) — abort cleanly when a token budget is set.
@@ -613,7 +691,16 @@ export async function runGeneration(
     // here makes the two environments identical (controls + art + debug contract
     // present before the game module), so the gate sees what the player sees.
     const withRuntime = (html: string): string => injectControlsRuntime(html);
-    if (engine !== 'three' && engine !== 'phaser') return withRuntime(fallbackHtml);
+    // canvas2d is inlined too. It used to fall through to the raw entry because it
+    // vendors no CDN engine — but the entry only ever <script src>s `src/main.js`,
+    // which cannot load under setContent, so the gate booted an EMPTY page and read
+    // the injected `window.__game` as a successful boot. With the modular scaffold
+    // that hole widens (every module is external), and buildGameHtml handles
+    // canvas2d without touching the network (the engine-vendoring step is skipped
+    // for it), so there is nothing left to trade off.
+    if (engine !== 'three' && engine !== 'phaser' && engine !== 'canvas2d') {
+      return withRuntime(fallbackHtml);
+    }
     try {
       const files = tree.toSnapshotInput().map((f) => ({
         path: f.path,
@@ -733,9 +820,7 @@ export async function runGeneration(
           // only got partial adoption (confirm 2026-06-23). Seed ONLY when nothing is
           // there yet: a remix (initialFiles) or an agent who already wrote an entry
           // keeps their file. The choose_engine result tells the agent to adapt it.
-          if (tree.view(PREMIUM_STARTER_PATH) === null) {
-            tree.create(PREMIUM_STARTER_PATH, PREMIUM_STARTERS[engine]);
-          }
+          for (const path of seedPremiumStarter(tree, engine)) seededStarterPaths.add(path);
         }
       },
       getCurrentEngine: () => state.engine,
@@ -972,12 +1057,94 @@ export async function runGeneration(
   // stubborn agent can't burn the whole repair budget on it.
   let stagedUnusedRepairDone = false;
 
+  // ── BUILD_SPEED §3 — look at ONE frame ────────────────────────────────────
+  // Nothing else in this loop ever sees the game. `playtest_game` returns
+  // positions, HP and error counts, so the agent reasons entirely from numbers —
+  // which is why run 3's juice score fell 96 → 91 while the game doubled in size
+  // and no gate noticed. Flat lighting, untextured primitives, an unreadable
+  // silhouette, a HUD colliding with itself: all obvious in a frame, all invisible
+  // in a state snapshot.
+  //
+  // BOUNDED, deliberately. Two vision calls per run: one at the first moment we
+  // would otherwise ship (whose findings buy at most ONE repair round) and one
+  // after that repair, recorded and never acted on. Never a loop — a critique
+  // loop converges on taste, not on shipping.
+  const visionCritic = ports.visionCritic;
+  const canCritique = visionCritic !== undefined && browserJobs?.screenshot !== undefined;
+  let visionCalls = 0;
+  let visualRepairDone = false;
+  const visualCritiques: Array<{ findings: string[]; readsFinished: boolean }> = [];
+
+  /** Capture a frame and critique it. Null when unavailable or it failed — a
+   *  missing critique must never fail or block a run. */
+  const critiqueCurrentFrame = async (): Promise<VisualCritique | null> => {
+    if (!canCritique || visionCalls >= MAX_VISUAL_CRITIQUES) return null;
+    // Only worth looking at a game that booted; a frame of a dead page tells us
+    // nothing the boot gate has not already said far more precisely.
+    if (lastRuntimeVerify?.booted !== true) return null;
+    const entry = tree.view('index.html');
+    if (entry === null) return null;
+    visionCalls += 1;
+    try {
+      const frame = await browserJobs?.screenshot?.(await inlineForVerify(entry.content));
+      if (frame === null || frame === undefined) return null;
+      const raw = await visionCritic?.({
+        pngBase64: frame.pngBase64,
+        mimeType: 'image/png',
+        prompt: buildVisualCritiquePrompt(req.prompt),
+      });
+      if (raw === null || raw === undefined || raw.trim().length === 0) return null;
+      const critique = parseVisualCritique(raw);
+      visualCritiques.push({ findings: critique.findings, readsFinished: critique.readsFinished });
+      const findingLines = critique.findings.map((f) => `\n[visual-critique]   - ${f}`).join('');
+      console.log(
+        `[visual-critique] call=${visionCalls} findings=${critique.findings.length} readsFinished=${critique.readsFinished}${findingLines}`,
+      );
+      return critique;
+    } catch (err) {
+      // Vision is an ADVISORY layer bolted onto a loop that already ships
+      // correctly without it. It never gets to break a run.
+      console.warn(`[run-generation] visual critique failed (non-fatal): ${String(err)}`);
+      return null;
+    }
+  };
+
+  /**
+   * The whole §3 hook, in the one place both ship paths reach.
+   *
+   * Returns true when it launched a repair round (the caller re-enters the loop).
+   * At most ONE such round per run: a second look is for the record, not for more
+   * work. Everything here is best-effort — every early return ships the run
+   * exactly as it would have shipped without vision.
+   */
+  const runVisualCritiqueRound = async (budgetExhausted: boolean): Promise<boolean> => {
+    if (visualRepairDone || !canCritique) return false;
+    const critique = await critiqueCurrentFrame();
+    if (critique === null || critique.findings.length === 0) return false;
+    // Findings exist but there is no room to act on them: they are still recorded
+    // (critiqueCurrentFrame pushed them), which is how a "shipped looking
+    // unfinished" run becomes visible in telemetry instead of invisible.
+    if (budgetExhausted || repairRounds >= maxRepairRounds) return false;
+    visualRepairDone = true;
+    history.push(
+      { role: 'user', content: nextPrompt },
+      { role: 'assistant', content: output.message },
+    );
+    nextPrompt = buildVisualRepairInstruction(critique.findings);
+    repairRounds += 1;
+    output = await generate(buildInput(nextPrompt, history), deps);
+    return true;
+  };
+
   for (;;) {
     const verdict = await observeVerdict();
     shippedVerdict = verdict;
     if (verdict === null) {
       // No deterministic verdict (no port / no spec / no predicates / no
-      // artifact). Nothing to gate on — ship as-is.
+      // artifact). Nothing to gate on — but a booted game can still be LOOKED at
+      // before it ships, and a no_verdict run is exactly the one with no other
+      // quality signal at all.
+      if (await runVisualCritiqueRound(aborted || output.interrupted)) continue;
       shipReason = 'no_verdict';
       break;
     }
@@ -1023,6 +1190,9 @@ export async function runGeneration(
       }
     }
     if (action.kind === 'ship') {
+      // The first moment we would otherwise ship IS "the first passing playtest".
+      // Look at a frame; if it reads unfinished, spend one round on it.
+      if (await runVisualCritiqueRound(budgetExhausted)) continue;
       shipReason = action.reason;
       break;
     }
@@ -1036,6 +1206,14 @@ export async function runGeneration(
     nextPrompt = action.instruction;
     repairRounds += 1;
     output = await generate(buildInput(nextPrompt, history), deps);
+  }
+
+  // BUILD_SPEED §3 — the second and last look: one frame AFTER the repair that the
+  // first critique bought. Recorded, never acted on — this is the measurement that
+  // says whether looking at a frame actually improved the shipped game, which is
+  // the only way to know if this whole hook earns its two calls.
+  if (visualRepairDone) {
+    await critiqueCurrentFrame();
   }
 
   // v3.1 — dead-skill sweep. The staged-unused repair round (above) gives the
@@ -1128,6 +1306,25 @@ export async function runGeneration(
     req.model?.modelId ?? null,
   );
   const billedInput = usedInputTokens + usedCacheReadTokens + usedCacheWriteTokens;
+  // Modular-scaffold survival + file-size shape, both read off the SHIPPED tree.
+  const shippedTextFiles = tree.toTextFiles();
+  const scaffoldSurvivors = [...seededStarterPaths].filter((p) =>
+    shippedTextFiles.some((f) => f.path === p),
+  );
+  const lineCountOf = (content: string): number => content.split('\n').length;
+  const entryLines = (() => {
+    const entry = shippedTextFiles.find((f) => f.path === PREMIUM_STARTER_PATH);
+    return entry === undefined ? 0 : lineCountOf(entry.content);
+  })();
+  let maxLines = 0;
+  let maxLinesPath: string | null = null;
+  for (const f of shippedTextFiles) {
+    const lines = lineCountOf(f.content);
+    if (lines > maxLines) {
+      maxLines = lines;
+      maxLinesPath = f.path;
+    }
+  }
   const buildReport = {
     genre: state.spec?.genre ?? null,
     engine: state.engine,
@@ -1159,6 +1356,32 @@ export async function runGeneration(
     importWithoutUse: sig.skillsImported.length > 0 && usage.engineImports === 0,
     removedDeadSkills, // v3.1 — provably-unreferenced staged modules swept at ship
     removedDeadSkillCount: removedDeadSkills.length,
+    // Modular scaffold (BUILD_SPEED §1/§2) — the two things worth watching.
+    //
+    // scaffold*: how much of the seeded module set is still on disk at ship. The
+    // scaffold is only load-bearing while the agent EDITS it; a run that deletes it
+    // and writes its own monolith is the regression, and `engineImports` /
+    // `usesSkillFns` above (never `skillsImported`) say whether the seeded engine is
+    // still being called.
+    //
+    // *FileLines: the cost §1 is actually about. Run 3 shipped a 1419-line
+    // `src/main.js` and paid 37 views for 17 mutations because no edit could be made
+    // without a look first. If the modules hold, maxFileLines stays in the hundreds
+    // and the view:mutation ratio should follow it down.
+    scaffoldSeeded: seededStarterPaths.size,
+    scaffoldSurvived: scaffoldSurvivors.length,
+    scaffoldDeleted: [...seededStarterPaths].filter((p) => !scaffoldSurvivors.includes(p)),
+    entryFileLines: entryLines,
+    maxFileLines: maxLines,
+    maxFileLinesPath: maxLinesPath,
+    // BUILD_SPEED §3 — what the frame said, before and after the repair it bought.
+    // Read `visualFindingsAfter < visualFindingsBefore` against `juiceScore` to
+    // judge whether the vision call is worth keeping.
+    visionCalls,
+    visualRepairRan: visualRepairDone,
+    visualFindingsBefore: visualCritiques[0]?.findings.length ?? null,
+    visualFindingsAfter: visualCritiques[1]?.findings.length ?? null,
+    visualFindings: visualCritiques[0]?.findings ?? [],
     recommendedButUnused,
     engineEscaped,
     ...sig,
@@ -1192,6 +1415,16 @@ export async function runGeneration(
         `ship=${shipReason} forceAccept=${metrics.forceAccept} repair=${repairRounds} ` +
         `playbook=${metrics.playbookPass}/${metrics.playbookTotal} juice=${metrics.juiceScore ?? 'n/a'} ` +
         `predicates=[${predicateSummary}]`,
+    );
+    // BUILD_SPEED §1/§2/§6 — the three things the build-speed work is judged on,
+    // on one greppable line: did the scaffold survive, how big did files get, and
+    // what did the run's restarts cost to re-establish.
+    console.log(
+      `[build-speed] scaffold=${scaffoldSurvivors.length}/${seededStarterPaths.size} ` +
+        `engineImports=${usage.engineImports} usesSkillFns=${usage.usesSkillFns} ` +
+        `entryLines=${entryLines} maxLines=${maxLines}${maxLinesPath === null ? '' : ` (${maxLinesPath})`} ` +
+        `restarts=${sig.agentRestarts} reestablish=${sig.restartReestablishTokens}tok ` +
+        `(${(sig.restartReestablishShare * 100).toFixed(1)}% of billed input)`,
     );
     if (score !== null && score.failures > 0) {
       for (const r of score.results.filter((x) => !x.pass)) {

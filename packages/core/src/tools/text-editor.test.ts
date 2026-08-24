@@ -1632,3 +1632,112 @@ describe('navigation: the map and find replace scanning', () => {
     ).rejects.toThrow(/non-empty/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// BUILD_SPEED §5 — large files steer to `patch`, every time, not once
+// ---------------------------------------------------------------------------
+
+describe('text-editor large-file patch steering — BUILD_SPEED §5', () => {
+  function readText(
+    res: Awaited<ReturnType<ReturnType<typeof makeTextEditorTool>['execute']>>,
+  ): string {
+    const block = res.content[0];
+    return block && 'text' in block ? block.text : '';
+  }
+
+  /** A file of `n` uniquely-numbered lines. */
+  function bigFile(n: number): string {
+    return Array.from({ length: n }, (_, i) => `const line${i} = ${i};`).join('\n');
+  }
+
+  it('steers to patch on EVERY str_replace once the file passes 600 lines', async () => {
+    const fs = makeFs({ 'src/main.js': bigFile(900) });
+    const tool = makeTextEditorTool(fs);
+
+    // A single-line edit — below the threshold this would get no nudge at all.
+    const r1 = await tool.execute('e1', {
+      command: 'str_replace',
+      path: 'src/main.js',
+      old_str: 'const line10 = 10;',
+      new_str: 'const line10 = 11;',
+    });
+    expect(readText(r1)).toMatch(/900 lines/);
+    expect(readText(r1)).toMatch(/patch/);
+    expect(readText(r1)).toMatch(/expectedOriginal/);
+
+    // …and again. The one-shot tip was the thing that stopped holding.
+    const r2 = await tool.execute('e2', {
+      command: 'str_replace',
+      path: 'src/main.js',
+      old_str: 'const line20 = 20;',
+      new_str: 'const line20 = 21;',
+    });
+    expect(readText(r2)).toMatch(/patch/);
+    expect(readText(r2)).toMatch(/expectedOriginal/);
+  });
+
+  it('leaves a small file on the original one-shot tip', async () => {
+    const fs = makeFs({ 'src/player.js': bigFile(120) });
+    const tool = makeTextEditorTool(fs);
+    const res = await tool.execute('e1', {
+      command: 'str_replace',
+      path: 'src/player.js',
+      old_str: 'const line10 = 10;',
+      new_str: 'const line10 = 11;',
+    });
+    // Single-line edit on a short file: no pressure at all.
+    expect(readText(res)).not.toMatch(/patch/);
+  });
+
+  it('does not steer on a deletion (there is nothing to re-anchor)', async () => {
+    const fs = makeFs({ 'src/main.js': bigFile(900) });
+    const tool = makeTextEditorTool(fs);
+    const res = await tool.execute('e1', {
+      command: 'str_replace',
+      path: 'src/main.js',
+      old_str: 'const line10 = 10;',
+      new_str: '',
+    });
+    expect(readText(res)).not.toMatch(/expectedOriginal/);
+  });
+
+  it('steers to patch when a str_replace MISSES on a large file', async () => {
+    const fs = makeFs({ 'src/main.js': bigFile(900) });
+    const tool = makeTextEditorTool(fs);
+    await expect(
+      tool.execute('e1', {
+        command: 'str_replace',
+        path: 'src/main.js',
+        old_str: 'const nothingLikeThis = 0;',
+        new_str: 'x',
+      }),
+    ).rejects.toThrow(/900 lines[\s\S]*patch/);
+  });
+
+  it('does not steer on a miss in a small file', async () => {
+    const fs = makeFs({ 'src/player.js': bigFile(50) });
+    const tool = makeTextEditorTool(fs);
+    await expect(
+      tool.execute('e1', {
+        command: 'str_replace',
+        path: 'src/player.js',
+        old_str: 'const nothingLikeThis = 0;',
+        new_str: 'x',
+      }),
+    ).rejects.toThrow(/old_str not found/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BUILD_SPEED §4 — read-only calls are told to batch
+// ---------------------------------------------------------------------------
+
+describe('text-editor batching guidance — BUILD_SPEED §4', () => {
+  it('tells the agent to emit independent reads in one turn', () => {
+    const tool = makeTextEditorTool(makeFs({ 'index.html': '<html></html>' }));
+    expect(tool.description).toMatch(/BATCH READS/);
+    expect(tool.description).toMatch(/ONE turn/);
+    // The point is the round trip, not the tool: say so.
+    expect(tool.description).toMatch(/round trip/);
+  });
+});

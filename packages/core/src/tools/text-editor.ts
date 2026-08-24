@@ -310,6 +310,22 @@ function throwOversizedInsert(path: string, byteLen: number, cap: number): never
  * Returns definition-like lines first (function/class/const/method/arrow), then
  * any whole-word occurrence. 1-indexed, capped. (Edit-failure pass 2026-06-22.)
  */
+/**
+ * BUILD_SPEED §5 — the line count past which `str_replace` actively steers toward
+ * `patch`, on every edit and on every miss.
+ *
+ * The one-shot tip did not hold. Run 2 cut str_replace failures 7 → 2; run 3
+ * doubled the file's size and they went back to 5, with `patch` still the minority
+ * path (7 patches against 10 str_replaces). A tip mentioned once, hundreds of lines
+ * of file-growth ago, is not steering.
+ *
+ * Size is the whole reason: anchoring by exact bytes gets less reliable the more of
+ * the file the agent is holding from memory, and production miss rates split ~32 %
+ * for str_replace against ~12 % for patch with `expectedOriginal`. Below the
+ * threshold the one-shot tip still applies — a short file does not need the pressure.
+ */
+const LARGE_FILE_PATCH_STEER_LINES = 600;
+
 function locateIdentifierLines(content: string, ident: string): { defs: number[]; any: number[] } {
   const esc = ident.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const word = new RegExp(`\\b${esc}\\b`);
@@ -486,7 +502,14 @@ function throwStrReplaceMiss(path: string, oldStr: string, fileContent: string):
     candidateLines.length > 0
       ? `${window}\nNext step: build a fresh old_str directly from the bytes shown above, then retry str_replace. Do NOT blindly retry with another guessed old_str — the file has drifted from your memory and another guess will fail the same way.`
       : 'Next step: re-issue `view` with a small `view_range` covering the section you wanted to edit, then retry str_replace with the exact snippet you read back. Do NOT guess at another old_str — the file content has drifted from your memory.';
-  throw new Error(`${head}\n\n${guidance}`);
+  // BUILD_SPEED §5 — on a file this size, byte-matching is the wrong tool, and a
+  // miss is the moment that lands. The window above already gives real line
+  // numbers, so the retry can be a patch instead of another guess.
+  const sizeSteer =
+    lines.length >= LARGE_FILE_PATCH_STEER_LINES
+      ? `\n\n\`${path}\` is ${lines.length} lines. Retry with \`command: "patch"\` anchored on the line numbers above and \`expectedOriginal\` set to the bytes shown — patch relocates a shifted hunk instead of missing outright (~12 % miss rate vs ~32 % for str_replace).`
+      : '';
+  throw new Error(`${head}\n\n${guidance}${sizeSteer}`);
 }
 
 function throwStrReplaceAmbiguous(oldStr: string, fileContent: string, path: string): never {
@@ -599,6 +622,15 @@ export function makeTextEditorTool(
       'To locate anything the map does not name (a string, a config value, a call site, a usage), use ' +
       'command "find" with `query`: a LITERAL search across the whole project, returning path:line with surrounding context ' +
       '(`context_lines`, default 2; `this_file_only: true` restricts it to `path`). One find replaces a dozen ranged views. ' +
+      // BUILD_SPEED §4. Six generate_audio_asset calls went out in ONE turn and came
+      // back together — one model round trip for six assets. Nothing else batched:
+      // independent views and finds were issued one per turn, each paying the full
+      // ~5-10s of model latency that dominates a build.
+      'BATCH READS. `view` and `find` are read-only — when you need several and none depends on ' +
+      "another's result, emit them ALL in ONE turn (several tool calls in the same response). " +
+      'Six independent reads batched cost one model round trip; issued one per turn they cost six, ' +
+      'and model latency — not the tool — is where a build actually spends its time. ' +
+      'Only serialise when the next call genuinely needs the previous answer. ' +
       'IMPORTANT: pass `view_range: [startLine, endLine]` (1-indexed, inclusive; either bound may be -1 for EOF) ' +
       'to read only a slice of the file — strongly preferred over full-file views after the file has grown past ~100 lines. ' +
       'Alternatively pass `symbol: "<JsxName>"` to read the body of a top-level function or const declaration by name ' +
@@ -900,10 +932,18 @@ export function makeTextEditorTool(
             const oldLineCount = (oldStr.match(/\n/g) ?? []).length + 1;
             const isMultiLine =
               Math.max(newLineCount, oldLineCount) >= STR_REPLACE_PATCH_NUDGE_LINES;
-            const patchNudge =
-              !isDeletion && isMultiLine && !patchNudgedPaths.has(path)
-                ? `\n\nTip: this edit spanned ${Math.max(newLineCount, oldLineCount)} lines. For multi-line edits, prefer \`command: "patch"\` with a \`hunks\` array — set \`expectedOriginal\` to catch line-shift errors automatically (production miss rate: ~12 % for patch vs ~32 % for str_replace).`
-                : '';
+            // BUILD_SPEED §5 — past LARGE_FILE_PATCH_STEER_LINES the steer repeats on
+            // every str_replace (see the constant). Below it, the original one-shot
+            // tip stands.
+            const totalLinesAfter = result.totalLines ?? 0;
+            const isLargeFile = totalLinesAfter >= LARGE_FILE_PATCH_STEER_LINES;
+            const patchNudge = isDeletion
+              ? ''
+              : isLargeFile
+                ? `\n\n\`${path}\` is ${totalLinesAfter} lines — past that size, anchor edits by LINE RANGE, not by matching bytes. Use \`command: "patch"\` with a \`hunks\` array and set \`expectedOriginal\` on each hunk: it relocates the hunk when the file has shifted under you, and fails loud instead of clobbering when it hasn't. Production miss rate: ~12 % for patch vs ~32 % for str_replace, and the gap widens with file size. Also consider splitting this file — a 300-line module needs neither a map nor a ranged read before an edit.`
+                : isMultiLine && !patchNudgedPaths.has(path)
+                  ? `\n\nTip: this edit spanned ${Math.max(newLineCount, oldLineCount)} lines. For multi-line edits, prefer \`command: "patch"\` with a \`hunks\` array — set \`expectedOriginal\` to catch line-shift errors automatically (production miss rate: ~12 % for patch vs ~32 % for str_replace).`
+                  : '';
             if (patchNudge.length > 0) patchNudgedPaths.add(path);
             const fullMessage = `${message}${budgetWarning ?? ''}${patchNudge}`;
             return ok(fullMessage, {

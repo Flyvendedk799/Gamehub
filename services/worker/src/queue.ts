@@ -31,6 +31,7 @@ import {
   type GenerationResult,
   type RunQualityMetrics,
   type RunTokenUsage,
+  type VisionCriticFn,
   type WebEngine,
   runGeneration,
 } from './run-generation';
@@ -95,6 +96,13 @@ export interface QueuePorts {
    * run records what it spent instead of 0/0.
    */
   onUsage?: (usage: RunTokenUsage) => void;
+  /**
+   * BUILD_SPEED §3 — the vision model for the bounded visual critique. main.ts
+   * binds it to the run's own model + credential. Omitted in offline tests /
+   * when the credential has no vision: the run then never looks at a frame,
+   * exactly as before.
+   */
+  visionCritic?: VisionCriticFn;
 }
 
 export interface EnqueueResult extends GenerationResult {
@@ -207,6 +215,7 @@ export async function enqueueRun(input: EnqueueInput, ports: QueuePorts): Promis
           : {}),
         ...(input.maxTokens !== undefined ? { maxTokens: input.maxTokens } : {}),
         ...(ports.onUsage !== undefined ? { onUsage: ports.onUsage } : {}),
+        ...(ports.visionCritic !== undefined ? { visionCritic: ports.visionCritic } : {}),
         onEvent: (event: AgentEvent) => {
           // Capture the latest set_todos for continuation building.
           if (

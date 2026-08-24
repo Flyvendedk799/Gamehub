@@ -103,6 +103,76 @@ describe('createRunSignalAggregator', () => {
       contractAuthored: false,
       tweakSchemaDeclared: false,
       strReplaceFailures: 0,
+      agentStarts: 0,
+      agentRestarts: 0,
+      restartReestablishTokens: 0,
+      restartReestablishShare: 0,
+      restartSegmentTurns: [],
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BUILD_SPEED §6 — what a restart actually costs
+// ---------------------------------------------------------------------------
+
+describe('restart accounting — BUILD_SPEED §6', () => {
+  const turn = (input: number, cacheRead: number, cacheWrite: number): AgentEvent =>
+    ({
+      type: 'turn_end',
+      message: { usage: { input, output: 100, cacheRead, cacheWrite } },
+    }) as unknown as AgentEvent;
+  const start = (): AgentEvent => ({ type: 'agent_start' }) as unknown as AgentEvent;
+
+  it('a single-segment run reports no restarts and no re-establish cost', () => {
+    const agg = createRunSignalAggregator();
+    agg.observe(start());
+    agg.observe(turn(500, 8000, 0));
+    agg.observe(turn(400, 9000, 0));
+    const s = agg.snapshot();
+    expect(s.agentStarts).toBe(1);
+    expect(s.agentRestarts).toBe(0);
+    expect(s.restartReestablishTokens).toBe(0);
+    expect(s.restartReestablishShare).toBe(0);
+    expect(s.restartSegmentTurns).toEqual([2]);
+  });
+
+  it('prices each restart at the fresh input + cache WRITE of its first turn', () => {
+    const agg = createRunSignalAggregator();
+    agg.observe(start());
+    agg.observe(turn(500, 0, 10_000)); // run's own priming — not a restart cost
+    agg.observe(turn(300, 10_000, 0));
+    agg.observe(start()); // ← restart: the prefix has to be re-primed
+    agg.observe(turn(700, 0, 12_000));
+    agg.observe(turn(200, 12_000, 0));
+    const s = agg.snapshot();
+    expect(s.agentStarts).toBe(2);
+    expect(s.agentRestarts).toBe(1);
+    // 700 fresh input + 12_000 cache write, and nothing from the first segment.
+    expect(s.restartReestablishTokens).toBe(12_700);
+    expect(s.restartSegmentTurns).toEqual([2, 2]);
+    // Share of total billed input across the run.
+    const billed = 500 + 10_000 + 300 + 10_000 + 700 + 12_000 + 200 + 12_000;
+    expect(s.restartReestablishShare).toBeCloseTo(12_700 / billed, 6);
+  });
+
+  it('counts three starts as two restarts (the run-3 shape)', () => {
+    const agg = createRunSignalAggregator();
+    for (let i = 0; i < 3; i += 1) {
+      agg.observe(start());
+      agg.observe(turn(100, 0, 5_000));
+    }
+    const s = agg.snapshot();
+    expect(s.agentRestarts).toBe(2);
+    expect(s.restartReestablishTokens).toBe(2 * 5_100);
+  });
+
+  it('tolerates a provider that streams turn_end without usage', () => {
+    const agg = createRunSignalAggregator();
+    agg.observe(start());
+    agg.observe({ type: 'turn_end', message: {} } as unknown as AgentEvent);
+    const s = agg.snapshot();
+    expect(s.restartReestablishTokens).toBe(0);
+    expect(s.restartSegmentTurns).toEqual([1]);
   });
 });

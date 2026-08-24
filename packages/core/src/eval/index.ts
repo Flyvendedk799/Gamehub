@@ -44,3 +44,18 @@ export type {
   QualityWindow,
   RunQualityRow,
 } from './source-postgres.js';
+// BUILD_SPEED "Instrumentation to keep" — the four per-run trace queries.
+export {
+  LINEAR_SCAN_THRESHOLD,
+  analyzeRunTiming,
+  analyzeTrace,
+  analyzeViews,
+} from './trace-analysis.js';
+export type {
+  LatencyEntry,
+  ToolHistogramEntry,
+  TraceAnalysis,
+  TraceEvent,
+  ViewAnalysis,
+  ViewSequence,
+} from './trace-analysis.js';

@@ -47,6 +47,14 @@ export interface PlaytestStepResult {
   errors: string[];
 }
 
+/** BUILD_SPEED §3 — one frame of the running game, for the visual critique. */
+export interface ThumbnailResult {
+  /** Base64-encoded PNG. */
+  pngBase64: string;
+  width: number;
+  height: number;
+}
+
 export interface PlaytestResult {
   hasGameContract: boolean;
   hasDebugContract: boolean;
@@ -77,6 +85,15 @@ export class BrowserJobsClient {
     const job = await this.queue.add(
       'runtime-verify',
       { kind: 'runtime-verify', htmlContent, bootTimeoutMs: 10_000 },
+      { removeOnComplete: 20, removeOnFail: 20 },
+    );
+    return job.id ?? 'unknown';
+  }
+
+  async enqueueThumbnail(htmlContent: string): Promise<string> {
+    const job = await this.queue.add(
+      'thumbnail',
+      { kind: 'thumbnail', htmlContent, bootTimeoutMs: 10_000 },
       { removeOnComplete: 20, removeOnFail: 20 },
     );
     return job.id ?? 'unknown';

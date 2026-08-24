@@ -2,6 +2,22 @@
 
 Multi-file projects are first-class in game-builder mode. The agent persists every file via `text_editor`, and the privileged `game-files://designs/{designId}/` protocol serves them into the preview iframe. Snapshots capture the full bundle so restore recovers the entire project tree, not just the entry point.
 
+## The project is ALREADY multi-file — you are editing a scaffold, not starting one
+
+When an engine is pinned, a complete, bootable premium project is seeded into the tree
+**before your first turn**: a thin `src/main.js` bootstrap, the engine it runs on at
+`src/engine/core.js`, and one small module per concern — `theme.js`, `player.js`,
+`enemies.js`, `waves.js`, `fx.js`, `hud.js` (Phaser also splits `src/scenes/`).
+
+**Adapt those modules. Do not collapse them back into one file.** Each is short enough
+to read whole, so an edit costs one call instead of a view-then-edit pair, and a change
+to `player.js` leaves the prompt cache for every other module intact. A single 1400-line
+`main.js` costs a look before every edit — measured at 37 views for 17 mutations on one
+production run — and re-primes the whole file's cache on every single-byte change.
+
+Add a module when you add a concern. `src/main.js` stays a bootstrap: wiring, the screen
+flow, and nothing else.
+
 ## Default to multi-file
 
 For Three.js and Phaser, **multi-file is the default expectation** — these engines benefit immediately from a separate scene file, an entity module, and a small data/config sidecar even on small games. The engine starter's `index.html` is a thin shell + importmap; your job is to author `main.js` plus the game's modules around it.
@@ -16,7 +32,8 @@ Use multi-file authoring when *any* of these hold (most non-trivial games hit at
 
 ## When to stay single-file (rare)
 
-Stay single-file (`main.js` inlined into `index.html` only, no `src/`) ONLY when ALL of these hold:
+This applies only to a project that arrives with no scaffold. If modules were seeded,
+keep them. Stay single-file (`main.js` inlined into `index.html` only, no `src/`) ONLY when ALL of these hold:
 
 - Trivial canvas demo: one mechanic, one screen, one entity type, < 150 LOC
 - Brief explicitly says "quick", "minimal", or "the simplest version of …"
@@ -28,7 +45,14 @@ If the brief is just "an endless runner" or "a 2D platformer", that's NOT trivia
 
 ```
 index.html                # entry — provided by engine starter
-src/main.js               # boot: Phaser.Game / Three.js scene mount
+src/main.js               # boot ONLY: wiring + screen flow, kept thin
+src/engine/core.js        # the engine your game runs on — seeded, extend it
+src/theme.js              # palette / fonts — one edit re-skins the game
+src/player.js             # the subject: state, update, draw
+src/enemies.js            # what the player deals with
+src/waves.js              # pacing + difficulty escalation
+src/fx.js                 # juice: shake, particles
+src/hud.js                # readable state + title/over screens
 src/scenes/
   boot.js                 # preload globals
   menu.js
