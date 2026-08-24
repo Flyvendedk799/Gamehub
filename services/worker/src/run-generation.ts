@@ -54,7 +54,7 @@ import type { SnapshotStore, WriteResult } from '@playforge/storage';
 // Relative import into the exporters package src (same pattern the API uses for
 // the worker) — reuses the proven single-file game bundler for the verify gate.
 import { buildGameHtml } from '../../../packages/exporters/src/index';
-import { makeAssetGenerator } from './asset-generator';
+import { canGenerateImages, makeAssetGenerator } from './asset-generator';
 import { createRunSignalAggregator } from './run-signal';
 import { analyzeSkillUsage } from './skill-usage-grep.js';
 import { assertGeneratedJavaScriptSyntax } from './syntax-check';
@@ -572,10 +572,21 @@ export async function runGeneration(
     ports.onEvent?.(event);
   };
 
-  const generateImageAsset = makeAssetGenerator({
-    apiKey: req.apiKey,
-    provider: req.provider ?? 'openai',
-  });
+  // Only offer bitmap generation when the credential can actually produce a
+  // bitmap. Offering it regardless meant the agent spent turns requesting art it
+  // then wrote into the game as a 1×1 transparent pixel, believing it had
+  // succeeded. A tool that cannot work is worse than no tool: the agent plans
+  // around it, and the absence is what makes it draw the art in code instead.
+  const imageProvider = req.provider ?? 'openai';
+  const imagesAvailable = canGenerateImages(imageProvider, req.apiKey);
+  if (!imagesAvailable) {
+    console.warn(
+      `[run-generation] bitmap generation unavailable (provider=${imageProvider}) — generate_image_asset will not be offered; the agent is told to author art in code.`,
+    );
+  }
+  const generateImageAsset = imagesAvailable
+    ? makeAssetGenerator({ apiKey: req.apiKey, provider: imageProvider })
+    : undefined;
 
   // #1.4 — wire the out-of-process browser-jobs port into the agent's runtime
   // gates. Both adapters round-trip to the dedicated browser-worker pool; the

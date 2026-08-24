@@ -36,6 +36,42 @@ describe('recommendSkills', () => {
     expect(recommendSkills({}, 'three')).toHaveLength(0);
   });
 
+  describe('three/engine-core', () => {
+    // It shipped registered-but-unrecommended: a production Three run logged
+    // engineImports: 0 and skillsImported: [] while hand-rolling its own frame
+    // loop over 16 minutes. Nothing pointed the agent at it.
+    it('leads the list for a Three game with any signal', () => {
+      const recs = recommendSkills({ hasEnemies: true }, 'three');
+      expect(recs[0]?.skill).toBe('three/engine-core.jsx');
+    });
+
+    it('fires on genre alone, with no capabilities', () => {
+      const recs = recommendSkills({}, 'three', 'shmup');
+      expect(recs.map((r) => r.skill)).toContain('three/engine-core.jsx');
+    });
+
+    it('stays silent when nothing at all is known', () => {
+      // The gate: a caller who knows nothing about the game gets nothing.
+      expect(recommendSkills({}, 'three')).toHaveLength(0);
+    });
+
+    it('is Three-only — Phaser has its own scene system', () => {
+      const recs = recommendSkills({ hasEnemies: true }, 'phaser');
+      expect(recs.map((r) => r.skill)).not.toContain('three/engine-core.jsx');
+      expect(recs.map((r) => r.skill)).not.toContain('phaser/engine-core.js');
+    });
+
+    it('appears once even when several rules fire', () => {
+      const recs = recommendSkills(
+        { hasEnemies: true, escalates: true, hasProgression: true },
+        'three',
+        'shmup',
+      );
+      const core = recs.filter((r) => r.skill === 'three/engine-core.jsx');
+      expect(core).toHaveLength(1);
+    });
+  });
+
   it('touch controlScheme → mobile-controls', () => {
     const recs = recommendSkills({ controlScheme: 'touch' }, 'phaser');
     expect(recs.map((r) => r.skill)).toContain('phaser/mobile-controls.js');

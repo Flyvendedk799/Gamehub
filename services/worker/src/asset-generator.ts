@@ -39,9 +39,22 @@ const ASPECT_TO_SIZE: Record<string, string> = {
 
 const IMAGE_MODEL = 'gpt-image-1';
 
-// 1×1 transparent PNG — fallback when image generation isn't available.
-const PLACEHOLDER_PNG =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+/**
+ * Can this credential actually generate images?
+ *
+ * The images endpoint is OpenAI's, so an Anthropic subscription or a placeholder
+ * platform key cannot call it. Callers use this to decide whether to offer the
+ * tool AT ALL — see the note on the placeholder below for why offering it
+ * anyway is the worse option.
+ */
+export function canGenerateImages(provider: string, apiKey: string | undefined): boolean {
+  if (provider !== 'openai') return false;
+  if (!apiKey || apiKey.trim().length === 0) return false;
+  // Deployments carry a literal placeholder in PLATFORM_API_KEY when image
+  // generation was never provisioned. Treat it as absent rather than sending a
+  // doomed request per asset.
+  return !/placeholder|changeme|your[-_]?key|sk-ant-placeho/i.test(apiKey);
+}
 
 export function makeAssetGenerator(opts: {
   apiKey: string;
@@ -51,14 +64,19 @@ export function makeAssetGenerator(opts: {
     const { prompt, purpose, aspectRatio = '1:1', filenameHint, alt } = request;
     const path = filenameHint ?? `assets/${purpose}-${Date.now()}.png`;
 
-    if (opts.provider !== 'openai') {
-      return {
-        path,
-        dataUrl: PLACEHOLDER_PNG,
-        mimeType: 'image/png',
-        model: 'placeholder',
-        provider: opts.provider,
-      };
+    // This used to return a 1×1 transparent PNG and report SUCCESS. The agent
+    // then wrote that pixel into the game as if it were art, and nothing —
+    // no log, no warning, no failed gate — said otherwise. Every game built on
+    // a non-OpenAI credential shipped invisible sprites while the build report
+    // said assets were generated.
+    //
+    // Failing loudly is strictly better: the agent handles tool errors, and the
+    // message tells it what to do instead. Callers that can check up front
+    // should use `canGenerateImages` and not offer the tool at all.
+    if (!canGenerateImages(opts.provider, opts.apiKey)) {
+      throw new Error(
+        `generate_image_asset is unavailable on this deployment (image generation requires an OpenAI credential; this run uses "${opts.provider}"). Do NOT retry, and do NOT reference a bitmap you did not create — it would 404 and render as nothing. Draw the art in code instead: canvas-rendered sprites, inline <svg>, CSS gradients, or generated geometry/materials. Code-drawn art that renders beats a bitmap that does not exist.`,
+      );
     }
 
     const size = ASPECT_TO_SIZE[aspectRatio] ?? '1024x1024';
@@ -88,13 +106,12 @@ export function makeAssetGenerator(opts: {
       console.warn(
         `[asset-generator] OpenAI images API error ${res.status} (purpose=${purpose}, size=${size}): ${text}`,
       );
-      return {
-        path,
-        dataUrl: PLACEHOLDER_PNG,
-        mimeType: 'image/png',
-        model: IMAGE_MODEL,
-        provider: 'openai',
-      };
+      // Surfaced, not swallowed. Returning a transparent pixel here reported
+      // success for an asset that does not exist, so the game shipped with an
+      // invisible sprite and the run looked clean.
+      throw new Error(
+        `generate_image_asset failed: images API returned ${res.status}. ${res.status === 429 ? 'Rate limited — try ONE more time, then ' : 'Do not retry more than once; '}fall back to drawing this asset in code (canvas, inline <svg>, CSS, or generated geometry). Never reference a bitmap path you did not successfully create.`,
+      );
     }
 
     const json = (await res.json()) as {
@@ -103,13 +120,11 @@ export function makeAssetGenerator(opts: {
     const b64 = json.data?.[0]?.b64_json;
     if (!b64) {
       console.warn(`[asset-generator] images response carried no b64_json (purpose=${purpose})`);
-      return {
-        path,
-        dataUrl: PLACEHOLDER_PNG,
-        mimeType: 'image/png',
-        model: IMAGE_MODEL,
-        provider: 'openai',
-      };
+      throw new Error(
+        'generate_image_asset failed: the images API returned no image data. ' +
+          'Draw this asset in code instead (canvas, inline <svg>, CSS, or generated geometry), ' +
+          'and do not reference a bitmap path you did not successfully create.',
+      );
     }
 
     return {

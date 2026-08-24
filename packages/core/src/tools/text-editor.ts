@@ -12,10 +12,10 @@
 
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
-import { formatEditEcho } from './edit-echo.js';
 import { REDACTED_PATH_SENTINEL, REDACTION_POISON_KEY } from '../context-prune.js';
 import type { CameraGuard } from './camera-pin.js';
 import type { EditBudget } from './edit-budget.js';
+import { formatEditEcho } from './edit-echo.js';
 import { assertSafeToolPath } from './path-safety.js';
 import { extractJsxSymbol, offsetsToLines, rangeToLineSpan } from './symbol-extractor.js';
 
@@ -157,9 +157,7 @@ function formatEditOk(
   const range = startLine === endLine ? `line ${startLine}` : `lines ${startLine}-${endLine}`;
   const summary = `${headlineWithPath} New content at ${range} (file is now ${totalLines} lines).`;
   const echo =
-    contentAfter === undefined
-      ? ''
-      : formatEditEcho(path, contentAfter, startLine, endLine);
+    contentAfter === undefined ? '' : formatEditEcho(path, contentAfter, startLine, endLine);
   return `${summary}${echo}`;
 }
 
@@ -400,6 +398,19 @@ function renderWindowSnippet(fileContent: string, line: number, before = 5, afte
   return out.join('\n');
 }
 
+/** Non-overlapping occurrences of `needle` in `haystack`. */
+function countOccurrences(haystack: string, needle: string): number {
+  if (needle.length === 0) return 0;
+  let count = 0;
+  let from = 0;
+  while (true) {
+    const at = haystack.indexOf(needle, from);
+    if (at === -1) return count;
+    count += 1;
+    from = at + needle.length;
+  }
+}
+
 function throwStrReplaceMiss(path: string, oldStr: string, fileContent: string): never {
   const firstLine = (oldStr.split('\n').find((ln) => ln.trim().length > 0) ?? '').trim();
   const lines = fileContent.split('\n');
@@ -456,7 +467,7 @@ function throwStrReplaceMiss(path: string, oldStr: string, fileContent: string):
   throw new Error(`${head}\n\n${guidance}`);
 }
 
-function throwStrReplaceAmbiguous(oldStr: string, fileContent: string, originalMsg: string): never {
+function throwStrReplaceAmbiguous(oldStr: string, fileContent: string, path: string): never {
   const firstLine = (oldStr.split('\n').find((ln) => ln.trim().length > 0) ?? '').trim();
   const lines = fileContent.split('\n');
   const matchLines: number[] = [];
@@ -466,7 +477,13 @@ function throwStrReplaceAmbiguous(oldStr: string, fileContent: string, originalM
       if (matchLines.length >= 8) break;
     }
   }
-  const head = `${originalMsg}${matchLines.length > 0 ? ` First-line matches at: ${matchLines.join(', ')}.` : ''}`;
+  // The count is computed here rather than parsed out of the fs layer's error
+  // text. Depending on that wording is what left the miss path dead in
+  // production for every run.
+  const occurrences = countOccurrences(fileContent, oldStr);
+  const head =
+    `old_str matched ${occurrences} times in ${path}; it must be unique.` +
+    `${matchLines.length > 0 ? ` First-line matches at: ${matchLines.join(', ')}.` : ''}`;
   const guidance =
     'Next step: extend `old_str` with more surrounding context (1-3 extra lines above or below) so the snippet is unique, then retry. Do NOT shorten old_str — that makes ambiguity worse.';
   throw new Error(`${head}\n\n${guidance}`);
@@ -845,13 +862,26 @@ export function makeTextEditorTool(
                 prior.lastFailAt = tick;
               }
             }
-            const msg = err instanceof Error ? err.message : String(err);
             const file = fs.view(path);
-            if (file !== null && /old_str not found/i.test(msg)) {
-              throwStrReplaceMiss(path, oldStr, file.content);
-            }
-            if (file !== null && /ambiguous|matched \d+ times/i.test(msg)) {
-              throwStrReplaceAmbiguous(oldStr, file.content, msg);
+            // Classify the failure from the FILE, not from the error text.
+            //
+            // This used to test the message against /old_str not found/i. The
+            // in-repo test double throws exactly that; the real working tree
+            // throws "str_replace: no match for the given text in <path>". So
+            // the branch matched in tests and never once in production — the
+            // whole recovery path below (near-match bytes, whitespace diff,
+            // windowed current content) was dead, and agents got a bare error
+            // whose advice was "`view` the file and copy the exact snippet".
+            // They did exactly that: 45 views of one file in a single 17-minute
+            // run, ~9s of model latency each.
+            //
+            // Whether old_str is absent or ambiguous is a property of the file
+            // and the string, so read it off those two directly. No wording any
+            // implementation chooses can drift away from this again.
+            if (file !== null) {
+              const occurrences = countOccurrences(file.content, oldStr);
+              if (occurrences === 0) throwStrReplaceMiss(path, oldStr, file.content);
+              if (occurrences > 1) throwStrReplaceAmbiguous(oldStr, file.content, path);
             }
             throw err;
           }
@@ -877,10 +907,11 @@ export function makeTextEditorTool(
               fs.view(path)?.content ?? '',
             ),
             {
-            command: 'insert',
-            path,
-            result,
-          });
+              command: 'insert',
+              path,
+              result,
+            },
+          );
         }
         case 'patch': {
           // Backlog-3 §2 — multi-hunk patch. Apply hunks in descending
