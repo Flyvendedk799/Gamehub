@@ -272,6 +272,96 @@ export function listTopLevelSymbols(src: string): string[] {
   return [...out];
 }
 
+/** One declaration in a file's outline. */
+export interface OutlineEntry {
+  readonly name: string;
+  /** 1-indexed line of the declaration. */
+  readonly line: number;
+  /** True when the declaration starts at column 0. */
+  readonly topLevel: boolean;
+}
+
+/**
+ * A navigable map of a file: every declaration and the line it starts on.
+ *
+ * This exists because of how agents actually move through a file they cannot
+ * see. Production traces show them walking a 745-line game in overlapping
+ * 60-100 line windows — [160,240] [200,290] [240,320] [295,380] [320,420] — one
+ * round trip each, roughly ten seconds each, because nothing ever told them
+ * where anything was. Across two full runs there were 96 range views and 1
+ * symbol view: the precise primitive existed the whole time and went unused,
+ * because using it means already knowing the name you want.
+ *
+ * So the map is not something to ask for. It rides along with every view and
+ * every edit, and the agent navigates instead of scanning.
+ *
+ * Nested declarations are included — inner helpers and object methods are
+ * common in game code — but flagged, because `view symbol=` only resolves
+ * top-level ones and the caller needs to know which kind it is looking at.
+ */
+export function fileOutline(src: string): OutlineEntry[] {
+  const out: OutlineEntry[] = [];
+  const seen = new Set<string>();
+  const lines = src.split('\n');
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? '';
+    const decl =
+      /^(\s*)(?:export\s+)?(?:async\s+)?(?:function|const|let|var)\s+([A-Za-z_$][\w$]*)/.exec(
+        line,
+      ) ?? /^(\s*)(?:export\s+)?(?:async\s+)?class\s+([A-Za-z_$][\w$]*)/.exec(line);
+    if (!decl) continue;
+    const indent = decl[1] ?? '';
+    const name = decl[2];
+    if (name === undefined) continue;
+
+    // Only bindings that hold something callable or structural earn a place.
+    // A scalar `const MAX = 5` is noise at this density.
+    const rest = line.slice(decl[0].length);
+    const isInteresting =
+      /^\s*=\s*(?:async\s*)?(?:\(|function|class)/.test(rest) ||
+      /^\s*(?:export\s+)?(?:async\s+)?(?:function|class)\s/.test(line);
+    if (!isInteresting) continue;
+
+    // Inner one- and two-letter bindings (an arrow assigned to `x`, `dz`) are
+    // never navigation targets and crowd out the names that are.
+    if (indent.length > 0 && name.length <= 2) continue;
+
+    // Same name declared twice (a shadowed inner helper) — keep the first.
+    if (seen.has(name)) continue;
+    seen.add(name);
+    out.push({ name, line: i + 1, topLevel: indent.length === 0 });
+  }
+
+  return out;
+}
+
+/** Cap on outline entries rendered into a tool result. */
+const OUTLINE_ENTRY_CAP = 60;
+
+/**
+ * Render a file's map for a tool result, or '' when the file is small enough
+ * that a map buys nothing and only costs context.
+ */
+export function renderOutline(path: string, src: string, minLines = 120): string {
+  const lineCount = src.split('\n').length;
+  if (lineCount < minLines) return '';
+  const entries = fileOutline(src);
+  if (entries.length === 0) return '';
+
+  const shown = entries.slice(0, OUTLINE_ENTRY_CAP);
+  const rendered = shown
+    .map((entry) => `${entry.name}@${entry.line}${entry.topLevel ? '' : '*'}`)
+    .join(', ');
+  const elided = entries.length > shown.length ? ` (+${entries.length - shown.length} more)` : '';
+
+  return [
+    `\nMAP of ${path} (${lineCount} lines) — jump straight to what you need; do NOT page through it:`,
+    rendered + elided,
+    'Read one by name with `view` + `symbol` — exact, and no line numbers to get wrong. Entries marked * are nested, so pass `view_range` around that line instead. For anything not listed — a string, a config value, a call site — use `command: "find"`.',
+  ].join('\n');
+}
+
 /**
  * Find the `symbol` declaration in `src` and return its source range.
  * Returns `{ kind: 'missing', candidates }` with up to 12 nearby symbol

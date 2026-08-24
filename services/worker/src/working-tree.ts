@@ -301,6 +301,11 @@ export class WorkingTree {
     return [...this.files.entries()].map(([path, content]) => ({ path, content }));
   }
 
+  /** TextEditorFsCallbacks.textFiles — backs the edit tool's `find`. */
+  textFiles(): Array<{ path: string; content: string }> {
+    return this.toTextFiles();
+  }
+
   /** Persist the current tree to the content-addressed store. */
   async persist(store: SnapshotStore): Promise<WriteResult> {
     return store.write(this.toSnapshotInput());

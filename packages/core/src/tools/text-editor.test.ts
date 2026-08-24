@@ -1528,3 +1528,107 @@ describe('text-editor view stubs — Improver1 §4', () => {
     expect(readText(ranged)).toContain('line 7');
   });
 });
+
+describe('navigation: the map and find replace scanning', () => {
+  /**
+   * The behaviour these pin is the fix for the largest single cost in a build.
+   * In the last production trace 62% of all model latency followed this tool —
+   * 82 calls at ~10s each — and most of those calls were ranged views walking a
+   * file front to back to locate code. The map and `find` remove the walk.
+   */
+  function bigGame(): string {
+    return [
+      'import * as THREE from "three";',
+      '',
+      'const scene = new THREE.Scene();',
+      '',
+      'function spawnEnemy(kind) {',
+      '  return kind;',
+      '}',
+      '',
+      'function waveUpdate(dt) {',
+      '  spawnEnemy("grunt");',
+      '}',
+      ...Array.from({ length: 130 }, (_, i) => `// filler ${i}`),
+      'function gameOver() {}',
+    ].join('\n');
+  }
+
+  it('attaches the map to a full view, so navigation needs no extra call', async () => {
+    const tool = makeTextEditorTool(makeFs({ 'src/main.js': bigGame() }));
+    const res = await tool.execute('t1', { command: 'view', path: 'src/main.js' });
+    const text = JSON.stringify(res);
+    expect(text).toContain('MAP of src/main.js');
+    expect(text).toContain('spawnEnemy@5');
+    expect(text).toContain('gameOver@');
+  });
+
+  it('attaches the map to a ranged view — the call that used to be a scan step', async () => {
+    const tool = makeTextEditorTool(makeFs({ 'src/main.js': bigGame() }));
+    const res = await tool.execute('t2', {
+      command: 'view',
+      path: 'src/main.js',
+      view_range: [20, 40],
+    });
+    // Seeing lines 20-40 previously told the agent nothing about where to go
+    // next, so it asked for 40-60, then 60-80.
+    expect(JSON.stringify(res)).toContain('MAP of src/main.js');
+  });
+
+  it('attaches the map after create, so the next edit needs no orientation view', async () => {
+    const tool = makeTextEditorTool(makeFs());
+    const res = await tool.execute('t3', {
+      command: 'create',
+      path: 'src/main.js',
+      file_text: bigGame(),
+    });
+    expect(JSON.stringify(res)).toContain('waveUpdate@');
+  });
+
+  it('does not attach a map to a small file', async () => {
+    const tool = makeTextEditorTool(makeFs({ 'tiny.js': 'function a() {}' }));
+    const res = await tool.execute('t4', { command: 'view', path: 'tiny.js' });
+    expect(JSON.stringify(res)).not.toContain('MAP of');
+  });
+
+  it('find locates a call site across the whole project in one call', async () => {
+    const fs = makeFs({
+      'src/main.js': bigGame(),
+      'index.html': '<script type="module" src="src/main.js"></script>',
+    });
+    // The worker's tree exposes this; makeFs is extended here to match.
+    (fs as unknown as { textFiles: () => Array<{ path: string; content: string }> }).textFiles =
+      () => [
+        { path: 'src/main.js', content: bigGame() },
+        { path: 'index.html', content: '<script type="module" src="src/main.js"></script>' },
+      ];
+    const tool = makeTextEditorTool(fs);
+    const res = await tool.execute('t5', {
+      command: 'find',
+      path: 'src/main.js',
+      query: 'spawnEnemy',
+      context_lines: 0,
+    });
+    const text = JSON.stringify(res);
+    expect(text).toContain('src/main.js:5');
+    expect(text).toContain('src/main.js:10');
+  });
+
+  it('find falls back to the single file when the host cannot list files', async () => {
+    const tool = makeTextEditorTool(makeFs({ 'src/main.js': bigGame() }));
+    const res = await tool.execute('t6', {
+      command: 'find',
+      path: 'src/main.js',
+      query: 'waveUpdate',
+      context_lines: 0,
+    });
+    expect(JSON.stringify(res)).toContain('src/main.js:9');
+  });
+
+  it('find rejects an empty query with a usable message', async () => {
+    const tool = makeTextEditorTool(makeFs({ 'src/main.js': bigGame() }));
+    await expect(
+      tool.execute('t7', { command: 'find', path: 'src/main.js', query: '  ' }),
+    ).rejects.toThrow(/non-empty/);
+  });
+});
