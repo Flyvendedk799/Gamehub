@@ -225,7 +225,11 @@ describe('text-editor success message includes post-edit position', () => {
     const text = (res.content[0] as { text: string }).text;
     // "line3" sits at line 3; replacement spans 2 lines (3-4); file gains
     // one line (now 6 total).
-    expect(text).toBe('Edited index.html. New content at lines 3-4 (file is now 6 lines).');
+    // The summary still leads; the echoed region follows it.
+
+    expect(text).toContain('Edited index.html. New content at lines 3-4 (file is now 6 lines).');
+
+    expect(text).toContain('no need to `view`');
   });
 
   it('str_replace deletion (empty new_str) surfaces "Removed content"', async () => {
@@ -255,7 +259,9 @@ describe('text-editor success message includes post-edit position', () => {
     });
     const text = (res.content[0] as { text: string }).text;
     // insert_line: 2 = before line 3 (1-indexed), spans 2 lines, total grows by 2.
-    expect(text).toBe('Inserted at index.html:2. New content at lines 3-4 (file is now 5 lines).');
+    expect(text).toContain('Inserted at index.html:2. New content at lines 3-4 (file is now 5 lines).');
+
+    expect(text).toContain('no need to `view`');
   });
 
   it('falls back to the headline when the FS impl omits position info', async () => {

@@ -506,9 +506,14 @@ async function main() {
     const abortKind = classifyAbortKind(err instanceof Error ? err.message : String(err));
     console.error(`[worker] job ${job?.id ?? '?'} run=${runId ?? '?'} failed (${abortKind}):`, err);
     if (runId) {
+      // `finishedAt` matters as much as the status. Without it every failed
+      // run reads as still in flight — all five failures in production had a
+      // NULL finished_at, so the stuck-run reaper and any "is this done yet"
+      // query could not tell an aborted run from a live one.
+      const now = new Date();
       await db
         .update(schema.runs)
-        .set({ status: 'failed', abortKind, updatedAt: new Date() })
+        .set({ status: 'failed', abortKind, updatedAt: now, finishedAt: now })
         .where(eq(schema.runs.id, runId))
         .catch(() => {});
 

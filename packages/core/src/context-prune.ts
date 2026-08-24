@@ -43,6 +43,7 @@
  */
 
 import type { AgentMessage } from '@mariozechner/pi-agent-core';
+import { buildFileCoverageResultIds } from './file-coverage.js';
 import { type CoreLogger, NOOP_LOGGER } from './logger.js';
 
 const TEXT_BLOCK_LIMIT = 8 * 1024;
@@ -662,12 +663,29 @@ export function buildTransformContext(
     if (messages.length === 0) return messages;
 
     const activeFiles = findActiveFiles(messages, activeFileK);
-    const activeFileResultIds = buildActiveFileResultIds(messages, activeFiles, activeFileWindow);
+
+    // Retention is bounded by what the kept results actually SHOW, not by how
+    // many there are. The count-based window below was the wrong unit: a file
+    // the model pages in six chunks consumed the whole window, so the next
+    // tool call evicted a chunk and the model re-read the entire file — six
+    // more round trips for identical bytes. Run 5f7e6510 did that fourteen
+    // times and spent 92% of twenty-six minutes waiting on the model.
+    const coverage = buildFileCoverageResultIds(messages, activeFiles, TEXT_EDITOR_TOOL_NAME);
+
+    // The old window still contributes, so nothing that used to be pinned
+    // stops being pinned — this widens retention, it does not replace it.
+    const windowResultIds = buildActiveFileResultIds(messages, activeFiles, activeFileWindow);
+    const activeFileResultIds = new Set<string>([...coverage.keep, ...windowResultIds]);
+
     if (activeFiles.length > 0 && activeFileResultIds.size > 0) {
       log.info('[context-prune] step=active_file_kept', {
         activeFiles,
         keptResults: activeFileResultIds.size,
         windowSize: activeFileWindow,
+        coverageKept: coverage.keep.size,
+        // Reads dropped because a newer result already showed those lines.
+        // High numbers here are the re-read spiral being absorbed.
+        redundantReads: coverage.redundantReads,
       });
     }
 
