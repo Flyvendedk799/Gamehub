@@ -201,6 +201,23 @@ export interface PlaytestVerdict {
   bootErrors: ReadonlyArray<string>;
 }
 
+/**
+ * Run-total token usage.
+ *
+ * Named (rather than inlined on the result) because it is now reported twice:
+ * once on the finished result, and continuously through `onUsage` so a run
+ * that never reaches its result still has its spend recorded.
+ */
+export interface RunTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  /** Prompt-cache reads (the static prefix served from cache). */
+  cacheReadTokens: number;
+  /** Prompt-cache writes (priming that prefix). */
+  cacheWriteTokens: number;
+}
+
 export interface GenerationPorts {
   store: SnapshotStore;
   onEvent?: (event: AgentEvent) => void;
@@ -236,6 +253,17 @@ export interface GenerationPorts {
    * in offline dev / tests that don't assert telemetry.
    */
   recordRunQuality?: RecordRunQualityFn;
+  /**
+   * Running token usage, pushed after every `turn_end`.
+   *
+   * The finished `GenerationResult` also carries usage, but a run that aborts
+   * — token ceiling, tool budget, a throwing provider — never produces one, so
+   * its spend used to persist as 0/0 no matter how many tokens it actually
+   * burned. Aborted runs are exactly the expensive ones, so that was the worst
+   * possible blind spot. Each call supersedes the last; the caller keeps the
+   * most recent and writes it whether the run finishes or throws.
+   */
+  onUsage?: (usage: RunTokenUsage) => void;
 }
 
 export interface GenerationResult {
@@ -265,14 +293,7 @@ export interface GenerationResult {
   shipReason: ShipReason;
   /** Run-total token usage, summed from every `turn_end`. Persisted to the
    *  `runs` row for cost attribution. Zero when the provider streams no usage. */
-  usage: {
-    inputTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-    /** Prompt-cache reads (the static prefix served from cache) + writes. */
-    cacheReadTokens: number;
-    cacheWriteTokens: number;
-  };
+  usage: RunTokenUsage;
   /** WS-D — set when the run paused because the agent called `ask_user`. The
    *  caller persists it on the continuation_pending row so the builder can show
    *  the question + collect an answer. Null for a normal/complete run. */
@@ -528,6 +549,15 @@ export async function runGeneration(
     usedOutputTokens += usage.output ?? 0;
     usedCacheReadTokens += usage.cacheRead ?? 0;
     usedCacheWriteTokens += usage.cacheWrite ?? 0;
+    // Report before the ceiling check, so the totals that TRIGGER an abort are
+    // the last ones the caller sees.
+    ports.onUsage?.({
+      inputTokens: usedInputTokens,
+      outputTokens: usedOutputTokens,
+      totalTokens: usedInputTokens + usedOutputTokens,
+      cacheReadTokens: usedCacheReadTokens,
+      cacheWriteTokens: usedCacheWriteTokens,
+    });
     if (tokenAbortController && !aborted && usedInputTokens + usedOutputTokens > ports.maxTokens!) {
       aborted = true;
       tokenAbortController.abort();
