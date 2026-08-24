@@ -612,6 +612,33 @@ export { SkillFrontmatterV1 } from './skills';
 export type { LoadedSkill, LoadedSkillRule } from './skills';
 
 export { summarizeSnapshotDiff } from './snapshot-diff';
+
+// The design interview — the short conversation before a build. Exported for
+// the API route that drafts prompt-tailored questions and for the web client
+// that renders them.
+export {
+  DESIGN_LAYERS,
+  type DesignBrief,
+  type DesignLayer,
+  type InterviewPlan,
+  type InterviewState,
+  type LayerAnswer,
+  type LayerId,
+  type LayerOption,
+  answerLayer,
+  briefToPrompt,
+  buildInterviewPlanPrompt,
+  extractJsonObject,
+  finishInterview,
+  getLayer,
+  inferAnsweredLayers,
+  nextQuestion,
+  parseInterviewPlan,
+  skipLayer,
+  startInterview,
+  startInterviewFromPlan,
+  toBrief,
+} from './design-interview';
 export type { SnapshotDiffOptions } from './snapshot-diff';
 
 export { diagnose, diagnoseGenerateFailure, looksLikeTruncatedStream } from './diagnostics';

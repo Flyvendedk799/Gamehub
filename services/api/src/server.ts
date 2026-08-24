@@ -24,6 +24,7 @@ import { exportGameZip } from '@playforge/exporters/game-zip';
 import {
   type StoredClaudeAuth,
   type StoredCodexAuth,
+  complete,
   decodeJwtClaims,
   readClaudeCodeKeychainCredentials,
   readCodexAuthFile,
@@ -36,8 +37,11 @@ import {
   type SocialOutroSummary,
   SocialOutroSummarySchema,
   type WireApi,
+  buildInterviewPlanPrompt,
+  extractJsonObject,
   injectControlsRuntime,
   normalizeEngineCdnUrls,
+  parseInterviewPlan,
 } from '@playforge/shared';
 import { type SnapshotStore, contentTypeFor, isSafeBundlePath } from '@playforge/storage';
 import {
@@ -352,6 +356,13 @@ export interface ServerDeps {
   accountRepo?: AccountRepo;
   /** Optional: platform default model used when a user has not selected BYOK. */
   platformModel?: ModelRef;
+  /** Optional: platform-funded credential, used for short non-build model calls
+   *  (currently the design interview). Builds get their key from the worker. */
+  platformApiKey?: string;
+  /** Optional: model that drafts the design interview on platform-funded runs.
+   *  Defaults to `platformModel`; worth pointing at something small and fast,
+   *  since a person is waiting on it before they can answer anything. */
+  interviewModel?: ModelRef;
   /** Optional: Claude subscription credential store. When connected, generation
    *  runs on the subscription (OAuth over the real Anthropic API) and the
    *  /v1/auth/claude/* routes are enabled. */
@@ -408,6 +419,15 @@ const ACCOUNT_PROVIDERS: AccountProvider[] = [
   'codex-subscription',
 ];
 const DEFAULT_PLATFORM_MODEL: ModelRef = { provider: 'anthropic', modelId: 'claude-sonnet-4-6' };
+
+/**
+ * How long the design interview may spend drafting questions.
+ *
+ * Someone is watching a spinner for the whole of it. Past this the static
+ * questions are strictly better than more waiting, so the call is abandoned
+ * rather than extended.
+ */
+const INTERVIEW_TIMEOUT_MS = 12_000;
 const DEFAULT_BYOK_MODELS: Record<ByokProvider, string> = {
   anthropic: PROVIDER_SHORTLIST.anthropic.defaultPrimary,
   openai: PROVIDER_SHORTLIST.openai.defaultPrimary,
@@ -1961,6 +1981,76 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     });
     return { ok: true, runId: run.id };
   }
+
+  // ── design interview ──────────────────────────────────────────────────────
+  //
+  // Drafts the questions asked before a build, written for THIS prompt. A
+  // generic question set says nobody read the idea, which is worse than not
+  // asking at all — so the questions come from a model that has read it.
+  //
+  // Best-effort by contract: any failure returns `{ plan: null }` with a 200
+  // and the client falls back to the static layers. An interview that cannot
+  // start is worse than a generic one, and this must never block a build.
+  app.post('/v1/design/interview', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+
+    const body = (req.body ?? {}) as { prompt?: unknown };
+    if (typeof body.prompt !== 'string' || body.prompt.trim() === '') {
+      return reply.code(400).send({ error: 'prompt_required' });
+    }
+    // Far below the build cap: this is a one-line idea, and the call is meant
+    // to be cheap. Anything longer has already answered these questions.
+    if (body.prompt.length > 2000) {
+      return reply.code(400).send({ error: 'prompt_too_long', max: 2000 });
+    }
+    const prompt = body.prompt.trim();
+
+    const creds = await resolveGenerationCredentials(user.userId);
+    if (!creds.ok) return reply.send({ plan: null });
+
+    // A user credential (BYOK or subscription) speaks for itself. Platform-funded
+    // runs go through the platform key, and may use a smaller model than the
+    // build does — drafting four questions is not the job the build model is for.
+    const usesOwnKey = creds.apiKey !== undefined && creds.platformFunded !== true;
+    const model = usesOwnKey
+      ? (creds.model ?? deps.platformModel ?? DEFAULT_PLATFORM_MODEL)
+      : (deps.interviewModel ?? deps.platformModel ?? DEFAULT_PLATFORM_MODEL);
+    const apiKey = usesOwnKey ? creds.apiKey : deps.platformApiKey;
+    if (!apiKey) return reply.send({ plan: null });
+
+    // A person is watching a spinner, so this is on a leash. Past the deadline
+    // the static questions are strictly better than more waiting.
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort();
+    }, INTERVIEW_TIMEOUT_MS);
+    try {
+      const result = await complete(
+        model,
+        [{ role: 'user', content: buildInterviewPlanPrompt(prompt) }],
+        {
+          apiKey,
+          signal: controller.signal,
+          maxTokens: 2000,
+          // Nothing here needs deliberation, and every second spent thinking is
+          // a second the person spends looking at a spinner.
+          reasoning: 'minimal',
+          ...(usesOwnKey && creds.wire !== undefined ? { wire: creds.wire } : {}),
+          ...(usesOwnKey && creds.httpHeaders !== undefined
+            ? { httpHeaders: creds.httpHeaders }
+            : {}),
+        },
+      );
+      const plan = parseInterviewPlan(extractJsonObject(result.content));
+      return reply.send({ plan });
+    } catch (err) {
+      console.warn(`[design-interview] plan unavailable, falling back: ${String(err)}`);
+      return reply.send({ plan: null });
+    } finally {
+      clearTimeout(timer);
+    }
+  });
 
   app.post('/v1/projects/:id/generate', async (req, reply) => {
     const user = await requireUser(req, reply);

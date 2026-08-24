@@ -1,3 +1,4 @@
+import type { InterviewPlan } from '@playforge/shared/design-interview';
 import type { SocialOutroSummary } from '@playforge/shared/social-outro';
 import { getToken } from './auth';
 import { API_BASE } from './config';
@@ -185,6 +186,26 @@ export async function generateGame(
     method: 'POST',
     body: JSON.stringify({ prompt }),
   });
+}
+
+/**
+ * Ask the server to draft interview questions for this prompt.
+ *
+ * Best-effort: the server answers `{ plan: null }` rather than failing when a
+ * model is unavailable or too slow, and a thrown request is treated the same
+ * way. The caller falls back to the static layers — a generic interview beats
+ * no interview, and neither may block a build.
+ */
+export async function fetchInterviewPlan(prompt: string): Promise<InterviewPlan | null> {
+  try {
+    const { plan } = await apiFetch<{ plan: InterviewPlan | null }>('/v1/design/interview', {
+      method: 'POST',
+      body: JSON.stringify({ prompt }),
+    });
+    return plan ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Hub ─────────────────────────────────────────────────────────────────────

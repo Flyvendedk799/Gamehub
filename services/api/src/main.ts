@@ -130,6 +130,12 @@ async function main() {
   const modelId = process.env['PLATFORM_MODEL_ID'] ?? 'claude-sonnet-4-6';
   const modelProvider = process.env['PLATFORM_PROVIDER'] ?? 'anthropic';
   const platformModel = { provider: modelProvider, modelId };
+  // The design interview is four short questions, not a build. Point it at
+  // something fast — the person is waiting on it before they can answer.
+  const interviewModel = {
+    provider: process.env['INTERVIEW_PROVIDER'] ?? modelProvider,
+    modelId: process.env['INTERVIEW_MODEL_ID'] ?? modelId,
+  };
   const apiKeyEncryptionSecret = process.env['API_KEY_ENCRYPTION_SECRET'] ?? platformApiKey;
   const port = parsePositiveIntEnv(process.env['PORT'], DEFAULT_API_PORT);
   const redisUrl = process.env['REDIS_URL'];
@@ -503,6 +509,8 @@ async function main() {
     authDb: db,
     accountRepo,
     platformModel,
+    platformApiKey,
+    interviewModel,
     claudeAuthStore,
     claudeSubscriptionModel,
     codexAuthStore,
