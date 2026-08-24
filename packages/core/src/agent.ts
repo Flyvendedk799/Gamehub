@@ -60,6 +60,7 @@ import {
 import type { TSchema } from '@sinclair/typebox';
 import { resolveCachePolicy } from './cache-policy.js';
 import { buildTransformContext } from './context-prune.js';
+import type { EditorSession } from './editor/session.js';
 import { remapProviderError } from './errors.js';
 import type {
   AttachmentContext,
@@ -133,7 +134,6 @@ import {
   makeRenderMotionPreviewTool,
 } from './tools/render-motion-preview.js';
 import { type RenderPreviewer, makeRenderPreviewTool } from './tools/render-preview.js';
-import type { EditorSession } from './editor/session.js';
 import { makeSceneTools } from './tools/scene-edit.js';
 import { makeSetTodosTool } from './tools/set-todos.js';
 import { type TextEditorFsCallbacks, makeTextEditorTool } from './tools/text-editor.js';
@@ -835,6 +835,26 @@ const VANILLA_TOOL_GUIDANCE = [
   "Auto-continue chunking + budget steering still apply (you have ~5 min per chunk; budget reminders fire at 60% and 90%; aim to call `done` within the chunk you're in). Cancel + Wrap-up controls still work. The 1-3 tool-calls-per-turn cadence still helps pacing.",
 ].join('\n');
 
+const CODE_DRAWN_ART_GUIDANCE = [
+  '## Art direction (no bitmap generation on this run)',
+  '',
+  '`generate_image_asset` is NOT available here. That is a constraint on HOW you make art, not permission to skip it. Untextured primitives in default material colours are the single most common reason a finished game reads as a prototype.',
+  '',
+  'Never reference an image path you did not create — it 404s and renders as nothing, silently.',
+  '',
+  'Author the look in code instead. Pick from these, and commit to a palette of 4-6 colours before you start:',
+  '',
+  '- **Procedural textures.** Draw to an offscreen `<canvas>` and use it as a texture: noise, stripes, checkers, gradients, hazard tape, grid lines, scanlines, brushed metal. Twenty lines gives every surface a material identity.',
+  '- **Vertex colours and emissive.** Tint by height, depth, team, or damage state. An emissive rim on hostile actors reads instantly and costs nothing.',
+  '- **Silhouette first.** Readable shape beats surface detail. Compose characters from a few primitives with distinct proportions rather than one box.',
+  '- **Lighting is the cheapest art budget you have.** A key light with a warm tint, a cool fill, and a coloured ambient turns flat geometry into a scene. Add fog matched to the sky colour for depth.',
+  '- **Gradient sky / backdrop.** A two-stop vertical gradient on a large sphere or a CSS backdrop removes the black void that makes a 3D scene look unfinished.',
+  '- **Inline `<svg>`** for UI, icons, and HUD — crisp at any resolution and stylable.',
+  '- **Ground the scene.** A textured floor plane with a grid or contact shadows stops actors from appearing to float.',
+  '',
+  'Motion is art too: squash on impact, a short camera shake, particles on hit, and a colour flash on damage do more for perceived quality than any texture.',
+].join('\n');
+
 const IMAGE_ASSET_TOOL_GUIDANCE = [
   '## Bitmap asset generation',
   '',
@@ -1462,9 +1482,12 @@ export async function generateViaAgent(
   // command in the chat input flips this to multi-source-file. The
   // image-asset addendum applies to both patterns.
   const baseGuidance = input.pattern === 'vanilla' ? VANILLA_TOOL_GUIDANCE : AGENTIC_TOOL_GUIDANCE;
+  // When bitmap generation is unavailable the agent must be told to author art
+  // in code. Left unsaid, it ships default-material primitives — which is what
+  // "the result wasn't impressive" looks like from the outside.
   const activeGuidance = deps.generateImageAsset
     ? `${baseGuidance}\n\n${IMAGE_ASSET_TOOL_GUIDANCE}`
-    : baseGuidance;
+    : `${baseGuidance}\n\n${CODE_DRAWN_ART_GUIDANCE}`;
   const augmentedSystemPrompt = encourageToolUse
     ? `${systemPrompt}\n\n${activeGuidance}`
     : systemPrompt;

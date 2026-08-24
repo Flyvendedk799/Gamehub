@@ -190,6 +190,33 @@ export function recommendSkills(
     push('asset-pipeline', 'load real glTF models + instanced geometry instead of primitives');
   }
 
+  // The Three engine core, first in the list.
+  //
+  // It was registered in the skill index and recommended by nothing, so agents
+  // only ever found it by browsing — and did not. A production Three run logged
+  // `engineImports: 0` and `skillsImported: []` while hand-rolling its own
+  // frame loop, then spent 16 minutes doing it. Everything the core provides
+  // (fixed-timestep clock with spike clamping, fault-quarantined systems,
+  // resource disposal, and the `window.__game` bridge the verdict layer reads)
+  // is otherwise re-derived from scratch every single run.
+  //
+  // Placed at the FRONT because it is the foundation the other skills sit on,
+  // and the prompt presents only the first few as "import now".
+  //
+  // Gated on there being any signal at all, so `recommendSkills({}, 'three')`
+  // stays empty — a caller who knows nothing about the game gets nothing.
+  if (engine === 'three' && (recs.length > 0 || genre !== undefined)) {
+    const core = skillPath('three', 'engine-core');
+    if (!seen.has(core)) {
+      seen.add(core);
+      recs.unshift({
+        skill: core,
+        reason:
+          'the engine foundation — fixed-timestep loop (framerate-independent physics, no background-tab catch-up debt), fault-quarantined systems, resource disposal, and the window.__game bridge (debug.track/controls.define/setWorld) the playtest verdict reads. Import this BEFORE hand-rolling a requestAnimationFrame loop.',
+      });
+    }
+  }
+
   return recs;
 }
 

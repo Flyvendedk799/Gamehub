@@ -18,7 +18,18 @@ function makeFs(initial: Record<string, string> = {}): TextEditorFsCallbacks {
       const cur = map.get(path);
       if (cur === undefined) throw new Error(`File not found: ${path}`);
       const idx = cur.indexOf(oldStr);
-      if (idx === -1) throw new Error(`old_str not found in ${path}`);
+      // Deliberately the WORKING TREE's wording, not a convenient one. This
+      // double used to throw "old_str not found in <path>", which happened to
+      // be the exact phrase text-editor.ts pattern-matched on to decide whether
+      // to emit its rich recovery message. Production throws this instead, so
+      // the branch passed here and was dead in the real system for every run.
+      // A double that words its errors more helpfully than the real thing hides
+      // exactly this class of bug.
+      if (idx === -1) {
+        throw new Error(
+          `str_replace: no match for the given text in ${path} (${cur.split('\n').length} lines). old_str must match the file content EXACTLY (whitespace + indentation included) and it does not.`,
+        );
+      }
       const last = cur.lastIndexOf(oldStr);
       if (last !== idx) {
         let count = 0;
@@ -27,7 +38,7 @@ function makeFs(initial: Record<string, string> = {}): TextEditorFsCallbacks {
           count += 1;
           i = cur.indexOf(oldStr, i + oldStr.length);
         }
-        throw new Error(`old_str matched ${count} times in ${path}; must be unique`);
+        throw new Error(`str_replace: text is not unique in ${path} (matched more than once)`);
       }
       const next = cur.replace(oldStr, newStr);
       map.set(path, next);
@@ -100,6 +111,90 @@ async function runAndCatch(fn: () => Promise<unknown>): Promise<string> {
   }
   throw new Error('expected the call to throw, but it resolved');
 }
+
+describe('str_replace recovery does not depend on the fs layer wording', () => {
+  /**
+   * The bug this pins: recovery was gated on the error message matching
+   * /old_str not found/i. The in-repo double threw exactly that, the real
+   * working tree threw "str_replace: no match for the given text", and so the
+   * rich recovery never ran in production — while the system prompt told the
+   * agent it would. Agents fell back to the advice in the bare error, which is
+   * to `view` the file: 45 views of one file in a single 17-minute run.
+   *
+   * Each case below drives the tool through an fs whose wording is deliberately
+   * unhelpful, and asserts recovery still fires.
+   */
+  function hostileFs(files: Record<string, string>): TextEditorFsCallbacks {
+    const map = new Map(Object.entries(files));
+    const edit = (path: string) => ({ path, startLine: 1, endLine: 1, totalLines: 1 });
+    return {
+      view(path: string) {
+        const c = map.get(path);
+        return c === undefined ? null : { content: c, numLines: c.split('\n').length };
+      },
+      create(path: string, content: string) {
+        map.set(path, content);
+        return { path };
+      },
+      strReplace(path: string) {
+        if (!map.has(path)) throw new Error(`File not found: ${path}`);
+        // Says nothing a matcher could key on. Any fs is free to word its errors
+        // this way, and recovery must still work.
+        throw new Error('edit rejected');
+      },
+      insert: edit,
+      patch: edit,
+    } as unknown as TextEditorFsCallbacks;
+  }
+
+  async function attempt(files: Record<string, string>, oldStr: string): Promise<string> {
+    const tool = makeTextEditorTool(hostileFs(files));
+    try {
+      await tool.execute('probe', {
+        command: 'str_replace',
+        path: 'src/main.js',
+        old_str: oldStr,
+        new_str: 'X',
+      });
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
+    throw new Error('expected the edit to fail');
+  }
+
+  it('surfaces candidate line numbers when old_str is absent', async () => {
+    const file = [
+      'function a() {',
+      '  return 1;',
+      '}',
+      '',
+      'function b() {',
+      '  return 2;',
+      '}',
+    ].join('\n');
+    const msg = await attempt({ 'src/main.js': file }, 'function b() {\n  return 999;\n}');
+    expect(msg).toMatch(/old_str not found/);
+    // The whole point: current bytes inline, so no `view` round-trip is needed.
+    expect(msg).toContain('function b() {');
+    expect(msg).toMatch(/CURRENT CONTENT/);
+  });
+
+  it('surfaces the literal bytes when the miss is only whitespace drift', async () => {
+    const file = ['const config = {', '\tvalue: 1,', '};'].join('\n');
+    // Same text, spaces instead of a tab — the classic drift.
+    const msg = await attempt({ 'src/main.js': file }, 'const config = {\n    value: 1,\n};');
+    expect(msg).toMatch(/near-match exists at line/);
+    expect(msg).toMatch(/differs only in whitespace/);
+  });
+
+  it('reports the real occurrence count when old_str is ambiguous', async () => {
+    const file = ['a();', 'dup();', 'b();', 'dup();', 'c();'].join('\n');
+    const msg = await attempt({ 'src/main.js': file }, 'dup();');
+    // Counted from the file, not parsed out of the fs layer's message.
+    expect(msg).toMatch(/matched 2 times/);
+    expect(msg).toMatch(/extend .?old_str/i);
+  });
+});
 
 describe('text-editor str_replace miss handling', () => {
   it('throws with candidate line numbers when old_str cannot be located', async () => {
@@ -259,7 +354,9 @@ describe('text-editor success message includes post-edit position', () => {
     });
     const text = (res.content[0] as { text: string }).text;
     // insert_line: 2 = before line 3 (1-indexed), spans 2 lines, total grows by 2.
-    expect(text).toContain('Inserted at index.html:2. New content at lines 3-4 (file is now 5 lines).');
+    expect(text).toContain(
+      'Inserted at index.html:2. New content at lines 3-4 (file is now 5 lines).',
+    );
 
     expect(text).toContain('no need to `view`');
   });
