@@ -130,6 +130,9 @@ importers:
         specifier: ^0.34.49
         version: 0.34.49
     devDependencies:
+      '@playforge/runtime':
+        specifier: workspace:*
+        version: link:../runtime
       '@types/node':
         specifier: ^22.10.2
         version: 22.19.21
