@@ -321,6 +321,89 @@ describe('exportGameHtml', () => {
     ]);
   });
 
+  it('inlines a SIBLING relative import between two modules in the same directory', async () => {
+    const dest = join(workDir, 'game.html');
+    const indexHtml = `<!doctype html><html><head>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
+</head><body>
+<canvas id="game"></canvas>
+<script type="module" src="src/main.js"></script>
+</body></html>`;
+    await exportGameHtml(dest, {
+      files: [
+        { path: 'index.html', content: indexHtml },
+        {
+          path: 'src/main.js',
+          content:
+            "import { burst } from './fx.js';\nimport { drawHud } from './hud.js';\nburst(); drawHud();",
+        },
+        { path: 'src/fx.js', content: 'export function burst() { return "BURST_MARKER"; }' },
+        { path: 'src/hud.js', content: 'export function drawHud() { return "HUD_MARKER"; }' },
+      ],
+      engine: 'three',
+    });
+    const entry = decodeEntryModule(readFileSync(dest, 'utf8'));
+    // The sibling specifiers must be gone from the entry, replaced by data: URLs
+    // that actually carry the sibling modules' source.
+    expect(entry).not.toContain("'./fx.js'");
+    expect(entry).not.toContain("'./hud.js'");
+    expect(decodeAllModules(entry).join('\n')).toContain('BURST_MARKER');
+    expect(decodeAllModules(entry).join('\n')).toContain('HUD_MARKER');
+  });
+
+  it('fully inlines a DEEP import chain (a → b → c), not just the first hop', async () => {
+    const dest = join(workDir, 'game.html');
+    const indexHtml = `<!doctype html><html><head>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
+</head><body>
+<canvas id="game"></canvas>
+<script type="module" src="src/main.js"></script>
+</body></html>`;
+    await exportGameHtml(dest, {
+      // Deliberately ordered entry-first so a single forward pass would capture
+      // a stale `b` (the bug this covers).
+      files: [
+        { path: 'index.html', content: indexHtml },
+        { path: 'src/main.js', content: "import { b } from './b.js';\nb();" },
+        {
+          path: 'src/b.js',
+          content: "import { c } from './c.js';\nexport function b() { return c(); }",
+        },
+        { path: 'src/c.js', content: 'export function c() { return "DEEP_LEAF_MARKER"; }' },
+      ],
+      engine: 'three',
+    });
+    const entry = decodeEntryModule(readFileSync(dest, 'utf8'));
+    const reachable = decodeAllModules(entry).join('\n');
+    expect(reachable).toContain('DEEP_LEAF_MARKER');
+    expect(reachable).not.toContain("'./c.js'");
+  });
+
+  it('does not hang on a circular import', async () => {
+    const dest = join(workDir, 'game.html');
+    const indexHtml = `<!doctype html><html><head>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
+</head><body><canvas id="game"></canvas>
+<script type="module" src="src/main.js"></script></body></html>`;
+    await exportGameHtml(dest, {
+      files: [
+        { path: 'index.html', content: indexHtml },
+        { path: 'src/main.js', content: "import { p } from './ping.js';\np();" },
+        {
+          path: 'src/ping.js',
+          content: "import { g } from './pong.js';\nexport function p() { return g(); }",
+        },
+        {
+          path: 'src/pong.js',
+          content: "import { p } from './ping.js';\nexport function g() { return 'PONG_MARKER'; }",
+        },
+      ],
+      engine: 'three',
+    });
+    const entry = decodeEntryModule(readFileSync(dest, 'utf8'));
+    expect(decodeAllModules(entry).join('\n')).toContain('PONG_MARKER');
+  });
+
   it('injects the configurable "Remix this" CTA and still locks connect-src to none (#3.2)', async () => {
     const dest = join(workDir, 'game.html');
     const indexHtml = `<!doctype html><html><head>
@@ -377,4 +460,24 @@ function assertNoLocalRefs(html: string, paths: string[]): void {
     expect(html).not.toMatch(new RegExp(`url\\(\\s*['"\`]?${esc}`));
     expect(html).not.toMatch(new RegExp(`(?:src|href)\\s*=\\s*['"\`]${esc}`));
   }
+}
+
+/** Decode the entry `<script type="module" src="data:…">` back to source. */
+function decodeEntryModule(html: string): string {
+  const m = html.match(/<script\b[^>]*\bsrc\s*=\s*["']data:text\/javascript;base64,([^"']+)["']/);
+  if (m === null || m[1] === undefined) throw new Error('no inlined entry module found');
+  return Buffer.from(m[1], 'base64').toString('utf8');
+}
+
+/** Decode `source` plus every JS data: URL nested inside it, transitively. */
+function decodeAllModules(source: string): string[] {
+  const out = [source];
+  const re = /data:text\/javascript;base64,([A-Za-z0-9+/=]+)/g;
+  let m: RegExpExecArray | null = re.exec(source);
+  while (m !== null) {
+    if (m[1] !== undefined)
+      out.push(...decodeAllModules(Buffer.from(m[1], 'base64').toString('utf8')));
+    m = re.exec(source);
+  }
+  return out;
 }

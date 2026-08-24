@@ -1210,6 +1210,8 @@ Other built-in genres expose their fields through their recommended skills' \`ge
 
 **Scaffold, then fill — author in big blocks.** Write each file's full skeleton in ONE \`create\` (every function present in its final position, bodies stubbed), then fill the bodies — this is far cheaper than growing a file through many incremental \`str_replace\` calls. Editing the same region five-plus times is the signal you should have scaffolded it up front; the edit budget below enforces that. Reach for a recommended library skill before writing a system by hand — adapting a vetted snippet is fewer tokens and fewer bugs than re-deriving it.
 
+**Batch every independent read into ONE turn.** You already do this for audio: six \`generate_audio_asset\` calls go out in a single turn and all six results come back together — one model round trip for six assets. Do the same for every read-only call. Several \`view\`s of different modules, several \`find\`s for different symbols, a \`find\` plus a \`view\` — if none of them needs another's answer, emit them ALL in the same response. Issued one per turn they each pay full model latency, and model latency (not tool time) is where a build actually spends its minutes. Serialise only when the next call genuinely depends on the previous result.
+
 **Trust your writes — do NOT \`view\` to verify.** Game files are large (20–40 KB single-file Three.js / Phaser), so re-views are extra-expensive in game mode. After a successful \`text_editor.create\` or \`str_replace\`, the post-edit position is reported in the tool result — work from that. Only \`view\` when (a) \`str_replace\` returned an error and you need its candidate line numbers, or (b) you genuinely need to re-read a section heavily edited by *prior* turns.
 
 **Do NOT narrate validator/linter trips.** The \`verify_artifact\` and \`validate_game_scene\` tools surface their own findings to you as tool results — internal output that the user does not need to see. If a linter warning fires, fix it silently with the next tool call. Phrases like "The linter is tripping on…", "Only a non-fatal accessibility warning…", "Let me add a \`<main>\` wrapper to satisfy it…" are noise.
@@ -1761,6 +1763,22 @@ const GAME_MULTI_FILE_GUIDE = `# Game multi-file authoring guide
 
 Multi-file projects are first-class in game-builder mode. The agent persists every file via \`text_editor\`, and the privileged \`game-files://designs/{designId}/\` protocol serves them into the preview iframe. Snapshots capture the full bundle so restore recovers the entire project tree, not just the entry point.
 
+## The project is ALREADY multi-file — you are editing a scaffold, not starting one
+
+When an engine is pinned, a complete, bootable premium project is seeded into the tree
+**before your first turn**: a thin \`src/main.js\` bootstrap, the engine it runs on at
+\`src/engine/core.js\`, and one small module per concern — \`theme.js\`, \`player.js\`,
+\`enemies.js\`, \`waves.js\`, \`fx.js\`, \`hud.js\` (Phaser also splits \`src/scenes/\`).
+
+**Adapt those modules. Do not collapse them back into one file.** Each is short enough
+to read whole, so an edit costs one call instead of a view-then-edit pair, and a change
+to \`player.js\` leaves the prompt cache for every other module intact. A single 1400-line
+\`main.js\` costs a look before every edit — measured at 37 views for 17 mutations on one
+production run — and re-primes the whole file's cache on every single-byte change.
+
+Add a module when you add a concern. \`src/main.js\` stays a bootstrap: wiring, the screen
+flow, and nothing else.
+
 ## Default to multi-file
 
 For Three.js and Phaser, **multi-file is the default expectation** — these engines benefit immediately from a separate scene file, an entity module, and a small data/config sidecar even on small games. The engine starter's \`index.html\` is a thin shell + importmap; your job is to author \`main.js\` plus the game's modules around it.
@@ -1775,7 +1793,8 @@ Use multi-file authoring when *any* of these hold (most non-trivial games hit at
 
 ## When to stay single-file (rare)
 
-Stay single-file (\`main.js\` inlined into \`index.html\` only, no \`src/\`) ONLY when ALL of these hold:
+This applies only to a project that arrives with no scaffold. If modules were seeded,
+keep them. Stay single-file (\`main.js\` inlined into \`index.html\` only, no \`src/\`) ONLY when ALL of these hold:
 
 - Trivial canvas demo: one mechanic, one screen, one entity type, < 150 LOC
 - Brief explicitly says "quick", "minimal", or "the simplest version of …"
@@ -1787,7 +1806,14 @@ If the brief is just "an endless runner" or "a 2D platformer", that's NOT trivia
 
 \`\`\`
 index.html                # entry — provided by engine starter
-src/main.js               # boot: Phaser.Game / Three.js scene mount
+src/main.js               # boot ONLY: wiring + screen flow, kept thin
+src/engine/core.js        # the engine your game runs on — seeded, extend it
+src/theme.js              # palette / fonts — one edit re-skins the game
+src/player.js             # the subject: state, update, draw
+src/enemies.js            # what the player deals with
+src/waves.js              # pacing + difficulty escalation
+src/fx.js                 # juice: shake, particles
+src/hud.js                # readable state + title/over screens
 src/scenes/
   boot.js                 # preload globals
   menu.js

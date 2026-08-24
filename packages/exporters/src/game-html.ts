@@ -360,53 +360,107 @@ async function inlineImportMap(
 }
 
 /**
+ * Resolve a module specifier as it is written INSIDE `fromPath` to a real
+ * bundle path.
+ *
+ * A specifier is relative to the file that contains it: `src/main.js` writing
+ * `'./fx.js'` means `src/fx.js`, not `fx.js`. The old matcher only knew the
+ * bundle path and its `./`-prefixed form, so it inlined `'src/fx.js'` and
+ * `'./src/fx.js'` (what index.html writes) but silently left `'./fx.js'`
+ * alone — a sibling import between two modules in the same directory, which
+ * is the ordinary shape of a modular project. The specifier then survived
+ * into the inlined HTML as a relative URL with no origin to resolve against,
+ * so the module never loaded and the game booted half-built.
+ *
+ * Bare/root-relative specifiers still resolve against the project root, so
+ * everything the variant matcher used to catch still resolves.
+ */
+function resolveSpecifierToBundlePath(
+  fromPath: string,
+  spec: string,
+  known: ReadonlySet<string>,
+): string | null {
+  const candidates: string[] = [];
+  if (spec.startsWith('./') || spec.startsWith('../')) {
+    const fromDir = fromPath.includes('/') ? fromPath.slice(0, fromPath.lastIndexOf('/')) : '';
+    const parts = fromDir === '' ? [] : fromDir.split('/');
+    let escaped = false;
+    for (const seg of spec.split('/')) {
+      if (seg === '.' || seg === '') continue;
+      if (seg === '..') {
+        if (parts.length === 0) {
+          escaped = true;
+          break;
+        }
+        parts.pop();
+      } else parts.push(seg);
+    }
+    if (!escaped) candidates.push(parts.join('/'));
+  }
+  // Root-relative fallback: `'src/fx.js'` / `'./src/fx.js'` written from
+  // anywhere. Kept so nothing the previous variant matcher inlined regresses.
+  candidates.push(spec.startsWith('./') ? spec.slice(2) : spec);
+
+  for (const base of candidates) {
+    if (base === '') continue;
+    for (const cand of [base, `${base}.js`, `${base}.mjs`, `${base}.cjs`, `${base}/index.js`]) {
+      if (known.has(cand)) return cand;
+    }
+  }
+  return null;
+}
+
+/** Every quoted string in a JS source, in any quote style. A specifier is only
+ *  ever substituted when it resolves to a file that is actually in the bundle,
+ *  so an unrelated string literal is left alone. */
+const QUOTED_SPECIFIER_RE = /(['"`])([^'"`\n]+)\1/g;
+
+/**
  * Inline every JS module in the bundle, recursively rewriting cross-module
  * references — static `import`/`export … from`, side-effect `import '…'`,
  * AND dynamic `import('…')` specifiers that name a local module — to the
  * inlined data: URLs.
  */
 function buildJsDataUrls(jsFiles: ZipAsset[]): Map<string, string> {
-  // Index by both the exact path and a leading-`./` form so relative
-  // specifiers resolve regardless of the convention the model emitted.
-  const byPath = new Map<string, string>();
-  for (const f of jsFiles) {
-    byPath.set(f.path, jsDataUrl(contentToString(f.content)));
-  }
-
-  // Recursively rewrite: replace any quoted local-module specifier with the
-  // current data: URL for that module. Iterate to a fixed point so deep
-  // import chains (a → b → c) fully inline.
   const sourceByPath = new Map<string, string>();
   for (const f of jsFiles) sourceByPath.set(f.path, contentToString(f.content));
+  const known = new Set(sourceByPath.keys());
 
-  for (let pass = 0; pass < jsFiles.length + 1; pass++) {
-    let changed = false;
-    for (const f of jsFiles) {
-      const current = sourceByPath.get(f.path) ?? '';
-      let rewritten = current;
-      for (const other of jsFiles) {
-        if (other.path === f.path) continue;
-        const otherDataUrl = byPath.get(other.path) ?? '';
-        // Match the path with or without a leading `./` (both `'a/b.js'`
-        // and `'./a/b.js'`), in any quote style. This also covers dynamic
-        // `import('a/b.js')` because the quoted specifier is identical.
-        const variants = referenceVariants(other.path);
-        for (const variant of variants) {
-          const re = new RegExp(`(['"\`])${escapeRegExp(variant)}\\1`, 'g');
-          const next = rewritten.replace(re, `$1${otherDataUrl}$1`);
-          if (next !== rewritten) {
-            rewritten = next;
-            changed = true;
-          }
-        }
-      }
-      if (rewritten !== current) {
-        sourceByPath.set(f.path, rewritten);
-        byPath.set(f.path, jsDataUrl(rewritten));
-      }
-    }
-    if (!changed) break;
+  // Inline DEPTH-FIRST: a module's data: URL is only minted once every module
+  // it imports has been inlined into it. The previous multi-pass loop rewrote
+  // files in bundle order, so on an a → b → c chain `a` captured `b`'s data URL
+  // before `b` had `c` folded in — and since that capture replaced the literal
+  // `'b.js'` with a data: URL, no later pass could see the edge again to
+  // refresh it. `a` shipped a stale `b`, and `c` never ran.
+  const resolved = new Map<string, string>();
+  const inProgress = new Set<string>();
+
+  const inlineSpecifiers = (path: string, source: string): string =>
+    source.replace(QUOTED_SPECIFIER_RE, (whole: string, quote: string, spec: string): string => {
+      // An already-inlined module is a data: URL — never re-resolve it.
+      if (spec.startsWith('data:')) return whole;
+      const target = resolveSpecifierToBundlePath(path, spec, known);
+      if (target === null || target === path) return whole;
+      return `${quote}${dataUrlFor(target)}${quote}`;
+    });
+
+  function dataUrlFor(path: string): string {
+    const cached = resolved.get(path);
+    if (cached !== undefined) return cached;
+    const source = sourceByPath.get(path) ?? '';
+    // Import cycle: a data: URL graph cannot express one (each edge inlines a
+    // fresh copy), so break the back-edge by inlining this module as-is. Not
+    // cached — the outer frame still produces the fully-rewritten version.
+    if (inProgress.has(path)) return jsDataUrl(source);
+    inProgress.add(path);
+    const url = jsDataUrl(inlineSpecifiers(path, source));
+    inProgress.delete(path);
+    resolved.set(path, url);
+    return url;
   }
+
+  const byPath = new Map<string, string>();
+  for (const f of jsFiles) byPath.set(f.path, dataUrlFor(f.path));
   return byPath;
 }
 

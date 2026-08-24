@@ -33,8 +33,21 @@ export {
 
 export { loadAllSkills, loadSkillsFromDir } from './skills/index.js';
 export type { LoadAllSkillsOptions } from './skills/index.js';
-export { PREMIUM_STARTERS, PREMIUM_STARTER_PATH } from './premium-starters.js';
-export type { StarterEngine } from './premium-starters.js';
+export {
+  PREMIUM_STARTER_ENGINE_PATH,
+  PREMIUM_STARTER_FILES,
+  PREMIUM_STARTER_PATH,
+  starterPathsFor,
+} from './premium-starters.js';
+export type { StarterEngine, StarterFiles } from './premium-starters.js';
+
+export {
+  MAX_VISUAL_CRITIQUES,
+  buildVisualCritiquePrompt,
+  buildVisualRepairInstruction,
+  parseVisualCritique,
+} from './visual-critique.js';
+export type { VisualCritique } from './visual-critique.js';
 
 export { generateViaAgent } from './agent.js';
 export type { AgentEvent, GenerateViaAgentDeps } from './agent.js';

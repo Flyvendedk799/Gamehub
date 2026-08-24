@@ -13,7 +13,8 @@
     "test": "vitest run --passWithNoTests",
     "eval:games": "tsx scripts/eval-games.ts",
     "analyze:runs": "tsx ../../scripts/analyze-runs.ts",
-    "sync:engine": "node scripts/sync-engine-skill.mjs"
+    "sync:engine": "node scripts/sync-engine-skill.mjs",
+    "trace:run": "tsx ../../scripts/trace-run.ts"
   },
   "dependencies": {
     "@mariozechner/pi-agent-core": "^0.67.68",

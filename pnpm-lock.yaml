@@ -389,6 +389,9 @@ importers:
       '@playforge/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@playforge/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
       '@playforge/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime

@@ -2,7 +2,7 @@
   "name": "playforge",
   "version": "0.0.0",
   "private": true,
-  "description": "Cloud-native AI game builder — describe a game in natural language, get a real playable web game, publish and remix in a community hub. (Working codename: Playforge.)",
+  "description": "Cloud-native AI game builder \u2014 describe a game in natural language, get a real playable web game, publish and remix in a community hub. (Working codename: Playforge.)",
   "license": "UNLICENSED",
   "type": "module",
   "engines": {
@@ -16,6 +16,7 @@
     "typecheck": "turbo run typecheck",
     "eval:games": "pnpm --filter @playforge/agent-core eval:games",
     "analyze:runs": "pnpm --filter @playforge/agent-core analyze:runs",
+    "trace:run": "pnpm --filter @playforge/agent-core trace:run",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write ."

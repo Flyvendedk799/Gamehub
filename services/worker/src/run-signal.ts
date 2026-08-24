@@ -31,6 +31,30 @@ export interface RunSignal {
   tweakSchemaDeclared: boolean;
   /** Count of str_replace tool results that reported a failure (edit thrash). */
   strReplaceFailures: number;
+  /**
+   * BUILD_SPEED §6 — how many times the agent loop STARTED within this run.
+   * Run 3 fired `agent_start` three times: chunk boundaries, each one
+   * re-establishing context from scratch. 1 = no restart.
+   */
+  agentStarts: number;
+  /** Restarts = starts beyond the first. */
+  agentRestarts: number;
+  /**
+   * What those restarts actually COST, rather than what they look like they cost.
+   *
+   * Re-establishing context shows up as the first turn of a new segment paying
+   * for a prompt prefix the previous segment had already paid for: fresh input
+   * plus cache WRITES, with no cache reads to offset them. So this sums
+   * (input + cacheWrite) over the FIRST turn of every segment after the first.
+   * That is the number to weigh before touching chunk boundaries — the doc's
+   * instruction was to measure the cost first, not to assume it.
+   */
+  restartReestablishTokens: number;
+  /** The same, as a share of the run's total billed input (0 when none). */
+  restartReestablishShare: number;
+  /** Turn count per segment — a restart that buys no work is a different problem
+   *  from one that splits the run evenly. */
+  restartSegmentTurns: number[];
 }
 
 function toolNameOf(event: AgentEvent): string | undefined {
@@ -48,9 +72,41 @@ export function createRunSignalAggregator() {
   let contractAuthored = false;
   let tweakSchemaDeclared = false;
   let strReplaceFailures = 0;
+  // BUILD_SPEED §6 — restart accounting.
+  let agentStarts = 0;
+  let awaitingSegmentFirstTurn = false;
+  let restartReestablishTokens = 0;
+  let billedInputTotal = 0;
+  const segmentTurns: number[] = [];
 
   return {
     observe(event: AgentEvent): void {
+      if (event.type === 'agent_start') {
+        agentStarts += 1;
+        // Only a RESTART re-establishes context; the first start is the run.
+        awaitingSegmentFirstTurn = agentStarts > 1;
+        segmentTurns.push(0);
+        return;
+      }
+      if (event.type === 'turn_end') {
+        const usage = (
+          event as {
+            message?: { usage?: { input?: number; cacheRead?: number; cacheWrite?: number } };
+          }
+        ).message?.usage;
+        if (segmentTurns.length === 0) segmentTurns.push(0);
+        const last = segmentTurns.length - 1;
+        segmentTurns[last] = (segmentTurns[last] ?? 0) + 1;
+        if (usage === undefined) return;
+        const input = usage.input ?? 0;
+        const cacheWrite = usage.cacheWrite ?? 0;
+        billedInputTotal += input + cacheWrite + (usage.cacheRead ?? 0);
+        if (awaitingSegmentFirstTurn) {
+          restartReestablishTokens += input + cacheWrite;
+          awaitingSegmentFirstTurn = false;
+        }
+        return;
+      }
       if (event.type === 'tool_execution_start') {
         const name = toolNameOf(event);
         if (!name) return;
@@ -107,6 +163,12 @@ export function createRunSignalAggregator() {
         skillsViewed: [...skills].sort(),
         skillsImported: [...imported].sort(),
         invariantWarnings: [...invariantWarnings],
+        agentStarts,
+        agentRestarts: Math.max(0, agentStarts - 1),
+        restartReestablishTokens,
+        restartReestablishShare:
+          billedInputTotal > 0 ? restartReestablishTokens / billedInputTotal : 0,
+        restartSegmentTurns: [...segmentTurns],
         contractAuthored,
         tweakSchemaDeclared,
         strReplaceFailures,

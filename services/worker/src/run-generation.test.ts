@@ -5,10 +5,15 @@
  * generateViaAgent would — then assert the snapshot persisted and the stream
  * fired. No provider key, no network: deterministic proof of the wiring.
  */
-import type { AgentEvent, GenerateOutput, PlaytestStep } from '@playforge/agent-core';
+import {
+  type AgentEvent,
+  type GenerateOutput,
+  type PlaytestStep,
+  starterPathsFor,
+} from '@playforge/agent-core';
 import type { GameSpec } from '@playforge/shared';
 import { InMemoryBlobStore, SnapshotStore } from '@playforge/storage';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   type BrowserJobsPort,
   ENGINE_SCENE_VALIDATOR,
@@ -103,10 +108,11 @@ describe('runGeneration (offline E2E)', () => {
     // Engine + spec carried forward through the gameMode callbacks.
     expect(result.engine).toBe('phaser');
     expect(result.spec).toMatchObject({ genre: 'sandbox', dimension: '2d' });
-    // 2 files: the stub agent's index.html + the premium starter src/main.js that
-    // setEngine seeds the moment the engine is pinned (premium pivot). A real agent
-    // edits that seeded entry into its game; this minimal stub leaves it in place.
-    expect(result.fileCount).toBe(2);
+    // The stub agent's index.html + the premium starter MODULE SET that setEngine
+    // seeds the moment the engine is pinned (premium pivot; modular scaffold
+    // BUILD_SPEED §1). A real agent edits those seeded modules into its game; this
+    // minimal stub leaves them in place.
+    expect(result.fileCount).toBe(starterPathsFor('phaser').length + 1);
 
     // Snapshot persisted to content-addressed storage; index.html readable back.
     expect(result.snapshot.manifestKey).toBe(
@@ -1308,6 +1314,13 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
 
   it('inlines a MULTI-FILE game before the browser-worker boots it (no false boot failure on external src)', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());
+    // Stub the engine-vendoring fetch: what is under test is the BUNDLER, not
+    // jsdelivr's availability. Un-stubbed, this test silently measured network
+    // reachability and reported a bundler regression whenever CI had no egress.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, status: 200, text: () => Promise.resolve('/* phaser */') })),
+    );
     let verifyHtml = '';
     const browserJobs: BrowserJobsPort & { playtestCalls: number } = {
       playtestCalls: 0,
@@ -1349,6 +1362,7 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     // inlined, not a dangling <script src="src/main.js"> it can't load.
     expect(verifyHtml.length).toBeGreaterThan(0);
     expect(verifyHtml).not.toContain('src="src/main.js"');
+    vi.unstubAllGlobals();
   });
 
   it('budget exhaustion (interrupted run) stops the loop early with budget_exhausted', async () => {
@@ -1466,5 +1480,253 @@ describe('validateControlsManifest (controls-manifest lint)', () => {
     const res = ENGINE_SCENE_VALIDATOR('canvas2d', [{ path: 'src/main.js', content: code }]);
     expect(res.ok).toBe(false);
     expect(res.issues.some((i) => /RESETS the controls manifest/.test(i.message))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BUILD_SPEED §3 — the bounded visual critique
+// ---------------------------------------------------------------------------
+
+describe('visual critique (BUILD_SPEED §3 — one frame, twice, never a loop)', () => {
+  const SPEC = {
+    schemaVersion: 1,
+    genre: 'topdown_arcade',
+    dimensions: '2d',
+    perspective: 'top_down',
+    cameraKind: 'follow_2d',
+    primaryInputs: ['keyboard'],
+    numActors: 1,
+    winCondition: 'Reach the exit tile.',
+    loseCondition: 'Touch an enemy.',
+    features: {},
+  } as unknown as GameSpec;
+
+  const HTML =
+    '<!doctype html><html><body><canvas id="game"></canvas><script>window.__game={};</script></body></html>';
+
+  /** A playtest trace that satisfies the topdown playbook, so the run is
+   *  ship-eligible on round 0 and the critique is the only thing left. */
+  function passing(): PlaytestVerdict {
+    return {
+      hasGameContract: true,
+      hasDebugContract: true,
+      baselineSnapshot: { playerPos: { x: 100, y: 100 } },
+      steps: [
+        {
+          step: { kind: 'key', code: 'KeyW' },
+          snapshotAfter: { playerPos: { x: 100, y: 70 } },
+          errors: [],
+        },
+        {
+          step: { kind: 'key', code: 'KeyS' },
+          snapshotAfter: { playerPos: { x: 100, y: 110 } },
+          errors: [],
+        },
+        {
+          step: { kind: 'key', code: 'KeyA' },
+          snapshotAfter: { playerPos: { x: 70, y: 110 } },
+          errors: [],
+        },
+        {
+          step: { kind: 'key', code: 'KeyD' },
+          snapshotAfter: { playerPos: { x: 110, y: 110 } },
+          errors: [],
+        },
+      ],
+      bootErrors: [],
+    };
+  }
+
+  function seeingBrowserJobs(): BrowserJobsPort & { screenshots: number } {
+    return {
+      screenshots: 0,
+      async runtimeVerify() {
+        return { hasGameContract: true, fatalErrors: [] } satisfies RuntimeVerifyVerdict;
+      },
+      async playtest() {
+        return passing();
+      },
+      async screenshot() {
+        this.screenshots += 1;
+        return { pngBase64: 'aGVsbG8=', width: 640, height: 360 };
+      },
+    };
+  }
+
+  function buildingAgent(onRound?: (prompt: string) => void): GenerateFn {
+    return async (input, deps) => {
+      onRound?.(input.prompt);
+      await deps.gameMode?.setSpec?.(SPEC);
+      await deps.fs?.create('index.html', HTML);
+      return emptyOutput('built it');
+    };
+  }
+
+  it('looks at a frame before shipping and spends ONE repair round on what it sees', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = seeingBrowserJobs();
+    const prompts: string[] = [];
+    let critiques = 0;
+
+    const result = await runGeneration(
+      {
+        prompt: 'a topdown arcade game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      {
+        store,
+        generate: buildingAgent((p) => prompts.push(p)),
+        browserJobs,
+        visionCritic: async () => {
+          critiques += 1;
+          return critiques === 1
+            ? 'FINDING: the player is an untextured grey box on a grey floor\nVERDICT: FIX'
+            : 'VERDICT: SHIP';
+        },
+      },
+    );
+
+    // Two vision calls: one at the first passing playtest, one after the repair.
+    expect(critiques).toBe(2);
+    expect(browserJobs.screenshots).toBe(2);
+    // Exactly one repair round, and it carried the finding.
+    expect(result.repairRounds).toBe(1);
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain('untextured grey box');
+    expect(prompts[1]).toMatch(/screenshot was taken/i);
+  });
+
+  it('ships untouched when the frame reads finished — no repair, ONE call', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = seeingBrowserJobs();
+    let critiques = 0;
+
+    const result = await runGeneration(
+      {
+        prompt: 'a topdown arcade game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      {
+        store,
+        generate: buildingAgent(),
+        browserJobs,
+        visionCritic: async () => {
+          critiques += 1;
+          return 'VERDICT: SHIP';
+        },
+      },
+    );
+
+    expect(critiques).toBe(1);
+    expect(result.repairRounds).toBe(0);
+    expect(result.shipReason).toBe('passed');
+  });
+
+  it('never critiques more than twice, even when it keeps finding problems', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = seeingBrowserJobs();
+    let critiques = 0;
+
+    const result = await runGeneration(
+      {
+        prompt: 'a topdown arcade game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      {
+        store,
+        generate: buildingAgent(),
+        browserJobs,
+        // Always unhappy. A loop would run until the repair budget was gone.
+        visionCritic: async () => {
+          critiques += 1;
+          return 'FINDING: still flat\nVERDICT: FIX';
+        },
+      },
+    );
+
+    expect(critiques).toBe(2);
+    expect(result.repairRounds).toBe(1);
+  });
+
+  it('a failing vision call never fails or delays the run', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = seeingBrowserJobs();
+
+    const result = await runGeneration(
+      {
+        prompt: 'a topdown arcade game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      {
+        store,
+        generate: buildingAgent(),
+        browserJobs,
+        visionCritic: async () => {
+          throw new Error('provider has no vision');
+        },
+      },
+    );
+
+    expect(result.shipReason).toBe('passed');
+    expect(result.repairRounds).toBe(0);
+  });
+
+  it('is inert when no vision critic is wired (the pre-§3 behaviour, unchanged)', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = seeingBrowserJobs();
+
+    const result = await runGeneration(
+      {
+        prompt: 'a topdown arcade game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: buildingAgent(), browserJobs },
+    );
+
+    expect(browserJobs.screenshots).toBe(0);
+    expect(result.repairRounds).toBe(0);
+  });
+
+  it('does not look at a game that never booted — the boot gate says it better', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    let critiques = 0;
+    const browserJobs: BrowserJobsPort & { screenshots: number } = {
+      screenshots: 0,
+      async runtimeVerify() {
+        return { hasGameContract: false, fatalErrors: ['boom'] } satisfies RuntimeVerifyVerdict;
+      },
+      async playtest() {
+        return passing();
+      },
+      async screenshot() {
+        this.screenshots += 1;
+        return { pngBase64: 'aGVsbG8=', width: 640, height: 360 };
+      },
+    };
+
+    await runGeneration(
+      {
+        prompt: 'a topdown arcade game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      {
+        store,
+        generate: buildingAgent(),
+        browserJobs,
+        visionCritic: async () => {
+          critiques += 1;
+          return 'FINDING: x\nVERDICT: FIX';
+        },
+      },
+    );
+
+    expect(browserJobs.screenshots).toBe(0);
+    expect(critiques).toBe(0);
   });
 });

@@ -2,10 +2,6 @@ import { performance } from 'node:perf_hooks';
 import type { ContinuationPromptInput } from '@playforge/agent-core';
 import { RedisEventBus } from '@playforge/bus';
 import { createDb, schema } from '@playforge/db';
-import type { AbortKind, GameSpec, ModelRef } from '@playforge/shared';
-import { classifyAbortKind } from '@playforge/shared';
-import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
-import { Queue, Worker } from 'bullmq';
 /**
  * Generation worker — BullMQ consumer.
  *
@@ -32,12 +28,18 @@ import { Queue, Worker } from 'bullmq';
  *   BLOB_DIR            local blob-store root (default: .playforge-blobs)
  *   WORKER_CONCURRENCY  parallel jobs per instance (default: 2)
  */
+import { complete } from '@playforge/providers';
+import type { AbortKind, GameSpec, ModelRef } from '@playforge/shared';
+import { classifyAbortKind } from '@playforge/shared';
+import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
+import { Queue, Worker } from 'bullmq';
 import { and, eq, inArray } from 'drizzle-orm';
 import {
   BrowserJobsClient,
   type PlaytestResult,
   type PlaytestStep,
   type RuntimeVerifyResult,
+  type ThumbnailResult,
 } from './browser-jobs';
 import { finalizeRun } from './finalize-run';
 import { enqueueRun } from './queue';
@@ -242,6 +244,19 @@ async function main() {
               bootErrors: result.bootErrors,
             };
           },
+          // BUILD_SPEED §3 — one frame for the visual critique. The `thumbnail`
+          // job already boots the game, nudges past a title screen and captures a
+          // non-blank frame of PLAY, which is exactly the frame worth judging.
+          async screenshot(htmlContent: string) {
+            const jobId = await browserClient.enqueueThumbnail(htmlContent);
+            const result = await browserClient.waitForResult<ThumbnailResult>(jobId, 30_000);
+            if (result === null) return null;
+            return {
+              pngBase64: result.pngBase64,
+              width: result.width,
+              height: result.height,
+            };
+          },
         };
 
   const worker = new Worker<GenerateJobData>(
@@ -302,6 +317,19 @@ async function main() {
             bus,
             store,
             ...(browserJobs !== undefined ? { browserJobs } : {}),
+            // BUILD_SPEED §3 — the vision call, on the run's OWN model and
+            // credential. Bounded to MAX_VISUAL_CRITIQUES by run-generation, so
+            // the worst case is two short image completions per run. A provider
+            // that rejects image input throws here; run-generation catches it and
+            // ships the run unchanged, which is why this needs no capability probe.
+            visionCritic: async ({ pngBase64, mimeType, prompt }) => {
+              const res = await complete(model, [{ role: 'user', content: prompt }], {
+                apiKey,
+                maxTokens: 500,
+                userImages: [{ data: pngBase64, mimeType }],
+              });
+              return res.content;
+            },
             // #5.6 — persist the per-run quality telemetry row. numeric(juice_score)
             // is string-typed in drizzle, so the measured score is stringified.
             // onConflictDoUpdate so a resumed run's final ship overwrites the row.
