@@ -60,6 +60,23 @@ export const PROXY_PRESETS = [
     notes: '',
   },
   {
+    id: 'subgate',
+    label: 'SubGate',
+    provider: 'openai',
+    // Loopback default for a co-hosted gateway; point at the public hostname
+    // when the consumer runs elsewhere. The API key is a SubGate consumer
+    // token (sgk_…), not a provider key.
+    baseUrl: 'http://127.0.0.1:8788/v1',
+    notes: 'Self-hosted gateway. Edit URL to your deployment; key is a consumer token',
+  },
+  {
+    id: 'subgate-anthropic',
+    label: 'SubGate (Anthropic wire)',
+    provider: 'anthropic',
+    baseUrl: 'http://127.0.0.1:8788',
+    notes: 'Same gateway via /v1/messages, for the Anthropic-native path',
+  },
+  {
     id: 'custom',
     label: 'Custom...',
     provider: 'openai',
