@@ -132,9 +132,11 @@ async function main() {
   const platformModel = { provider: modelProvider, modelId };
   // The design interview is four short questions, not a build. Point it at
   // something fast — the person is waiting on it before they can answer.
+  // `||`, not `??`: compose passes these through as empty strings when they
+  // are not set in .env, and an empty modelId would be sent to the provider.
   const interviewModel = {
-    provider: process.env['INTERVIEW_PROVIDER'] ?? modelProvider,
-    modelId: process.env['INTERVIEW_MODEL_ID'] ?? modelId,
+    provider: process.env['INTERVIEW_PROVIDER']?.trim() || modelProvider,
+    modelId: process.env['INTERVIEW_MODEL_ID']?.trim() || modelId,
   };
   const apiKeyEncryptionSecret = process.env['API_KEY_ENCRYPTION_SECRET'] ?? platformApiKey;
   const port = parsePositiveIntEnv(process.env['PORT'], DEFAULT_API_PORT);

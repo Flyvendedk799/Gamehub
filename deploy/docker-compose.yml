@@ -58,6 +58,12 @@ services:
       PLATFORM_API_KEY: ${PLATFORM_API_KEY:?set PLATFORM_API_KEY in deploy/.env}
       PLATFORM_PROVIDER: ${PLATFORM_PROVIDER:-anthropic}
       PLATFORM_MODEL_ID: ${PLATFORM_MODEL_ID:-claude-sonnet-4-6}
+      # The model that drafts the pre-build design interview. Unset falls back
+      # to PLATFORM_MODEL_ID; a smaller model is usually the right answer, since
+      # someone is waiting on these four questions before they can answer any
+      # of them.
+      INTERVIEW_PROVIDER: ${INTERVIEW_PROVIDER:-}
+      INTERVIEW_MODEL_ID: ${INTERVIEW_MODEL_ID:-}
       # Encrypts users' BYOK keys at rest. Falls back to PLATFORM_API_KEY when
       # unset — which would make every stored BYOK key undecryptable the moment
       # you rotate the platform key. Always set it explicitly.
