@@ -41,7 +41,7 @@ import {
 } from './browser-jobs';
 import { finalizeRun } from './finalize-run';
 import { enqueueRun } from './queue';
-import type { BrowserJobsPort, WebEngine } from './run-generation';
+import type { BrowserJobsPort, RunTokenUsage, WebEngine } from './run-generation';
 
 function requireEnv(name: string): string {
   const val = process.env[name];
@@ -275,6 +275,13 @@ async function main() {
       // finally that persists the elapsed ms — excludes queue wait / idle time.
       const aiStartedAt = new Date();
       const aiStartMs = performance.now();
+      // Latest running token usage (see GenerationPorts.onUsage). Held here so
+      // the finally below can persist spend for a run that THREW — aborted runs
+      // never reach finalizeRun, so their tokens used to read 0/0 forever.
+      // A ref rather than a bare `let`: TypeScript's flow analysis does not
+      // see the assignment inside the onUsage callback, so a `let` reads back
+      // as narrowed-to-null in the finally.
+      const usageRef: { latest: RunTokenUsage | null } = { latest: null };
       let result: Awaited<ReturnType<typeof enqueueRun>>;
       try {
         result = await enqueueRun(
@@ -330,6 +337,9 @@ async function main() {
                   },
                 });
             },
+            onUsage: (usage) => {
+              usageRef.latest = usage;
+            },
             // Durable build-feed log so the SSE relay can replay after a refresh.
             persistEvent: async (rec) => {
               await db
@@ -350,9 +360,27 @@ async function main() {
         // records timing on the row. Don't let a timing write mask the real error.
         const aiFinishedAt = new Date();
         const aiRuntimeMs = Math.max(0, Math.round(performance.now() - aiStartMs));
+        // Token spend goes down with the timing. On success finalizeRun runs
+        // straight after this and rewrites the same columns with the run's own
+        // authoritative totals, so this is only load-bearing for the throw path
+        // — which is precisely the path that was losing it.
+        const usage = usageRef.latest;
         await db
           .update(schema.runs)
-          .set({ aiStartedAt, aiFinishedAt, aiRuntimeMs, updatedAt: new Date() })
+          .set({
+            aiStartedAt,
+            aiFinishedAt,
+            aiRuntimeMs,
+            updatedAt: new Date(),
+            ...(usage === null
+              ? {}
+              : {
+                  inputTokens: usage.inputTokens,
+                  outputTokens: usage.outputTokens,
+                  cachedInputTokens: usage.cacheReadTokens,
+                  cacheCreationInputTokens: usage.cacheWriteTokens,
+                }),
+          })
           .where(eq(schema.runs.id, runId))
           .catch((err: unknown) =>
             console.error(`[worker] run=${runId} ai-runtime persist failed:`, err),
@@ -506,9 +534,14 @@ async function main() {
     const abortKind = classifyAbortKind(err instanceof Error ? err.message : String(err));
     console.error(`[worker] job ${job?.id ?? '?'} run=${runId ?? '?'} failed (${abortKind}):`, err);
     if (runId) {
+      // `finishedAt` matters as much as the status. Without it every failed
+      // run reads as still in flight — all five failures in production had a
+      // NULL finished_at, so the stuck-run reaper and any "is this done yet"
+      // query could not tell an aborted run from a live one.
+      const now = new Date();
       await db
         .update(schema.runs)
-        .set({ status: 'failed', abortKind, updatedAt: new Date() })
+        .set({ status: 'failed', abortKind, updatedAt: now, finishedAt: now })
         .where(eq(schema.runs.id, runId))
         .catch(() => {});
 

@@ -1,5 +1,6 @@
 'use client';
 
+import { DesignInterview, needsInterview } from '@/components/DesignInterview';
 import { BrandMark, Wordmark } from '@/components/Logo';
 import ProjectCard from '@/components/ProjectCard';
 import { createProject, generateGame, listProjects } from '@/lib/api';
@@ -28,6 +29,15 @@ export default function HomePage() {
   const [errorMsg, setErrorMsg] = useState('');
   const [recent, setRecent] = useState<Project[] | null>(null);
   const [authed, setAuthed] = useState(false);
+  /**
+   * The prompt waiting on the design interview.
+   *
+   * Set when someone submits something the interview can usefully ask about;
+   * cleared when they build or go back. While it is set the interview replaces
+   * the page, because a few questions answered up front are worth far more than
+   * a build that guessed.
+   */
+  const [interviewPrompt, setInterviewPrompt] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Signed in, the home is the production console's dashboard (identity board
@@ -88,14 +98,41 @@ export default function HomePage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    await startBuild(prompt, engine);
+    const trimmed = prompt.trim();
+    if (!trimmed) return;
+
+    // Ask before building — but only when there is something worth asking. A
+    // prompt that already names its world, loop and win condition goes straight
+    // through rather than being interrogated about what it just said.
+    if (needsInterview(trimmed)) {
+      setInterviewPrompt(trimmed);
+      return;
+    }
+    await startBuild(trimmed, engine);
   }
 
   // #3.5 — one-click build from an idea chip: submit the real brief through
   // the same path (auth-aware, pending-prompt) as a typed prompt. No need to
   // populate the textarea first; the click IS the submit.
+  //
+  // Chips skip the interview on purpose: the brief behind a chip already
+  // specifies its world, loop and win condition, so the click means "this one",
+  // not "let us discuss it".
   function useExample(brief: GameExampleBrief) {
     void startBuild(briefToPrompt(brief), briefEngineToApiEngine(brief.engine));
+  }
+
+  if (interviewPrompt !== null) {
+    return (
+      <DesignInterview
+        prompt={interviewPrompt}
+        onBuild={(composed) => {
+          setInterviewPrompt(null);
+          void startBuild(composed, engine);
+        }}
+        onCancel={() => setInterviewPrompt(null)}
+      />
+    );
   }
 
   const isLoading = status === 'loading';

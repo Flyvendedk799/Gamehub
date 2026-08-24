@@ -29,7 +29,7 @@ describe('deriveBuildStatus', () => {
       }),
     ]);
     expect(s.phase).toBe('Build');
-    expect(s.currentStep).toBe('writing src/main.js');
+    expect(s.currentStep).toBe('Writing main.js');
   });
 
   it('advances to Test on a verify tool, then Ready on run_complete', () => {
@@ -101,7 +101,7 @@ describe('deriveBuildStatus', () => {
       }),
     ]);
     expect(s.phase).toBe('Build');
-    expect(s.currentStep).toBe('writing index.html');
+    expect(s.currentStep).toBe('Laying out the page');
   });
 
   it('exposes exactly four ordered phases', () => {

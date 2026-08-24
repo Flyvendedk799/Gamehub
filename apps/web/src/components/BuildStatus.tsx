@@ -95,6 +95,40 @@ export function BuildStatus({
         {formatElapsed(elapsed)} ELAPSED
       </p>
 
+      {/*
+        The work so far. A single replaced line hides that anything is
+        progressing — which is how a twenty-six minute build came to read as a
+        hang. Completed steps stay dim; the last one is live.
+      */}
+      {status.steps.length > 0 && (
+        <ul className="mx-auto mt-5 flex max-w-xs flex-col gap-1 text-left">
+          {status.steps.map((buildStep, i) => {
+            const isCurrent = i === status.steps.length - 1 && !status.done;
+            return (
+              <li
+                key={`${buildStep.label}-${i}`}
+                className={`flex items-baseline gap-2 text-xs leading-relaxed ${
+                  isCurrent ? 'text-ink' : 'text-ink-4'
+                }`}
+              >
+                <span
+                  aria-hidden
+                  className={`font-mono text-[10px] ${isCurrent ? 'text-live' : 'text-ink-4'}`}
+                >
+                  {isCurrent ? '▸' : '✓'}
+                </span>
+                <span className="flex-1">{buildStep.label}</span>
+                {buildStep.count > 1 && (
+                  <span className="font-mono text-[10px] tabular-nums text-ink-4">
+                    ×{buildStep.count}
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
       {/* Phase tracker */}
       <div className="mt-6 flex flex-col items-center gap-2.5">
         <div className="h-0.5 w-full bg-hairline">

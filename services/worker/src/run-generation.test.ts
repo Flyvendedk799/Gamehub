@@ -14,6 +14,7 @@ import {
   ENGINE_SCENE_VALIDATOR,
   type GenerateFn,
   type PlaytestVerdict,
+  type RunTokenUsage,
   type RuntimeVerifyVerdict,
   isVerifyInlineAssetNoise,
   runGeneration,
@@ -290,6 +291,131 @@ describe('runGeneration token ceiling (#18)', () => {
     );
 
     expect(abortedSeen).toBe(false);
+  });
+});
+
+describe('runGeneration onUsage port (spend survives an abort)', () => {
+  function turnEnd(input: number, output: number, cacheRead = 0, cacheWrite = 0): AgentEvent {
+    return {
+      type: 'turn_end',
+      message: {
+        usage: { input, output, cacheRead, cacheWrite, totalTokens: input + output },
+      },
+      toolResults: [],
+    } as unknown as AgentEvent;
+  }
+
+  it('reports running totals after every turn', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const seen: RunTokenUsage[] = [];
+    const agent: GenerateFn = async (_input, deps) => {
+      deps.onEvent?.(turnEnd(1_000, 100, 10, 5));
+      deps.onEvent?.(turnEnd(2_000, 200, 20, 5));
+      await deps.fs?.create('index.html', RED_SQUARE);
+      return emptyOutput('ok');
+    };
+
+    const result = await runGeneration(
+      {
+        prompt: 'metered game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      {
+        store,
+        generate: agent,
+        onUsage: (u) => {
+          seen.push(u);
+        },
+      },
+    );
+
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toEqual({
+      inputTokens: 1_000,
+      outputTokens: 100,
+      totalTokens: 1_100,
+      cacheReadTokens: 10,
+      cacheWriteTokens: 5,
+    });
+    // Cumulative across turns, not per-turn.
+    expect(seen[1]).toEqual({
+      inputTokens: 3_000,
+      outputTokens: 300,
+      totalTokens: 3_300,
+      cacheReadTokens: 30,
+      cacheWriteTokens: 10,
+    });
+    // The last report agrees with the finished result — one source of truth.
+    expect(seen[1]).toEqual(result.usage);
+  });
+
+  it('has already reported the spend when the run THROWS', async () => {
+    // The regression this exists for: an aborted run never produces a
+    // GenerationResult, so before onUsage its tokens persisted as 0/0 — and
+    // aborted runs are exactly the expensive ones.
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const seen: RunTokenUsage[] = [];
+    const explodingAgent: GenerateFn = async (_input, deps) => {
+      deps.onEvent?.(turnEnd(80_000, 9_000));
+      throw new Error('tool_budget_exceeded');
+    };
+
+    await expect(
+      runGeneration(
+        {
+          prompt: 'runaway game',
+          model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+          apiKey: 'sk-test',
+        },
+        {
+          store,
+          generate: explodingAgent,
+          onUsage: (u) => {
+            seen.push(u);
+          },
+        },
+      ),
+    ).rejects.toThrow('tool_budget_exceeded');
+
+    expect(seen.at(-1)).toEqual({
+      inputTokens: 80_000,
+      outputTokens: 9_000,
+      totalTokens: 89_000,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
+  });
+
+  it('reports the totals that tripped the token ceiling', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const seen: RunTokenUsage[] = [];
+    const meteredAgent: GenerateFn = async (input, deps) => {
+      deps.onEvent?.(turnEnd(90_000, 20_000)); // 110k, over the 100k ceiling
+      expect(input.signal?.aborted ?? false).toBe(true);
+      await deps.fs?.create('index.html', RED_SQUARE);
+      return emptyOutput('hit ceiling');
+    };
+
+    await runGeneration(
+      {
+        prompt: 'over budget',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      {
+        store,
+        generate: meteredAgent,
+        maxTokens: 100_000,
+        onUsage: (u) => {
+          seen.push(u);
+        },
+      },
+    );
+
+    // Reported BEFORE the ceiling check, so the over-budget totals are what the
+    // caller sees rather than the last under-budget ones.
+    expect(seen.at(-1)?.totalTokens).toBe(110_000);
   });
 });
 

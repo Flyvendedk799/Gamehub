@@ -30,6 +30,7 @@ import {
   type GenerateFn,
   type GenerationResult,
   type RunQualityMetrics,
+  type RunTokenUsage,
   type WebEngine,
   runGeneration,
 } from './run-generation';
@@ -88,6 +89,12 @@ export interface QueuePorts {
    * no-DB dev — the run then streams live-only as before.
    */
   persistEvent?: PersistRunEventFn;
+  /**
+   * Running token usage for the active run (see `GenerationPorts.onUsage`).
+   * main.ts keeps the latest and persists it in its `finally`, so an aborted
+   * run records what it spent instead of 0/0.
+   */
+  onUsage?: (usage: RunTokenUsage) => void;
 }
 
 export interface EnqueueResult extends GenerationResult {
@@ -199,6 +206,7 @@ export async function enqueueRun(input: EnqueueInput, ports: QueuePorts): Promis
             }
           : {}),
         ...(input.maxTokens !== undefined ? { maxTokens: input.maxTokens } : {}),
+        ...(ports.onUsage !== undefined ? { onUsage: ports.onUsage } : {}),
         onEvent: (event: AgentEvent) => {
           // Capture the latest set_todos for continuation building.
           if (

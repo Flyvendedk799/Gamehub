@@ -12,7 +12,8 @@
     "./social-outro": "./src/social-outro.ts",
     "./game-jam": "./src/game-jam.ts",
     "./controls-gamepad": "./src/controls-gamepad.ts",
-    "./runtime-beacon": "./src/runtime-beacon.ts"
+    "./runtime-beacon": "./src/runtime-beacon.ts",
+    "./design-interview": "./src/design-interview.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

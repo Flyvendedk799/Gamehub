@@ -12,6 +12,7 @@
 
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
+import { formatEditEcho } from './edit-echo.js';
 import { REDACTED_PATH_SENTINEL, REDACTION_POISON_KEY } from '../context-prune.js';
 import type { CameraGuard } from './camera-pin.js';
 import type { EditBudget } from './edit-budget.js';
@@ -129,17 +130,37 @@ function ok(text: string, details: TextEditorDetails): AgentToolResult<TextEdito
  * "lines X-Y" each time it lands a write costs ~10 extra tokens per call
  * but anchors the agent's working memory to ground truth.
  */
-function formatEditOk(headline: string, result: EditResult, isDeletion: boolean): string {
+/**
+ * Summarise a successful edit, and show what it produced.
+ *
+ * The summary alone ("New content at lines 118-142") tells the model where it
+ * wrote but not what — so it calls `view` to look, which is a full model round
+ * trip after nearly every edit. Run 5f7e6510 made 86 view calls against 30
+ * mutations of one file. Passing `contentAfter` appends the edited region, so
+ * the model already has what it would have gone to fetch.
+ */
+function formatEditOk(
+  headline: string,
+  result: EditResult,
+  isDeletion: boolean,
+  contentAfter?: string | undefined,
+): string {
   const { path, startLine, endLine, totalLines } = result;
   const headlineWithPath = headline.endsWith('.') ? headline : `${headline} ${path}.`;
   if (startLine === undefined || endLine === undefined || totalLines === undefined) {
     return headlineWithPath;
   }
   if (isDeletion) {
+    // Nothing to echo — the lines are gone.
     return `${headlineWithPath} Removed content at line ${startLine} (file is now ${totalLines} lines).`;
   }
   const range = startLine === endLine ? `line ${startLine}` : `lines ${startLine}-${endLine}`;
-  return `${headlineWithPath} New content at ${range} (file is now ${totalLines} lines).`;
+  const summary = `${headlineWithPath} New content at ${range} (file is now ${totalLines} lines).`;
+  const echo =
+    contentAfter === undefined
+      ? ''
+      : formatEditEcho(path, contentAfter, startLine, endLine);
+  return `${summary}${echo}`;
 }
 
 /**
@@ -778,13 +799,14 @@ export function makeTextEditorTool(
           }
           try {
             const result = await fs.strReplace(path, oldStr, newStr);
-            const sizeAfter = fs.view(path)?.content.length ?? 0;
+            const afterContent = fs.view(path)?.content ?? '';
+            const sizeAfter = afterContent.length;
             lastMutationByPath.set(path, { tick, size: sizeAfter });
             // Successful edit clears the per-target failure counter for
             // this bucket — agent demonstrated it found the right bytes.
             if (bucketKey !== null) targetFailures.delete(bucketKey);
             const budgetWarning = editBudget?.recordEdit(path) ?? null;
-            const message = formatEditOk('Edited', result, newStr.length === 0);
+            const message = formatEditOk('Edited', result, newStr.length === 0, afterContent);
             // Improver1 §5 — nudge towards `patch` after a successful
             // multi-line REPLACE (not pure deletions). One-shot per
             // (path, run) so the tool stream isn't spammed. Production
@@ -847,7 +869,14 @@ export function makeTextEditorTool(
           // on the user's requested `insert_line` for continuity, then layers
           // the post-edit range on top so the model knows where the new
           // content actually lives.
-          return ok(formatEditOk(`Inserted at ${result.path}:${line}.`, result, false), {
+          return ok(
+            formatEditOk(
+              `Inserted at ${result.path}:${line}.`,
+              result,
+              false,
+              fs.view(path)?.content ?? '',
+            ),
+            {
             command: 'insert',
             path,
             result,
@@ -990,13 +1019,15 @@ export function makeTextEditorTool(
           }
           // Successful patch clears the per-target counter.
           if (patchBucketKey !== null) targetFailures.delete(patchBucketKey);
-          const sizeAfter = fs.view(path)?.content.length ?? 0;
+          const afterContent = fs.view(path)?.content ?? '';
+          const sizeAfter = afterContent.length;
           lastMutationByPath.set(path, { tick, size: sizeAfter });
           const budgetWarning = editBudget?.recordEdit(path) ?? null;
           const message = formatEditOk(
             `Patched ${path} (${hunks.length} hunk${hunks.length === 1 ? '' : 's'}).`,
             result,
             false,
+            afterContent,
           );
           return ok(budgetWarning !== null ? `${message}${budgetWarning}` : message, {
             command: 'patch',
