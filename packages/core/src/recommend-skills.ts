@@ -190,32 +190,35 @@ export function recommendSkills(
     push('asset-pipeline', 'load real glTF models + instanced geometry instead of primitives');
   }
 
-  // The Three engine core, first in the list.
+  // DO NOT recommend three/engine-core here. It was tried, measured, and
+  // reverted — read this before adding it back.
   //
-  // It was registered in the skill index and recommended by nothing, so agents
-  // only ever found it by browsing — and did not. A production Three run logged
-  // `engineImports: 0` and `skillsImported: []` while hand-rolling its own
-  // frame loop, then spent 16 minutes doing it. Everything the core provides
-  // (fixed-timestep clock with spike clamping, fault-quarantined systems,
-  // resource disposal, and the `window.__game` bridge the verdict layer reads)
-  // is otherwise re-derived from scratch every single run.
+  // The engine core is registered in the skill index and recommended by nothing,
+  // which looks like an obvious gap: agents hand-roll a frame loop every run
+  // while a tested one sits unused. Adding it to this list DID get it imported.
+  // It did not get it used.
   //
-  // Placed at the FRONT because it is the foundation the other skills sit on,
-  // and the prompt presents only the first few as "import now".
+  // Same prompt, before and after (production runs 8e064664 → d1567c9a):
   //
-  // Gated on there being any signal at all, so `recommendSkills({}, 'three')`
-  // stays empty — a caller who knows nothing about the game gets nothing.
-  if (engine === 'three' && (recs.length > 0 || genre !== undefined)) {
-    const core = skillPath('three', 'engine-core');
-    if (!seen.has(core)) {
-      seen.add(core);
-      recs.unshift({
-        skill: core,
-        reason:
-          'the engine foundation — fixed-timestep loop (framerate-independent physics, no background-tab catch-up debt), fault-quarantined systems, resource disposal, and the window.__game bridge (debug.track/controls.define/setWorld) the playtest verdict reads. Import this BEFORE hand-rolling a requestAnimationFrame loop.',
-      });
-    }
-  }
+  //   skillsImported   []            → ["engine-core", "enemy-ai", "wave-spawner"]
+  //   usesSkillFns     0             → 0
+  //   engineImports    0             → 0
+  //   removedDeadSkills []           → ["engine-core", "enemy-ai", "wave-spawner"]
+  //   wall clock       16.8 min      → 24.9 min
+  //
+  // All three were staged, read (nine `view` calls across them), never called,
+  // and then deleted by the dead-skill sweep. The shipped game was byte-for-byte
+  // as engine-free as before, and the run cost eight extra minutes to get there.
+  //
+  // The reason is structural, not a wording problem. By the time a recommendation
+  // is read the agent has already committed to its own architecture, and a
+  // foundational loop is the one thing it cannot adopt halfway. Feature skills
+  // (enemy-ai, wave-spawner) can be bolted on; an engine core cannot.
+  //
+  // The fix is to make the engine the STARTING POINT — scaffolded into the
+  // working tree so the agent edits a main.js that already runs on it — not an
+  // optional import offered after the fact. Until that exists, recommending it
+  // costs time and changes nothing.
 
   return recs;
 }
