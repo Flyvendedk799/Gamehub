@@ -16,8 +16,14 @@ import { REDACTED_PATH_SENTINEL, REDACTION_POISON_KEY } from '../context-prune.j
 import type { CameraGuard } from './camera-pin.js';
 import type { EditBudget } from './edit-budget.js';
 import { formatEditEcho } from './edit-echo.js';
+import { findInFiles } from './find-in-files.js';
 import { assertSafeToolPath } from './path-safety.js';
-import { extractJsxSymbol, offsetsToLines, rangeToLineSpan } from './symbol-extractor.js';
+import {
+  extractJsxSymbol,
+  offsetsToLines,
+  rangeToLineSpan,
+  renderOutline,
+} from './symbol-extractor.js';
 
 /**
  * Result shape for write-class callbacks (`strReplace`, `insert`). The optional
@@ -40,6 +46,13 @@ export interface EditResult {
 
 export interface TextEditorFsCallbacks {
   view(path: string): { content: string; numLines: number } | null;
+  /**
+   * Every text file in the tree — backs a project-wide `find`.
+   *
+   * Optional so existing hosts keep working; when absent, `find` searches the
+   * single file named by `path` instead of the whole project.
+   */
+  textFiles?(): Array<{ path: string; content: string }>;
   create(path: string, content: string): Promise<{ path: string }> | { path: string };
   strReplace(path: string, oldStr: string, newStr: string): Promise<EditResult> | EditResult;
   insert(path: string, line: number, text: string): Promise<EditResult> | EditResult;
@@ -72,8 +85,17 @@ const TextEditorParams = Type.Object({
     // Backlog-3 §2 — patch protocol: multiple line-bounded hunks in one
     // call. Cuts surrounding-context output tokens for iteration runs.
     Type.Literal('patch'),
+    // Locate code without reading it — see find-in-files.ts for why this had
+    // to exist.
+    Type.Literal('find'),
   ]),
   path: Type.String(),
+  /** `find`: the literal text to search for. */
+  query: Type.Optional(Type.String()),
+  /** `find`: lines of context either side of each hit. 0 = the line alone. */
+  context_lines: Type.Optional(Type.Number()),
+  /** `find`: search only `path` rather than the whole project. */
+  this_file_only: Type.Optional(Type.Boolean()),
   file_text: Type.Optional(Type.String()),
   old_str: Type.Optional(Type.String()),
   new_str: Type.Optional(Type.String()),
@@ -110,7 +132,7 @@ const TextEditorParams = Type.Object({
 });
 
 export interface TextEditorDetails {
-  command: 'view' | 'create' | 'str_replace' | 'insert' | 'patch';
+  command: 'view' | 'create' | 'str_replace' | 'insert' | 'patch' | 'find';
   path: string;
   result?: unknown;
 }
@@ -564,10 +586,19 @@ export function makeTextEditorTool(
     name: 'str_replace_based_edit_tool',
     label: 'Text editor',
     description:
-      'Read and edit files in the current design via view/create/str_replace/insert commands. ' +
+      'Read and edit files in the current design via view/find/create/str_replace/insert/patch commands. ' +
       'Paths are relative to the project root (e.g. "index.html", "assets/sprite.png"). ' +
       'Use create for new files; str_replace requires an exact match of old_str; ' +
       'view returns file content or directory listing. ' +
+      // Navigation comes first. Hunting for code by reading it is the single
+      // largest cost in a build — 62% of all model latency in the last
+      // production trace followed this tool, most of it ranged views walking a
+      // file front to back. The map and find replace that outright.
+      'NAVIGATE, NEVER SCAN. Every view of a file over ~120 lines returns a MAP of its declarations with line numbers — ' +
+      'read it and jump straight to what you need instead of paging through the file. ' +
+      'To locate anything the map does not name (a string, a config value, a call site, a usage), use ' +
+      'command "find" with `query`: a LITERAL search across the whole project, returning path:line with surrounding context ' +
+      '(`context_lines`, default 2; `this_file_only: true` restricts it to `path`). One find replaces a dozen ranged views. ' +
       'IMPORTANT: pass `view_range: [startLine, endLine]` (1-indexed, inclusive; either bound may be -1 for EOF) ' +
       'to read only a slice of the file — strongly preferred over full-file views after the file has grown past ~100 lines. ' +
       'Alternatively pass `symbol: "<JsxName>"` to read the body of a top-level function or const declaration by name ' +
@@ -606,9 +637,41 @@ export function makeTextEditorTool(
       // etc. BEFORE any fs callback runs, so a storage bug can't become an escape.
       assertSafeToolPath(path, 'str_replace_based_edit_tool');
       switch (params.command) {
+        case 'find': {
+          const query = params.query ?? '';
+          if (query.trim().length === 0) {
+            throw new Error(
+              'find requires a non-empty `query` — the literal text to search for (a function name, a string, a config key).',
+            );
+          }
+          // Project-wide by default: the thing being looked for is often in a
+          // file the agent has not read, and narrowing to one file just costs
+          // another round trip to discover that.
+          const all = fs.textFiles?.();
+          const scope =
+            params.this_file_only === true || all === undefined
+              ? (() => {
+                  const single = fs.view(path);
+                  return single === null ? [] : [{ path, content: single.content }];
+                })()
+              : all;
+          if (scope.length === 0) throw new Error(`find: ${path} does not exist`);
+          const found = findInFiles(scope, query, params.context_lines ?? 2);
+          return ok(found.text, {
+            command: 'find',
+            path,
+            result: { query, matches: found.total, files: scope.length },
+          });
+        }
         case 'view': {
           const file = fs.view(path);
           if (file !== null) {
+            // Every view carries the file's map. The agent cannot see the file,
+            // so without one its only way to locate code is to scan — production
+            // traces show exactly that, marching through a 745-line game in
+            // overlapping 60-100 line windows at ~10s a round trip. The map costs
+            // under a kilobyte and replaces the whole search.
+            const map = renderOutline(path, file.content);
             // Symbol view — find a top-level function/const declaration by
             // name and return its body. Mutually exclusive with view_range;
             // when both are supplied, symbol wins (it's the more precise
@@ -652,7 +715,7 @@ export function makeTextEditorTool(
               const header = `${path} · symbol ${symbol} · lines ${span.startLine}-${span.endLine} of ${file.numLines}\n`;
               // Improver1 §8 — symbol view delivers fresh bytes.
               resetTargetFailuresForPath(path);
-              return ok(header + slice, {
+              return ok(header + slice + map, {
                 command: 'view',
                 path,
                 result: {
@@ -695,7 +758,7 @@ export function makeTextEditorTool(
               // the per-target retry budget for this path so the agent
               // can retry without hitting the refusal.
               resetTargetFailuresForPath(path);
-              return ok(header + slice + truncationHint, {
+              return ok(header + slice + truncationHint + map, {
                 command: 'view',
                 path,
                 result: {
@@ -719,7 +782,7 @@ export function makeTextEditorTool(
             if (lastMut !== undefined && file.content.length === lastMut.size && noViewSinceWrite) {
               const stub = `${path} was last written at tool-call tick ${lastMut.tick} (${lastMut.size} bytes, ${file.numLines} lines). No edits or other writes have landed since. Re-issue \`view\` with \`view_range\` or \`symbol\` only if you need a SPECIFIC region — re-fetching the entire file burns ~${Math.ceil(file.content.length / 4)} tokens for no new information. Otherwise continue with your next edit using the bytes you wrote.`;
               lastViewByPath.set(path, { tick, size: file.content.length });
-              return ok(stub, {
+              return ok(stub + map, {
                 command: 'view',
                 path,
                 result: { numLines: file.numLines, postWriteStub: true },
@@ -740,7 +803,7 @@ export function makeTextEditorTool(
             if (noMutationSinceView && lastView !== undefined) {
               const stub = `${path} unchanged since your last view at tick ${lastView.tick} (${file.numLines} lines, ${file.content.length} bytes). The bytes already in your context for this path are still current — no need to re-emit them. To inspect a specific region, pass \`view_range: [start, end]\` (1-indexed); otherwise continue.`;
               lastViewByPath.set(path, { tick, size: file.content.length });
-              return ok(stub, {
+              return ok(stub + map, {
                 command: 'view',
                 path,
                 result: { numLines: file.numLines, staleViewStub: true },
@@ -753,7 +816,7 @@ export function makeTextEditorTool(
               // Improver1 §8 — first full-file view delivers fresh
               // bytes; clear retry-budget for this path.
               resetTargetFailuresForPath(path);
-              return ok(file.content, {
+              return ok(file.content + map, {
                 command: 'view',
                 path,
                 result: { numLines: file.numLines },
@@ -764,7 +827,7 @@ export function makeTextEditorTool(
             const head = file.content.slice(0, 400);
             const ellipsis = file.content.length > 400 ? '…' : '';
             const summary = `${path} (already viewed ${count - 1} time(s) in this run — ${file.numLines} lines total)\n\nFirst 400 chars for orientation:\n${head}${ellipsis}\n\nTo see a specific region, re-issue view with \`view_range: [startLine, endLine]\` (1-indexed). Full-file re-views are disabled for the rest of this run to keep context from blowing up.`;
-            return ok(summary, {
+            return ok(summary + map, {
               command: 'view',
               path,
               result: { numLines: file.numLines, summarized: true },
@@ -786,7 +849,11 @@ export function makeTextEditorTool(
           // E3: record the mutation tick + size for post-write view stubbing.
           const sizeAfter = fs.view(path)?.content.length ?? 0;
           lastMutationByPath.set(path, { tick, size: sizeAfter });
-          return ok(`Created ${result.path}`, { command: 'create', path, result });
+          return ok(`Created ${result.path}`.concat(renderOutline(path, text)), {
+            command: 'create',
+            path,
+            result,
+          });
         }
         case 'str_replace': {
           const oldStr = params.old_str ?? '';
