@@ -133,6 +133,8 @@ import {
   makeRenderMotionPreviewTool,
 } from './tools/render-motion-preview.js';
 import { type RenderPreviewer, makeRenderPreviewTool } from './tools/render-preview.js';
+import type { EditorSession } from './editor/session.js';
+import { makeSceneTools } from './tools/scene-edit.js';
 import { makeSetTodosTool } from './tools/set-todos.js';
 import { type TextEditorFsCallbacks, makeTextEditorTool } from './tools/text-editor.js';
 import {
@@ -986,6 +988,19 @@ export interface GenerateViaAgentDeps {
    * default toolset gains `choose_engine` (always) and `validate_game_scene`
    * (when `fs` is also set).
    */
+  /**
+   * When present, the run edits a live scene instead of only writing files.
+   *
+   * This is the prompting half of the two-layer editor: the agent's changes
+   * become discrete tool calls against the same `EditorSession` a person drives
+   * by hand, so the user watches each edit land in the viewport rather than
+   * waiting for a file diff, and can then adjust it themselves.
+   *
+   * Resolved lazily — a run that switches projects must not keep editing the
+   * previous one.
+   */
+  sceneEditor?: { getSession: () => EditorSession } | undefined;
+
   gameMode?:
     | {
         /** Persists the agent's `choose_engine` decision into the per-run
@@ -1122,6 +1137,14 @@ export async function generateViaAgent(
     makeSetTodosTool(deps.setTodosCounter) as unknown as AgentTool<TSchema, unknown>,
   );
   defaultTools.push(makeReadUrlTool() as unknown as AgentTool<TSchema, unknown>);
+  // The scene tools. Registered only when the host supplies a session, so runs
+  // that are purely file-based keep exactly the toolset they had.
+  if (deps.sceneEditor !== undefined) {
+    const getSession = deps.sceneEditor.getSession;
+    for (const tool of makeSceneTools(getSession)) {
+      defaultTools.push(tool as unknown as AgentTool<TSchema, unknown>);
+    }
+  }
   // Phase-1.7 — game-feel (JUICE) library. Surfaces the bundled `game-skills/*` snippets
   // (previously DEAD) — both the authored feel primitives (screen-shake /
   // hitstop / particle-burst / squash-&-stretch / score-pop / screen-flash /
