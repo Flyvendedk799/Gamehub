@@ -780,6 +780,70 @@ describe('complete — openai-responses strict instructions', () => {
   });
 });
 
+describe('complete — Claude OAuth tokens (subscription credentials)', () => {
+  const OAT = 'sk-ant-oat01-abc123';
+
+  /** Captures the options `complete()` hands to pi-ai. */
+  async function optsFor(apiKey: string) {
+    getModelMock.mockReturnValue({
+      id: 'claude-sonnet-4-6',
+      api: 'anthropic-messages',
+      provider: 'anthropic',
+    });
+    completeSimpleMock.mockResolvedValue({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'ok' }],
+      api: 'anthropic-messages',
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-6',
+      usage: {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: 'stop',
+    });
+
+    await complete(
+      { provider: 'anthropic', modelId: 'claude-sonnet-4-6' },
+      [{ role: 'user', content: 'hi' }],
+      { apiKey },
+    );
+    return completeSimpleMock.mock.calls[0]?.[2] as {
+      apiKey?: string;
+      headers?: Record<string, string>;
+    };
+  }
+
+  it('passes the OAuth token through to pi-ai untouched', async () => {
+    // The regression this pins: `complete()` used to substitute a placeholder
+    // apiKey here, meaning to keep the token out of x-api-key. pi-ai decides
+    // between Bearer and x-api-key by INSPECTING the apiKey it is given, so the
+    // placeholder sent the request down the plain-key branch and it went out as
+    // `x-api-key: playforge-oauth-placeholder`. Anthropic validates x-api-key
+    // whenever the header is present — a wrong value is enough — so every
+    // subscription call 401'd "invalid x-api-key" despite a valid Bearer.
+    const opts = await optsFor(OAT);
+    expect(opts.apiKey).toBe(OAT);
+    expect(opts.apiKey).not.toContain('placeholder');
+  });
+
+  it('does not hand pi-ai an authorization header of its own', async () => {
+    // pi-ai builds the client with `apiKey: null, authToken`, which is what
+    // OMITS x-api-key. Setting authorization here would not have omitted it.
+    const opts = await optsFor(OAT);
+    expect(opts.headers?.['authorization']).toBeUndefined();
+  });
+
+  it('leaves a normal API key alone', async () => {
+    const opts = await optsFor('sk-ant-api03-realkey');
+    expect(opts.apiKey).toBe('sk-ant-api03-realkey');
+  });
+});
+
 describe('inferReasoning', () => {
   it('returns false for Qwen DashScope via openai-chat (#183)', () => {
     expect(

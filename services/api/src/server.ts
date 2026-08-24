@@ -423,11 +423,13 @@ const DEFAULT_PLATFORM_MODEL: ModelRef = { provider: 'anthropic', modelId: 'clau
 /**
  * How long the design interview may spend drafting questions.
  *
- * Someone is watching a spinner for the whole of it. Past this the static
- * questions are strictly better than more waiting, so the call is abandoned
- * rather than extended.
+ * Someone is watching a spinner for the whole of it, so this wants to be
+ * short. It is not, because the alternative is worse: falling back to generic
+ * questions is the exact failure this feature exists to fix, and measured
+ * drafting takes 10-13s. The ceiling sits above that with headroom, and only
+ * catches a genuine stall.
  */
-const INTERVIEW_TIMEOUT_MS = 12_000;
+const INTERVIEW_TIMEOUT_MS = 25_000;
 const DEFAULT_BYOK_MODELS: Record<ByokProvider, string> = {
   anthropic: PROVIDER_SHORTLIST.anthropic.defaultPrimary,
   openai: PROVIDER_SHORTLIST.openai.defaultPrimary,
@@ -2009,15 +2011,21 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const creds = await resolveGenerationCredentials(user.userId);
     if (!creds.ok) return reply.send({ plan: null });
 
-    // A user credential (BYOK or subscription) speaks for itself. Platform-funded
-    // runs go through the platform key, and may use a smaller model than the
-    // build does — drafting four questions is not the job the build model is for.
+    // Whose credential pays: a BYOK key or a connected subscription speaks for
+    // itself; otherwise the platform key.
     const usesOwnKey = creds.apiKey !== undefined && creds.platformFunded !== true;
-    const model = usesOwnKey
-      ? (creds.model ?? deps.platformModel ?? DEFAULT_PLATFORM_MODEL)
-      : (deps.interviewModel ?? deps.platformModel ?? DEFAULT_PLATFORM_MODEL);
     const apiKey = usesOwnKey ? creds.apiKey : deps.platformApiKey;
     if (!apiKey) return reply.send({ plan: null });
+
+    // Drafting four short questions is not the job the build model is for, and
+    // latency here is almost entirely output length — a smaller model roughly
+    // halves the wait. Only swap when the interview model is for the SAME
+    // provider as the credential; a subscription token cannot call OpenAI.
+    const credentialModel = creds.model ?? deps.platformModel ?? DEFAULT_PLATFORM_MODEL;
+    const model =
+      deps.interviewModel !== undefined && deps.interviewModel.provider === credentialModel.provider
+        ? deps.interviewModel
+        : credentialModel;
 
     // A person is watching a spinner, so this is on a leash. Past the deadline
     // the static questions are strictly better than more waiting.

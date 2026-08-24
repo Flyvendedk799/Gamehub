@@ -372,17 +372,30 @@ const LIMITS = {
   why: 160,
   placeholder: 110,
   label: 60,
-  detail: 80,
+  detail: 90,
   value: 200,
 } as const;
 
 const LAYER_IDS = new Set<string>(DESIGN_LAYERS.map((layer) => layer.id));
 
-/** Trim, collapse whitespace, and cap. Returns '' for anything unusable. */
+/**
+ * Trim, collapse whitespace, and cap. Returns '' for anything unusable.
+ *
+ * Over-long text is cut at a WORD boundary. Cutting at the raw character limit
+ * produced options reading "scavenging disturbs i", which looks like a bug
+ * rather than a limit.
+ */
 function clean(raw: unknown, max: number): string {
   if (typeof raw !== 'string') return '';
   const collapsed = raw.replace(/\s+/g, ' ').trim();
-  return collapsed.length > max ? collapsed.slice(0, max).trimEnd() : collapsed;
+  if (collapsed.length <= max) return collapsed;
+  // Reserve a character for the ellipsis, then back up to the last space.
+  const cut = collapsed.slice(0, max - 1);
+  const lastSpace = cut.lastIndexOf(' ');
+  // Only honour the boundary if it leaves most of the text; a very long single
+  // word would otherwise collapse to almost nothing.
+  const kept = lastSpace > max * 0.6 ? cut.slice(0, lastSpace) : cut;
+  return `${kept.trimEnd()}…`;
 }
 
 function asLayerId(raw: unknown): LayerId | null {
@@ -517,29 +530,26 @@ export function buildInterviewPlanPrompt(prompt: string): string {
   ).join('\n');
 
   return [
-    'You are helping someone turn a one-line game idea into a buildable brief.',
-    'Read their idea and draft a SHORT interview about it.',
+    'Turn a one-line game idea into a short interview about THAT idea.',
     '',
-    'The layers you may ask about, and why each matters:',
+    'Layers you may ask about:',
     layerList,
     '',
     'Rules:',
-    '1. Every question and every option must be about THEIR idea. Someone who',
-    '   wrote "underwater roguelike" must never be offered "medieval castle".',
-    '2. Put anything their idea already settles in `settled`, with the value',
-    '   extracted in their words ("a flooded neon city"), and do NOT ask about',
-    '   that layer again.',
-    '3. Ask at most 4 questions — the ones where their idea is genuinely open',
-    '   and the answer would change what gets built. Fewer is better.',
-    '4. Each question gets 3 or 4 concrete options. An option is a real design',
-    '   choice with consequences, not a synonym of another option.',
-    '5. `detail` is a few words on what picking it actually changes.',
-    '6. Write in second person, plainly. No marketing voice.',
+    '1. Every question and option must be about THEIR idea. Someone who wrote',
+    '   "underwater roguelike" must never be offered "medieval castle".',
+    '2. Anything their idea already settles goes in `settled`, phrased in their',
+    '   words ("a flooded neon city"). Never ask about a settled layer.',
+    '3. At most 4 questions — only where their idea is genuinely open and the',
+    '   answer changes what gets built. Fewer is better.',
+    '4. Exactly 3 options per question. Each is a real design choice with',
+    '   consequences, not a synonym of another.',
+    '5. BE BRIEF. Someone is waiting on this: question ≤ 12 words, label ≤ 6',
+    '   words, detail ≤ 10 words. Second person, plain, no marketing voice.',
     '',
-    'Respond with JSON only, no prose and no code fence:',
+    'JSON only — no prose, no code fence. Exactly these fields:',
     '{"settled":[{"layer":"world","value":"..."}],',
-    ' "questions":[{"layer":"cast","title":"Who you play","question":"...",',
-    '  "why":"...","placeholder":"...",',
+    ' "questions":[{"layer":"cast","question":"...",',
     '  "options":[{"label":"...","detail":"..."}]}]}',
     '',
     'Their idea:',

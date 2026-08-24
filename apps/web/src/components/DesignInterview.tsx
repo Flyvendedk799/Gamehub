@@ -81,7 +81,7 @@ export function DesignInterview({
         <p className="font-mono text-[11px] tracking-[.16em] text-ink-4">READING YOUR IDEA</p>
         <p className="mt-1 text-sm text-ink-3">{prompt}</p>
         <div className="mt-8 border border-hairline bg-raised p-5">
-          <p className="text-sm text-ink-4">Working out what to ask you…</p>
+          <p className="animate-pulse text-sm text-ink-4">Working out what to ask you…</p>
         </div>
         <button
           type="button"
