@@ -393,19 +393,19 @@ export async function complete(
     };
   }
 
-  // OAuth tokens (sk-ant-oat*) must be sent as Bearer, not x-api-key —
-  // Anthropic endpoints (and sub2api gateways that proxy them) reject
-  // OAuth tokens presented via x-api-key.
-  if (model.provider === 'anthropic' && looksLikeClaudeOAuthToken(apiKey)) {
-    piOpts.headers = {
-      ...piOpts.headers,
-      authorization: `Bearer ${apiKey}`,
-      'anthropic-version': '2023-06-01',
-    };
-    // Send a placeholder as the primary apiKey so pi-ai's internal
-    // x-api-key header doesn't carry the OAuth token (which causes 401).
-    piOpts.apiKey = 'playforge-oauth-placeholder';
-  }
+  // NOTE: Claude OAuth tokens (sk-ant-oat*) are passed through untouched, and
+  // deliberately so. pi-ai detects them and builds its client with
+  // `apiKey: null, authToken: <token>`, which sends Bearer and omits x-api-key
+  // entirely — plus the Claude Code identity headers.
+  //
+  // There used to be an override here that swapped in a placeholder apiKey to
+  // keep the OAuth token out of x-api-key. It did the opposite: pi-ai's
+  // detection reads the apiKey it is given, so the placeholder sent it down the
+  // plain-API-key branch, which sends `x-api-key: playforge-oauth-placeholder`.
+  // Anthropic validates x-api-key whenever the header is PRESENT — its value
+  // being wrong is enough — so every subscription-token call 401'd with
+  // "invalid x-api-key" despite carrying a valid Bearer. Verified against
+  // api.anthropic.com: Bearer alone → 200, Bearer + any x-api-key → 401.
 
   // sub2api / claude2api gateways 403 requests without claude-cli identity
   // headers. pi-ai only injects those on OAuth tokens — paste a

@@ -348,9 +348,34 @@ describe('prompt-tailored interviews', () => {
       expect(plan?.questions[0]?.title.length).toBeLessThanOrEqual(24);
       expect(plan?.questions[0]?.question.length).toBeLessThanOrEqual(140);
       expect(plan?.questions[0]?.options[0]?.label.length).toBeLessThanOrEqual(60);
-      expect(plan?.questions[0]?.options[0]?.detail?.length).toBeLessThanOrEqual(80);
+      expect(plan?.questions[0]?.options[0]?.detail?.length).toBeLessThanOrEqual(90);
     });
 
+    it('cuts over-long text at a word boundary, not mid-word', () => {
+      // Chopping at the raw character limit produced options reading
+      // "scavenging disturbs i", which looks like a bug rather than a limit.
+      const plan = parseInterviewPlan({
+        settled: [],
+        questions: [
+          {
+            layer: 'loop',
+            question: 'What do you do?',
+            options: [
+              {
+                label: 'A',
+                detail:
+                  'the city is still partially occupied and scavenging disturbs its residents in ways that escalate',
+              },
+            ],
+          },
+        ],
+      });
+      const detail = plan?.questions[0]?.options[0]?.detail ?? '';
+      expect(detail.endsWith('…')).toBe(true);
+      // Ends on a whole word.
+      expect(detail.slice(0, -1).trimEnd()).toMatch(/[a-z]$/i);
+      expect(detail).not.toContain(' i…');
+    });
     it('caps how many questions and options survive', () => {
       const many = Array.from({ length: 4 }, (_, i) => ({ label: `option ${i}` }));
       const plan = parseInterviewPlan({
