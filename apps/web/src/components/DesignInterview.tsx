@@ -1,5 +1,6 @@
 'use client';
 
+import { fetchInterviewPlan } from '@/lib/api';
 import {
   type InterviewState,
   type LayerAnswer,
@@ -9,9 +10,10 @@ import {
   nextQuestion,
   skipLayer,
   startInterview,
+  startInterviewFromPlan,
   toBrief,
 } from '@playforge/shared/design-interview';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 /**
  * Is there anything worth asking about this prompt?
@@ -48,9 +50,80 @@ export function DesignInterview({
   onBuild: (composedPrompt: string) => void;
   onCancel: () => void;
 }) {
-  const [state, setState] = useState<InterviewState>(() => startInterview(prompt));
+  const [state, setState] = useState<InterviewState | null>(null);
   const [typed, setTyped] = useState('');
 
+  // Draft questions for THIS prompt. Until they arrive there is nothing worth
+  // showing: the static layers are a fallback for when the model cannot answer,
+  // not a first screen to be replaced a second later — swapping the question
+  // out from under someone mid-read is worse than a moment of waiting.
+  //
+  // `startedRef` guards against React 18 double-invoking effects in dev, which
+  // would otherwise fire two model calls and let the slower one overwrite an
+  // interview already in progress.
+  const startedRef = useRef(false);
+  useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+    let cancelled = false;
+    void fetchInterviewPlan(prompt).then((plan) => {
+      if (cancelled) return;
+      setState(plan === null ? startInterview(prompt) : startInterviewFromPlan(prompt, plan));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [prompt]);
+
+  if (state === null) {
+    return (
+      <div className="mx-auto w-full max-w-2xl px-6 py-10">
+        <p className="font-mono text-[11px] tracking-[.16em] text-ink-4">READING YOUR IDEA</p>
+        <p className="mt-1 text-sm text-ink-3">{prompt}</p>
+        <div className="mt-8 border border-hairline bg-raised p-5">
+          <p className="text-sm text-ink-4">Working out what to ask you…</p>
+        </div>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="mt-6 font-mono text-[11px] tracking-[.1em] text-ink-4 hover:text-ink-3"
+        >
+          ← BACK
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <InterviewBody
+      state={state}
+      setState={setState}
+      typed={typed}
+      setTyped={setTyped}
+      prompt={prompt}
+      onBuild={onBuild}
+      onCancel={onCancel}
+    />
+  );
+}
+
+function InterviewBody({
+  state,
+  setState,
+  typed,
+  setTyped,
+  prompt,
+  onBuild,
+  onCancel,
+}: {
+  state: InterviewState;
+  setState: (next: InterviewState) => void;
+  typed: string;
+  setTyped: (next: string) => void;
+  prompt: string;
+  onBuild: (composedPrompt: string) => void;
+  onCancel: () => void;
+}) {
   const question = useMemo(() => nextQuestion(state), [state]);
   const brief = useMemo(() => toBrief(state), [state]);
 
@@ -73,6 +146,11 @@ export function DesignInterview({
     }
     setState(next);
   }
+
+  // Answered / total, so the number of questions left is visible up front —
+  // an unknown number of questions is what makes a form feel endless.
+  const answered = state.answers.filter((a) => a.source !== 'inferred').length;
+  const total = answered + state.remaining.length;
 
   function record(answer: LayerAnswer) {
     advance(answerLayer(state, answer));
@@ -99,7 +177,9 @@ export function DesignInterview({
 
   return (
     <div className="mx-auto w-full max-w-2xl px-6 py-10">
-      <p className="font-mono text-[11px] tracking-[.16em] text-ink-4">DESIGNING</p>
+      <p className="font-mono text-[11px] tracking-[.16em] text-ink-4">
+        DESIGNING{total > 0 ? ` · ${Math.min(answered + 1, total)}/${total}` : ''}
+      </p>
       <p className="mt-1 text-sm text-ink-3">{prompt}</p>
 
       {decisions}

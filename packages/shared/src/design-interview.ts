@@ -66,6 +66,15 @@ export interface InterviewState {
   /** Layers still to ask, in order. */
   readonly remaining: readonly LayerId[];
   readonly done: boolean;
+  /**
+   * The layer definitions in play for THIS interview.
+   *
+   * Present when the questions were written for the prompt (see
+   * `startInterviewFromPlan`); absent for a static interview, which reads
+   * `DESIGN_LAYERS` instead. Carried on the state because a tailored question
+   * exists nowhere else — there is no table to look it up in.
+   */
+  readonly layers?: readonly DesignLayer[] | undefined;
 }
 
 /**
@@ -214,10 +223,15 @@ export function startInterview(prompt: string, options: StartOptions = {}): Inte
   const inferred = options.askEverything ? [] : inferAnsweredLayers(prompt);
   const inferredSet = new Set(inferred);
 
+  // No value: the regexes detect THAT a layer is settled, not what it was
+  // settled as. Recording the whole prompt here put the entire prompt on a card
+  // titled "World" and again under "World:" in the build prompt. An empty value
+  // drops out of the brief, which is the honest outcome — the prompt already
+  // says it, and `toBrief` filters empties.
   const answers: LayerAnswer[] = inferred.map((layer) => ({
     layer,
     option: null,
-    value: prompt,
+    value: '',
     source: 'inferred',
   }));
 
@@ -228,10 +242,18 @@ export function startInterview(prompt: string, options: StartOptions = {}): Inte
   return { prompt, answers, remaining, done: remaining.length === 0 };
 }
 
+/**
+ * Resolve a layer for an interview: its own tailored definition if it has one,
+ * otherwise the static table.
+ */
+function layerFor(state: InterviewState, id: LayerId): DesignLayer | undefined {
+  return state.layers?.find((layer) => layer.id === id) ?? getLayer(id);
+}
+
 /** The next question, or null when the interview is over. */
 export function nextQuestion(state: InterviewState): DesignLayer | null {
   const next = state.remaining[0];
-  return next === undefined ? null : (getLayer(next) ?? null);
+  return next === undefined ? null : (layerFor(state, next) ?? null);
 }
 
 /**
@@ -263,6 +285,8 @@ export interface DesignBrief {
   readonly layers: readonly { layer: LayerId; title: string; value: string }[];
   /** Layers the person explicitly left to the agent. */
   readonly delegated: readonly LayerId[];
+  /** Those layers' titles, resolved against whichever wording was shown. */
+  readonly delegatedTitles: readonly string[];
 }
 
 /**
@@ -279,7 +303,7 @@ export function toBrief(state: InterviewState): DesignBrief {
     .sort((a, b) => (order.get(a.layer) ?? 0) - (order.get(b.layer) ?? 0))
     .map((answer) => ({
       layer: answer.layer,
-      title: getLayer(answer.layer)?.title ?? answer.layer,
+      title: layerFor(state, answer.layer)?.title ?? answer.layer,
       value: answer.value.trim(),
     }));
 
@@ -289,6 +313,9 @@ export function toBrief(state: InterviewState): DesignBrief {
     delegated: state.answers
       .filter((answer) => answer.source === 'skipped')
       .map((answer) => answer.layer),
+    delegatedTitles: state.answers
+      .filter((answer) => answer.source === 'skipped')
+      .map((answer) => layerFor(state, answer.layer)?.title ?? answer.layer),
   };
 }
 
@@ -300,11 +327,242 @@ export function briefToPrompt(brief: DesignBrief): string {
     for (const layer of brief.layers) lines.push(`- ${layer.title}: ${layer.value}`);
   }
   if (brief.delegated.length > 0) {
-    const titles = brief.delegated.map((id) => getLayer(id)?.title ?? id);
+    const titles =
+      brief.delegatedTitles.length === brief.delegated.length
+        ? brief.delegatedTitles
+        : brief.delegated.map((id) => getLayer(id)?.title ?? id);
     lines.push(
       '',
       `Left to you: ${titles.join(', ')}. Choose something that fits the above, and say what you chose.`,
     );
   }
   return lines.join('\n');
+}
+
+// ── Prompt-tailored interviews ──────────────────────────────────────────────
+//
+// The layers above are the SHAPE of the conversation, not its content. Asking
+// someone who wrote "an underwater roguelike" whether their game is set in a
+// neon city is worse than not asking at all — it says nobody read the prompt.
+//
+// So the questions themselves are written for the prompt in hand: a model reads
+// what the person wrote, extracts what they already settled, and drafts the
+// remaining questions with options drawn from THEIR idea. The static layers
+// stay as the fallback for when that call fails or is slow, because an
+// interview that cannot start is worse than a generic one.
+
+/**
+ * A set of questions written for one specific prompt.
+ *
+ * `settled` is what the prompt already decided, with the value extracted from
+ * it — "a flooded neon city", not the whole prompt echoed back. Those layers
+ * become cards immediately and are never asked about.
+ */
+export interface InterviewPlan {
+  readonly settled: readonly { layer: LayerId; value: string }[];
+  readonly questions: readonly DesignLayer[];
+}
+
+/** Hard caps on model-authored text. These strings are rendered as UI. */
+const LIMITS = {
+  questions: 6,
+  options: 4,
+  title: 24,
+  question: 140,
+  why: 160,
+  placeholder: 110,
+  label: 60,
+  detail: 80,
+  value: 200,
+} as const;
+
+const LAYER_IDS = new Set<string>(DESIGN_LAYERS.map((layer) => layer.id));
+
+/** Trim, collapse whitespace, and cap. Returns '' for anything unusable. */
+function clean(raw: unknown, max: number): string {
+  if (typeof raw !== 'string') return '';
+  const collapsed = raw.replace(/\s+/g, ' ').trim();
+  return collapsed.length > max ? collapsed.slice(0, max).trimEnd() : collapsed;
+}
+
+function asLayerId(raw: unknown): LayerId | null {
+  return typeof raw === 'string' && LAYER_IDS.has(raw) ? (raw as LayerId) : null;
+}
+
+/**
+ * Validate a model-authored plan.
+ *
+ * Strict on purpose: this is model output rendered directly into the UI and
+ * folded into the build prompt. Anything malformed is dropped rather than
+ * repaired, and a plan with no usable questions returns null so the caller
+ * falls back to the static layers instead of showing an empty interview.
+ *
+ * Option ids are assigned here rather than taken from the model — they are
+ * React keys and answer identifiers, and a model that emitted duplicates would
+ * otherwise corrupt both.
+ */
+export function parseInterviewPlan(raw: unknown): InterviewPlan | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const source = raw as { settled?: unknown; questions?: unknown };
+
+  const seen = new Set<LayerId>();
+  const settled: { layer: LayerId; value: string }[] = [];
+  if (Array.isArray(source.settled)) {
+    for (const entry of source.settled) {
+      if (typeof entry !== 'object' || entry === null) continue;
+      const record = entry as Record<string, unknown>;
+      const layer = asLayerId(record['layer']);
+      const value = clean(record['value'], LIMITS.value);
+      if (layer === null || value === '' || seen.has(layer)) continue;
+      seen.add(layer);
+      settled.push({ layer, value });
+    }
+  }
+
+  const questions: DesignLayer[] = [];
+  if (Array.isArray(source.questions)) {
+    for (const entry of source.questions) {
+      if (questions.length >= LIMITS.questions) break;
+      if (typeof entry !== 'object' || entry === null) continue;
+      const record = entry as Record<string, unknown>;
+      const id = asLayerId(record['layer']);
+      // A layer the prompt already settled must not also be asked about.
+      if (id === null || seen.has(id)) continue;
+
+      const fallback = getLayer(id);
+      const question = clean(record['question'], LIMITS.question);
+      if (question === '') continue;
+
+      const options: LayerOption[] = [];
+      if (Array.isArray(record['options'])) {
+        for (const rawOption of record['options']) {
+          if (options.length >= LIMITS.options) break;
+          if (typeof rawOption !== 'object' || rawOption === null) continue;
+          const optionRecord = rawOption as Record<string, unknown>;
+          const label = clean(optionRecord['label'], LIMITS.label);
+          if (label === '') continue;
+          const detail = clean(optionRecord['detail'], LIMITS.detail);
+          options.push({
+            id: `${id}-${options.length}`,
+            label,
+            ...(detail === '' ? {} : { detail }),
+          });
+        }
+      }
+      // A question with nothing to pick is a text box with extra steps.
+      if (options.length === 0) continue;
+
+      seen.add(id);
+      questions.push({
+        id,
+        title: clean(record['title'], LIMITS.title) || (fallback?.title ?? id),
+        question,
+        why: clean(record['why'], LIMITS.why) || (fallback?.why ?? ''),
+        placeholder:
+          clean(record['placeholder'], LIMITS.placeholder) || (fallback?.placeholder ?? ''),
+        options,
+      });
+    }
+  }
+
+  if (questions.length === 0) return null;
+
+  // Canonical order regardless of what the model emitted: the world still
+  // constrains the cast, and the twist still needs something to subvert.
+  const order = new Map(DESIGN_LAYERS.map((layer, index) => [layer.id, index]));
+  questions.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+
+  return { settled, questions };
+}
+
+/**
+ * Begin an interview from a prompt-tailored plan.
+ *
+ * Mirrors `startInterview`, but the questions come from the plan and the
+ * settled layers carry the value the model extracted from the prompt, so they
+ * show as real cards ("World: a flooded neon city") instead of the prompt
+ * repeated back.
+ */
+export function startInterviewFromPlan(
+  prompt: string,
+  plan: InterviewPlan,
+  options: StartOptions = {},
+): InterviewState {
+  const maxQuestions = Math.max(1, options.maxQuestions ?? DEFAULT_MAX_QUESTIONS);
+  const answers: LayerAnswer[] = plan.settled.map((entry) => ({
+    layer: entry.layer,
+    option: null,
+    value: entry.value,
+    source: 'inferred',
+  }));
+  const asked = plan.questions.slice(0, maxQuestions);
+  return {
+    prompt,
+    answers,
+    remaining: asked.map((layer) => layer.id),
+    done: asked.length === 0,
+    layers: asked,
+  };
+}
+
+/**
+ * The instruction handed to the model that drafts the questions.
+ *
+ * Lives here rather than in the API so it can be tested, and so the rules it
+ * states stay next to the code that enforces them.
+ */
+export function buildInterviewPlanPrompt(prompt: string): string {
+  const layerList = DESIGN_LAYERS.map(
+    (layer) => `- ${layer.id} (${layer.title}): ${layer.why}`,
+  ).join('\n');
+
+  return [
+    'You are helping someone turn a one-line game idea into a buildable brief.',
+    'Read their idea and draft a SHORT interview about it.',
+    '',
+    'The layers you may ask about, and why each matters:',
+    layerList,
+    '',
+    'Rules:',
+    '1. Every question and every option must be about THEIR idea. Someone who',
+    '   wrote "underwater roguelike" must never be offered "medieval castle".',
+    '2. Put anything their idea already settles in `settled`, with the value',
+    '   extracted in their words ("a flooded neon city"), and do NOT ask about',
+    '   that layer again.',
+    '3. Ask at most 4 questions — the ones where their idea is genuinely open',
+    '   and the answer would change what gets built. Fewer is better.',
+    '4. Each question gets 3 or 4 concrete options. An option is a real design',
+    '   choice with consequences, not a synonym of another option.',
+    '5. `detail` is a few words on what picking it actually changes.',
+    '6. Write in second person, plainly. No marketing voice.',
+    '',
+    'Respond with JSON only, no prose and no code fence:',
+    '{"settled":[{"layer":"world","value":"..."}],',
+    ' "questions":[{"layer":"cast","title":"Who you play","question":"...",',
+    '  "why":"...","placeholder":"...",',
+    '  "options":[{"label":"...","detail":"..."}]}]}',
+    '',
+    'Their idea:',
+    prompt,
+  ].join('\n');
+}
+
+/**
+ * Pull a JSON object out of a model response.
+ *
+ * Models fence JSON, prefix it with "Here is", or both, however firmly they are
+ * told not to. Failing the whole interview over a code fence would be silly.
+ */
+export function extractJsonObject(text: string): unknown {
+  const trimmed = text.trim();
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(trimmed);
+  const candidate = fenced?.[1]?.trim() ?? trimmed;
+  const start = candidate.indexOf('{');
+  const end = candidate.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+  try {
+    return JSON.parse(candidate.slice(start, end + 1)) as unknown;
+  } catch {
+    return null;
+  }
 }
