@@ -1,6 +1,7 @@
 import type { SocialOutroSummary } from '@playforge/shared/social-outro';
 import { getToken } from './auth';
 import { API_BASE } from './config';
+import { type EngineChoice, toApiEngine } from './engine-api';
 import { RAW_AGENT_TYPES, isRawAgentType, normalizeAgentFrame } from './event-normalize';
 import type {
   ChatHistoryResponse,
@@ -114,11 +115,16 @@ function normalizeProjectResponse(
 
 export async function createProject(
   name: string,
-  engine: Engine = 'phaser',
+  engine: EngineChoice = 'phaser',
 ): Promise<CreateProjectResponse> {
+  // Converted here rather than at each call site: the web's spelling and the
+  // API's allow-list are different vocabularies, and sending the web's one
+  // straight through is what made "THREE.JS 3D" fail with 400 invalid_engine.
+  // 'auto' resolves to undefined, which omits the field so the agent chooses.
+  const apiEngine = toApiEngine(engine);
   const response = await apiFetch<Project | CreateProjectResponse>('/v1/projects', {
     method: 'POST',
-    body: JSON.stringify({ name, engine }),
+    body: JSON.stringify({ name, ...(apiEngine === undefined ? {} : { engine: apiEngine }) }),
   });
   return normalizeProjectResponse(response);
 }

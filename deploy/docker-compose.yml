@@ -79,10 +79,29 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-noreply@playerzero.online}
       SMTP_FROM_NAME: ${SMTP_FROM_NAME:-PlayerZero}
+      # Claude subscription (OAuth harvested from a local `claude login`).
+      #
+      # The API reads Claude Code's credentials file to connect the
+      # subscription. Inside a container `~` is the container's home, NOT the
+      # host's — so a `claude login` run on the VPS is invisible here unless the
+      # file is mounted in and this points at it. Without both, connecting the
+      # subscription fails with "Claude Code is not logged in on this machine",
+      # no matter how many times you log in on the host.
+      #
+      # Set CLAUDE_CREDENTIALS_FILE in deploy/.env to the host path, e.g.
+      #   CLAUDE_CREDENTIALS_FILE=/root/.claude/.credentials.json
+      PLAYFORGE_CLAUDE_CREDENTIALS_FILE: ${CLAUDE_CREDENTIALS_FILE:+/claude/.credentials.json}
+      # Where the harvested token is cached. On the blob volume so it survives a
+      # container restart; refresh re-reads the mounted file above.
+      CLAUDE_AUTH_FILE: /data/blobs/claude-auth.json
     volumes:
       # Generated games live here. This volume IS your content — back it up.
       # The worker writes snapshots to the SAME store, so both must mount it.
       - blob-data:/data/blobs
+      # Read-only bind of the host's Claude Code login. Bound rather than copied
+      # so the container keeps seeing the token after `claude` refreshes it.
+      # The `:ro` matters: nothing here should ever write to your login.
+      - ${CLAUDE_CREDENTIALS_FILE:-/dev/null}:/claude/.credentials.json:ro
 
   # Generation worker — BullMQ consumer running the agent loop. Delegates
   # runtime-verify / playtest / thumbnail jobs to browser-worker over Redis.
