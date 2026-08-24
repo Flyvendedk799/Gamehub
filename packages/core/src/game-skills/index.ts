@@ -91,6 +91,11 @@ const THREE_SKILLS: ReadonlyArray<GameSkillSpec> = [
   { name: 'three/score-pop.jsx', engine: 'three', category: 'feel' },
   { name: 'three/screen-flash.jsx', engine: 'three', category: 'feel' },
   { name: 'three/knockback.jsx', engine: 'three', category: 'feel' },
+  // The engine core — generated from @playforge/engine3d (packages/engine3d).
+  // Deterministic fixed-timestep loop, system scheduler, leak-proof disposal and
+  // the window.__game contract wired correctly. Listed first among the Three
+  // scaffolding because it subsumes three/game-loop.jsx for anything real.
+  { name: 'three/engine-core.jsx', engine: 'three', category: 'engine' },
   // Pre-existing engine scaffolding (previously dead).
   { name: 'three/audio-cue.jsx', engine: 'three', category: 'engine' },
   { name: 'three/camera-controller.jsx', engine: 'three', category: 'engine' },
