@@ -4,6 +4,7 @@ import { BrandMark, Wordmark } from '@/components/Logo';
 import ProjectCard from '@/components/ProjectCard';
 import { createProject, generateGame, listProjects } from '@/lib/api';
 import { isAuthenticated } from '@/lib/auth';
+import type { EngineChoice } from '@/lib/engine-api';
 import {
   GAME_EXAMPLE_BRIEFS,
   type GameExampleBrief,
@@ -11,7 +12,7 @@ import {
   briefToPrompt,
 } from '@/lib/example-briefs';
 import { deriveProjectName, setPendingPrompt } from '@/lib/pending-prompt';
-import type { Engine, Project } from '@/lib/types';
+import type { Project } from '@/lib/types';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
@@ -19,7 +20,10 @@ import { useEffect, useRef, useState } from 'react';
 export default function HomePage() {
   const router = useRouter();
   const [prompt, setPrompt] = useState('');
-  const [engine, setEngine] = useState<Engine>('phaser');
+  // 'auto' is the default: most people describing a game do not know or care
+  // whether it wants 2D or 3D, and the agent's choose_engine is better at that
+  // decision than a chip is. Picking one explicitly still pins it.
+  const [engine, setEngine] = useState<EngineChoice>('auto');
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [recent, setRecent] = useState<Project[] | null>(null);
@@ -53,7 +57,7 @@ export default function HomePage() {
    * logic as typing a prompt. Typed submits carry the engine chip selection;
    * idea chips pass the brief's mapped engine.
    */
-  async function startBuild(rawPrompt: string, buildEngine: Engine = 'phaser') {
+  async function startBuild(rawPrompt: string, buildEngine: EngineChoice = 'auto') {
     const trimmed = rawPrompt.trim();
     if (!trimmed) return;
 
@@ -122,8 +126,10 @@ export default function HomePage() {
           <div className="flex gap-2 font-mono text-[11px] tracking-[.1em]">
             {(
               [
+                ['auto', 'AUTO'],
                 ['phaser', 'PHASER 2D'],
                 ['threejs', 'THREE.JS 3D'],
+                ['vanilla', 'CANVAS 2D'],
               ] as const
             ).map(([value, label]) => (
               <button
