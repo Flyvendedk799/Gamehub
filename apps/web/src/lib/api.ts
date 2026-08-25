@@ -198,12 +198,17 @@ export async function generateGame(
  */
 export async function fetchInterviewPlan(prompt: string): Promise<InterviewPlan | null> {
   try {
-    const { plan } = await apiFetch<{ plan: InterviewPlan | null }>('/v1/design/interview', {
-      method: 'POST',
-      body: JSON.stringify({ prompt }),
-    });
+    const { plan, reason } = await apiFetch<{ plan: InterviewPlan | null; reason?: string }>(
+      '/v1/design/interview',
+      { method: 'POST', body: JSON.stringify({ prompt }) },
+    );
+    // Why the generic questions are about to appear. Silent degradation is how
+    // this broke twice without anyone being able to say which half failed, so
+    // the reason the server gives is kept where a bug report can reach it.
+    if (!plan) console.warn(`[interview] falling back to the static questions: ${reason ?? '?'}`);
     return plan ?? null;
-  } catch {
+  } catch (err) {
+    console.warn(`[interview] falling back to the static questions: ${String(err)}`);
     return null;
   }
 }

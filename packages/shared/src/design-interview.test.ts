@@ -304,7 +304,9 @@ describe('prompt-tailored interviews', () => {
 
     it('drops questions about layers the prompt already settled', () => {
       // Otherwise someone is asked where their game is set immediately after
-      // being told the answer on a card.
+      // being told the answer on a card. What survives is the card: the model
+      // read the prompt correctly, and that reading is worth keeping even when
+      // dropping the duplicate leaves nothing to ask.
       const plan = parseInterviewPlan(
         rawPlan({
           questions: [
@@ -316,7 +318,8 @@ describe('prompt-tailored interviews', () => {
           ],
         }),
       );
-      expect(plan).toBeNull();
+      expect(plan?.questions).toEqual([]);
+      expect(plan?.settled).toEqual([{ layer: 'world', value: 'a flooded neon city' }]);
     });
 
     it('drops unknown layers, empty questions and optionless questions', () => {
@@ -474,6 +477,83 @@ describe('prompt-tailored interviews', () => {
     });
   });
 
+  describe('reading what the model meant', () => {
+    // Every case here used to drop a question, and a plan that lost all of its
+    // questions was thrown away for the static layers — so a model that read
+    // the prompt correctly still produced questions about someone else's game.
+
+    it('keeps a plan that settles everything and asks nothing', () => {
+      const plan = parseInterviewPlan({
+        settled: [
+          { layer: 'world', value: 'a flooded neon city' },
+          { layer: 'loop', value: 'roguelike diving runs' },
+        ],
+        questions: [],
+      });
+      // The model read the idea and found nothing worth asking. Falling back
+      // here replaced a correct reading with questions about a neon castle.
+      expect(plan?.settled).toHaveLength(2);
+      expect(plan?.questions).toEqual([]);
+    });
+
+    it('is still null when there is neither a question nor a settled layer', () => {
+      expect(parseInterviewPlan({ settled: [], questions: [] })).toBeNull();
+    });
+
+    it('reads options given as bare strings', () => {
+      const plan = parseInterviewPlan(
+        rawPlan({
+          questions: [
+            {
+              layer: 'cast',
+              question: 'Who is moving through the flooded city?',
+              options: ['A salvage diver', 'A courier on a jet-ski'],
+            },
+          ],
+        }),
+      );
+      expect(plan?.questions[0]?.options.map((o) => o.label)).toEqual([
+        'A salvage diver',
+        'A courier on a jet-ski',
+      ]);
+    });
+
+    it('reads an option label under text, name or title', () => {
+      const plan = parseInterviewPlan(
+        rawPlan({
+          questions: [
+            {
+              layer: 'cast',
+              question: 'Who is moving through the flooded city?',
+              options: [
+                { text: 'A salvage diver', description: 'Slow, heavy, tethered' },
+                { name: 'A courier' },
+                { title: 'A stray cat' },
+              ],
+            },
+          ],
+        }),
+      );
+      expect(plan?.questions[0]?.options.map((o) => o.label)).toEqual([
+        'A salvage diver',
+        'A courier',
+        'A stray cat',
+      ]);
+      expect(plan?.questions[0]?.options[0]?.detail).toBe('Slow, heavy, tethered');
+    });
+
+    it('reads the layer under id as well as layer', () => {
+      const plan = parseInterviewPlan(
+        rawPlan({
+          questions: [
+            { id: 'cast', question: 'Who do you play?', options: [{ label: 'A diver' }] },
+          ],
+        }),
+      );
+      expect(plan?.questions[0]?.id).toBe('cast');
+    });
+  });
+
   describe('extractJsonObject', () => {
     it('reads bare JSON', () => {
       expect(extractJsonObject('{"settled":[]}')).toEqual({ settled: [] });
@@ -484,6 +564,25 @@ describe('prompt-tailored interviews', () => {
       // whole interview over a code fence would be silly.
       expect(extractJsonObject('```json\n{"a":1}\n```')).toEqual({ a: 1 });
       expect(extractJsonObject('Here you go:\n{"a":1}\nHope that helps!')).toEqual({ a: 1 });
+    });
+
+    it('salvages the complete questions out of a truncated response', () => {
+      // Cut off by the token ceiling mid-question. Three good questions had
+      // already arrived; discarding them handed someone the generic set.
+      const truncated =
+        '{"settled":[{"layer":"world","value":"a flooded neon city"}],' +
+        '"questions":[{"layer":"cast","question":"Who do you play?",' +
+        '"options":[{"label":"A diver"}]},{"layer":"loop","question":"What are you doin';
+      const parsed = extractJsonObject(truncated) as {
+        settled: unknown[];
+        questions: { layer: string }[];
+      } | null;
+      expect(parsed?.settled).toHaveLength(1);
+      expect(parsed?.questions.map((q) => q.layer)).toEqual(['cast']);
+    });
+
+    it('salvages nothing when the cut lands before the first complete value', () => {
+      expect(extractJsonObject('{"settled":[{"layer":"wor')).toBeNull();
     });
 
     it('returns null for prose with no JSON, and for malformed JSON', () => {

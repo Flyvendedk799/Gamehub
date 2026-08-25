@@ -12,7 +12,7 @@ import {
   briefEngineToApiEngine,
   briefToPrompt,
 } from '@/lib/example-briefs';
-import { deriveProjectName, setPendingPrompt } from '@/lib/pending-prompt';
+import { deriveProjectName, setPendingPrompt, takePendingPrompt } from '@/lib/pending-prompt';
 import type { Project } from '@/lib/types';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -48,6 +48,17 @@ export default function HomePage() {
     const ok = isAuthenticated();
     setAuthed(ok);
     if (!ok) return;
+
+    // A prompt handed back by onboarding: someone who submitted an idea logged
+    // out, signed up, and is owed the interview they would have had. Onboarding
+    // builds anything that does not need asking about, so whatever arrives here
+    // does — but build it rather than drop it if that ever stops being true.
+    const pending = takePendingPrompt();
+    if (pending !== null) {
+      if (needsInterview(pending)) setInterviewPrompt(pending);
+      else void startBuild(pending);
+    }
+
     let cancelled = false;
     void listProjects()
       .then(({ projects }) => {
@@ -100,6 +111,16 @@ export default function HomePage() {
     e.preventDefault();
     const trimmed = prompt.trim();
     if (!trimmed) return;
+
+    // The interview drafts its questions server-side, so it needs a token: a
+    // logged-out visitor who reached it would be handed a 401 and therefore the
+    // generic questions. Sign-up first, and the prompt comes back here to be
+    // asked about properly (see the pending-prompt handoff above).
+    if (!isAuthenticated()) {
+      setPendingPrompt(trimmed);
+      router.push('/auth/register?next=build');
+      return;
+    }
 
     // Ask before building — but only when there is something worth asking. A
     // prompt that already names its world, loop and win condition goes straight

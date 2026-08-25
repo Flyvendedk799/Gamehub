@@ -1,5 +1,6 @@
 'use client';
 
+import { needsInterview } from '@/components/DesignInterview';
 import { BrandMark, Wordmark } from '@/components/Logo';
 import {
   type AccountProvider,
@@ -9,7 +10,7 @@ import {
   getAccountSettings,
   saveAccountProvider,
 } from '@/lib/api';
-import { deriveProjectName, takePendingPrompt } from '@/lib/pending-prompt';
+import { deriveProjectName, setPendingPrompt, takePendingPrompt } from '@/lib/pending-prompt';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useState } from 'react';
@@ -75,6 +76,14 @@ function OnboardingForm() {
   async function continueAfterSave() {
     const pending = takePendingPrompt();
     if (pending) {
+      // Held onto the prompt across the auth wall, so honour what it was for:
+      // an idea with room in it gets the design interview on the homepage
+      // rather than a build that guessed at the half nobody asked about.
+      if (needsInterview(pending)) {
+        setPendingPrompt(pending);
+        router.push('/');
+        return;
+      }
       const { project } = await createProject(deriveProjectName(pending), 'phaser');
       const { runId } = await generateGame(project.id, pending);
       router.push(`/projects/${project.id}?runId=${runId}`);
