@@ -398,6 +398,36 @@ function clean(raw: unknown, max: number): string {
   return `${kept.trimEnd()}…`;
 }
 
+/**
+ * Read one option, however the model chose to express it.
+ *
+ * The instruction asks for `{label, detail}`, and models routinely answer with
+ * a bare string, or with `text`/`name` instead of `label`. Every one of those
+ * used to drop the option, and a question that lost all its options was dropped
+ * with them — so a plan that was 90% right degraded to generic questions about
+ * someone else's game. What the model MEANT is unambiguous in each case, so it
+ * is read rather than discarded.
+ */
+function parseOption(raw: unknown): { label: string; detail: string } | null {
+  if (typeof raw === 'string') {
+    const label = clean(raw, LIMITS.label);
+    return label === '' ? null : { label, detail: '' };
+  }
+  if (typeof raw !== 'object' || raw === null) return null;
+  const record = raw as Record<string, unknown>;
+  const label =
+    clean(record['label'], LIMITS.label) ||
+    clean(record['text'], LIMITS.label) ||
+    clean(record['name'], LIMITS.label) ||
+    clean(record['title'], LIMITS.label);
+  if (label === '') return null;
+  const detail =
+    clean(record['detail'], LIMITS.detail) ||
+    clean(record['description'], LIMITS.detail) ||
+    clean(record['why'], LIMITS.detail);
+  return { label, detail };
+}
+
 function asLayerId(raw: unknown): LayerId | null {
   return typeof raw === 'string' && LAYER_IDS.has(raw) ? (raw as LayerId) : null;
 }
@@ -438,7 +468,7 @@ export function parseInterviewPlan(raw: unknown): InterviewPlan | null {
       if (questions.length >= LIMITS.questions) break;
       if (typeof entry !== 'object' || entry === null) continue;
       const record = entry as Record<string, unknown>;
-      const id = asLayerId(record['layer']);
+      const id = asLayerId(record['layer']) ?? asLayerId(record['id']);
       // A layer the prompt already settled must not also be asked about.
       if (id === null || seen.has(id)) continue;
 
@@ -450,15 +480,12 @@ export function parseInterviewPlan(raw: unknown): InterviewPlan | null {
       if (Array.isArray(record['options'])) {
         for (const rawOption of record['options']) {
           if (options.length >= LIMITS.options) break;
-          if (typeof rawOption !== 'object' || rawOption === null) continue;
-          const optionRecord = rawOption as Record<string, unknown>;
-          const label = clean(optionRecord['label'], LIMITS.label);
-          if (label === '') continue;
-          const detail = clean(optionRecord['detail'], LIMITS.detail);
+          const parsed = parseOption(rawOption);
+          if (parsed === null) continue;
           options.push({
             id: `${id}-${options.length}`,
-            label,
-            ...(detail === '' ? {} : { detail }),
+            label: parsed.label,
+            ...(parsed.detail === '' ? {} : { detail: parsed.detail }),
           });
         }
       }
@@ -478,7 +505,13 @@ export function parseInterviewPlan(raw: unknown): InterviewPlan | null {
     }
   }
 
-  if (questions.length === 0) return null;
+  // No questions AND nothing settled is a non-answer: the caller falls back to
+  // the static layers. No questions but a full `settled` is the opposite — the
+  // model read the prompt and found nothing left worth asking. Returning null
+  // there threw away a correct reading of THEIR idea and replaced it with
+  // questions about a neon city, which is the exact failure this file exists to
+  // prevent. A settled-only plan goes through, and the UI offers the build.
+  if (questions.length === 0 && settled.length === 0) return null;
 
   // Canonical order regardless of what the model emitted: the world still
   // constrains the cast, and the twist still needs something to subvert.
@@ -568,11 +601,74 @@ export function extractJsonObject(text: string): unknown {
   const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(trimmed);
   const candidate = fenced?.[1]?.trim() ?? trimmed;
   const start = candidate.indexOf('{');
+  if (start === -1) return null;
+
   const end = candidate.lastIndexOf('}');
-  if (start === -1 || end <= start) return null;
+  if (end > start) {
+    try {
+      return JSON.parse(candidate.slice(start, end + 1)) as unknown;
+    } catch {
+      // Fall through to the truncation repair below.
+    }
+  }
+
+  const repaired = closeTruncatedJson(candidate.slice(start));
+  if (repaired === null) return null;
   try {
-    return JSON.parse(candidate.slice(start, end + 1)) as unknown;
+    return JSON.parse(repaired) as unknown;
   } catch {
     return null;
   }
+}
+
+/** Where the brackets stand at the end of a (possibly cut off) JSON fragment. */
+function scanJson(text: string): { open: string[]; lastNestedClose: number } {
+  const open: string[] = [];
+  let lastNestedClose = -1;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{') open.push('}');
+    else if (ch === '[') open.push(']');
+    else if (ch === '}' || ch === ']') {
+      open.pop();
+      // A close that still leaves brackets open ended a NESTED value — a whole
+      // question object, say. That is a safe place to cut.
+      if (open.length > 0) lastNestedClose = i;
+    }
+  }
+  return { open, lastNestedClose };
+}
+
+/**
+ * Salvage the complete part of a JSON object that was cut off mid-flight.
+ *
+ * A response truncated by the token ceiling used to be worth nothing: the parse
+ * failed, the plan came back null, and someone who wrote three paragraphs about
+ * their game was asked whether it is set in a neon city. Three complete
+ * questions had usually already arrived. This cuts back to the last complete
+ * nested value, closes what is still open, and keeps them.
+ *
+ * Returns null when there is nothing complete to keep — a half-written first
+ * question is not worth guessing at.
+ */
+export function closeTruncatedJson(fragment: string): string | null {
+  const { open, lastNestedClose } = scanJson(fragment);
+  // Balanced already: not truncated, so the parse failed for another reason and
+  // there is nothing here to repair.
+  if (open.length === 0) return null;
+  if (lastNestedClose === -1) return null;
+
+  const head = fragment.slice(0, lastNestedClose + 1);
+  const closers = scanJson(head).open;
+  if (closers.length === 0) return null;
+  return head + closers.reverse().join('');
 }

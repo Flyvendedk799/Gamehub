@@ -430,6 +430,23 @@ const DEFAULT_PLATFORM_MODEL: ModelRef = { provider: 'anthropic', modelId: 'clau
  * catches a genuine stall.
  */
 const INTERVIEW_TIMEOUT_MS = 25_000;
+/**
+ * Output ceiling for a drafted interview.
+ *
+ * Measured output is ~550 tokens, so this is not a cost lever — it is the
+ * distance between a normal answer and a runaway one. A response cut off at the
+ * ceiling is now salvaged rather than discarded (`closeTruncatedJson`), and the
+ * headroom means a slightly wordy model never reaches the cut at all.
+ */
+const INTERVIEW_MAX_TOKENS = 3000;
+/**
+ * Do not start an attempt with less than this left on the clock.
+ *
+ * Drafting measures 10-13s, so a two-second window buys nothing but a certain
+ * abort — and the person still waits out those two seconds before seeing the
+ * static questions.
+ */
+const MIN_INTERVIEW_ATTEMPT_MS = 6_000;
 const DEFAULT_BYOK_MODELS: Record<ByokProvider, string> = {
   anthropic: PROVIDER_SHORTLIST.anthropic.defaultPrimary,
   openai: PROVIDER_SHORTLIST.openai.defaultPrimary,
@@ -2009,55 +2026,109 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const prompt = body.prompt.trim();
 
     const creds = await resolveGenerationCredentials(user.userId);
-    if (!creds.ok) return reply.send({ plan: null });
+    if (!creds.ok) {
+      console.warn('[design-interview] no credential; falling back to static questions');
+      return reply.send({ plan: null, reason: 'no_credential' });
+    }
 
     // Whose credential pays: a BYOK key or a connected subscription speaks for
     // itself; otherwise the platform key.
     const usesOwnKey = creds.apiKey !== undefined && creds.platformFunded !== true;
     const apiKey = usesOwnKey ? creds.apiKey : deps.platformApiKey;
-    if (!apiKey) return reply.send({ plan: null });
+    if (!apiKey) {
+      console.warn('[design-interview] no API key; falling back to static questions');
+      return reply.send({ plan: null, reason: 'no_api_key' });
+    }
 
     // Drafting four short questions is not the job the build model is for, and
     // latency here is almost entirely output length — a smaller model roughly
     // halves the wait. Only swap when the interview model is for the SAME
     // provider as the credential; a subscription token cannot call OpenAI.
     const credentialModel = creds.model ?? deps.platformModel ?? DEFAULT_PLATFORM_MODEL;
-    const model =
-      deps.interviewModel !== undefined && deps.interviewModel.provider === credentialModel.provider
-        ? deps.interviewModel
-        : credentialModel;
+    const sameModel = (a: ModelRef, b: ModelRef) =>
+      a.provider === b.provider && a.modelId === b.modelId;
 
-    // A person is watching a spinner, so this is on a leash. Past the deadline
-    // the static questions are strictly better than more waiting.
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      controller.abort();
-    }, INTERVIEW_TIMEOUT_MS);
-    try {
-      const result = await complete(
-        model,
-        [{ role: 'user', content: buildInterviewPlanPrompt(prompt) }],
-        {
-          apiKey,
-          signal: controller.signal,
-          maxTokens: 2000,
-          // Nothing here needs deliberation, and every second spent thinking is
-          // a second the person spends looking at a spinner.
-          reasoning: 'minimal',
-          ...(usesOwnKey && creds.wire !== undefined ? { wire: creds.wire } : {}),
-          ...(usesOwnKey && creds.httpHeaders !== undefined
-            ? { httpHeaders: creds.httpHeaders }
-            : {}),
-        },
-      );
-      const plan = parseInterviewPlan(extractJsonObject(result.content));
-      return reply.send({ plan });
-    } catch (err) {
-      console.warn(`[design-interview] plan unavailable, falling back: ${String(err)}`);
-      return reply.send({ plan: null });
-    } finally {
-      clearTimeout(timer);
+    // Which models to try, in order.
+    //
+    // The credential's own model is ALWAYS the last resort, because a
+    // misconfigured INTERVIEW_MODEL_ID is otherwise indistinguishable from a
+    // broken feature: an id pi-ai does not know throws PROVIDER_MODEL_UNKNOWN
+    // on every single call, and every build silently gets the generic
+    // questions. That is a deployment typo, not a reason to stop asking about
+    // someone's game — so the model that DOES work answers instead.
+    const candidates: ModelRef[] = [];
+    if (
+      deps.interviewModel !== undefined &&
+      deps.interviewModel.provider === credentialModel.provider
+    ) {
+      candidates.push(deps.interviewModel);
     }
+    if (!candidates.some((candidate) => sameModel(candidate, credentialModel))) {
+      candidates.push(credentialModel);
+    }
+
+    // A person is watching a spinner, so this is on a leash — one deadline for
+    // the whole route, not one per attempt. A fallback attempt gets whatever
+    // time the failed one left behind, and none is started without enough of it
+    // to plausibly finish.
+    const deadline = Date.now() + INTERVIEW_TIMEOUT_MS;
+    let lastError: unknown = null;
+    let sawUnusable = false;
+
+    for (const model of candidates) {
+      const budget = deadline - Date.now();
+      if (budget < MIN_INTERVIEW_ATTEMPT_MS) break;
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => {
+        controller.abort();
+      }, budget);
+      try {
+        const result = await complete(
+          model,
+          [{ role: 'user', content: buildInterviewPlanPrompt(prompt) }],
+          {
+            apiKey,
+            signal: controller.signal,
+            maxTokens: INTERVIEW_MAX_TOKENS,
+            // Nothing here needs deliberation, and every second spent thinking
+            // is a second the person spends looking at a spinner.
+            reasoning: 'minimal',
+            ...(usesOwnKey && creds.wire !== undefined ? { wire: creds.wire } : {}),
+            ...(usesOwnKey && creds.httpHeaders !== undefined
+              ? { httpHeaders: creds.httpHeaders }
+              : {}),
+          },
+        );
+        const plan = parseInterviewPlan(extractJsonObject(result.content));
+        if (plan !== null) {
+          return reply.send({ plan, reason: 'ok' });
+        }
+        // The call worked and the answer was unusable — the small model
+        // ignoring the JSON instruction, most often. That is exactly what the
+        // next candidate is for, and it is logged with the evidence either way,
+        // because a fallback nobody can see is how this regressed unnoticed.
+        sawUnusable = true;
+        console.warn(
+          `[design-interview] ${model.provider}:${model.modelId} returned an unusable plan ` +
+            `(${result.content.length} chars): ${result.content.slice(0, 300).replace(/\s+/g, ' ')}`,
+        );
+      } catch (err) {
+        lastError = err;
+        console.warn(
+          `[design-interview] ${model.provider}:${model.modelId} failed: ${String(err)}`,
+        );
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    const reason = sawUnusable && lastError === null ? 'unusable_response' : 'model_error';
+    console.warn(
+      `[design-interview] no model could draft questions (${reason})` +
+        `${lastError === null ? '' : `: ${String(lastError)}`}`,
+    );
+    return reply.send({ plan: null, reason });
   });
 
   app.post('/v1/projects/:id/generate', async (req, reply) => {

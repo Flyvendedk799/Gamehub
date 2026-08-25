@@ -33,9 +33,11 @@ export function needsInterview(prompt: string): boolean {
  * answer as a card, so the game visibly takes shape before a line is written
  * and a wrong turn is corrected while correcting is still free.
  *
- * It runs entirely on the client. The questions are a fixed vocabulary, not a
- * model call, so answering is instant: waiting on an LLM to ask "where is it
- * set?" would be slower than the prompt box it replaces, and worse.
+ * The questions themselves are drafted for THIS prompt by the server
+ * (`/v1/design/interview`) before anything renders. The static layers are the
+ * fallback for when that call fails, and a visible one: someone who wrote
+ * "underwater roguelike" and gets asked about a neon city should be told the
+ * drafting failed, not left to conclude that nobody read their idea.
  *
  * Skipping is a first-class answer and "Build it now" is always visible. This
  * has to stay a conversation someone can walk out of, not a form that must be
@@ -127,6 +129,12 @@ function InterviewBody({
   const question = useMemo(() => nextQuestion(state), [state]);
   const brief = useMemo(() => toBrief(state), [state]);
 
+  // Questions written for THIS prompt carry their own layer definitions; the
+  // static set does not. When the fallback is what someone is looking at, say
+  // so rather than passing off "Neon city / Deep sea" as a reading of their
+  // idea — the generic set showing up unannounced is the whole bug report.
+  const tailored = state.layers !== undefined;
+
   function build(next: InterviewState) {
     onBuild(briefToPrompt(toBrief(finishInterview(next))));
   }
@@ -181,6 +189,13 @@ function InterviewBody({
         DESIGNING{total > 0 ? ` · ${Math.min(answered + 1, total)}/${total}` : ''}
       </p>
       <p className="mt-1 text-sm text-ink-3">{prompt}</p>
+
+      {!tailored && (
+        <p className="mt-3 border border-hairline bg-raised px-4 py-2.5 text-xs leading-relaxed text-ink-4">
+          Couldn't draft questions about your idea just now, so these are the general ones. Your
+          prompt still reaches the build exactly as you wrote it.
+        </p>
+      )}
 
       {decisions}
 
