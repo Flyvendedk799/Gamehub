@@ -72,6 +72,7 @@ import { reasoningForModel } from './index.js';
 import { type CoreLogger, NOOP_LOGGER } from './logger.js';
 import { createNarrationDetector } from './narration-detector.js';
 import { composeSystemPrompt } from './prompts/index.js';
+import { nextSpeedAction } from './speed-schedule.js';
 import { makeAddControllerSupportTool } from './tools/add-controller-support.js';
 import { type GetGameSpecFn, makeAmendGameSpecTool } from './tools/amend-game-spec.js';
 import { makeAskUserTool } from './tools/ask-user.js';
@@ -1789,6 +1790,10 @@ export async function generateViaAgent(
   // callbacks below so a game-mode `done` rejects when either is 0.
   let validateGameSceneCount = 0;
   let playtestGameCount = 0;
+  // S10 — early playtest schedule. Force boot+playtest before polish once the
+  // entry exists / tool-call ceiling is hit.
+  let entryWritten = false;
+  let speedPlaytestSteerEmitted = false;
   // Defer wall_clock-triggered aborts to the next `turn_end` boundary
   // (the safe point identified in pi-agent-core/dist/agent-loop.js:121,
   // between turn_end and the next turn_start). Aborting mid-stream
@@ -1831,10 +1836,40 @@ export async function generateViaAgent(
       // before accepting a game-mode artifact. The FPS Wave Defense
       // run logged 1 of each across 28 snapshots; the gate ensures
       // the agent actually exercises the validators.
-      const ev = event as { toolName?: string };
+      const ev = event as { toolName?: string; args?: Record<string, unknown> };
       if (typeof ev.toolName === 'string') {
         if (ev.toolName === 'validate_game_scene') validateGameSceneCount += 1;
         else if (ev.toolName === 'playtest_game') playtestGameCount += 1;
+        // S10 — detect durable entry writes (src/main.* / index.html create/replace).
+        if (
+          isGameMode &&
+          (ev.toolName === 'str_replace_based_edit_tool' || ev.toolName === 'import_skill')
+        ) {
+          const path = typeof ev.args?.['path'] === 'string' ? ev.args['path'] : '';
+          if (/^(src\/main\.|index\.html)/.test(path) || /\/src\/main\./.test(path)) {
+            entryWritten = true;
+          }
+        }
+        if (isGameMode && !speedPlaytestSteerEmitted) {
+          const action = nextSpeedAction({
+            toolCallsSoFar: toolCallCount,
+            entryWritten,
+            playtestRan: playtestGameCount > 0,
+          });
+          if (action.kind === 'force_early_playtest') {
+            speedPlaytestSteerEmitted = true;
+            log.info('[generate] step=speed_schedule.force_early_playtest', {
+              ...ctx,
+              reason: action.reason,
+              toolCallCount,
+            });
+            agent.steer({
+              role: 'user',
+              content: `[system-reminder] S10 build-speed: ${action.reason}. STOP polishing. Call get_playtest_playbook (if needed) then playtest_game NOW, then validate_game_scene, before any further juice/art edits.`,
+              timestamp: Date.now(),
+            });
+          }
+        }
       }
       // Backlog-3 §3 — track whether turn 0 actually emitted any tool
       // calls. If it didn't AND the assistant emitted text, we re-issue

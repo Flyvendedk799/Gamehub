@@ -476,6 +476,13 @@ export interface RuntimeVerifyResult {
    * so it can NEVER false-flag a game we couldn't reliably inspect.
    */
   renderedNonBlank: boolean;
+  /**
+   * S1/S5 — runtime audio evidence. Count of HTMLAudioElement.play /
+   * AudioContext oscillator starts observed during the verify window (via the
+   * runtime shim's `window.__game.debug.audioPlays`). A mute game scores 0.
+   * Juice alone can no longer greenlight silence.
+   */
+  audioPlays: number;
 }
 
 /** Phase 5.5 — hard ceiling on the juice score so a pathological canvas /
@@ -933,6 +940,15 @@ export async function runRuntimeVerify(
       blockedRequests: [...egress.blocked],
       juiceScore,
       renderedNonBlank,
+      audioPlays: hasGameContract
+        ? await page
+            .evaluate(() => {
+              const g = (window as Window & { __game?: { debug?: { audioPlays?: number } } })
+                .__game;
+              return typeof g?.debug?.audioPlays === 'number' ? g.debug.audioPlays : 0;
+            })
+            .catch(() => 0)
+        : 0,
     };
   } finally {
     await context.close();

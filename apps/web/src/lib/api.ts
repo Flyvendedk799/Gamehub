@@ -116,7 +116,9 @@ function normalizeProjectResponse(
 
 export async function createProject(
   name: string,
-  engine: EngineChoice = 'phaser',
+  /** Default `auto` so the agent calls `choose_engine` — never bake Phaser in
+   *  before generation (S0: a 3D brief must not ship a Phaser bootstrap). */
+  engine: EngineChoice = 'auto',
 ): Promise<CreateProjectResponse> {
   // Converted here rather than at each call site: the web's spelling and the
   // API's allow-list are different vocabularies, and sending the web's one

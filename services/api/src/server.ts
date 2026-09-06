@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import websocketPlugin from '@fastify/websocket';
 import type { EventBus } from '@playforge/bus';
 import { runChannel } from '@playforge/bus';
-import { type ExportGameHtmlOptions, buildGameHtml } from '@playforge/exporters';
+import { type ExportGameHtmlOptions, buildGameHtml, detectEngineFromHtml, evaluateBootCheck } from '@playforge/exporters';
 import { exportGameZip } from '@playforge/exporters/game-zip';
 import {
   type StoredClaudeAuth,
@@ -42,6 +42,8 @@ import {
   injectControlsRuntime,
   normalizeEngineCdnUrls,
   parseInterviewPlan,
+  resolvePlayEngine,
+  RtRelay,
 } from '@playforge/shared';
 import { type SnapshotStore, contentTypeFor, isSafeBundlePath } from '@playforge/storage';
 import {
@@ -663,6 +665,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // Hub comment body cap — uncapped, the only limit was the 1 MiB bodyLimit. (content MEDIUM)
   const MAX_COMMENT_LEN = 2000;
   void app.register(websocketPlugin);
+
+  // S11 — same-origin realtime relay for netplay (connect-src 'self').
+  const rtRelay = new RtRelay();
 
   // ── Auth rate limiting (in-memory, per-server-instance) ──────────────────
   const authAttempts = new Map<string, { count: number; resetAt: number }>();
@@ -2807,7 +2812,18 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(409).send({ error: 'no_snapshot', message: 'Generate a game first.' });
     }
 
-    const engine = (project.engine ?? 'phaser') as 'phaser' | 'three' | 'canvas2d';
+    // S0 — boot the engine the agent chose (and finalizeRun persisted). Prefer
+    // project.engine; fall back to the HEAD snapshot's engine so a stale null
+    // project row cannot Phaser-bootstrap a Three.js game.
+    let snapshotEngine: 'phaser' | 'three' | 'canvas2d' | null = null;
+    if (project.currentSnapshotId !== null && deps.snapshotRepo) {
+      const snap = await deps.snapshotRepo.getById(project.currentSnapshotId);
+      snapshotEngine = (snap?.engine as 'phaser' | 'three' | 'canvas2d' | null | undefined) ?? null;
+    }
+    const engine = resolvePlayEngine(
+      project.engine as 'phaser' | 'three' | 'canvas2d' | null,
+      snapshotEngine,
+    );
     const manifest = await deps.store.readManifest(project.currentManifestKey);
 
     // Build ZipAsset[] from the manifest — text files as strings, binary as Buffers.
@@ -2833,6 +2849,25 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         ? { appBaseUrl: deps.appBaseUrl, publishSlug: project.slug }
         : {}),
     });
+
+    // S14 — static boot-check before smoke: reject engine mismatch early.
+    const detectedEngine = detectEngineFromHtml(html);
+    const staticBoot = evaluateBootCheck({
+      hasGameContract: /window\.__game|__game\s*=/.test(html),
+      fatalErrors: [],
+      declaredEngine: engine,
+      detectedEngine,
+    });
+    if (!staticBoot.ok) {
+      return reply.code(422).send({
+        error: 'boot_check_failed',
+        message: staticBoot.errors.join('; '),
+        errors: staticBoot.errors,
+        declaredEngine: engine,
+        detectedEngine,
+      });
+    }
+
     const htmlBytes = Buffer.from(html, 'utf8');
     const bundleKey = await deps.store.putBlob(htmlBytes);
 
@@ -2908,6 +2943,26 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
             fatalErrors: verifyResult.fatalErrors,
           });
         }
+        // S14 — re-run evaluateBootCheck with live smoke evidence (audio when present).
+        if (verifyResult) {
+          const liveBoot = evaluateBootCheck({
+            hasGameContract: verifyResult.hasGameContract,
+            fatalErrors: verifyResult.fatalErrors,
+            declaredEngine: engine,
+            detectedEngine,
+            ...(typeof verifyResult.audioPlays === 'number'
+              ? { audioPlays: verifyResult.audioPlays }
+              : {}),
+          });
+          if (!liveBoot.ok) {
+            await deps.publishRepo.setStatus(publishedGame.id, 'unpublished');
+            return reply.code(422).send({
+              error: 'boot_check_failed',
+              message: liveBoot.errors.join('; '),
+              errors: liveBoot.errors,
+            });
+          }
+        }
         if (verifyResult?.fatalErrors.length) {
           console.warn(
             `[publish:smoke] ${publishedGame.publishSlug} has fatal errors:`,
@@ -2972,6 +3027,24 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     return reply.code(200).send({
       slug: publishedGame.publishSlug,
       publishUrl: `/v1/play/${publishedGame.publishSlug}`,
+      // S14 — embed snippet for sites that want to iframe the play URL.
+      embedSnippet: `<iframe src="${deps.appBaseUrl ?? ''}/v1/play/${publishedGame.publishSlug}" width="800" height="600" allow="fullscreen; gamepad; pointer-lock" style="border:0;max-width:100%"></iframe>`,
+    });
+  });
+
+  // S14 — GET embed snippet for a published play slug (also linked from play page).
+  app.get('/v1/play/:slug/embed', async (req, reply) => {
+    const { slug } = req.params as { slug: string };
+    if (!deps.publishRepo) return reply.code(503).send({ error: 'publish_unavailable' });
+    const game = await deps.publishRepo.getBySlug(slug);
+    if (!game || game.status !== 'live') return reply.code(404).send({ error: 'not_found' });
+    const base = deps.appBaseUrl ?? '';
+    const src = `${base}/v1/play/${slug}`;
+    return reply.send({
+      slug,
+      playUrl: src,
+      embedSnippet: `<iframe src="${src}" width="800" height="600" allow="fullscreen; gamepad; pointer-lock" style="border:0;max-width:100%"></iframe>`,
+      pwaStartUrl: src,
     });
   });
 
@@ -3003,10 +3076,18 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const { readFile, rm } = await import('node:fs/promises');
     const dest = join(tmpdir(), `playforge-export-${id}-${Date.now()}.zip`);
     try {
+      let snapshotEngine: 'phaser' | 'three' | 'canvas2d' | null = null;
+      if (project.currentSnapshotId !== null && deps.snapshotRepo) {
+        const snap = await deps.snapshotRepo.getById(project.currentSnapshotId);
+        snapshotEngine = (snap?.engine as 'phaser' | 'three' | 'canvas2d' | null | undefined) ?? null;
+      }
       await exportGameZip(dest, {
         files,
         designName: project.name,
-        engine: (project.engine as 'three' | 'phaser' | 'canvas2d') ?? 'phaser',
+        engine: resolvePlayEngine(
+          project.engine as 'three' | 'phaser' | 'canvas2d' | null,
+          snapshotEngine,
+        ),
       });
       const zipBytes = await readFile(dest);
       const safeName =
@@ -3278,10 +3359,18 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const { exportGameArtifact } = await import('@playforge/exporters');
     const tmpPath = join(tmpdir(), `playforge-${randomUUID()}.zip`);
     try {
+      let snapshotEngine: 'phaser' | 'three' | 'canvas2d' | null = null;
+      if (project.currentSnapshotId !== null && deps.snapshotRepo) {
+        const snap = await deps.snapshotRepo.getById(project.currentSnapshotId);
+        snapshotEngine = (snap?.engine as 'phaser' | 'three' | 'canvas2d' | null | undefined) ?? null;
+      }
       await exportGameArtifact('game-zip', tmpPath, {
         files,
         designName: project.name,
-        engine: (project.engine ?? 'phaser') as 'phaser' | 'three' | 'canvas2d',
+        engine: resolvePlayEngine(
+          project.engine as 'phaser' | 'three' | 'canvas2d' | null,
+          snapshotEngine,
+        ),
       });
       const { readFile } = await import('node:fs/promises');
       const zipBytes = await readFile(tmpPath);
@@ -3881,6 +3970,40 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       socket.on('close', () => {
         collabRooms.get(id)?.delete(socket);
         if (collabRooms.get(id)?.size === 0) collabRooms.delete(id);
+      });
+    });
+
+    // S11 — GET /v1/rt?room=… same-origin netplay relay (CSP connect-src 'self').
+    app.get('/v1/rt', { websocket: true }, async (first, second) => {
+      const args = websocketArgs(first, second);
+      if (!args) return;
+      const { socket, req } = args;
+      let roomId = 'lobby';
+      try {
+        const u = new URL(req.url, 'http://localhost');
+        const q = u.searchParams.get('room');
+        if (typeof q === 'string' && q.trim().length > 0) roomId = q.trim().slice(0, 128);
+      } catch {
+        /* default lobby */
+      }
+      const client = rtRelay.join(roomId, (data) => {
+        try {
+          socket.send(data);
+        } catch {
+          /* disconnected */
+        }
+      });
+      socket.on('message', (raw: Buffer | ArrayBuffer | string) => {
+        const text =
+          typeof raw === 'string'
+            ? raw
+            : Buffer.isBuffer(raw)
+              ? raw.toString('utf8')
+              : Buffer.from(raw).toString('utf8');
+        rtRelay.handleMessage(client, text);
+      });
+      socket.on('close', () => {
+        rtRelay.leave(client);
       });
     });
   });

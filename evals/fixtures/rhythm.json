@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "name": "Rhythm — lane hits",
+  "slug": "rhythm",
+  "description": "S2/S9: rhythm games must self-sound via beatmap-synth and score on audioTime.",
+  "brief": "Make a four-lane rhythm game. Notes scroll to a hit line; pressing the lane key on time scores. Use WebAudio / beatmap-synth so the chart is audible with NO external audio files. Expose score and combo.",
+  "playtestPlaybook": "rhythm",
+  "assertions": {
+    "expectedEngine": "phaser",
+    "expectedGenre": "rhythm",
+    "requiredFiles": ["index.html"],
+    "requiredAudio": true,
+    "maxInputTokens": 1400000,
+    "maxStrReplaceFailureRate": 0.08,
+    "maxSetTodosCalls": 10,
+    "minValidateGameSceneCalls": 1,
+    "minPlaytestGameCalls": 1,
+    "maxRenderPreviewCalls": 0,
+    "maxCorrections": 3,
+    "requireRuntimeBoot": true,
+    "requireJuice": 15
+  }
+}

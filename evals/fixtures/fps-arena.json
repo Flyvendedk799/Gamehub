@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "name": "3D Arena — pointer lock",
+  "slug": "fps-arena",
+  "description": "S0/S2/S8: Three.js FPS must persist engine=three, acquire pointer lock, and not ship Phaser HTML.",
+  "brief": "Make a first-person 3D arena shooter. Click to lock the pointer, WASD to move on the camera basis, mouse to look. Enemies spawn in waves. Use createFpsController. Include WebAudio hit SFX.",
+  "playtestPlaybook": "fps",
+  "assertions": {
+    "expectedEngine": "three",
+    "expectedGenre": "fps",
+    "requiredFiles": ["index.html"],
+    "requiredAudio": true,
+    "maxInputTokens": 1600000,
+    "maxStrReplaceFailureRate": 0.1,
+    "maxSetTodosCalls": 12,
+    "minValidateGameSceneCalls": 1,
+    "minPlaytestGameCalls": 1,
+    "maxRenderPreviewCalls": 0,
+    "maxCorrections": 4,
+    "requireRuntimeBoot": true,
+    "requireJuice": 25
+  }
+}

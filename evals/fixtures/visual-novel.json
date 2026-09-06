@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "name": "Visual Novel — branch choice",
+  "slug": "visual-novel",
+  "description": "S2/S9: VN must advance dialogue and record a choice via an authored playtest contract.",
+  "brief": "Make a short visual novel with at least 3 dialogue lines and one branching choice that changes the ending. Click/Space advances text. Expose dialogueIndex and choiceCount on the debug snapshot.",
+  "playtestPlaybook": "visual_novel",
+  "assertions": {
+    "expectedEngine": "phaser",
+    "expectedGenre": "visual_novel",
+    "requiredFiles": ["index.html"],
+    "requiredAudio": false,
+    "maxInputTokens": 1200000,
+    "maxStrReplaceFailureRate": 0.08,
+    "maxSetTodosCalls": 8,
+    "minValidateGameSceneCalls": 1,
+    "minPlaytestGameCalls": 1,
+    "maxRenderPreviewCalls": 0,
+    "maxCorrections": 3,
+    "requireRuntimeBoot": true,
+    "requireJuice": 0
+  }
+}

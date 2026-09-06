@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "name": "Wordfall — falling letters",
+  "slug": "wordfall",
+  "description": "S9 off-menu: typing / falling-words arcade loop.",
+  "brief": "Make a wordfall game. Letters or words fall from the top; type them before they hit the ground. Score rises; speed escalates. Phaser 2D.",
+  "assertions": {
+    "expectedEngine": "phaser",
+    "expectedGenre": "other",
+    "requiredFiles": ["index.html"],
+    "requiredAudio": true,
+    "maxInputTokens": 1600000,
+    "maxStrReplaceFailureRate": 0.1,
+    "maxSetTodosCalls": 12,
+    "minValidateGameSceneCalls": 1,
+    "minPlaytestGameCalls": 1,
+    "maxRenderPreviewCalls": 0,
+    "maxCorrections": 4,
+    "requireRuntimeBoot": true,
+    "requireJuice": 15
+  }
+}

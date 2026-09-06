@@ -376,8 +376,13 @@ export function decideRepairAction(
   if (verdict.pass) {
     return { kind: 'ship', reason: 'passed' };
   }
-  // (5) Validation-tail budget gone — stop and ship the best attempt.
+  // (5) Validation-tail budget gone — stop and ship the best attempt,
+  // UNLESS we never gathered evidence (S1: a game that never booted must not
+  // ship as budget_exhausted). Surface as no_verdict so telemetry/done can refuse.
   if (state.budgetExhausted) {
+    if (verdict.noEvidence) {
+      return { kind: 'ship', reason: 'no_verdict' };
+    }
     return { kind: 'ship', reason: 'budget_exhausted' };
   }
   // (6) Rounds remaining — author a specific instruction and repair.

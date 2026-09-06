@@ -61,17 +61,24 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script></body></html>`;
 
 /** Same game but now complete: a lose path (gameOver), a restart binding
- *  (R key → reset), and on-hit feedback (a sound). Should clear the floor. */
+ *  (R key → reset), and on-hit feedback (a sound). Should clear the floor.
+ *  S1 also requires feel-kit markers + a debug contract for juiced genres. */
 const PONG_COMPLETE = `<!doctype html><html lang="en"><head><title>Pong</title></head>
 <body><div id="root"></div>
 <script type="text/babel">
+function sfx(n) { new Audio(n).play(); }
+function shake() {}
+function emitParticle() {}
 function App() {
   let score = 0;
-  function onPaddleHit() { score += 1; new Audio('blip.wav').play(); }
+  function onPaddleHit() { score += 1; sfx('blip.wav'); shake(); emitParticle(); }
   function checkLose() { if (score <= 0) { gameOver(); } }
   function gameOver() { /* lose */ }
   window.addEventListener('keydown', (e) => { if (e.code === 'KeyR') resetGame(); });
   function resetGame() { score = 0; }
+  window.__game = window.__game || {};
+  window.__game.debug = window.__game.debug || { track() {}, snapshot() { return { score }; } };
+  window.__game.debug.track({ score: () => score });
   return <canvas />;
 }
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
@@ -258,11 +265,17 @@ describe('done — Phase-1.5 completability floor', () => {
       'index.html':
         '<!doctype html><html lang="en"><head><title>g</title></head><body><script type="module" src="src/game.js"></script></body></html>',
       'src/game.js': `
+        function sfx(n) { new Audio(n).play(); }
+        function shake() {}
+        function emitParticle() {}
         let hp = 3;
-        function onHit() { hp -= 1; new Audio('hit.wav').play(); if (hp <= 0) gameOver(); }
+        function onHit() { hp -= 1; sfx('hit.wav'); shake(); emitParticle(); if (hp <= 0) gameOver(); }
         function gameOver() {}
         window.addEventListener('keydown', (e) => { if (e.code === 'KeyR') resetGame(); });
         function resetGame() { hp = 3; }
+        window.__game = window.__game || {};
+        window.__game.debug = window.__game.debug || { track() {}, snapshot() { return { hp }; } };
+        window.__game.debug.track({ hp: () => hp });
       `,
     });
     const tool = makeDoneTool(

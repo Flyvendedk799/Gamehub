@@ -1,34 +1,20 @@
 /**
- * generateImageAsset — inline image generation for the gen-worker.
+ * generateImageAsset — provider-agnostic image generation for the gen-worker.
  *
- * Calls the OpenAI Images API (gpt-image-1) to produce a PNG and returns it as
- * a data URL so the agent can write it into the working tree.
+ * S6 — multi-provider switch:
+ *   1. Default / Claude path: when PLATFORM_PROVIDER is anthropic (or anything
+ *      non-OpenAI), look for OPENAI_API_KEY / PLAYFORGE_IMAGE_API_KEY as an
+ *      OpenAI Images fallback. If none, fail loudly with draw-in-code guidance.
+ *   2. OpenAI path: call gpt-image-1 directly with the run credential.
  *
  * Model note: `dall-e-3` was retired (2026-03-04) and the legacy
  * `response_format` parameter is no longer accepted by the images endpoint —
- * the gpt-image-* series ALWAYS returns base64 in `data[].b64_json`, so we send
- * no `response_format` and read b64_json directly. (Sending the old model/param
- * produced a hard `400 Unknown parameter: 'response_format'` that silently
- * dropped every asset to the placeholder PNG.)
- *
- * In the future this can be extracted to a dedicated asset-worker that
- * processes BullMQ `asset-jobs` in parallel. The `GenerateImageAssetFn`
- * contract is identical either way, so the migration is a drop-in swap.
- *
- * Required: PLATFORM_API_KEY must be set and PLATFORM_PROVIDER must be 'openai'.
- * When the provider isn't OpenAI, a transparent 1×1 PNG placeholder is returned
- * so the agent run still completes.
+ * the gpt-image-* series ALWAYS returns base64 in `data[].b64_json`.
  */
 
 import type { GenerateImageAssetFn, GenerateImageAssetRequest } from '@playforge/agent-core';
-// The ONE canonical SSRF guard. Any server-side fetch of a URL that is
-// attacker/model/config-influenced runs through this (async, DNS-aware) guard.
-// Do not re-fork a local blocklist — see packages/shared/src/ssrf.ts.
 import { assertSafeUrl } from '@playforge/shared';
 
-// gpt-image-1 supports a fixed set of sizes: 1024x1024 (square),
-// 1536x1024 (landscape), 1024x1536 (portrait), and 'auto'. The legacy
-// dall-e-3 1792-wide sizes are rejected, so map every aspect onto these three.
 const ASPECT_TO_SIZE: Record<string, string> = {
   '1:1': '1024x1024',
   '16:9': '1536x1024',
@@ -39,43 +25,61 @@ const ASPECT_TO_SIZE: Record<string, string> = {
 
 const IMAGE_MODEL = 'gpt-image-1';
 
+/** Resolve which credential can hit the OpenAI Images API. */
+export function resolveImageCredential(
+  provider: string,
+  apiKey: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): { apiKey: string; provider: 'openai'; via: 'primary' | 'fallback' } | null {
+  if (provider === 'openai' && apiKey && canGenerateImages('openai', apiKey)) {
+    return { apiKey, provider: 'openai', via: 'primary' };
+  }
+  const fallback =
+    env['PLAYFORGE_IMAGE_API_KEY']?.trim() ||
+    env['OPENAI_API_KEY']?.trim() ||
+    '';
+  if (fallback.length > 0 && canGenerateImages('openai', fallback)) {
+    return { apiKey: fallback, provider: 'openai', via: 'fallback' };
+  }
+  return null;
+}
+
 /**
- * Can this credential actually generate images?
- *
- * The images endpoint is OpenAI's, so an Anthropic subscription or a placeholder
- * platform key cannot call it. Callers use this to decide whether to offer the
- * tool AT ALL — see the note on the placeholder below for why offering it
- * anyway is the worse option.
+ * Can this credential (or a configured OpenAI fallback) generate images?
  */
 export function canGenerateImages(provider: string, apiKey: string | undefined): boolean {
-  if (provider !== 'openai') return false;
   if (!apiKey || apiKey.trim().length === 0) return false;
-  // Deployments carry a literal placeholder in PLATFORM_API_KEY when image
-  // generation was never provisioned. Treat it as absent rather than sending a
-  // doomed request per asset.
-  return !/placeholder|changeme|your[-_]?key|sk-ant-placeho/i.test(apiKey);
+  if (/placeholder|changeme|your[-_]?key|sk-ant-placeho/i.test(apiKey)) return false;
+  // Primary path is OpenAI Images. Non-openai providers rely on resolveImageCredential
+  // finding a fallback key — this helper only validates a key that will be sent
+  // to the images endpoint.
+  if (provider !== 'openai') return false;
+  return true;
+}
+
+/** True when the run can offer generate_image_asset (primary OpenAI or fallback). */
+export function canOfferImageGeneration(
+  provider: string,
+  apiKey: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return resolveImageCredential(provider, apiKey, env) !== null;
 }
 
 export function makeAssetGenerator(opts: {
   apiKey: string;
   provider: string;
+  /** Optional env override for tests. */
+  env?: NodeJS.ProcessEnv;
 }): GenerateImageAssetFn {
   return async (request: GenerateImageAssetRequest, signal?: AbortSignal) => {
     const { prompt, purpose, aspectRatio = '1:1', filenameHint, alt } = request;
     const path = filenameHint ?? `assets/${purpose}-${Date.now()}.png`;
 
-    // This used to return a 1×1 transparent PNG and report SUCCESS. The agent
-    // then wrote that pixel into the game as if it were art, and nothing —
-    // no log, no warning, no failed gate — said otherwise. Every game built on
-    // a non-OpenAI credential shipped invisible sprites while the build report
-    // said assets were generated.
-    //
-    // Failing loudly is strictly better: the agent handles tool errors, and the
-    // message tells it what to do instead. Callers that can check up front
-    // should use `canGenerateImages` and not offer the tool at all.
-    if (!canGenerateImages(opts.provider, opts.apiKey)) {
+    const cred = resolveImageCredential(opts.provider, opts.apiKey, opts.env ?? process.env);
+    if (cred === null) {
       throw new Error(
-        `generate_image_asset is unavailable on this deployment (image generation requires an OpenAI credential; this run uses "${opts.provider}"). Do NOT retry, and do NOT reference a bitmap you did not create — it would 404 and render as nothing. Draw the art in code instead: canvas-rendered sprites, inline <svg>, CSS gradients, or generated geometry/materials. Code-drawn art that renders beats a bitmap that does not exist.`,
+        `generate_image_asset is unavailable on this deployment (image generation needs an OpenAI Images credential; this run uses "${opts.provider}" with no OPENAI_API_KEY / PLAYFORGE_IMAGE_API_KEY fallback). Do NOT retry, and do NOT reference a bitmap you did not create — it would 404 and render as nothing. Draw the art in code instead: canvas-rendered sprites, inline <svg>, CSS gradients, or generated geometry/materials. Code-drawn art that renders beats a bitmap that does not exist.`,
       );
     }
 
@@ -88,14 +92,13 @@ export function makeAssetGenerator(opts: {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${opts.apiKey}`,
+        Authorization: `Bearer ${cred.apiKey}`,
       },
       body: JSON.stringify({
         model: IMAGE_MODEL,
         prompt: fullPrompt,
         n: 1,
         size,
-        // Keep game sprites cheap + fast; the agent only needs serviceable art.
         quality: 'low',
       }),
       ...(signal != null ? { signal } : {}),
@@ -104,11 +107,8 @@ export function makeAssetGenerator(opts: {
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       console.warn(
-        `[asset-generator] OpenAI images API error ${res.status} (purpose=${purpose}, size=${size}): ${text}`,
+        `[asset-generator] OpenAI images API error ${res.status} (purpose=${purpose}, size=${size}, via=${cred.via}): ${text}`,
       );
-      // Surfaced, not swallowed. Returning a transparent pixel here reported
-      // success for an asset that does not exist, so the game shipped with an
-      // invisible sprite and the run looked clean.
       throw new Error(
         `generate_image_asset failed: images API returned ${res.status}. ${res.status === 429 ? 'Rate limited — try ONE more time, then ' : 'Do not retry more than once; '}fall back to drawing this asset in code (canvas, inline <svg>, CSS, or generated geometry). Never reference a bitmap path you did not successfully create.`,
       );

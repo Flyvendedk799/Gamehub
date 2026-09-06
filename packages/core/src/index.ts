@@ -50,7 +50,60 @@ export {
 export type { VisualCritique } from './visual-critique.js';
 
 export { generateViaAgent } from './agent.js';
+
 export type { AgentEvent, GenerateViaAgentDeps } from './agent.js';
+
+
+// S3 — scene graph: same EditorSession the agent and the builder share.
+export {
+  createEditorSession,
+  type EditorSession,
+  type EditorSessionOptions,
+  type SceneSummary,
+} from './editor/session.js';
+export { makeSceneTools } from './tools/scene-edit.js';
+
+// S7 — parallel specialist planning/merge (worker owns the queue).
+export {
+  planSpecialists,
+  isPathAllowedForSpecialist,
+  mergeSpecialistWrites,
+  type SpecialistKind,
+  type SpecialistBrief,
+  type SpecialistResult,
+} from './specialists.js';
+
+// S5 / S13 — feel-kit gate + cloud MCP descriptors.
+export { checkFeelKit, looksCircleOnlySubject, type FeelKitReport } from './feel-kit.js';
+export {
+  PLAYFORGE_MCP_TOOLS,
+  assertMcpProjectAccess,
+  listMcpToolNames,
+  type McpToolDescriptor,
+  type McpAuthContext,
+} from './mcp-tools.js';
+export {
+  printMcpCatalog,
+  resolveMcpTool,
+  main as runMcpServerCli,
+  type McpServerOptions,
+} from './mcp-server.js';
+
+export {
+  buildHierarchy,
+  reparentCommand,
+  setFieldCommand,
+  type HierarchyNode,
+  type SceneHierarchyModel,
+} from './scene-hierarchy.js';
+
+// S10 — early playtest scheduling budgets.
+export {
+  nextSpeedAction,
+  SPEED_BUDGETS,
+  type SpeedScheduleInput,
+  type SpeedScheduleAction,
+} from './speed-schedule.js';
 
 // may9 Phase 14 — eval framework. The CLI script in scripts/eval-games.ts
 // imports these to evaluate fixtures against recorded designs.

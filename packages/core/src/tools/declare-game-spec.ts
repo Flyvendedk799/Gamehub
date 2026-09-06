@@ -63,6 +63,27 @@ const CapabilitiesSchema = Type.Object({
   requiresNetworking: Type.Optional(
     Type.Boolean({ description: 'Online/networked multiplayer is implied (co-op/versus/.io).' }),
   ),
+  contentPlan: Type.Optional(
+    Type.Object({
+      distinctEnemyBehaviors: Type.Optional(
+        Type.Integer({
+          minimum: 0,
+          maximum: 32,
+          description: 'How many DISTINCT enemy behaviors (not scalar HP/speed bumps).',
+        }),
+      ),
+      mechanicVariety: Type.Optional(Type.Integer({ minimum: 0, maximum: 32 })),
+      progressionMechanic: Type.Optional(
+        Type.Union([
+          Type.Literal('upgrade'),
+          Type.Literal('new-enemy'),
+          Type.Literal('new-tool'),
+          Type.Literal('environmental'),
+          Type.Literal('none'),
+        ]),
+      ),
+    }),
+  ),
 });
 
 const DeclareGameSpecParams = Type.Object({

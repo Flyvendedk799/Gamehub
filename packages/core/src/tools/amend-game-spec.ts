@@ -49,6 +49,13 @@ const AmendGameSpecParams = Type.Object({
       hasPhysics: Type.Optional(Type.Boolean()),
       procedural: Type.Optional(Type.Boolean()),
       requiresNetworking: Type.Optional(Type.Boolean()),
+      contentPlan: Type.Optional(
+        Type.Object({
+          distinctEnemyBehaviors: Type.Optional(Type.Integer({ minimum: 0, maximum: 32 })),
+          mechanicVariety: Type.Optional(Type.Integer({ minimum: 0, maximum: 32 })),
+          progressionMechanic: Type.Optional(Type.String()),
+        }),
+      ),
     }),
   ),
   features: Type.Optional(Type.Record(Type.String(), FeatureRecord)),

@@ -590,7 +590,7 @@ export function assertGameInvariants(
       checked.push('silent-audio');
       issues.push({
         invariant: 'silent-audio',
-        severity: 'warn',
+        severity: 'error',
         message: `Audio file(s) referenced but never created (they 404 → the game ships MUTE, the error is swallowed): ${missing.slice(0, 4).join(', ')}. Sound is half of game feel. Fix: synthesize SFX in code with WebAudio (createOscillator — no asset files), OR call generate_audio_asset to create the file BEFORE referencing it. Never reference an assets/audio path you did not create.`,
       });
     }
@@ -708,7 +708,7 @@ export function assertGameInvariants(
   if (anyMatch(source, DECOY_ENGINE_PATTERNS)) {
     issues.push({
       invariant: 'decoy-engine',
-      severity: 'warn',
+      severity: 'error',
       message:
         'Decoy engine entry detected — dead/placeholder framework code (e.g. `if (false && window.Phaser)` or an empty `extends Phaser.Scene {}`) that exists only to satisfy validate_game_scene while the real game runs in another file. Build honestly: if a raw <canvas> + requestAnimationFrame loop fits the idea better than the declared engine, write that as the actual entry (it is allowed) and wire window.__game from it — do NOT fake a scene.',
     });
@@ -833,7 +833,7 @@ export function assertGameInvariants(
     checked.push('shallow-escalation');
     issues.push({
       invariant: 'shallow-escalation',
-      severity: 'warn',
+      severity: 'error',
       message:
         'Difficulty escalates but ONLY by scalars (more/faster/tougher of the SAME thing) — no new enemy behaviour, upgrade, power-up, boss, or second weapon/ability. A game that introduces no SECOND idea by ~minute 2 plays like a tech demo, not something worth sharing. Add variety: a distinct enemy type/behaviour (the `enemy-ai` skill gives chase/orbit/charge/ranged), an upgrade or power-up between waves, a boss encounter, or a second weapon/ability the player unlocks.',
     });
@@ -877,6 +877,13 @@ export const FATAL_FLOOR_INVARIANTS: ReadonlySet<GameInvariant> = new Set<GameIn
   // Premium-completeness gate: a completable game must not ship MUTE. The seed ships
   // an sfx() helper, so the fix is one call; sandboxes are exempt via isCompletableSpec.
   'silent-game',
+  // S1 — referenced-but-missing audio files (404 → mute) and decoy-engine fakes are
+  // ship-blocking for completable games. Pattern presence is not enough; the VFS
+  // must contain the file, and the declared engine must be the one that runs.
+  'silent-audio',
+  'decoy-engine',
+  // S1 — scalar-only wave bumps are not depth. Completables must introduce a second idea.
+  'shallow-escalation',
 ]);
 
 /** GameSpec (`@playforge/shared`) genres that legitimately have no lose

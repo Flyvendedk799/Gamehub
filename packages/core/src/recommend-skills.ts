@@ -138,6 +138,31 @@ export function recommendSkills(
   // signal the capability phrasing can miss, so fire the genre's canonical skills
   // even when the mechanic keywords didn't match. push() de-dupes.
   const GENRE_SKILLS: Record<string, ReadonlyArray<readonly [string, string]>> = {
+    platformer: [
+      [
+        'character-controller-2d',
+        'platformers need coyote time + jump buffer + variable jump — import createPlatformerController, do not hand-roll velocity.y = -10',
+      ],
+      ['arcade-physics', 'platformers need solid ground + one-way platforms'],
+    ],
+    fps: [
+      [
+        'fps-controller',
+        'FPS needs pointer-lock + camera-basis wishdir move — import createFpsController; never rotation.y = -playerAngle',
+      ],
+    ],
+    tps: [
+      [
+        'tps-controller',
+        'TPS needs orbit camera + strafe on camera basis — import createTpsController',
+      ],
+    ],
+    tycoon: [
+      [
+        'economy-system',
+        'tycoon/management games need currency + build/upgrade costs — expose credits',
+      ],
+    ],
     rhythm: [
       ['rhythm-clock', 'rhythm games need a precision music clock + judgment windows'],
       [
@@ -176,6 +201,16 @@ export function recommendSkills(
   const genreEntries = genre ? GENRE_SKILLS[genre] : undefined;
   if (genreEntries) {
     for (const [base, reason] of genreEntries) push(base, reason);
+  }
+
+  // S9 — horror capability pack (no dedicated genre enum): keyword trigger.
+  const horrorKeywords = ['horror', 'scary', 'fear', 'jump.?scare', 'dread', 'haunted'];
+  if (horrorKeywords.some((kw) => mechanicsLower.some((m) => new RegExp(kw, 'i').test(m)))) {
+    push(
+      'audio-cue',
+      'horror-adjacent: sparse stingers + darkness; avoid constant looping music',
+    );
+    push('screen-shake', 'horror jump-scares pair with brief low-intensity screen-shake');
   }
 
   // asset-pipeline is Three-only (glTF models + instanced geometry). Recommend it

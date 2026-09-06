@@ -1099,20 +1099,20 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
 
   it('a no-predicate genre with no declared gameplay ships honest no_verdict — no fabricated interactivity pass (review M1/M2)', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());
-    // 'tycoon' has no bundled playbook AND declares no gameplay caps. The floor must
+    // 'other' has no bundled playbook AND declares no gameplay caps. The floor must
     // NOT mint a 'passed' from generic-input/ambient drift (that was less honest than
     // no_verdict — adversarial review). With no caps it ships no_verdict without even
     // running a probe.
     const browserJobs = queuedBrowserJobs([invertedPlaytest()]);
     const agent: GenerateFn = async (_input, deps) => {
-      await deps.gameMode?.setSpec?.({ ...TOPDOWN_SPEC, genre: 'tycoon' } as unknown as GameSpec);
+      await deps.gameMode?.setSpec?.({ ...TOPDOWN_SPEC, genre: 'other' } as unknown as GameSpec);
       await deps.fs?.create('index.html', RED_SQUARE);
-      return emptyOutput('idle');
+      return emptyOutput('other');
     };
 
     const result = await runGeneration(
       {
-        prompt: 'a tycoon',
+        prompt: 'an other-genre game',
         model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
         apiKey: 'sk-test',
       },
@@ -1131,14 +1131,14 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     // (strictly no worse than the prior behavior; we didn't ask this genre to wire one).
     const browserJobs = queuedBrowserJobs([{ ...passingPlaytest(), hasDebugContract: false }]);
     const agent: GenerateFn = async (_input, deps) => {
-      await deps.gameMode?.setSpec?.({ ...TOPDOWN_SPEC, genre: 'tycoon' } as unknown as GameSpec);
+      await deps.gameMode?.setSpec?.({ ...TOPDOWN_SPEC, genre: 'other' } as unknown as GameSpec);
       await deps.fs?.create('index.html', RED_SQUARE);
-      return emptyOutput('idle');
+      return emptyOutput('other');
     };
 
     const result = await runGeneration(
       {
-        prompt: 'a tycoon',
+        prompt: 'an other-genre game',
         model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
         apiKey: 'sk-test',
       },
@@ -1159,7 +1159,7 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     const agent: GenerateFn = async (_input, deps) => {
       await deps.gameMode?.setSpec?.({
         ...TOPDOWN_SPEC,
-        genre: 'tycoon',
+        genre: 'other',
         capabilities: { hasEnemies: true },
       } as unknown as GameSpec);
       await deps.fs?.create('index.html', RED_SQUARE);
@@ -1168,7 +1168,7 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
 
     const result = await runGeneration(
       {
-        prompt: 'a tycoon with enemies',
+        prompt: 'an other-genre game with enemies',
         model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
         apiKey: 'sk-test',
       },
@@ -1212,16 +1212,16 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     const agent: GenerateFn = async (_input, deps) => {
       await deps.gameMode?.setSpec?.({
         ...TOPDOWN_SPEC,
-        genre: 'tycoon',
+        genre: 'other',
         capabilities: { hasEnemies: true },
       } as unknown as GameSpec);
       await deps.fs?.create('index.html', RED_SQUARE);
-      return emptyOutput('a responsive tycoon');
+      return emptyOutput('a responsive other-genre game');
     };
 
     const result = await runGeneration(
       {
-        prompt: 'a tycoon with enemies',
+        prompt: 'an other-genre game with enemies',
         model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
         apiKey: 'sk-test',
       },
@@ -1252,16 +1252,16 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     const agent: GenerateFn = async (_input, deps) => {
       await deps.gameMode?.setSpec?.({
         ...TOPDOWN_SPEC,
-        genre: 'tycoon',
+        genre: 'other',
         capabilities: { hasEnemies: true },
       } as unknown as GameSpec);
       await deps.fs?.create('index.html', RED_SQUARE);
-      return emptyOutput('a dead tycoon');
+      return emptyOutput('a dead other-genre game');
     };
 
     const result = await runGeneration(
       {
-        prompt: 'a tycoon with enemies',
+        prompt: 'an other-genre game with enemies',
         model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
         apiKey: 'sk-test',
       },

@@ -59,6 +59,8 @@ const PHASER_SKILLS: ReadonlyArray<GameSkillSpec> = [
   { name: 'phaser/arcade-physics.js', engine: 'phaser', category: 'engine' },
   { name: 'phaser/audio-cue.js', engine: 'phaser', category: 'engine' },
   { name: 'phaser/controller.js', engine: 'phaser', category: 'engine' },
+  // S4 — one-click character controller (coyote + jump buffer + variable jump).
+  { name: 'phaser/character-controller-2d.js', engine: 'phaser', category: 'engine' },
   { name: 'phaser/scene-system.js', engine: 'phaser', category: 'engine' },
   { name: 'phaser/sprite-batching.js', engine: 'phaser', category: 'engine' },
   { name: 'phaser/tilemap-loader.js', engine: 'phaser', category: 'engine' },
@@ -79,6 +81,8 @@ const PHASER_SKILLS: ReadonlyArray<GameSkillSpec> = [
   // Asset substrates (Engine Evolution v2 P9).
   { name: 'phaser/music-sync.js', engine: 'phaser', category: 'engine' },
   { name: 'phaser/beatmap-synth.js', engine: 'phaser', category: 'engine' },
+  // S11 — same-origin netplay (CSP connect-src 'self').
+  { name: 'phaser/netplay.js', engine: 'phaser', category: 'engine' },
 ];
 
 // ── Three.js ────────────────────────────────────────────────────────────────
@@ -100,6 +104,10 @@ const THREE_SKILLS: ReadonlyArray<GameSkillSpec> = [
   { name: 'three/audio-cue.jsx', engine: 'three', category: 'engine' },
   { name: 'three/camera-controller.jsx', engine: 'three', category: 'engine' },
   { name: 'three/controller.jsx', engine: 'three', category: 'engine' },
+  // S4 / S8 — FPS/TPS locomotion with pointer-lock + camera-basis move.
+  { name: 'three/fps-controller.jsx', engine: 'three', category: 'engine' },
+  // S8 — dedicated TPS skill file (re-exports createTpsController).
+  { name: 'three/tps-controller.jsx', engine: 'three', category: 'engine' },
   { name: 'three/game-loop.jsx', engine: 'three', category: 'engine' },
   { name: 'three/input-handler.jsx', engine: 'three', category: 'engine' },
   { name: 'three/scene-transition.jsx', engine: 'three', category: 'engine' },
@@ -122,6 +130,8 @@ const THREE_SKILLS: ReadonlyArray<GameSkillSpec> = [
   { name: 'three/music-sync.jsx', engine: 'three', category: 'engine' },
   { name: 'three/beatmap-synth.jsx', engine: 'three', category: 'engine' },
   { name: 'three/asset-pipeline.jsx', engine: 'three', category: 'engine' },
+  // S11 — same-origin netplay.
+  { name: 'three/netplay.jsx', engine: 'three', category: 'engine' },
 ];
 
 const ALL_SPECS: ReadonlyArray<GameSkillSpec> = [...PHASER_SKILLS, ...THREE_SKILLS];

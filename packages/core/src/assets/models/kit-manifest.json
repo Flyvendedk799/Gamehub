@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "description": "S6 — same-origin glTF kit stubs for Three.js games (CSP connect-src 'self'). Paths are project-relative; binaries may be filled later.",
+  "basePath": "assets/models",
+  "kits": [
+    {
+      "id": "hero-humanoid",
+      "label": "Humanoid hero placeholder",
+      "path": "assets/models/hero-humanoid.glb",
+      "tags": ["character", "player", "tps", "fps"],
+      "status": "stub"
+    },
+    {
+      "id": "enemy-drone",
+      "label": "Flying enemy drone",
+      "path": "assets/models/enemy-drone.glb",
+      "tags": ["enemy", "fps", "shmup"],
+      "status": "stub"
+    },
+    {
+      "id": "prop-crate",
+      "label": "Environment crate",
+      "path": "assets/models/prop-crate.glb",
+      "tags": ["prop", "cover", "arena"],
+      "status": "stub"
+    },
+    {
+      "id": "weapon-blaster",
+      "label": "Sci-fi blaster",
+      "path": "assets/models/weapon-blaster.glb",
+      "tags": ["weapon", "fps", "tps"],
+      "status": "stub"
+    }
+  ]
+}
