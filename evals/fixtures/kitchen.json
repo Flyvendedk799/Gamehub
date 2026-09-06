@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "name": "Kitchen Rush — order tickets",
+  "slug": "kitchen",
+  "description": "S9 off-menu: short-order kitchen with tickets, stations, and timers.",
+  "brief": "Make a kitchen rush game. Orders appear as tickets; chop, cook, plate, and serve before the timer. Phaser 2D with juice on serve.",
+  "assertions": {
+    "expectedEngine": "phaser",
+    "expectedGenre": "other",
+    "requiredFiles": ["index.html"],
+    "requiredAudio": true,
+    "maxInputTokens": 1600000,
+    "maxStrReplaceFailureRate": 0.1,
+    "maxSetTodosCalls": 12,
+    "minValidateGameSceneCalls": 1,
+    "minPlaytestGameCalls": 1,
+    "maxRenderPreviewCalls": 0,
+    "maxCorrections": 4,
+    "requireRuntimeBoot": true,
+    "requireJuice": 15
+  }
+}

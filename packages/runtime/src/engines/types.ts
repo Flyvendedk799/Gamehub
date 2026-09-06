@@ -229,8 +229,12 @@ window.__game.debug = window.__game.debug || (function () {
     var st = window.__game.state;
     var hasState = st && typeof st === 'object' && Object.keys(st).length > 0;
     var hasTracked = Object.keys(tracked).length > 0;
-    if (!hasState && !hasTracked) return null; // nothing wired → honest no_debug_contract
-    var out = {};
+    if (!hasState && !hasTracked && !(api.audioPlays > 0)) return null; // nothing wired → honest no_debug_contract
+    var out = { audioPlays: api.audioPlays || 0 };
+    // S1 — pointer-lock evidence for FPS playbooks (0/1 so eq predicates work).
+    try {
+      out.pointerLocked = typeof document !== 'undefined' && document.pointerLockElement ? 1 : 0;
+    } catch (e) { out.pointerLocked = 0; }
     if (hasState) { for (var k in st) out[k] = read(st[k]); }
     for (var t in tracked) {
       if (t === 'player') { var p = reflectPos(read(tracked.player)); if (p) out.playerPos = p; }
@@ -238,8 +242,59 @@ window.__game.debug = window.__game.debug || (function () {
     }
     return out;
   }
-  var api = { track: track, snapshot: snapshot };
+  var api = { track: track, snapshot: snapshot, audioPlays: 0 };
   return api;
+})();
+// S1 — runtime audio evidence. Monkey-patch HTMLAudioElement.play and
+// AudioContext.resume/createOscillator so playtest snapshots can assert
+// audioPlays increased. A mute game can no longer hide behind a juice score.
+(function () {
+  function bump() {
+    try {
+      if (window.__game && window.__game.debug) {
+        window.__game.debug.audioPlays = (window.__game.debug.audioPlays || 0) + 1;
+      }
+    } catch (e) { /* ignore */ }
+  }
+  try {
+    if (typeof HTMLAudioElement !== 'undefined' && HTMLAudioElement.prototype) {
+      var _ap = HTMLAudioElement.prototype.play;
+      if (typeof _ap === 'function') {
+        HTMLAudioElement.prototype.play = function () {
+          bump();
+          return _ap.apply(this, arguments);
+        };
+      }
+    }
+  } catch (e) { /* ignore */ }
+  try {
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (AC && AC.prototype) {
+      var _resume = AC.prototype.resume;
+      if (typeof _resume === 'function') {
+        AC.prototype.resume = function () {
+          bump();
+          return _resume.apply(this, arguments);
+        };
+      }
+      var _osc = AC.prototype.createOscillator;
+      if (typeof _osc === 'function') {
+        AC.prototype.createOscillator = function () {
+          var osc = _osc.apply(this, arguments);
+          try {
+            var _start = osc.start;
+            if (typeof _start === 'function') {
+              osc.start = function () {
+                bump();
+                return _start.apply(this, arguments);
+              };
+            }
+          } catch (e2) { /* ignore */ }
+          return osc;
+        };
+      }
+    }
+  } catch (e) { /* ignore */ }
 })();
 // v3 P10b — cloud-save bridge. The cloud-save skill (import_skill) calls
 // window.__game.cloudSave.get/set/clear. This shim persists to localStorage for a

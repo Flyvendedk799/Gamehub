@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BuildStatus } from './BuildStatus';
 import { ControlsPanel } from './ControlsPanel';
 import { FilesPanel } from './FilesPanel';
+import { SceneHierarchyPanel } from './SceneHierarchy';
 
 type TweakKind = 'color' | 'number' | 'boolean';
 
@@ -73,7 +74,7 @@ export function PreviewPane({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [showTweaks, setShowTweaks] = useState(false);
   const [tweakValues, setTweakValues] = useState<Record<string, string | number | boolean>>({});
-  const [view, setView] = useState<'preview' | 'controls' | 'files'>('preview');
+  const [view, setView] = useState<'preview' | 'controls' | 'files' | 'scene'>('preview');
   const [controlsManifest, setControlsManifest] = useState<ControlsManifest | null>(null);
   // Whether a controller is connected to the running game (the gamepad bridge
   // posts this once controller support is mapped) — drives the panel's badge.
@@ -113,7 +114,7 @@ export function PreviewPane({
 
   // Guarded tab switch: confirm before leaving the Files tab with unsaved edits.
   const switchView = useCallback(
-    (next: 'preview' | 'controls' | 'files') => {
+    (next: 'preview' | 'controls' | 'files' | 'scene') => {
       if (view === 'files' && next !== 'files' && filesDirty) {
         if (!window.confirm('Discard unsaved changes?')) return;
         setFilesDirty(false);
@@ -320,6 +321,18 @@ export function PreviewPane({
             >
               files
             </button>
+            <button
+              type="button"
+              onClick={() => switchView('scene')}
+              aria-pressed={view === 'scene'}
+              className={`px-3 py-2.5 text-xs md:py-1.5 md:text-[11px] border border-l-0 transition-colors ${
+                view === 'scene'
+                  ? 'border-signal border-l bg-raised text-signal'
+                  : 'border-hairline text-ink-3 hover:text-ink'
+              }`}
+            >
+              scene
+            </button>
           </div>
         )}
         {previewUrl ? (
@@ -486,6 +499,13 @@ export function PreviewPane({
                 onDirtyChange={setFilesDirty}
                 {...(onFileSaved ? { onFileSaved } : {})}
               />
+            </div>
+          )}
+
+          {/* S12 — Scene hierarchy tab (client-side model; wires to EditorSession later) */}
+          {view === 'scene' && previewUrl && !hasError && (
+            <div className="absolute inset-0 z-10 bg-void">
+              <SceneHierarchyPanel />
             </div>
           )}
 

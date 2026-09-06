@@ -38,18 +38,40 @@ function diskLoader(slug: string): RunObservation | null {
   return parseEvalRecording(JSON.parse(fs.readFileSync(file, 'utf8'))).observation;
 }
 
+const GOLDEN_SLUGS = new Set([
+  'platformer',
+  'fps',
+  'puzzle',
+  'topdown-arcade',
+  'runner',
+  'fighting',
+]);
+
+/** Original 6 genre goldens (have committed recordings). Off-menu / expansion
+ *  fixtures live alongside them but are not required for the exit-0 contract. */
+function loadGoldenFixtures(): EvalFixture[] {
+  return loadAllFixtures().filter((f) => GOLDEN_SLUGS.has(f.slug));
+}
+
 describe('eval-games golden set on disk', () => {
-  it('ships all 6 genres and they parse', () => {
+  it('ships all 6 genres and they parse (plus optional expansion fixtures)', () => {
     const fixtures = loadAllFixtures();
     const genres = new Set(fixtures.map((f) => f.assertions.expectedGenre));
-    expect(fixtures.length).toBe(6);
+    expect(fixtures.length).toBeGreaterThanOrEqual(6);
     for (const g of ['platformer', 'fps', 'puzzle', 'topdown_arcade', 'runner', 'fighting']) {
       expect(genres.has(g)).toBe(true);
+    }
+    // Off-menu S9 fixtures must parse too when present.
+    const slugs = new Set(fixtures.map((f) => f.slug));
+    for (const s of ['fishing', 'kitchen', 'wordfall']) {
+      if (slugs.has(s)) {
+        expect(GOLDEN_SLUGS.has(s)).toBe(false);
+      }
     }
   });
 
   it('the committed golden set fully passes (CLI would exit 0)', () => {
-    const report = buildReport(loadAllFixtures(), diskLoader, '2026-06-17');
+    const report = buildReport(loadGoldenFixtures(), diskLoader, '2026-06-17');
     expect(report.summary.failed).toBe(0);
     expect(report.summary.passed).toBe(report.summary.total);
   });

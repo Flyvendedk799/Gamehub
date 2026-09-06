@@ -36,6 +36,7 @@ import {
   buildRepairVerdict,
   buildVisualCritiquePrompt,
   buildVisualRepairInstruction,
+  createEditorSession,
   decideRepairAction,
   detectInteractivityResponse,
   generateViaAgent,
@@ -60,9 +61,10 @@ import type { SnapshotStore, WriteResult } from '@playforge/storage';
 // Relative import into the exporters package src (same pattern the API uses for
 // the worker) — reuses the proven single-file game bundler for the verify gate.
 import { buildGameHtml } from '../../../packages/exporters/src/index';
-import { canGenerateImages, makeAssetGenerator } from './asset-generator';
+import { canOfferImageGeneration, makeAssetGenerator } from './asset-generator';
 import { createRunSignalAggregator } from './run-signal';
 import { analyzeSkillUsage } from './skill-usage-grep.js';
+import { buildSpecialistJobPlan } from './specialist-jobs.js';
 import { assertGeneratedJavaScriptSyntax } from './syntax-check';
 import { WorkingTree } from './working-tree';
 
@@ -656,7 +658,7 @@ export async function runGeneration(
   // succeeded. A tool that cannot work is worse than no tool: the agent plans
   // around it, and the absence is what makes it draw the art in code instead.
   const imageProvider = req.provider ?? 'openai';
-  const imagesAvailable = canGenerateImages(imageProvider, req.apiKey);
+  const imagesAvailable = canOfferImageGeneration(imageProvider, req.apiKey);
   if (!imagesAvailable) {
     console.warn(
       `[run-generation] bitmap generation unavailable (provider=${imageProvider}) — generate_image_asset will not be offered; the agent is told to author art in code.`,
@@ -753,6 +755,20 @@ export async function runGeneration(
               source: 'runtime',
             });
           }
+          // S1 — juice without audio is mute. When the browser measured juice,
+          // require at least one audioPlays tick.
+          const juice = verdict.juiceScore ?? 0;
+          const plays =
+            typeof (verdict as { audioPlays?: number }).audioPlays === 'number'
+              ? (verdict as { audioPlays: number }).audioPlays
+              : 0;
+          if (juice >= 15 && plays <= 0) {
+            errors.push({
+              message:
+                'Juice was measured but audioPlays == 0 — the game looks alive but is MUTE. Wire sfx()/WebAudio (or generate_audio_asset) into hit/jump/score handlers so sound actually plays.',
+              source: 'runtime',
+            });
+          }
           return errors;
         };
 
@@ -795,8 +811,21 @@ export async function runGeneration(
   // answer and resume.
   let pendingQuestion: string | null = null;
 
+  // S3 — live scene graph. The agent prefers scene.* tools against this session
+  // instead of rewriting a 1400-line main.js; the builder can attach later.
+  const editorSession = createEditorSession();
+
+  // S7 — specialist fan-out plan (feature-flagged). Recorded when engine is
+  // chosen so telemetry / future queue workers can schedule child jobs.
+  let specialistPlan = buildSpecialistJobPlan({
+    gameSpecJson: '{}',
+    engine: req.engine ?? 'phaser',
+    enabled: false,
+  });
+
   const deps: GenerateViaAgentDeps = {
     fs: tree,
+    sceneEditor: { getSession: () => editorSession },
     generateImageAsset,
     onEvent: wrappedOnEvent,
     onAskUser: (question) => {
@@ -821,6 +850,16 @@ export async function runGeneration(
           // there yet: a remix (initialFiles) or an agent who already wrote an entry
           // keeps their file. The choose_engine result tells the agent to adapt it.
           for (const path of seedPremiumStarter(tree, engine)) seededStarterPaths.add(path);
+          // S7 — after choose_engine, plan specialist fan-out (no-op unless flagged).
+          specialistPlan = buildSpecialistJobPlan({
+            gameSpecJson: JSON.stringify(state.spec ?? {}),
+            engine,
+          });
+          if (specialistPlan.enabled) {
+            console.info(
+              `[run-generation] S7 specialists planned: ${specialistPlan.briefs.map((b) => b.kind).join(', ')} (parent owns done)`,
+            );
+          }
         }
       },
       getCurrentEngine: () => state.engine,

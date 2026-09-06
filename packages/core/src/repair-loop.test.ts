@@ -401,8 +401,9 @@ describe('selectGamePlaytestPlan (planner glue)', () => {
   });
 
   it('returns null for a genre with no bundled playbook', () => {
-    // idle/sandbox/rhythm/visual_novel are now bundled (v2 P6); tycoon + other are not.
-    expect(selectGamePlaytestPlan('tycoon')).toBeNull();
+    // idle/sandbox/rhythm/visual_novel/tycoon are now bundled; other is not.
+    expect(selectGamePlaytestPlan('other')).toBeNull();
+    expect(selectGamePlaytestPlan('tycoon')).not.toBeNull();
     expect(selectGamePlaytestPlan('other')).toBeNull();
   });
 

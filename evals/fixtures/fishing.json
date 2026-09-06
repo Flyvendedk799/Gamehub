@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "name": "Cozy Fishing — timing catch",
+  "slug": "fishing",
+  "description": "S9 off-menu: cozy fishing with a timing minigame and catch collection.",
+  "brief": "Make a cozy fishing game. Cast with click/space, time a shrinking zone to catch fish. Collect different fish. Soft ambient audio. Phaser 2D.",
+  "assertions": {
+    "expectedEngine": "phaser",
+    "expectedGenre": "other",
+    "requiredFiles": ["index.html"],
+    "requiredAudio": true,
+    "maxInputTokens": 1600000,
+    "maxStrReplaceFailureRate": 0.1,
+    "maxSetTodosCalls": 12,
+    "minValidateGameSceneCalls": 1,
+    "minPlaytestGameCalls": 1,
+    "maxRenderPreviewCalls": 0,
+    "maxCorrections": 4,
+    "requireRuntimeBoot": true,
+    "requireJuice": 0
+  }
+}

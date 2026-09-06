@@ -824,6 +824,8 @@ export type { EditmodeBlock, TokenSchemaEntry, TweakSchema } from './editmode';
 
 export * from './ssrf';
 export * from './engine-cdn';
+export * from './play-engine';
+export * from './rt-relay';
 export * from './controls-runtime';
 export * from './art-runtime';
 export * from './controls-gamepad';

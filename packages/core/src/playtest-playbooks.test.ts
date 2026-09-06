@@ -21,9 +21,15 @@ describe('getPlaytestPlaybook', () => {
   });
 
   it('returns null for an un-bundled genre', () => {
-    // idle/rhythm/visual_novel/sandbox are now bundled (v2 P6); tycoon is not.
-    const pb = getPlaytestPlaybook('tycoon');
+    // S9 — tycoon is now bundled; collectathon-adjacent "other" still null.
+    const pb = getPlaytestPlaybook('other');
     expect(pb).toBeNull();
+  });
+
+  it('returns the tycoon playbook with credits predicates', () => {
+    const pb = getPlaytestPlaybook('tycoon');
+    expect(pb).not.toBeNull();
+    expect(pb?.steps.some((s) => s.predicates?.some((p) => p.field === 'credits'))).toBe(true);
   });
 
   it('listSupportedGenres includes the bundled cases (original 6 + shmup/racing/rpg/roguelike/tps/tower_defense)', () => {

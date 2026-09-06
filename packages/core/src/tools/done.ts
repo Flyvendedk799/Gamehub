@@ -25,6 +25,7 @@
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import { checkDestructiveEdit } from '../destructive-edit.js';
+import { checkFeelKit, looksCircleOnlySubject } from '../feel-kit.js';
 import { VerifyResultCache, hashContent } from '../incremental-verify.js';
 import { type CoreLogger, NOOP_LOGGER } from '../logger.js';
 import { planPlaytest } from '../playtest-planner.js';
@@ -34,6 +35,7 @@ import {
   type CompletabilitySpec,
   type GameGenre as InvariantGameGenre,
   evaluateCompletabilityFloor,
+  isCompletableSpec,
 } from './assert-game-invariants.js';
 import { HEURISTIC_ADVISORY_SOURCES, runHeuristics } from './done-heuristics.js';
 import type { EditBudget } from './edit-budget.js';
@@ -318,13 +320,87 @@ const MAX_HAS_ERRORS_ROUNDS = 3;
 const MAX_TOTAL_DONE_CALLS = 6;
 
 /** Phase-1.5 — the completability floor emits its missing-invariant
- *  issues under `game.invariant.<invariant>` sources. The ADVISORY ones
- *  (downgraded floor + score-or-state + brawler polish) are registered
- *  here so the fatal/advisory split below treats them like every other
- *  non-blocking signal. The FATAL ones (fail-state/restart/feedback on a
- *  completable game) are deliberately NOT in ADVISORY_SOURCES so they
- *  flip status to has_errors. */
+ *  issues under `game.invariant.<invariant>` sources. */
 const GAME_INVARIANT_SOURCE_PREFIX = 'game.invariant.';
+
+/** Genres that ship with the premium feel kit (sfx + shake + particles).
+ *  Missing the kit at done-time is a ship-blocker for these. */
+const JUICED_GENRES: ReadonlySet<string> = new Set([
+  'shmup',
+  'platformer',
+  'topdown_arcade',
+  'fighting',
+  'fps',
+  'tps',
+  'tower_defense',
+  'runner',
+  'racing',
+  'roguelike',
+]);
+
+/** Representational / figurative subjects — circle-only geometry is a vision fail. */
+const REPRESENTATIONAL_GENRES: ReadonlySet<string> = new Set([
+  'fps',
+  'tps',
+  'platformer',
+  'fighting',
+  'rpg',
+  'roguelike',
+  'tower_defense',
+  'racing',
+  'visual_novel',
+]);
+
+const NETWORKING_HONESTY_RE =
+  /NETWORKING_HONESTY_ACK|local multiplayer|hotseat|split[- ]screen|shared[- ]keyboard|same-origin netplay/i;
+
+function collectMainSources(fs: TextEditorFsCallbacks, entryPath: string): string {
+  const chunks: string[] = [];
+  const paths = new Set<string>([entryPath]);
+  try {
+    for (const f of fs.listDir('.')) paths.add(f);
+  } catch {
+    /* single-file */
+  }
+  for (const p of paths) {
+    const lower = p.toLowerCase();
+    if (!/\.(html|js|jsx|ts|tsx|mjs|cjs)$/.test(lower)) continue;
+    const v = fs.view(p);
+    if (v !== null) chunks.push(v.content);
+  }
+  return chunks.join('\n\n');
+}
+
+function hasDebugContract(source: string): boolean {
+  return (
+    /__game\.debug\.track\s*\(/.test(source) ||
+    /window\.__game\.debug/.test(source) ||
+    /debug\.track\s*\(/.test(source)
+  );
+}
+
+function contentPlanMissingDepth(spec: CompletabilitySpec): boolean {
+  const caps = spec.capabilities as
+    | {
+        escalates?: boolean;
+        hasEnemies?: boolean;
+        contentPlan?: {
+          distinctEnemyBehaviors?: number;
+          mechanicVariety?: number;
+          progressionMechanic?: string;
+        };
+      }
+    | undefined;
+  if (caps?.escalates !== true && caps?.hasEnemies !== true) return false;
+  const plan = caps.contentPlan;
+  if (plan === undefined) return true;
+  const behaviors = plan.distinctEnemyBehaviors ?? 0;
+  const variety = plan.mechanicVariety ?? 0;
+  const progression = plan.progressionMechanic;
+  const hasProgression =
+    typeof progression === 'string' && progression.length > 0 && progression !== 'none';
+  return behaviors < 2 && variety < 2 && !hasProgression;
+}
 
 /** Map a `@playforge/shared` GameSpec genre to this module's invariant
  *  GameGenre token so the genre-specific (brawler) advisory checks still
@@ -885,6 +961,65 @@ export function makeDoneTool(
               logger.info('[done] step=invariant_floor.downgraded', {
                 genre: spec.genre,
                 advisory: floor.advisory.length,
+              });
+            }
+
+            // S1 — feel-kit / networking honesty / debug contract / contentPlan.
+            const mainSource = collectMainSources(fs, path);
+            if (JUICED_GENRES.has(spec.genre)) {
+              const feel = checkFeelKit(mainSource);
+              if (!feel.ok) {
+                errors.push({
+                  message: `Feel kit missing for juiced genre "${spec.genre}": need ${feel.missing.join(', ')}. Restore sfx() + screen shake + particles (or the premium starter feel helpers) before done.`,
+                  source: `${GAME_INVARIANT_SOURCE_PREFIX}fatal.feel-kit`,
+                });
+              }
+            }
+            const caps = spec.capabilities as
+              | { requiresNetworking?: boolean; features?: unknown }
+              | undefined;
+            const requiresNet =
+              caps?.requiresNetworking === true ||
+              /requiresNetworking\s*:\s*true/.test(JSON.stringify(spec));
+            if (requiresNet && !NETWORKING_HONESTY_RE.test(mainSource)) {
+              // Also accept an explicit feature flag on the spec.
+              const features = (spec as { features?: Record<string, unknown> }).features;
+              const ackFeature =
+                features?.['networkingHonestyAck'] === true ||
+                features?.['networking_honesty_ack'] === true;
+              if (!ackFeature) {
+                errors.push({
+                  message:
+                    'Online networking declared without honesty ack. CSP connect-src is self-only — scope to LOCAL multiplayer (hotseat / split-screen / same-origin /rt netplay) and add NETWORKING_HONESTY_ACK (or features.networkingHonestyAck=true), or clear requiresNetworking.',
+                  source: `${GAME_INVARIANT_SOURCE_PREFIX}fatal.networking-honesty`,
+                });
+              }
+            }
+            if (!hasDebugContract(mainSource) && isCompletableSpec(spec)) {
+              errors.push({
+                message:
+                  'No debug contract / unbooted gate: wire window.__game.debug.track({...}) before done. Without it playtest returns no_debug_contract and the game cannot be verified.',
+                source: `${GAME_INVARIANT_SOURCE_PREFIX}fatal.no-debug-contract`,
+              });
+            }
+            if (contentPlanMissingDepth(spec)) {
+              errors.push({
+                message:
+                  'Depth floor: escalates/hasEnemies games must declare capabilities.contentPlan with distinctEnemyBehaviors≥2 OR progressionMechanic (upgrade|new-enemy|new-tool|environmental). Scalar-only waves are a tech demo.',
+                source: `${GAME_INVARIANT_SOURCE_PREFIX}fatal.content-plan`,
+              });
+            }
+            // S5 — circle-only subjects for representational specs.
+            const hasEnemies =
+              (spec.capabilities as { hasEnemies?: boolean } | undefined)?.hasEnemies === true;
+            if (
+              (REPRESENTATIONAL_GENRES.has(spec.genre) || hasEnemies) &&
+              looksCircleOnlySubject(mainSource)
+            ) {
+              errors.push({
+                message:
+                  'Vision: subject looks circle/box-only with no drawSubject/sprite/glTF path. Add a real subject draw (generate_image_asset, assets/models kit, or dedicated drawPlayer/drawEnemy) before done.',
+                source: `${GAME_INVARIANT_SOURCE_PREFIX}fatal.circle-only-subject`,
               });
             }
           }

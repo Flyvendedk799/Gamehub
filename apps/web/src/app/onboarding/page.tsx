@@ -84,7 +84,9 @@ function OnboardingForm() {
         router.push('/');
         return;
       }
-      const { project } = await createProject(deriveProjectName(pending), 'phaser');
+      // S0 — let the agent choose the engine from the brief. Hardcoding Phaser
+      // here made every 3D onboarding build unplayable at its share URL.
+      const { project } = await createProject(deriveProjectName(pending), 'auto');
       const { runId } = await generateGame(project.id, pending);
       router.push(`/projects/${project.id}?runId=${runId}`);
       return;

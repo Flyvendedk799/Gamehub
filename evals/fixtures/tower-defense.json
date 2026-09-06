@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "name": "Tower Defense — place & kill",
+  "slug": "tower-defense",
+  "description": "S2 eval bar: TD must boot, play, and make sound. Scalar-only waves fail the depth floor.",
+  "brief": "Make a top-down tower defense. Enemies walk a path toward a base. The player clicks to place towers that shoot enemies. Waves escalate with a NEW enemy type by wave 3. Include hit SFX via WebAudio.",
+  "playtestPlaybook": "tower_defense",
+  "assertions": {
+    "expectedEngine": "phaser",
+    "expectedGenre": "tower_defense",
+    "requiredFiles": ["index.html"],
+    "requiredAudio": true,
+    "maxInputTokens": 1400000,
+    "maxStrReplaceFailureRate": 0.08,
+    "maxSetTodosCalls": 10,
+    "minValidateGameSceneCalls": 1,
+    "minPlaytestGameCalls": 1,
+    "maxRenderPreviewCalls": 0,
+    "maxCorrections": 3,
+    "requireRuntimeBoot": true,
+    "requireJuice": 20
+  }
+}

@@ -55,6 +55,7 @@ export function buildVisualCritiquePrompt(brief: string): string {
     'screenshot and call unpolished:',
     '  - flat or absent lighting; everything one shade',
     '  - untextured default primitives standing in for a named thing',
+    '  - a subject drawn as tinted circles/rects/boxes with no silhouette (circle-only)',
     '  - a subject whose silhouette is unreadable against the background',
     '  - HUD or text colliding with itself, with the play area, or clipped off-screen',
     '  - z-fighting, seams, or geometry visibly intersecting wrongly',

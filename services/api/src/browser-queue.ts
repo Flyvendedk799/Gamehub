@@ -25,6 +25,10 @@ export interface RuntimeVerifyResult {
   hasGameContract: boolean;
   fatalErrors: string[];
   bootedIn: number;
+  /** Optional — present when the browser-worker reports juice / audio evidence. */
+  juiceScore?: number;
+  audioPlays?: number;
+  renderedNonBlank?: boolean;
 }
 
 export interface ThumbnailResult {

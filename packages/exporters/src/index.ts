@@ -25,6 +25,12 @@ export interface ExportResult {
 
 export type { ExportZipOptions, ZipAsset } from './zip';
 export type { ExportMarkdownOptions, MarkdownMeta } from './markdown';
+export {
+  evaluateBootCheck,
+  detectEngineFromHtml,
+  type BootCheckInput,
+  type BootCheckResult,
+} from './boot-check';
 export type { ExportGameZipOptions } from './game-zip';
 export type { ExportGameHtmlOptions } from './game-html';
 export { buildGameHtml } from './game-html';

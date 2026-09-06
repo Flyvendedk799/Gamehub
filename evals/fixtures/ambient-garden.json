@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "name": "Ambient garden — other + contract",
+  "slug": "ambient-garden",
+  "description": "S2/S9: genre-less ambient must declare a playtest contract and may use canvas2d honestly (no decoy Phaser).",
+  "brief": "You are the tide. Guide paper boats home by dragging currents. Soft ambient toy, no fail state. Declare a playtest contract that asserts progress rises when the pointer moves. Prefer canvas2d if Phaser/Three would be a fake.",
+  "playtestPlaybook": "other",
+  "assertions": {
+    "expectedEngine": "phaser",
+    "expectedGenre": "other",
+    "requiredFiles": ["index.html"],
+    "requiredAudio": false,
+    "maxInputTokens": 1200000,
+    "maxStrReplaceFailureRate": 0.1,
+    "maxSetTodosCalls": 8,
+    "minValidateGameSceneCalls": 1,
+    "minPlaytestGameCalls": 1,
+    "maxRenderPreviewCalls": 0,
+    "maxCorrections": 3,
+    "requireRuntimeBoot": true,
+    "requireJuice": 0
+  }
+}

@@ -280,17 +280,21 @@ export function primitiveKit() {
 //   import { createAssetLoader, makeInstancedField, primitiveKit } from './asset-pipeline.jsx';
 //   import * as THREE from 'three';
 //
+//   // S6 — prefer same-origin kit paths from packages/core/src/assets/models/kit-manifest.json
+//   // (copied into the project as assets/models/*). CSP connect-src is 'self' only.
+//   // Example kit ids: hero-humanoid, enemy-drone, prop-crate, weapon-blaster.
+//
 //   // --- Model loading with graceful primitive fallback ---
 //   const assets = createAssetLoader({ placeholderColor: 0x7c6d9e });
-//   await assets.preload(['/models/tree.glb', '/models/rock.glb']);
+//   await assets.preload(['assets/models/hero-humanoid.glb', 'assets/models/prop-crate.glb']);
 //
-//   const treeModel = await assets.loadModel('/models/tree.glb');
+//   const treeModel = await assets.loadModel('assets/models/hero-humanoid.glb');
 //   // If GLTFLoader is absent or the file 404s, treeModel is a labelled box —
 //   // the render loop never sees a throw/rejection.
 //   scene.add(treeModel);
 //
 //   // Synchronous clone after preload (for tight spawn loops):
-//   const rockClone = assets.get('/models/rock.glb');
+//   const rockClone = assets.get('assets/models/prop-crate.glb');
 //   if (rockClone) scene.add(rockClone);
 //
 //   // --- Instanced forest (1 draw call for 200 trees) ---

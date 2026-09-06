@@ -135,6 +135,19 @@ export const GameCapabilities = z.object({
    *  scope honestly to local multiplayer (split-screen / hotseat) — see
    *  validateCapabilities (Engine Evolution v2 P10). */
   requiresNetworking: z.boolean().default(false),
+  /**
+   * S1 — depth floor. Completables that escalate must declare HOW depth arrives
+   * (distinct enemy behaviors / a progression mechanic), not only scalar bumps.
+   */
+  contentPlan: z
+    .object({
+      distinctEnemyBehaviors: z.number().int().min(0).max(32).optional(),
+      mechanicVariety: z.number().int().min(0).max(32).optional(),
+      progressionMechanic: z
+        .enum(['upgrade', 'new-enemy', 'new-tool', 'environmental', 'none'])
+        .optional(),
+    })
+    .optional(),
 });
 export type GameCapabilities = z.infer<typeof GameCapabilities>;
 
@@ -155,6 +168,15 @@ export const GameCapabilitiesPatch = z.object({
   hasPhysics: z.boolean().optional(),
   procedural: z.boolean().optional(),
   requiresNetworking: z.boolean().optional(),
+  contentPlan: z
+    .object({
+      distinctEnemyBehaviors: z.number().int().min(0).max(32).optional(),
+      mechanicVariety: z.number().int().min(0).max(32).optional(),
+      progressionMechanic: z
+        .enum(['upgrade', 'new-enemy', 'new-tool', 'environmental', 'none'])
+        .optional(),
+    })
+    .optional(),
 });
 export type GameCapabilitiesPatch = z.infer<typeof GameCapabilitiesPatch>;
 
@@ -222,7 +244,19 @@ export function applyGameSpecPatch(prior: GameSpec, patch: GameSpecPatch): GameS
   // genuinely-missing defaults when the prior had no capabilities.
   const mergedCapabilities: GameCapabilities | undefined =
     patch.capabilities !== undefined
-      ? ({ ...(prior.capabilities ?? {}), ...patch.capabilities } as GameCapabilities)
+      ? ({
+          ...(prior.capabilities ?? {}),
+          ...patch.capabilities,
+          ...(patch.capabilities.contentPlan !== undefined ||
+          prior.capabilities?.contentPlan !== undefined
+            ? {
+                contentPlan: {
+                  ...(prior.capabilities?.contentPlan ?? {}),
+                  ...(patch.capabilities.contentPlan ?? {}),
+                },
+              }
+            : {}),
+        } as GameCapabilities)
       : prior.capabilities;
   const merged: GameSpec = {
     ...prior,

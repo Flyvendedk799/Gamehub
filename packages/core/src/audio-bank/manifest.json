@@ -83,6 +83,36 @@
       "keywords": ["jingle", "menu", "title", "intro", "main", "stinger", "fanfare"]
     },
     {
+      "id": "loop_120bpm",
+      "purpose": "music",
+      "path": "music/loop_120bpm.wav",
+      "mimeType": "audio/wav",
+      "label": "120 BPM arcade loop (metadata stub — synthesize or replace binary)",
+      "license": "Playforge music-bank stub (CC0)",
+      "keywords": ["bpm", "120", "loop", "arcade", "beat", "rhythm", "tempo", "music"],
+      "bpm": 120
+    },
+    {
+      "id": "loop_90bpm",
+      "purpose": "music",
+      "path": "music/loop_90bpm.wav",
+      "mimeType": "audio/wav",
+      "label": "90 BPM chill loop (metadata stub — synthesize or replace binary)",
+      "license": "Playforge music-bank stub (CC0)",
+      "keywords": ["bpm", "90", "loop", "chill", "ambient", "tempo", "music"],
+      "bpm": 90
+    },
+    {
+      "id": "loop_140bpm",
+      "purpose": "music",
+      "path": "music/loop_140bpm.wav",
+      "mimeType": "audio/wav",
+      "label": "140 BPM action loop (metadata stub — synthesize or replace binary)",
+      "license": "Playforge music-bank stub (CC0)",
+      "keywords": ["bpm", "140", "loop", "action", "fast", "combat", "tempo", "music"],
+      "bpm": 140
+    },
+    {
       "id": "notify_chime",
       "purpose": "voice",
       "path": "voice/notify_chime.wav",

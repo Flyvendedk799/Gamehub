@@ -65,7 +65,7 @@ export interface PlaybookStep {
 
 export interface PlaytestPlaybook {
   schemaVersion: 1;
-  genre: GameGenre;
+  genre: GameGenre | '2_5d';
   /** One sentence on what this playbook proves. Surfaced to the agent
    *  in the result text so it understands the shape of the test. */
   intent: string;
@@ -174,6 +174,8 @@ const FPS: PlaytestPlaybook = {
       kind: 'mouse',
       button: 0,
       assert: 'Pointer lock acquired (document.pointerLockElement === canvas).',
+      // S1 — machine-checkable: runtime shim exposes pointerLocked as 0|1.
+      predicates: [{ field: 'pointerLocked', op: 'eq', frame: { step: 0 }, value: 1 }],
     },
     {
       kind: 'mouse',
@@ -673,6 +675,38 @@ const SANDBOX: PlaytestPlaybook = {
   ],
 };
 
+/** S9 — tycoon / management economy loop. */
+const TYCOON: PlaytestPlaybook = {
+  schemaVersion: 1,
+  genre: 'tycoon',
+  intent:
+    'Economy loop: credits rise from producers; spending on a build/upgrade decreases credits and raises rate or capacity. Expose `credits` and `rate` in window.__game.debug.track().',
+  steps: [
+    {
+      kind: 'wait',
+      durationFrames: 60,
+      assert: '`credits` INCREASED from passive income / producers.',
+      predicates: [
+        { field: 'credits', op: 'increased', frame: { step: 0 }, against: 'baseline' },
+      ],
+    },
+    {
+      kind: 'mouse',
+      button: 0,
+      assert:
+        'Clicking a build/buy button spends credits (DECREASED) and raises rate or unlocks a producer.',
+      predicates: [
+        { field: 'credits', op: 'decreased', frame: { step: 1 }, against: { step: 0 } },
+      ],
+    },
+  ],
+  watchFor: [
+    'Credits never rise — no producers / income tick.',
+    'Buy button does nothing (credits stay flat, rate unchanged).',
+    'No way to spend — a pure number with no decisions.',
+  ],
+};
+
 // Plan step 4 — the genre run2 was actually about (3D collect-em-up), previously
 // force-fit to `fps` (the worst-covered genre) and shipped NO_VERDICT. The GATING
 // predicate is the safe, universal one — forward input MOVES the player (forward =
@@ -713,7 +747,40 @@ const COLLECTATHON: PlaytestPlaybook = {
   ],
 };
 
-const PLAYBOOKS: Partial<Record<GameGenre, PlaytestPlaybook>> = {
+/** S8 — 2.5D / billboard / isometric hybrid (Three with HemisphereLight + glTF kit). */
+const TWO_POINT_FIVE_D: PlaytestPlaybook = {
+  schemaVersion: 1,
+  genre: '2_5d',
+  intent:
+    '2.5D / isometric hybrid: camera is fixed or gently follows on XZ; player moves on a plane; subject uses a glTF kit or billboard, not a magenta cube. Expose playerPos.',
+  steps: [
+    {
+      kind: 'key',
+      code: 'KeyD',
+      frames: 20,
+      assert: 'Holding right moves playerPos.x (or the horizontal plane axis).',
+      predicates: [
+        { field: 'playerPos.x', op: 'changed', frame: { step: 0 }, against: 'baseline' },
+      ],
+    },
+    {
+      kind: 'key',
+      code: 'KeyW',
+      frames: 20,
+      assert: 'Holding forward moves on the depth axis (playerPos.z changed).',
+      predicates: [
+        { field: 'playerPos.z', op: 'changed', frame: { step: 1 }, against: 'baseline' },
+      ],
+    },
+  ],
+  watchFor: [
+    'No HemisphereLight / DirectionalLight — scene is flat black or unlit MeshBasicMaterial only.',
+    'Subject is a magenta/default box — load assets/models kit from kit-manifest.json instead.',
+    'Camera is free-fly FPS when the brief asked for 2.5D / isometric.',
+  ],
+};
+
+const PLAYBOOKS: Partial<Record<GameGenre | '2_5d', PlaytestPlaybook>> = {
   collectathon: COLLECTATHON,
   platformer: PLATFORMER,
   fighting: FIGHTING,
@@ -731,18 +798,20 @@ const PLAYBOOKS: Partial<Record<GameGenre, PlaytestPlaybook>> = {
   rhythm: RHYTHM,
   idle: IDLE,
   sandbox: SANDBOX,
+  tycoon: TYCOON,
+  '2_5d': TWO_POINT_FIVE_D,
 };
 
 /** Return the canonical playbook for a genre, or null when no
  *  playbook is bundled yet. The agent can fall back to its own
  *  improvised step list. */
-export function getPlaytestPlaybook(genre: GameGenre): PlaytestPlaybook | null {
+export function getPlaytestPlaybook(genre: GameGenre | '2_5d'): PlaytestPlaybook | null {
   return PLAYBOOKS[genre] ?? null;
 }
 
 /** List the genres that ship a built-in playbook. Used by the
  *  `get_playtest_playbook` tool's description so the agent knows what's
  *  available without trial-and-error. */
-export function listSupportedGenres(): GameGenre[] {
-  return Object.keys(PLAYBOOKS) as GameGenre[];
+export function listSupportedGenres(): Array<GameGenre | '2_5d'> {
+  return Object.keys(PLAYBOOKS) as Array<GameGenre | '2_5d'>;
 }
