@@ -187,6 +187,83 @@ describe('enqueueRun', () => {
     expect(parentBytes[1]).toBeUndefined();
   });
 
+  // The builder repoints its preview iframe at the project's HEAD the moment it
+  // sees `run_complete`, so the HEAD advance (finalizeRun, wired as `settle`)
+  // must be committed BEFORE that frame goes out — otherwise the reload serves
+  // the previous iteration and "refresh" never shows the newest build.
+  it('settles the run BEFORE publishing run_complete', async () => {
+    const { bus, store } = makePorts();
+    const runId = 'run_settle';
+    const order: string[] = [];
+    await bus.subscribe(runChannel(runId), (msg) => {
+      const t = (msg as { type: string }).type;
+      if (t === 'run_complete') order.push('published');
+    });
+
+    await enqueueRun(
+      {
+        runId,
+        projectId: 'proj_1',
+        prompt: 'red square',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      {
+        bus,
+        store,
+        generate: successAgent,
+        settle: async (result) => {
+          // Persistence is async in production (a DB transaction) — a macrotask
+          // here proves the publish actually waits rather than merely losing a race.
+          await new Promise((r) => setTimeout(r, 5));
+          expect(result.snapshot.manifestKey).toBeTruthy();
+          order.push('settled');
+        },
+      },
+    );
+
+    expect(order).toEqual(['settled', 'published']);
+  });
+
+  it('settles a PAUSED run before publishing run_paused, with the continuation attached', async () => {
+    const { bus, store } = makePorts();
+    const runId = 'run_settle_paused';
+    const order: string[] = [];
+    await bus.subscribe(runChannel(runId), (msg) => {
+      const t = (msg as { type: string }).type;
+      if (t === 'run_paused') order.push('published');
+    });
+
+    const pausingAgent: GenerateFn = async (_input, deps) => {
+      await deps.fs?.create('index.html', '<html></html>');
+      return { ...emptyOutput(), interrupted: true };
+    };
+
+    let sawContinuation = false;
+    await enqueueRun(
+      {
+        runId,
+        projectId: 'proj_1',
+        prompt: 'a long build',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      {
+        bus,
+        store,
+        generate: pausingAgent,
+        settle: async (result) => {
+          await new Promise((r) => setTimeout(r, 5));
+          sawContinuation = result.pausedContinuation !== undefined;
+          order.push('settled');
+        },
+      },
+    );
+
+    expect(sawContinuation).toBe(true);
+    expect(order).toEqual(['settled', 'published']);
+  });
+
   it('late subscriber still receives all events via replay', async () => {
     const { bus, store } = makePorts();
     const runId = 'run_003';

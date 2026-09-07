@@ -3331,6 +3331,48 @@ describe('social outro (GET /v1/projects/:id/social-outro)', () => {
     });
   });
 
+  // The share card leads with a frame of the game. Before this, an unpublished
+  // project had no thumbnail on the summary at all, so the card that is supposed
+  // to convince you to publish showed an empty "GAMEPLAY FRAME" placeholder.
+  it('falls back to the project build thumbnail when nothing is published', async () => {
+    const repo = new InMemoryProjectRepo();
+    const publishRepo = new InMemoryPublishRepo();
+    const project = await repo.create({ ownerId: 'alice', name: 'Draft' });
+    await repo.setThumbnail(project.id, '/v1/blobs/deadbeefdeadbeef');
+    const app = makeApp({ repo, publishRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/social-outro`,
+      headers: AS_ALICE,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().share).toEqual({
+      publishUrl: null,
+      thumbnailUrl: '/v1/blobs/deadbeefdeadbeef',
+    });
+  });
+
+  it('prefers the PUBLISHED capture over the project build thumbnail', async () => {
+    const repo = new InMemoryProjectRepo();
+    const publishRepo = new InMemoryPublishRepo();
+    const project = await repo.create({ ownerId: 'alice', name: 'Shipped' });
+    await repo.setThumbnail(project.id, '/v1/blobs/aaaaaaaaaaaaaaaa');
+    const published = await publishRepo.upsert({
+      projectId: project.id,
+      publishSlug: 'shipped-abc123',
+      title: 'Shipped',
+      bundleKey: 'k',
+    });
+    await publishRepo.setThumbnailUrl(published.id, '/v1/blobs/bbbbbbbbbbbbbbbb');
+    const app = makeApp({ repo, publishRepo });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/projects/${project.id}/social-outro`,
+      headers: AS_ALICE,
+    });
+    expect(res.json().share.thumbnailUrl).toBe('/v1/blobs/bbbbbbbbbbbbbbbb');
+  });
+
   it('hides the play link once a published game is unpublished', async () => {
     const repo = new InMemoryProjectRepo();
     const publishRepo = new InMemoryPublishRepo();

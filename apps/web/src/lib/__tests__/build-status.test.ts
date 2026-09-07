@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BUILD_PHASES, deriveBuildStatus, formatElapsed } from '../build-status';
+import { BUILD_PHASES, currentRunEvents, deriveBuildStatus, formatElapsed } from '../build-status';
 import type { SseEvent } from '../types';
 
 const T = '2026-06-26T10:00:00.000Z';
@@ -106,6 +106,92 @@ describe('deriveBuildStatus', () => {
 
   it('exposes exactly four ordered phases', () => {
     expect(BUILD_PHASES).toEqual(['Design', 'Build', 'Test', 'Ready']);
+  });
+});
+
+// The builder hands over its FULL log — every earlier run included — so a
+// follow-up prompt used to render the PREVIOUS run's finished status: 100%
+// progress, every phase ticked, and an elapsed timer counting from the project's
+// first-ever event. It looked frozen, then jumped when the new run finished.
+describe('deriveBuildStatus scopes to the current run', () => {
+  const T2 = '2026-06-26T10:30:00.000Z';
+  const history = [
+    ev({ type: 'agent_start' }),
+    ev({ type: 'tool_use', toolName: 'playtest_game', status: 'start' }),
+    ev({ type: 'run_complete', previewUrl: '/x', snapshotPath: 's' }),
+  ];
+
+  it('a follow-up prompt restarts at Design, not the previous run’s Ready', () => {
+    const s = deriveBuildStatus([
+      ...history,
+      ev({ type: 'user_message', content: 'add a boss', timestamp: T2 }),
+      ev({ type: 'agent_start', timestamp: T2 }),
+    ]);
+    expect(s.phase).toBe('Design');
+    expect(s.done).toBe(false);
+  });
+
+  it('times the follow-up run, not the whole project', () => {
+    const s = deriveBuildStatus([
+      ...history,
+      ev({ type: 'user_message', content: 'add a boss', timestamp: T2 }),
+    ]);
+    expect(s.startedAt).toBe(Date.parse(T2));
+  });
+
+  it('does not carry the previous run’s steps into the new one', () => {
+    const s = deriveBuildStatus([
+      ...history,
+      ev({ type: 'user_message', content: 'add a boss', timestamp: T2 }),
+      ev({
+        type: 'tool_use',
+        toolName: 'str_replace_based_edit_tool',
+        status: 'start',
+        path: 'src/boss.js',
+        timestamp: T2,
+      }),
+    ]);
+    expect(s.steps.map((x) => x.label)).toEqual(['Writing boss.js']);
+    expect(s.phase).toBe('Build');
+  });
+
+  it('a FINISHED follow-up still reads as Ready', () => {
+    const s = deriveBuildStatus([
+      ...history,
+      ev({ type: 'user_message', content: 'add a boss', timestamp: T2 }),
+      ev({ type: 'run_complete', previewUrl: '/y', snapshotPath: 's', timestamp: T2 }),
+    ]);
+    expect(s.done).toBe(true);
+    expect(s.startedAt).toBe(Date.parse(T2));
+  });
+
+  it('a paused run is a boundary too — Resume starts a fresh status', () => {
+    const s = deriveBuildStatus([
+      ev({ type: 'agent_start' }),
+      ev({ type: 'run_paused' }),
+      ev({ type: 'user_message', content: 'continue', timestamp: T2 }),
+      ev({ type: 'agent_start', timestamp: T2 }),
+    ]);
+    expect(s.startedAt).toBe(Date.parse(T2));
+    expect(s.phase).toBe('Design');
+  });
+});
+
+describe('currentRunEvents', () => {
+  it('returns everything when no run has finished yet', () => {
+    const events = [ev({ type: 'agent_start' }), ev({ type: 'turn_start', turnIndex: 0 })];
+    expect(currentRunEvents(events)).toHaveLength(2);
+  });
+
+  it('keeps only the segment after the last completed run', () => {
+    const events = [
+      ev({ type: 'agent_start' }),
+      ev({ type: 'run_complete', previewUrl: '/x', snapshotPath: 's' }),
+      ev({ type: 'run_error', error: 'boom' }),
+      ev({ type: 'user_message', content: 'try again' }),
+      ev({ type: 'agent_start' }),
+    ];
+    expect(currentRunEvents(events).map((e) => e.type)).toEqual(['user_message', 'agent_start']);
   });
 });
 

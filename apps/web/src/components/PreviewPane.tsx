@@ -6,6 +6,7 @@ import {
   type ControlsManifest,
   PREVIEW_IFRAME_ORIGIN,
   TWEAKS_UPDATE_MESSAGE_TYPE,
+  isRedundantManifest,
   parseControlsManifestMessage,
   parseGamepadStatusMessage,
   parseInboundBridgeMessage,
@@ -101,6 +102,11 @@ export function PreviewPane({
   // True when a change was made that a reload would surface (e.g. controls were
   // rebound) — drives a "refresh to see your changes" cue on the reload button.
   const [previewStale, setPreviewStale] = useState(false);
+  // The bindings last pushed into the game. The in-iframe runtime re-posts its
+  // manifest after every rebind, and that echo carries OUR keys — see
+  // `isRedundantManifest` for why accepting it broke both the declared defaults
+  // and the render loop.
+  const pushedBindingsRef = useRef<Record<string, string[]> | null>(null);
 
   const reloadPreview = useCallback(() => {
     setReloadNonce((n) => n + 1);
@@ -124,20 +130,19 @@ export function PreviewPane({
     [view, filesDirty],
   );
 
-  // Reset tweak values + controls when a NEW game loads. A manual file save (or a
-  // revert) repoints previewUrl at the project's HEAD preview
+  // Reset the VIEW + tweaks when a NEW game loads. A file save, a revert, or a
+  // finished iteration repoints previewUrl at the project's HEAD preview
   // (`/v1/projects/:id/preview/`) to refresh the iframe — that must NOT kick the
-  // user out of the Files tab or wipe their controls. So only do the full reset
-  // when the URL is NOT a project-preview URL: that covers null + a fresh build's
-  // run preview (`/v1/runs/.../preview/`), the real "new game" cases.
+  // user out of the Files tab. So only do this reset when the URL is NOT a
+  // project-preview URL: that covers null + a fresh build's run preview
+  // (`/v1/runs/.../preview/`), the real "new game" cases. (The controls manifest
+  // is reset separately, on every reload — see below.)
   useEffect(() => {
     const isProjectPreview = Boolean(previewUrl) && previewUrl?.includes('/v1/projects/');
-    if (isProjectPreview) return; // save/revert refresh of the same project — keep view + controls
+    if (isProjectPreview) return; // save/revert/iteration refresh — keep the current tab
     setTweakValues({});
     setShowTweaks(false);
-    setControlsManifest(null);
     setView('preview');
-    setPreviewStale(false);
   }, [previewUrl]);
 
   // The owner-gated preview route accepts the session token via ?token= because
@@ -170,7 +175,10 @@ export function PreviewPane({
       // WS-A — the game posts its control manifest on startup (and on request).
       const controls = parseControlsManifestMessage(event);
       if (controls) {
-        setControlsManifest(controls);
+        // Keep the manifest the game DECLARED; drop the echo of our own rebind.
+        setControlsManifest((cur) =>
+          isRedundantManifest(controls, cur, pushedBindingsRef.current) ? cur : controls,
+        );
         return;
       }
       const gamepad = parseGamepadStatusMessage(event);
@@ -219,12 +227,27 @@ export function PreviewPane({
     setIssueDismissed(false);
     animatedRef.current = false;
     staleBeatsRef.current = 0;
+    // The reloaded game re-declares its controls from scratch, so nothing we
+    // pushed to the previous instance is in effect any more; and whatever the
+    // reload was meant to surface is now on screen. Dropping the manifest is what
+    // makes the panel re-seed (and re-push the user's saved binds) into the new
+    // instance — holding an identical-looking manifest would leave the fresh game
+    // running its own declared defaults.
+    pushedBindingsRef.current = null;
+    setControlsManifest(null);
+    setPreviewStale(false);
   }, [previewUrl, reloadNonce]);
 
-  // Push rebound keys to the running game.
-  const applyControls = useCallback((bindings: Record<string, string[]>) => {
-    sendControlsRebind(iframeRef.current, bindings);
-  }, []);
+  // Push rebound keys to the running game. `defaults` (the game's DECLARED keys)
+  // rides along so the in-iframe remap bridge can translate the rebind for a game
+  // that reads the keyboard directly instead of through window.__game.controls.
+  const applyControls = useCallback(
+    (bindings: Record<string, string[]>, defaults: Record<string, string[]>) => {
+      pushedBindingsRef.current = bindings;
+      sendControlsRebind(iframeRef.current, bindings, defaults);
+    },
+    [],
+  );
 
   // Pull the manifest when the Controls tab opens (covers a game that declared
   // its controls before this pane attached its message listener). Retry over a
@@ -337,7 +360,7 @@ export function PreviewPane({
         )}
         {previewUrl ? (
           <span className="hidden flex-1 truncate text-center text-ink-4 sm:block">
-            preview · {previewUrl.split('/').pop() ?? 'index.html'}
+            preview · {previewFileLabel(previewUrl)}
           </span>
         ) : (
           <span className="flex-1 text-center text-ink-4">no preview</span>
@@ -477,9 +500,11 @@ export function PreviewPane({
               <ControlsPanel
                 manifest={controlsManifest}
                 onApply={applyControls}
-                // Key per-RUN (previewUrl carries the runId) so a fresh generation
-                // reverts stale manual binds to the new game's declared defaults.
-                storageKey={`pf:controls:${previewUrl ?? projectId}`}
+                // Keyed on the preview URL with its query stripped. The query
+                // carries cache-busting stamps (a finished run, a file save), and
+                // keying on those made every iteration and every save look like a
+                // different game — silently discarding the user's key bindings.
+                storageKey={`pf:controls:${previewUrl?.split('?')[0] ?? projectId}`}
                 // A user rebind applies live, but cue a reload so they can restart
                 // the game and test the new bindings from a clean state.
                 onUserRebind={() => setPreviewStale(true)}
@@ -665,6 +690,18 @@ function TweakControl({ tweakKey, entry, value, onChange }: TweakControlProps) {
   }
 
   return null;
+}
+
+/**
+ * The file the preview URL points at, for the toolbar breadcrumb. A preview URL
+ * ends at a directory (`.../preview/`) and carries cache-busting query stamps, so
+ * the naive "last path segment" read it as an empty string — or, once the stamps
+ * arrived, as `?t=1750000000000`.
+ */
+function previewFileLabel(url: string): string {
+  const path = url.split('?')[0] ?? url;
+  const last = path.split('/').filter(Boolean).pop();
+  return last === undefined || last === 'preview' ? 'index.html' : last;
 }
 
 // ─── Animations ───────────────────────────────────────────────────────────────

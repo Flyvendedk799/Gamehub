@@ -10,6 +10,7 @@ import {
   RUNTIME_ERROR_MESSAGE_TYPE,
   TWEAKS_UPDATE_MESSAGE_TYPE,
   isPreviewIframeOrigin,
+  isRedundantManifest,
   parseCloudSaveMessage,
   parseCloudSavePayload,
   parseControlsManifestMessage,
@@ -24,6 +25,47 @@ import {
 function evt(origin: string, data: unknown): MessageEvent<unknown> {
   return { origin, data } as MessageEvent<unknown>;
 }
+
+describe('isRedundantManifest — the rebind↔manifest echo guard', () => {
+  const declared = {
+    actions: [
+      { id: 'up', label: 'Up', keys: ['KeyW'] },
+      { id: 'down', label: 'Down', keys: ['KeyS'] },
+    ],
+  };
+
+  it('accepts the first manifest a game declares', () => {
+    expect(isRedundantManifest(declared, null, null)).toBe(false);
+  });
+
+  it('ignores a re-post of the manifest we already hold', () => {
+    expect(isRedundantManifest(structuredClone(declared), declared, null)).toBe(true);
+  });
+
+  it('ignores the echo the runtime posts after our own rebind', () => {
+    // The user swapped W/S; the runtime re-posts a manifest carrying OUR keys.
+    // Accepting it would overwrite the DECLARED defaults (so "Reset to defaults"
+    // resets to nothing) and re-trigger the seed effect → an endless ping-pong.
+    const echo = {
+      actions: [
+        { id: 'up', label: 'Up', keys: ['KeyS'] },
+        { id: 'down', label: 'Down', keys: ['KeyW'] },
+      ],
+    };
+    expect(isRedundantManifest(echo, declared, { up: ['KeyS'], down: ['KeyW'] })).toBe(true);
+  });
+
+  it('still accepts a genuinely new control set from a rebuilt game', () => {
+    const rebuilt = {
+      actions: [
+        { id: 'up', label: 'Up', keys: ['ArrowUp'] },
+        { id: 'down', label: 'Down', keys: ['ArrowDown'] },
+        { id: 'jump', label: 'Jump', keys: ['Space'] },
+      ],
+    };
+    expect(isRedundantManifest(rebuilt, declared, { up: ['KeyS'], down: ['KeyW'] })).toBe(false);
+  });
+});
 
 describe('parseControlsManifestMessage (WS-A)', () => {
   const manifest = {

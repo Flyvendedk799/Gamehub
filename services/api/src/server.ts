@@ -3164,7 +3164,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       },
       share: {
         publishUrl: livePublished ? `/v1/play/${livePublished.publishSlug}` : null,
-        thumbnailUrl: livePublished?.thumbnailUrl ?? null,
+        // Prefer the published game's own capture; fall back to the project's
+        // latest build thumbnail. Without the fallback the share card showed an
+        // empty placeholder for every UNPUBLISHED game — which is most of them
+        // at the moment someone opens Share, since the card is what convinces
+        // them to publish in the first place. Owner-only response, so the
+        // owner's own build thumbnail is nothing new to disclose.
+        thumbnailUrl: livePublished?.thumbnailUrl ?? project.thumbnailUrl ?? null,
       },
       metrics: {
         ...metrics,

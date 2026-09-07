@@ -1,6 +1,6 @@
 'use client';
 
-import { formatElapsed } from '@/lib/build-status';
+import { currentRunEvents, formatElapsed } from '@/lib/build-status';
 import { buildRenderItems } from '@/lib/chat-render';
 import { EDIT_TOOL, shouldOfferFix, writtenPaths } from '@/lib/event-normalize';
 import type { SseEvent } from '@/lib/types';
@@ -60,10 +60,12 @@ export function ChatPanel({
 
   const renderItems = useMemo(() => buildRenderItems(events), [events]);
 
-  // Elapsed build timer for the "Running" indicator. Anchored to the first event's
-  // timestamp so a mid-build reload shows the true elapsed, not 0.
+  // Elapsed build timer for the "Running" indicator. Anchored to the first event
+  // of the CURRENT run so a mid-build reload shows the true elapsed, not 0 — and
+  // so a follow-up prompt times its own run rather than counting from the
+  // project's first-ever event, which read as a wildly wrong, jumping clock.
   const startedAt = useMemo(() => {
-    for (const e of events) {
+    for (const e of currentRunEvents(events)) {
       const t = Date.parse(e.timestamp);
       if (Number.isFinite(t)) return t;
     }

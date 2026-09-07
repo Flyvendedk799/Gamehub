@@ -68,11 +68,13 @@ export function ControlsPanel({
   gamepadConnected = false,
 }: {
   manifest: ControlsManifest | null;
-  /** Push the full binding set to the running game. */
-  onApply: (bindings: Bindings) => void;
-  /** localStorage key (per RUN — see PreviewPane) for persisting custom binds.
-   *  Keyed per-run so a fresh generation reverts stale manual overrides to the
-   *  game's newly-declared defaults. */
+  /** Push the full binding set to the running game, alongside the keys the game
+   *  DECLARED — the in-iframe remap bridge needs those to translate a rebind for
+   *  a game that reads the keyboard directly rather than through the controls API. */
+  onApply: (bindings: Bindings, defaults: Bindings) => void;
+  /** localStorage key for persisting custom binds (see PreviewPane for how it's
+   *  derived). Bindings for action ids the current game doesn't declare are
+   *  ignored at seed time, so a new game falls back to its own declared keys. */
   storageKey: string;
   /** Legacy rescue: fire ONE scoped generation that wires the rebindable
    *  controls layer into a game that didn't declare it. One click = one run; no
@@ -97,13 +99,13 @@ export function ControlsPanel({
     const seeded: Bindings = {};
     for (const a of manifest.actions) seeded[a.id] = saved?.[a.id] ?? [...a.keys];
     setBindings(seeded);
-    onApply(seeded);
+    onApply(seeded, defaults);
   }, [manifest, storageKey]);
 
   const commit = useCallback(
     (next: Bindings) => {
       setBindings(next);
-      onApply(next);
+      onApply(next, defaults);
       onUserRebind?.();
       try {
         localStorage.setItem(storageKey, JSON.stringify(next));
@@ -111,7 +113,7 @@ export function ControlsPanel({
         /* storage may be unavailable (private mode) — binds still apply live */
       }
     },
-    [onApply, storageKey, onUserRebind],
+    [onApply, storageKey, onUserRebind, defaults],
   );
 
   // While capturing, the next keydown OR mouse button binds to the action.

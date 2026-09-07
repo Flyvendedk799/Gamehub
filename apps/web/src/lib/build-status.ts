@@ -36,6 +36,47 @@ const VERIFY_TOOLS = new Set([
   'runtime_verify',
 ]);
 
+/**
+ * Terminal frames — each one ends a run. The event log is a whole CONVERSATION
+ * (every prior run's history is hydrated into it on load), so these are also the
+ * boundaries between runs.
+ */
+const TERMINAL_TYPES = new Set(['run_complete', 'run_error', 'run_paused']);
+
+/**
+ * The slice of the log belonging to the run in progress (or, when nothing is
+ * running, the most recent one).
+ *
+ * The builder passes its FULL event log — every earlier run included. Deriving
+ * status from all of it made a second prompt show nothing that was happening:
+ * an earlier `run_complete` pinned the phase tracker at Ready (100%, every phase
+ * ticked) while the new run was still designing, the elapsed timer counted from
+ * the project's very first event, and the step list still read as the last
+ * build's work. The status appeared frozen, then jumped when the new run's
+ * terminal landed.
+ */
+export function currentRunEvents(events: ReadonlyArray<SseEvent>): ReadonlyArray<SseEvent> {
+  let last = -1;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e !== undefined && TERMINAL_TYPES.has(e.type)) {
+      last = i;
+      break;
+    }
+  }
+  if (last === -1) return events;
+  // A trailing terminal ends the LAST run, so that run is the current one — cut
+  // at the terminal before it instead (a finished run must still read as Ready).
+  if (last === events.length - 1) {
+    for (let i = last - 1; i >= 0; i--) {
+      const e = events[i];
+      if (e !== undefined && TERMINAL_TYPES.has(e.type)) return events.slice(i + 1);
+    }
+    return events;
+  }
+  return events.slice(last + 1);
+}
+
 export interface BuildStatus {
   /** 0=Design, 1=Build, 2=Test, 3=Ready. */
   phaseIndex: number;
@@ -65,7 +106,10 @@ function lastLine(s: string): string {
   return last.length > 110 ? `${last.slice(0, 110)}…` : last;
 }
 
-export function deriveBuildStatus(events: ReadonlyArray<SseEvent>): BuildStatus {
+export function deriveBuildStatus(allEvents: ReadonlyArray<SseEvent>): BuildStatus {
+  // Only this run's events — an earlier run's terminal would otherwise pin the
+  // tracker at Ready and anchor the timer to the project's first-ever event.
+  const events = currentRunEvents(allEvents);
   let phaseIndex = 0;
   let step = '';
   let startedAt: number | null = null;

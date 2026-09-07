@@ -90,15 +90,65 @@ export function parseControlsManifestMessage(
   return { actions };
 }
 
-/** Host → game: apply rebound keys (actionId → KeyboardEvent.code[]). */
+/**
+ * Host → game: apply rebound keys (actionId → KeyboardEvent.code[]).
+ *
+ * `defaults` carries the keys the game DECLARED. The in-iframe key-remap bridge
+ * needs them to translate a rebind for a game that reads the keyboard directly
+ * rather than through `window.__game.controls` — without them it stays dormant
+ * and only `controls.isDown()`-based games respond to a rebind.
+ */
 export function sendControlsRebind(
   iframe: HTMLIFrameElement | null,
   bindings: Record<string, string[]>,
+  defaults?: Record<string, string[]>,
 ): void {
   iframe?.contentWindow?.postMessage(
-    { type: CONTROLS_REBIND_MESSAGE_TYPE, bindings },
+    {
+      type: CONTROLS_REBIND_MESSAGE_TYPE,
+      bindings,
+      ...(defaults !== undefined ? { defaults } : {}),
+    },
     PREVIEW_IFRAME_ORIGIN,
   );
+}
+
+function sameKeys(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((k, i) => k === b[i]);
+}
+
+/**
+ * True when an inbound manifest carries nothing new — either it matches the one
+ * we already hold, or its keys are just the echo of a rebind we pushed.
+ *
+ * The in-iframe runtime re-posts its manifest after EVERY rebind. Accepting that
+ * echo did two bad things: it replaced the game's declared defaults with the
+ * user's own binds (so "Reset to defaults" reset to nothing), and it re-ran the
+ * panel's seed effect, which pushes a rebind — an endless rebind↔manifest
+ * ping-pong, one React render per hop, for as long as the Controls tab was open.
+ */
+export function isRedundantManifest(
+  incoming: ControlsManifest,
+  current: ControlsManifest | null,
+  lastPushed: Record<string, string[]> | null,
+): boolean {
+  if (
+    current !== null &&
+    current.actions.length === incoming.actions.length &&
+    current.actions.every((a, i) => {
+      const b = incoming.actions[i];
+      return b !== undefined && a.id === b.id && a.label === b.label && sameKeys(a.keys, b.keys);
+    })
+  ) {
+    return true;
+  }
+  if (lastPushed === null) return false;
+  const ids = Object.keys(lastPushed);
+  if (ids.length !== incoming.actions.length) return false;
+  return incoming.actions.every((a) => {
+    const pushed = lastPushed[a.id];
+    return pushed !== undefined && sameKeys(pushed, a.keys);
+  });
 }
 
 /** Host → game: ask the game to re-post its current control manifest. */

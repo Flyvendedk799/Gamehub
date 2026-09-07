@@ -297,6 +297,15 @@ async function main() {
       // see the assignment inside the onUsage callback, so a `let` reads back
       // as narrowed-to-null in the finally.
       const usageRef: { latest: RunTokenUsage | null } = { latest: null };
+      // Settled inside enqueueRun's `settle` port — BEFORE the terminal frame is
+      // published — so the browser never repoints its preview at a project HEAD
+      // that hasn't advanced yet. The outcome (and any persistence failure) is
+      // captured here and re-surfaced once enqueueRun resolves, so the error
+      // semantics are exactly what they were when finalizeRun ran afterwards.
+      const settled: {
+        outcome: Awaited<ReturnType<typeof finalizeRun>> | null;
+        error: unknown;
+      } = { outcome: null, error: null };
       let result: Awaited<ReturnType<typeof enqueueRun>>;
       try {
         result = await enqueueRun(
@@ -316,6 +325,24 @@ async function main() {
           {
             bus,
             store,
+            // Persist the finished run BEFORE `run_complete` / `run_paused` goes
+            // out. MUST NOT throw (see QueuePorts.settle) — the failure is held
+            // and rethrown below so BullMQ still fails the job as it always did.
+            settle: async (settleResult) => {
+              try {
+                settled.outcome = await finalizeRun(db, {
+                  runId,
+                  projectId,
+                  userId: job.data.userId,
+                  prompt,
+                  result: settleResult,
+                  creditsPerRun: CREDITS_PER_RUN,
+                  log: (m) => console.log(`[worker] job=${job.id} ${m}`),
+                });
+              } catch (err) {
+                settled.error = err;
+              }
+            },
             ...(browserJobs !== undefined ? { browserJobs } : {}),
             // BUILD_SPEED §3 — the vision call, on the run's OWN model and
             // credential. Bounded to MAX_VISUAL_CRITIQUES by run-generation, so
@@ -388,11 +415,13 @@ async function main() {
         // records timing on the row. Don't let a timing write mask the real error.
         const aiFinishedAt = new Date();
         const aiRuntimeMs = Math.max(0, Math.round(performance.now() - aiStartMs));
-        // Token spend goes down with the timing. On success finalizeRun runs
-        // straight after this and rewrites the same columns with the run's own
-        // authoritative totals, so this is only load-bearing for the throw path
-        // — which is precisely the path that was losing it.
-        const usage = usageRef.latest;
+        // Token spend goes down with the timing — but ONLY for a run that never
+        // settled. finalizeRun (in the `settle` port) now runs BEFORE this and
+        // has already written the run's own authoritative totals; re-writing the
+        // in-flight snapshot over them would lose the last turn's spend. The
+        // throw path — which is precisely the path that was losing token counts
+        // — never settles, so it still records what it spent.
+        const usage = settled.outcome === null ? usageRef.latest : null;
         await db
           .update(schema.runs)
           .set({
@@ -415,20 +444,18 @@ async function main() {
           );
       }
 
-      // Settle the finished run through the ONE canonical persistence path
+      // The run was settled through the ONE canonical persistence path
       // (finalizeRun, shared with the API's in-process fallback so the two can
-      // never drift again — see finalize-run.ts). It writes the snapshot row,
-      // flips the run to completed/paused with token usage, advances the project
-      // HEAD, and appends the chat row, all transactionally + idempotently.
-      const outcome = await finalizeRun(db, {
-        runId,
-        projectId,
-        userId: job.data.userId,
-        prompt,
-        result,
-        creditsPerRun: CREDITS_PER_RUN,
-        log: (m) => console.log(`[worker] job=${job.id} ${m}`),
-      });
+      // never drift again — see finalize-run.ts) inside the `settle` port above:
+      // it writes the snapshot row, flips the run to completed/paused with token
+      // usage, advances the project HEAD, and appends the chat row, all
+      // transactionally + idempotently. Rethrow a persistence failure here so
+      // BullMQ's 'failed' handler still refunds exactly as it did before.
+      if (settled.error !== null) throw settled.error;
+      const outcome = settled.outcome;
+      if (outcome === null) {
+        throw new Error(`[worker] run=${runId} was never settled — no finalizeRun outcome`);
+      }
 
       // NOTE: No credit debit on success — the run cost was RESERVED at enqueue
       // (negative 'reservation' ledger row keyed on runId); a successful run

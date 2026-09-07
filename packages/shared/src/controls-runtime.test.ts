@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ART_RUNTIME_MARKER } from './art-runtime';
 import {
   CONTROLS_MANIFEST_BRIDGE_MARKER,
+  CONTROLS_REMAP_BRIDGE_MARKER,
   CONTROLS_RUNTIME_MARKER,
   DEBUG_RUNTIME_MARKER,
   injectControlsRuntime,
@@ -77,6 +78,21 @@ describe('injectControlsRuntime', () => {
     expect(out.indexOf(CONTROLS_MANIFEST_BRIDGE_MARKER)).toBeLessThan(out.indexOf('</body>'));
     // It wraps define so the manifest is posted regardless of what won.
     expect(out).toContain('__pfWrapped');
+  });
+
+  it('injects the key-remap bridge at </body> so a rebind reaches direct-reading games', () => {
+    const out = injectControlsRuntime(
+      '<!doctype html><html><head></head><body><script type="module" src="src/main.js"></script></body></html>',
+    );
+    expect(out).toContain(CONTROLS_REMAP_BRIDGE_MARKER);
+    // After the head runtime, so a controls.isDown game still sees the raw key
+    // first and its own rebind path keeps working.
+    expect(out.indexOf(CONTROLS_REMAP_BRIDGE_MARKER)).toBeGreaterThan(
+      out.indexOf(CONTROLS_RUNTIME_MARKER),
+    );
+    expect(out.indexOf(CONTROLS_REMAP_BRIDGE_MARKER)).toBeLessThan(out.indexOf('</body>'));
+    const twice = injectControlsRuntime(out);
+    expect(twice.split(CONTROLS_REMAP_BRIDGE_MARKER).length - 1).toBe(1);
   });
 
   it('bridge is idempotent and survives an inline shim that overwrites define', () => {
