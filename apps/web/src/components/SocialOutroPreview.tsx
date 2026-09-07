@@ -23,6 +23,7 @@ import {
   formatTokenCount,
   publicShareUrl,
 } from '@/lib/social-outro';
+import { resolveThumbnailUrl } from '@/lib/thumbnail';
 import {
   BRAND_COLORS,
   BRAND_FONTS,
@@ -984,7 +985,12 @@ const SocialOutroPreview = forwardRef<SocialOutroPreviewHandle, SocialOutroPrevi
 
     // Load the thumbnail image whenever the source changes.
     useEffect(() => {
-      const url = summary.share.thumbnailUrl;
+      // The API stores thumbnails as a server-relative `/v1/blobs/<key>` path.
+      // Loading that raw resolves it against the WEB origin, where it 404s — the
+      // card then fell back to the "GAMEPLAY FRAME" placeholder and never showed
+      // the game. Every other thumbnail consumer already goes through
+      // resolveThumbnailUrl; this one didn't.
+      const url = resolveThumbnailUrl(summary.share.thumbnailUrl);
       if (!url) {
         thumbRef.current = null;
         paint(timeRef.current);
