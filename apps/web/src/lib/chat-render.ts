@@ -7,6 +7,9 @@
 
 import type { SseEvent } from './types';
 
+/** Frames that end a run — the boundaries between iterations in the log. */
+const TERMINAL_TYPES = new Set(['run_complete', 'run_error', 'run_paused']);
+
 export type RenderItem =
   | { kind: 'event'; key: string; event: SseEvent }
   | { kind: 'text'; key: string; text: string };
@@ -17,12 +20,20 @@ export function buildRenderItems(events: SseEvent[]): RenderItem[] {
   let textRunValue = '';
 
   // The plan (set_todos) is re-declared as it progresses; show only the latest
-  // checklist, at its most recent position, so the feed isn't littered with
-  // superseded plans.
-  let lastPlanIndex = -1;
+  // checklist of EACH run, at its most recent position, so the feed isn't
+  // littered with superseded plans. Scoped per run (terminal frames are the
+  // boundaries) — collapsing across the whole conversation retroactively erased
+  // every earlier iteration's plan the moment a follow-up declared its own.
+  const keptPlans = new Set<number>();
+  let planInRun = -1;
   events.forEach((e, i) => {
-    if (e.type === 'plan') lastPlanIndex = i;
+    if (e.type === 'plan') planInRun = i;
+    else if (TERMINAL_TYPES.has(e.type) && planInRun >= 0) {
+      keptPlans.add(planInRun);
+      planInRun = -1;
+    }
   });
+  if (planInRun >= 0) keptPlans.add(planInRun);
 
   const flushText = () => {
     if (textRunStart >= 0) {
@@ -48,8 +59,8 @@ export function buildRenderItems(events: SseEvent[]): RenderItem[] {
       textRunValue = event.text;
       return;
     }
-    // Drop superseded plans — only the latest checklist renders.
-    if (event.type === 'plan' && i !== lastPlanIndex) return;
+    // Drop superseded plans — only each run's latest checklist renders.
+    if (event.type === 'plan' && !keptPlans.has(i)) return;
     flushText();
     items.push({ kind: 'event', key: `ev-${i}`, event });
   });

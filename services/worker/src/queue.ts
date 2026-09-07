@@ -14,6 +14,13 @@
  *
  * In production the caller is a BullMQ worker consumer; in dev/test it can
  * be called inline with `InMemoryEventBus` + `InMemoryBlobStore`.
+ *
+ * ORDERING (preview freshness): the terminal frame is published only AFTER the
+ * optional `settle` port has run. `settle` is where the caller persists the run
+ * (finalizeRun: snapshot row + `projects.current_manifest_key` advance). The
+ * browser repoints the preview iframe at the project's HEAD the instant it sees
+ * `run_complete`, so publishing first raced persistence and served the PREVIOUS
+ * iteration's files — "refresh doesn't show the newest version".
  */
 import type { AgentEvent } from '@playforge/agent-core';
 import {
@@ -103,6 +110,20 @@ export interface QueuePorts {
    * exactly as before.
    */
   visionCritic?: VisionCriticFn;
+  /**
+   * Persist the finished run BEFORE its terminal frame is published.
+   *
+   * The caller settles the run here (finalizeRun: snapshot row, run status,
+   * project HEAD advance, chat row). Awaiting it first is load-bearing: the
+   * browser reloads the preview from `/v1/projects/:id/preview/` (HEAD) as soon
+   * as `run_complete` arrives, so a frame published ahead of the HEAD advance
+   * serves the previous iteration.
+   *
+   * MUST NOT throw — enqueueRun's error path would turn a successful build into
+   * a `run_error`. Callers swallow persistence failures here and re-surface them
+   * after enqueueRun resolves, exactly as before.
+   */
+  settle?: (result: EnqueueResult) => Promise<void>;
 }
 
 export interface EnqueueResult extends GenerationResult {
@@ -252,15 +273,22 @@ export async function enqueueRun(input: EnqueueInput, ports: QueuePorts): Promis
         fsState: result.fsState,
         originalUserPrompt: input.continuation?.originalUserPrompt ?? input.prompt,
       };
+      // Persist BEFORE announcing (see `settle`) so a resume/reload reads the
+      // paused run's own files, not the previous iteration's.
+      const paused: EnqueueResult = { ...result, pausedContinuation };
+      await ports.settle?.(paused);
       // WS-D — carry the clarifying question (ask_user pause) on the live frame
       // so the builder can show it + an answer box immediately, not just on reload.
       await recorder.control({
         type: 'run_paused',
         ...(result.pendingQuestion ? { question: result.pendingQuestion } : {}),
       });
-      return { ...result, pausedContinuation };
+      return paused;
     }
 
+    // Settle first, announce second — the browser treats `run_complete` as
+    // "HEAD is the new build" and reloads the preview off it immediately.
+    await ports.settle?.(result);
     await recorder.control({ type: 'run_complete' });
     return result;
   } catch (err) {

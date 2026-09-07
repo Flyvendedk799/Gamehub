@@ -60,4 +60,35 @@ describe('buildRenderItems', () => {
   it('returns an empty list for no events', () => {
     expect(buildRenderItems([])).toEqual([]);
   });
+
+  // set_todos is re-declared as a run progresses, so only the newest checklist is
+  // worth rendering — but only within its own run. Collapsing across the whole
+  // conversation retroactively erased every earlier iteration's plan the moment a
+  // follow-up prompt declared its own.
+  it('keeps one plan per run, not one for the whole conversation', () => {
+    const plan = (text: string): SseEvent => ({
+      type: 'plan',
+      runId: 'r',
+      items: [{ text, checked: false }],
+      timestamp: 't',
+    });
+    const complete: SseEvent = {
+      type: 'run_complete',
+      runId: 'r',
+      snapshotPath: '',
+      previewUrl: '/p',
+      timestamp: 't',
+    };
+    const items = buildRenderItems([
+      plan('draft'),
+      plan('first run — final'),
+      complete,
+      plan('second run — draft'),
+      plan('second run — final'),
+    ]);
+    const plans = items
+      .filter((i) => i.kind === 'event' && i.event.type === 'plan')
+      .map((i) => (i.kind === 'event' && i.event.type === 'plan' ? i.event.items[0]?.text : null));
+    expect(plans).toEqual(['first run — final', 'second run — final']);
+  });
 });

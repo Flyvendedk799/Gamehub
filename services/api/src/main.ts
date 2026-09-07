@@ -364,6 +364,9 @@ async function main() {
     // token usage — so on ServerHoster History/Restore/Remix silently broke and
     // run_quality_metrics stayed empty. finalizeRun fixes all three.
     const startedAt = Date.now();
+    // Set by the `settle` port below (finalizeRun's outcome), which runs before
+    // the terminal frame is published. Null means persistence never ran or threw.
+    let settledOutcome: Awaited<ReturnType<typeof finalizeRun>> | null = null;
     // Bracket the active agent loop for the social-outro "AI runtime" metric
     // (docs/SOCIAL_OUTRO_PLAN.md). Record the elapsed ms once enqueueRun settles
     // (in BOTH the success and failure continuations, before finalizeRun runs so
@@ -407,6 +410,31 @@ async function main() {
         bus,
         store,
         recordRunQuality,
+        // Settle the run BEFORE its terminal frame is published (see
+        // QueuePorts.settle). The builder repoints the preview iframe at
+        // `/v1/projects/:id/preview/` (HEAD) the moment `run_complete` arrives,
+        // so finalizeRun — which advances that HEAD — has to have committed
+        // first or the reload serves the PREVIOUS iteration's files.
+        // MUST NOT throw: a persistence failure would otherwise turn a
+        // successful build into a run_error. It's logged, exactly as before.
+        settle: async (settleResult) => {
+          try {
+            settledOutcome = await finalizeRun(db, {
+              runId,
+              projectId,
+              userId,
+              prompt,
+              result: settleResult,
+              creditsPerRun: CREDITS_PER_RUN,
+              log: (msg) => console.log(`${msg} (${Date.now() - startedAt}ms)`),
+            });
+          } catch (err: unknown) {
+            // Generation succeeded but persistence failed — do NOT refund or
+            // mark failed (the artifact exists); surface loudly so it can be
+            // repaired.
+            console.error(`[run:${runId}] post-completion persistence failed:`, err);
+          }
+        },
         // Real runtime-verify + playtest gates in-process (Chromium permitting).
         ...(inProcessBrowserJobs !== undefined ? { browserJobs: inProcessBrowserJobs } : {}),
         // Durable build-feed log so the feed survives refresh + API restart.
@@ -425,31 +453,15 @@ async function main() {
     )
       .then(async (result) => {
         await persistAiRuntime();
-        try {
-          const outcome = await finalizeRun(db, {
-            runId,
+        // finalizeRun already ran inside `settle` (before the terminal frame).
+        // Best-effort dashboard thumbnail for the freshly-built game (completed
+        // runs only). Non-blocking: a capture failure never affects the run.
+        if (settledOutcome !== null && !settledOutcome.paused && inProcessBrowserJobs) {
+          void captureProjectThumbnail(store, inProcessBrowserJobs, projectRepo, {
+            manifestKey: result.snapshot.manifestKey,
+            engine: (result.engine ?? engine ?? 'phaser') as 'phaser' | 'three' | 'canvas2d',
             projectId,
-            userId,
-            prompt,
-            result,
-            creditsPerRun: CREDITS_PER_RUN,
-            log: (msg) => console.log(`${msg} (${Date.now() - startedAt}ms)`),
-          });
-          // Best-effort dashboard thumbnail for the freshly-built game (completed
-          // runs only). Non-blocking: a capture failure never affects the run.
-          if (!outcome.paused && inProcessBrowserJobs) {
-            void captureProjectThumbnail(store, inProcessBrowserJobs, projectRepo, {
-              manifestKey: result.snapshot.manifestKey,
-              engine: (result.engine ?? engine ?? 'phaser') as 'phaser' | 'three' | 'canvas2d',
-              projectId,
-            }).catch((err: unknown) =>
-              console.warn(`[run:${runId}] thumbnail capture failed:`, err),
-            );
-          }
-        } catch (err: unknown) {
-          // Generation succeeded but persistence failed — do NOT refund or mark
-          // failed (the artifact exists); surface loudly so it can be repaired.
-          console.error(`[run:${runId}] post-completion persistence failed:`, err);
+          }).catch((err: unknown) => console.warn(`[run:${runId}] thumbnail capture failed:`, err));
         }
       })
       .catch(async (err: unknown) => {

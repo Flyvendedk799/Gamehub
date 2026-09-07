@@ -42,10 +42,10 @@ export const CONTROLS_RUNTIME_SNIPPET = `<script data-pf="${CONTROLS_RUNTIME_MAR
     function define(m){bindings={};meta={};order=[];var as=(m&&m.actions)||[];for(var i=0;i<as.length;i++){var a=as[i];if(!a||!a.id)continue;order.push(a.id);bindings[a.id]=(a.keys||[]).slice();meta[a.id]={label:a.label||a.id,description:a.description||'',pointer:a.pointer||''};}api.manifest=buildManifest();postManifest();return api;}
     function rebind(n){if(!n)return;for(var id in n){if(Object.prototype.hasOwnProperty.call(n,id))bindings[id]=(n[id]||[]).slice();}api.manifest=buildManifest();postManifest();}
     function press(code){down[code]=true;for(var id in bindings){if(keysFor(id).indexOf(code)!==-1){var hs=handlers[id]||[];for(var j=0;j<hs.length;j++){try{hs[j]();}catch(_){}}}}}
-    window.addEventListener('keydown',function(e){if(e.repeat)return;press(e.code);},true);
-    window.addEventListener('keyup',function(e){down[e.code]=false;},true);
-    window.addEventListener('mousedown',function(e){press('Mouse'+e.button);},true);
-    window.addEventListener('mouseup',function(e){down['Mouse'+e.button]=false;},true);
+    window.addEventListener('keydown',function(e){if(e.repeat||e.__pfRemap)return;press(e.code);},true);
+    window.addEventListener('keyup',function(e){if(e.__pfRemap)return;down[e.code]=false;},true);
+    window.addEventListener('mousedown',function(e){if(e.__pfRemap)return;press('Mouse'+e.button);},true);
+    window.addEventListener('mouseup',function(e){if(e.__pfRemap)return;down['Mouse'+e.button]=false;},true);
     window.addEventListener('contextmenu',function(e){e.preventDefault();});
     var api={manifest:null,define:define,isDown:isDown,on:on,rebind:rebind};
     window.__game.controls=api;
@@ -125,12 +125,112 @@ export const CONTROLS_MANIFEST_BRIDGE_SNIPPET = `<script data-pf="${CONTROLS_MAN
   window.addEventListener('message',function(e){if(e&&e.data&&e.data.type===RT){post(curActions(window.__game&&window.__game.controls));}});
 })();</script>`;
 
+/** Marker for the key-remap bridge (translates rebinds for direct-reading games). */
+export const CONTROLS_REMAP_BRIDGE_MARKER = 'pf-controls-remap-bridge';
+
 /**
- * Inject the rebindable controls runtime + the manifest bridge:
- *   - the head runtime right after `<head>` (runs before the game module), and
+ * Key-REMAP bridge — what makes the Controls tab actually change the controls.
+ *
+ * `controls:rebind` only reaches games that read input through
+ * `window.__game.controls.isDown()/on()`. In practice most generated games read
+ * the keyboard directly (`cursors.left.isDown`, their own `keydown` listener, a
+ * bundled shim that overwrote `window.__game.controls` with an object that has
+ * no `rebind`) — so rebinding a key in the builder changed a manifest and
+ * nothing else. The keys kept doing what the game hard-coded.
+ *
+ * This bridge closes that gap the same way the gamepad bridge does: it
+ * translates input at the EVENT level. Given the game's DECLARED defaults (sent
+ * alongside the bindings) it computes, per rebind:
+ *
+ *   • remap  — a key now bound to an action it isn't a default of dispatches a
+ *              synthetic event for that action's declared key, which is the key
+ *              the game's own code reads.
+ *   • block  — a declared key that no longer drives its own action is swallowed
+ *              (preventDefault + stopImmediatePropagation), so an unbound key
+ *              goes dead and a swap doesn't fire both sides.
+ *
+ * Ordering is load-bearing: the head runtime registers its window-capture
+ * listeners first, so a `controls.isDown` game still sees the RAW key and its
+ * own rebind path keeps working; this bridge runs after and only rewrites what
+ * reaches everything downstream. Synthetic events carry `__pfRemap` so the head
+ * runtime ignores them (otherwise a swap would trigger both actions) and so the
+ * bridge never re-enters itself.
+ *
+ * Dormant until a rebind arrives WITH defaults, and a no-op while the bindings
+ * still match those defaults. Pad codes are left alone — they're the gamepad
+ * bridge's job. ES5, self-contained, idempotent.
+ */
+export const CONTROLS_REMAP_BRIDGE_SNIPPET = `<script data-pf="${CONTROLS_REMAP_BRIDGE_MARKER}">(function(){
+  var REBIND=${JSON.stringify(REBIND_TYPE)};
+  var defaults=null, remap={}, block={}, busy=false;
+  var KEYVAL={Space:' ',ArrowUp:'ArrowUp',ArrowDown:'ArrowDown',ArrowLeft:'ArrowLeft',ArrowRight:'ArrowRight',Enter:'Enter',Escape:'Escape',ShiftLeft:'Shift',ShiftRight:'Shift',Tab:'Tab'};
+  function keyVal(code){ if(KEYVAL[code])return KEYVAL[code]; if(/^Key([A-Z])$/.test(code))return code.slice(3).toLowerCase(); if(/^Digit(\\d)$/.test(code))return code.slice(5); return code; }
+  function isPad(c){ return /^Pad(\\d+|L(?:Left|Right|Up|Down))$/.test(c); }
+  function has(o,k){ return Object.prototype.hasOwnProperty.call(o,k); }
+  function target(){ return document.querySelector('canvas') || document; }
+  function build(bindings){
+    remap={}; block={};
+    if(!defaults||!bindings) return;
+    for(var id in bindings){ if(!has(bindings,id)) continue;
+      var decl=defaults[id]||[], canon=null;
+      for(var i=0;i<decl.length;i++){ if(!isPad(decl[i])){ canon=decl[i]; break; } }
+      if(canon===null) continue;               // action the game declared no key for
+      var cur=bindings[id]||[];
+      for(var j=0;j<cur.length;j++){
+        var c=cur[j];
+        if(isPad(c)) continue;                 // controller codes: gamepad bridge's job
+        if(decl.indexOf(c)!==-1) continue;     // still one of its own declared keys
+        (remap[c]=remap[c]||[]).push(canon);
+      }
+    }
+    // A declared key that no longer drives its own action must stop reaching the
+    // game — otherwise an unbound key keeps working and a swap fires both sides.
+    for(var id2 in defaults){ if(!has(defaults,id2)) continue;
+      var ks=defaults[id2]||[], now=bindings[id2]||[];
+      for(var k=0;k<ks.length;k++){ if(!isPad(ks[k])&&now.indexOf(ks[k])===-1) block[ks[k]]=true; }
+    }
+    // Never block a key that is still a live default of some OTHER action.
+    for(var id3 in bindings){ if(!has(bindings,id3)) continue;
+      var live=bindings[id3]||[];
+      for(var m=0;m<live.length;m++){ var lc=live[m]; if((defaults[id3]||[]).indexOf(lc)!==-1) delete block[lc]; }
+    }
+  }
+  function fire(code,down){
+    try{
+      busy=true;
+      var t=target(), mm=/^Mouse(\\d+)$/.exec(code), ev;
+      if(mm) ev=new MouseEvent(down?'mousedown':'mouseup',{button:+mm[1],bubbles:true,cancelable:true});
+      else ev=new KeyboardEvent(down?'keydown':'keyup',{code:code,key:keyVal(code),bubbles:true,cancelable:true});
+      try{ ev.__pfRemap=true; }catch(_){}
+      t.dispatchEvent(ev);
+    }catch(e){}finally{ busy=false; }
+  }
+  function handle(e,code,down){
+    if(busy||e.__pfRemap) return;
+    var outs=remap[code], blocked=block[code];
+    if(!outs&&!blocked) return;
+    if(blocked){ if(e.cancelable)e.preventDefault(); e.stopImmediatePropagation(); }
+    if(outs){ for(var i=0;i<outs.length;i++) fire(outs[i],down); }
+  }
+  window.addEventListener('keydown',function(e){ handle(e,e.code,true); },true);
+  window.addEventListener('keyup',function(e){ handle(e,e.code,false); },true);
+  window.addEventListener('mousedown',function(e){ handle(e,'Mouse'+e.button,true); },true);
+  window.addEventListener('mouseup',function(e){ handle(e,'Mouse'+e.button,false); },true);
+  window.addEventListener('message',function(e){
+    if(!e||!e.data||e.data.type!==REBIND) return;
+    if(e.data.defaults) defaults=e.data.defaults;   // the game's DECLARED keys
+    build(e.data.bindings);
+  });
+})();</script>`;
+
+/**
+ * Inject the rebindable controls runtime + the bridges:
+ *   - the head runtime right after `<head>` (runs before the game module),
  *   - the manifest bridge right before `</body>` (runs AFTER any game-bundled
- *     controls shim, so the manifest still reaches the builder's Controls panel).
- * Both are idempotent on their own markers.
+ *     controls shim, so the manifest still reaches the builder's Controls panel), and
+ *   - the key-remap bridge right before `</body>` (translates a rebind into the
+ *     keys a directly-reading game actually listens for).
+ * All are idempotent on their own markers.
  */
 export function injectControlsRuntime(html: string): string {
   let out = html;
@@ -189,6 +289,18 @@ export function injectControlsRuntime(html: string): string {
       out = `${out.slice(0, bodyClose.index)}${CONTROLS_MANIFEST_BRIDGE_SNIPPET}\n${out.slice(bodyClose.index)}`;
     } else {
       out = `${out}\n${CONTROLS_MANIFEST_BRIDGE_SNIPPET}`;
+    }
+  }
+  // Key-remap bridge — makes a rebind reach games that read the keyboard
+  // directly instead of through `window.__game.controls`. Must come AFTER the
+  // head runtime's listeners (it is injected at </body>) so a controls-reading
+  // game still sees the raw key first. Dormant until a rebind carries defaults.
+  if (!out.includes(CONTROLS_REMAP_BRIDGE_MARKER)) {
+    const bodyClose = /<\/body\s*>/i.exec(out);
+    if (bodyClose?.index !== undefined) {
+      out = `${out.slice(0, bodyClose.index)}${CONTROLS_REMAP_BRIDGE_SNIPPET}\n${out.slice(bodyClose.index)}`;
+    } else {
+      out = `${out}\n${CONTROLS_REMAP_BRIDGE_SNIPPET}`;
     }
   }
   // Gamepad bridge — translates controller input into the synthetic key/mouse

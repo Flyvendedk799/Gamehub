@@ -167,7 +167,13 @@ export default function BuilderPage() {
             // tracks later file-tab/out-of-band edits, so the builder never gets
             // stuck showing a stale run snapshot. (`completeEvent.previewUrl` is
             // still what the server records in history; we just render HEAD.)
-            setPreviewUrl(`${BASE}/v1/projects/${projectId}/preview/`);
+            //
+            // The `?t=` stamp is load-bearing on an ITERATION: HEAD's URL is the
+            // same string it already was, so setting it again is a no-op React
+            // state write — the iframe src never changes and the pane keeps
+            // showing the PREVIOUS build until the user reloads by hand. Stamping
+            // it makes every finished run repoint the iframe at the new HEAD.
+            setPreviewUrl(`${BASE}/v1/projects/${projectId}/preview/?t=${Date.now()}`);
             setIsStreaming(false);
             streamCtrlRef.current?.close();
             refreshSnapshots();
