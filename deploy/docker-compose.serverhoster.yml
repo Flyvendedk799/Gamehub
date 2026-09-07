@@ -1,0 +1,55 @@
+# ServerHoster overlay — how this stack runs on the VPS.
+#
+# ServerHoster (LocalSURV) deploys playerzero.online as TWO things from this one
+# repo, both auto-deployed from master:
+#
+#   * the Next.js web tier, as a native ServerHoster process service on :3009,
+#     which the Cloudflare tunnel points playerzero.online at;
+#   * this compose stack, as a single `compose` service, providing the API,
+#     the generation/browser workers, Postgres and Redis.
+#
+# ServerHoster applies this file automatically as an overlay whenever it finds
+# it beside the compose file (`docker-compose.serverhoster.yml`), after
+# `docker-compose.yml`. It replaces the untracked `docker-compose.override.yml`
+# that used to live on the VPS: ServerHoster hard-resets the git checkout on
+# every deploy, so an untracked file there would be destroyed on the first pull.
+#
+# Local development is unaffected — plain `docker compose up` does not load this
+# file, only `docker-compose.override.yml`, which stays untracked and yours.
+#
+# SECRETS DO NOT LIVE HERE. They come from ServerHoster's encrypted env store,
+# passed to compose with `--env-file`, which replaces the default `.env`
+# lookup. Every `${VAR}` in docker-compose.yml resolves from there.
+
+services:
+  api:
+    # Published on loopback only. The tunnel never reaches the API directly —
+    # the browser talks to playerzero.online (:3009) and the Next server
+    # rewrites /v1/* here via API_PROXY_TARGET.
+    ports: ['127.0.0.1:3191:3191']
+    volumes:
+      # Carried over from the VPS override this file replaces. Read-only.
+      - /home/administrator/.claude:/root/.claude:ro
+
+  worker:
+    volumes:
+      - /home/administrator/.claude:/root/.claude:ro
+
+  # ---------------------------------------------------------------------------
+  # Deliberately NOT started on ServerHoster. Both are behind a profile that is
+  # never enabled here, so `docker compose up -d` skips them; `--profile local`
+  # still brings them up by hand if ever needed.
+  # ---------------------------------------------------------------------------
+
+  web:
+    # Superseded by the ServerHoster process service on :3009, which is what the
+    # tunnel actually routes to. Running this too would build and keep a second,
+    # unreachable copy of the same Next app.
+    profiles: ['local']
+
+  caddy:
+    # MUST NOT start here. It binds 80:80 and 443:443, and on this VPS port 80
+    # belongs to the ServerHoster control plane. TLS terminates at Cloudflare
+    # and the tunnel forwards plain HTTP to localhost, so there is nothing for
+    # Caddy to do — it would only fight for the port.
+    profiles: ['local']
