@@ -624,6 +624,9 @@ describe('assertGameInvariants brawler-specific checks (Sequence 6)', () => {
       'controls',
       'decoy-engine',
       'debug-snapshot',
+      // Always evaluated (it only RAISES when the source shows physics-shaped
+      // literals), so it belongs in the genre-independent baseline.
+      'tuning-block',
     ]);
     expect(result.genre).toBeNull();
   });
@@ -960,5 +963,51 @@ describe('assertGameInvariants — v3 P4 skill-staged-unused', () => {
   it('does not run when there are no src/engine modules', () => {
     const r = assertGameInvariants(deps([{ path: 'src/main.js', content: 'const x = 1;' }]));
     expect(r.checked).not.toContain('skill-staged-unused');
+  });
+});
+
+describe('tuning-block invariant', () => {
+  /** The production shape: five bare jump velocities, no name on any of them. */
+  const SCATTERED_LITERALS = `
+    onJump() { this.player.body.setVelocityY(-360); }
+    onDoubleJump() { this.player.body.setVelocityY(-420); }
+    onWallJump() { this.player.body.setVelocityY(-340); }
+  `;
+
+  it('warns when feel numbers are inline literals with no GAME_TUNING block', () => {
+    const r = assertGameInvariants(deps([{ path: 'src/main.js', content: SCATTERED_LITERALS }]));
+    expect(r.checked).toContain('tuning-block');
+    expect(r.issues.map((i) => i.invariant)).toContain('tuning-block');
+  });
+
+  it('does NOT warn once those numbers live in a GAME_TUNING block', () => {
+    const tuned = `
+      const TUNING = /*GAME-TUNING-BEGIN*/{"jumpVelocity":360,"doubleJumpVelocity":420}/*GAME-TUNING-END*/;
+      window.__game.tuning = TUNING;
+      ${SCATTERED_LITERALS}
+    `;
+    const r = assertGameInvariants(deps([{ path: 'src/main.js', content: tuned }]));
+    expect(r.issues.map((i) => i.invariant)).not.toContain('tuning-block');
+  });
+
+  it('stays quiet for a game with no physics-shaped values at all', () => {
+    // A turn-based / pointer / text game has nothing to collect — nagging it
+    // would push the agent to invent tunables it does not have.
+    const r = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: 'function onTileClick(i){ board[i] = turn; turn = -turn; render(); }',
+        },
+      ]),
+    );
+    expect(r.issues.map((i) => i.invariant)).not.toContain('tuning-block');
+  });
+
+  it('is satisfied by reading through the block, not by naming one constant', () => {
+    // `const JUMP_VELOCITY = 360;` alone is still un-tunable from the panel.
+    const named = 'const JUMP_VELOCITY = 360;\nbody.setVelocityY(-JUMP_VELOCITY);';
+    const r = assertGameInvariants(deps([{ path: 'src/main.js', content: named }]));
+    expect(r.issues.map((i) => i.invariant)).toContain('tuning-block');
   });
 });

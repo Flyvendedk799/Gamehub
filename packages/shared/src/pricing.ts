@@ -43,6 +43,15 @@ function deepFreeze<T extends Record<string, unknown>>(obj: T): Readonly<T> {
  *  this codebase: 'claude-sonnet-4-6', 'claude-opus-4-7', etc.).
  *  Deep-frozen so accidental mutation of nested entries throws. */
 export const ANTHROPIC_PRICING: Readonly<Record<string, ModelPricingEntry>> = deepFreeze({
+  // Sonnet 5 — the current Sonnet, and the platform default. Cheaper than the
+  // 4.6 it replaced (2 / 10 vs 3 / 15), so a run's implied cost DROPS on the
+  // model bump rather than rising.
+  'claude-sonnet-5': {
+    inputPerMillion: 2.0,
+    cachedInputPerMillion: 0.2,
+    cacheCreationPerMillion: 2.5,
+    outputPerMillion: 10.0,
+  },
   // Sonnet family — 3 / 15.
   'claude-sonnet-4-6': {
     inputPerMillion: 3.0,
@@ -56,7 +65,13 @@ export const ANTHROPIC_PRICING: Readonly<Record<string, ModelPricingEntry>> = de
     cacheCreationPerMillion: 3.75,
     outputPerMillion: 15.0,
   },
-  // Opus family — top-tier reasoning, 5 / 25 (≈1.67× Sonnet).
+  // Opus family — top-tier reasoning, 5 / 25 (2.5× Sonnet 5).
+  'claude-opus-5': {
+    inputPerMillion: 5.0,
+    cachedInputPerMillion: 0.5,
+    cacheCreationPerMillion: 6.25,
+    outputPerMillion: 25.0,
+  },
   'claude-opus-4-8': {
     inputPerMillion: 5.0,
     cachedInputPerMillion: 0.5,
@@ -76,6 +91,12 @@ export const ANTHROPIC_PRICING: Readonly<Record<string, ModelPricingEntry>> = de
     outputPerMillion: 25.0,
   },
   // Fable family — most capable, above Opus tier: 10 / 50.
+  'claude-fable-5-1': {
+    inputPerMillion: 10.0,
+    cachedInputPerMillion: 1.0,
+    cacheCreationPerMillion: 12.5,
+    outputPerMillion: 50.0,
+  },
   'claude-fable-5': {
     inputPerMillion: 10.0,
     cachedInputPerMillion: 1.0,
@@ -139,19 +160,26 @@ export interface UsageTokens {
  *  for unknown models so a missing pricing entry never silently disables the
  *  threshold. */
 export const MODEL_CONTEXT_WINDOWS: Readonly<Record<string, number>> = Object.freeze({
+  // Sonnet 5 — 1M context, the platform default
+  'claude-sonnet-5': 1_000_000,
+  'claude-sonnet-5[1m]': 1_000_000,
   // Sonnet 4.6 — 1M context at standard pricing
   'claude-sonnet-4-6': 1_000_000,
   'claude-sonnet-4-6[1m]': 1_000_000,
   // Sonnet 4.5 — 200k standard, 1M with the 1M-context beta
   'claude-sonnet-4-5': 200_000,
-  // Opus 4.6 / 4.7 / 4.8 — 1M context at standard pricing
+  // Opus 5 / 4.6 / 4.7 / 4.8 — 1M context at standard pricing
+  'claude-opus-5': 1_000_000,
+  'claude-opus-5[1m]': 1_000_000,
   'claude-opus-4-8': 1_000_000,
   'claude-opus-4-8[1m]': 1_000_000,
   'claude-opus-4-7': 1_000_000,
   'claude-opus-4-7[1m]': 1_000_000,
   'claude-opus-4-6': 1_000_000,
   'claude-opus-4-6[1m]': 1_000_000,
-  // Fable 5 — 1M context (default == max)
+  // Fable 5 / 5.1 — 1M context (default == max)
+  'claude-fable-5-1': 1_000_000,
+  'claude-fable-5-1[1m]': 1_000_000,
   'claude-fable-5': 1_000_000,
   'claude-fable-5[1m]': 1_000_000,
   // Haiku 4.5 — 200k
@@ -222,7 +250,10 @@ export function estimateContextUsedPct(
  *  input billed at the standard rate. */
 export function computeImpliedCost(usage: UsageTokens, modelId: string | null | undefined): number {
   const id = modelId ?? '';
-  const entry = ANTHROPIC_PRICING[id] ?? ANTHROPIC_PRICING['claude-sonnet-4-6'];
+  // Unknown model → price it as the platform default rather than 0, so a
+  // mis-typed or newly-released id under-reports slightly instead of showing
+  // a free run. Keep this in step with PLATFORM_MODEL_ID in deploy/.
+  const entry = ANTHROPIC_PRICING[id] ?? ANTHROPIC_PRICING['claude-sonnet-5'];
   if (!entry) return 0;
   const cached = Math.max(0, usage.cachedInputTokens);
   const created = Math.max(0, usage.cacheCreationInputTokens);

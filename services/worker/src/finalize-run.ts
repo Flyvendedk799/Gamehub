@@ -164,6 +164,11 @@ export async function finalizeRun(db: Db, args: FinalizeRunArgs): Promise<Finali
             prompt,
             ...(result.spec !== null ? { gameSpec: result.spec } : {}),
             ...(result.engine !== null ? { engine: result.engine } : {}),
+            // Live-tweak controls for this snapshot. The column existed and the
+            // builder read it, but no writer ever populated it — so the tweak
+            // panel had no schema to render for any game ever built. See
+            // shared/game-tuning.ts.
+            ...(result.tweakSchema != null ? { tweakSchema: result.tweakSchema } : {}),
             filesManifestKey: manifestKey,
             filesHash: result.snapshot.filesHash,
           })

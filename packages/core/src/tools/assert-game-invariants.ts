@@ -20,6 +20,7 @@
  */
 
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+import { hasGameTuning } from '@playforge/shared';
 import { Type } from '@sinclair/typebox';
 import type { TextEditorFsCallbacks } from './text-editor.js';
 
@@ -83,6 +84,7 @@ export type GameInvariant =
   | 'escalation'
   | 'decoy-engine'
   | 'debug-snapshot'
+  | 'tuning-block'
   | 'silent-audio'
   | 'silent-game'
   | 'dead-image'
@@ -183,6 +185,23 @@ function findStagedUnusedSkills(deps: AssertGameInvariantsDeps): string[] {
   }
   return dead;
 }
+
+/**
+ * Evidence that the game has FEEL numbers worth naming — a bare numeric literal
+ * handed to a physics/motion setter. Deliberately narrow: it must not fire on a
+ * turn-based, pointer-driven, or text game that legitimately has no such values
+ * to collect, and it must not fire on a game that already reads `TUNING.x`
+ * (those call sites pass an identifier, not a literal).
+ */
+const TUNABLE_LITERAL_PATTERNS: readonly RegExp[] = [
+  // Phaser / Arcade: setVelocityY(-360), setGravityY(1800), setAccelerationX(240)
+  /\.set(?:Velocity|Gravity|Acceleration|Drag|Bounce|MaxVelocity|Friction)[XYZ]?\s*\(\s*-?\d+(?:\.\d+)?\s*[,)]/,
+  // Bare assignment of a motion field to a literal: velocity.y = -360, speed = 240
+  /\b(?:velocity|gravity|acceleration|speed|jump\w*|thrust|damping|friction)\s*(?:\.\s*[xyz]\s*)?=\s*-?\d+(?:\.\d+)?\s*;/i,
+  // A named jump/gravity/speed const bound to a literal but NOT inside a tuning
+  // block — the "five scattered literals" shape with a name on only some of them.
+  /\b(?:const|let|var)\s+[A-Z_]*(?:JUMP|GRAVITY|SPEED|VELOCITY)[A-Z_]*\s*=\s*-?\d+(?:\.\d+)?\s*;/,
+];
 
 /** Restart binding — any of: an explicit reset()/restart() function,
  *  a key handler for R / Space that mutates state back, or `location.reload`. */
@@ -483,7 +502,34 @@ export function assertGameInvariants(
     'controls',
     'decoy-engine',
     'debug-snapshot',
+    'tuning-block',
   ];
+
+  // ── tuning-block ──────────────────────────────────────────────────────────
+  // A game whose feel numbers are inline literals cannot be tuned by anything
+  // but another AI run, and each run has to re-find every site. The production
+  // case: one parkour runner spread its jump across five bare `setVelocityY`
+  // literals, and "the jump is too high" cost six runs — each edit caught some
+  // sites and missed others, and one flipped a sign and killed jumping outright.
+  //
+  // Only nag when there is real evidence of physics-shaped tuning in the source,
+  // so a pointer-driven or turn-based game is never told to invent numbers it
+  // doesn't have.
+  if (!hasGameTuning(source) && anyMatch(source, TUNABLE_LITERAL_PATTERNS)) {
+    issues.push({
+      invariant: 'tuning-block',
+      severity: 'warn',
+      message:
+        'Feel numbers are inline literals with no GAME_TUNING block. Collect them into ' +
+        'one named block at the top of the entry file — ' +
+        'const TUNING = /*GAME-TUNING-BEGIN*/{ "jumpVelocity": 360, ... }/*GAME-TUNING-END*/; ' +
+        'window.__game.tuning = TUNING; — and read TUNING.x at the point of use. ' +
+        "That block powers the builder's live-tweak sliders (edits apply to the RUNNING " +
+        'game), so a player retunes the jump with a drag instead of spending a build run. ' +
+        'A value spread across several bare literals is the single most expensive ' +
+        'iteration failure there is: each later edit hits some sites and misses others.',
+    });
+  }
 
   if (!anyMatch(source, RESTART_PATTERNS)) {
     issues.push({

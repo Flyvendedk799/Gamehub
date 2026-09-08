@@ -19,6 +19,7 @@
 
 import { ART_RUNTIME_MARKER, ART_RUNTIME_SNIPPET } from './art-runtime';
 import { GAMEPAD_BRIDGE_MARKER, GAMEPAD_BRIDGE_SNIPPET } from './controls-gamepad';
+import { GAME_TUNING_BRIDGE_MARKER, GAME_TUNING_BRIDGE_SNIPPET } from './game-tuning';
 import { RUNTIME_BEACON_MARKER, RUNTIME_BEACON_SNIPPET } from './runtime-beacon';
 
 const MANIFEST_TYPE = 'playforge:controls:manifest';
@@ -281,6 +282,20 @@ export function injectControlsRuntime(html: string): string {
       out = `${out.slice(0, at)}\n${ART_RUNTIME_SNIPPET}${out.slice(at)}`;
     } else {
       out = `${ART_RUNTIME_SNIPPET}\n${out}`;
+    }
+  }
+  // Live-tuning bridge (window.__game.tuning). At <head> so the object exists
+  // before the game module runs and can assign its own GAME_TUNING block over
+  // it. This is what makes the builder's "Live tweaks" panel actually move a
+  // game: the React/Babel tweaks-bridge it replaces is inert without ReactDOM,
+  // so for Phaser/Three games nothing was listening at all. See game-tuning.ts.
+  if (!out.includes(GAME_TUNING_BRIDGE_MARKER)) {
+    const headOpen = /<head[^>]*>/i.exec(out);
+    if (headOpen?.index !== undefined) {
+      const at = headOpen.index + headOpen[0].length;
+      out = `${out.slice(0, at)}\n${GAME_TUNING_BRIDGE_SNIPPET}${out.slice(at)}`;
+    } else {
+      out = `${GAME_TUNING_BRIDGE_SNIPPET}\n${out}`;
     }
   }
   if (!out.includes(CONTROLS_MANIFEST_BRIDGE_MARKER)) {

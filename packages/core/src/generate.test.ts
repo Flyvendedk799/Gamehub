@@ -1637,8 +1637,13 @@ describe('prompt section .txt vs TS drift', () => {
       const tsConstant = PROMPT_SECTIONS[key];
       expect(tsConstant, `PROMPT_SECTIONS["${key}"] is missing`).toBeDefined();
       const txtContent = readFileSync(resolve(promptsDir, txtFileName), 'utf-8');
-      // trim trailing newline if .txt has one but constant doesn't (or vice versa)
-      expect((tsConstant as string).trim()).toBe(txtContent.trim());
+      // Compare CONTENT, not line endings. A template literal normalises CRLF to
+      // LF per spec, while the .txt is read from disk verbatim — so on a Windows
+      // checkout (where git hands these files back as CRLF) every section here
+      // failed permanently, for a difference that cannot reach the model. Both
+      // sides are normalised so the test catches real drift on every platform.
+      const normalize = (s: string): string => s.replace(/\r\n/g, '\n').trim();
+      expect(normalize(tsConstant as string)).toBe(normalize(txtContent));
     });
   }
 });

@@ -11,6 +11,7 @@ import {
   type PlaytestPredicate,
   type PlaytestTrace,
   evaluatePredicate,
+  outOfWorldFailure,
   parsePlaytestPredicate,
   resolvePath,
   scorePlaytest,
@@ -189,5 +190,66 @@ describe('scorePlaytest — observed/substantiation (plan step 6)', () => {
       { field: 'missingField', op: 'increased' }, // missing → NOT observed
     ]);
     expect(score.observed).toBe(1);
+  });
+});
+
+describe('out-of-world guard (universal floor)', () => {
+  /** A player that falls through the floor and keeps accelerating. This is the
+   *  trace two production runs shipped as `passed 2/2` while the user was
+   *  reporting "character falls through ground" — every genre predicate it was
+   *  graded against was satisfied by the fall itself. */
+  const FELL_THROUGH: PlaytestTrace = {
+    baseline: { playerPos: { x: 100, y: 300 }, score: 0 },
+    frames: [
+      { stepIndex: 0, snapshot: { playerPos: { x: 140, y: 900 }, score: 4 } },
+      { stepIndex: 1, snapshot: { playerPos: { x: 180, y: 48000 }, score: 9 } },
+    ],
+  };
+
+  it('fails a run whose player left the world, even with every genre predicate passing', () => {
+    // These are exactly the runner playbook's original two predicates. Both
+    // pass on this trace — that was the bug.
+    const genrePredicates: PlaytestPredicate[] = [
+      { field: 'score', op: 'increased' },
+      { field: 'playerPos.y', op: 'changed' },
+    ];
+    expect(genrePredicates.every((p) => evaluatePredicate(FELL_THROUGH, p).pass)).toBe(true);
+
+    const score = scorePlaytest(FELL_THROUGH, genrePredicates);
+    expect(score.pass).toBe(false);
+    expect(score.failures).toBe(1);
+    expect(score.results.at(-1)?.reason).toMatch(/left the world/);
+  });
+
+  it('runs even when the genre shipped no predicates at all', () => {
+    expect(scorePlaytest(FELL_THROUGH, []).pass).toBe(false);
+  });
+
+  it('never fires on ordinary play — a normal jump arc is not a fall', () => {
+    const normalJump: PlaytestTrace = {
+      baseline: { playerPos: { x: 100, y: 300 } },
+      frames: [
+        { stepIndex: 0, snapshot: { playerPos: { x: 140, y: 180 } } }, // rising
+        { stepIndex: 1, snapshot: { playerPos: { x: 190, y: 301 } } }, // landed
+      ],
+    };
+    expect(outOfWorldFailure(normalJump)).toBeNull();
+    expect(scorePlaytest(normalJump, [{ field: 'playerPos.y', op: 'changed' }]).pass).toBe(true);
+  });
+
+  it('catches a 3D game falling on the depth axis too', () => {
+    const fell3d: PlaytestTrace = {
+      baseline: { playerPos: { x: 0, y: 0, z: 0 } },
+      frames: [{ stepIndex: 0, snapshot: { playerPos: { x: 1, y: 0, z: -90000 } } }],
+    };
+    expect(outOfWorldFailure(fell3d)?.pass).toBe(false);
+  });
+
+  it('stays silent when the game exposes no position (that is the debug contract check, not this)', () => {
+    const noPos: PlaytestTrace = {
+      baseline: { score: 0 },
+      frames: [{ stepIndex: 0, snapshot: { score: 3 } }],
+    };
+    expect(outOfWorldFailure(noPos)).toBeNull();
   });
 });

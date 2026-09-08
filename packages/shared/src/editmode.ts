@@ -27,6 +27,11 @@ const EDITMODE_RE = /\/\*\s*EDITMODE-BEGIN\s*\*\/([\s\S]*?)\/\*\s*EDITMODE-END\s
 const BARE_TWEAK_DEFAULTS_RE = /const\s+TWEAK_DEFAULTS\s*=\s*/;
 const TWEAK_SCHEMA_RE = /\/\*\s*TWEAK-SCHEMA-BEGIN\s*\*\/([\s\S]*?)\/\*\s*TWEAK-SCHEMA-END\s*\*\//;
 
+/** A GAME's tunables block. Games carry no TWEAK_DEFAULTS — that is a
+ *  design-artifact construct in index.html — so this is the anchor
+ *  `replaceTweakSchema` uses for them. See `game-tuning.ts`. */
+const GAME_TUNING_RE = /\/\*\s*GAME-TUNING-BEGIN\s*\*\/([\s\S]*?)\/\*\s*GAME-TUNING-END\s*\*\//;
+
 export interface EditmodeBlock {
   tokens: Record<string, unknown>;
   /** Raw inner span (between the markers) — useful for diagnostics. */
@@ -244,6 +249,18 @@ export function replaceTweakSchema(source: string, schema: TweakSchema): string 
   if (bare) {
     const semi = source.indexOf(';', bare.objEnd);
     const insertAt = semi >= 0 ? semi + 1 : bare.objEnd;
+    const block = `\nconst TWEAK_SCHEMA = /*TWEAK-SCHEMA-BEGIN*/${json}/*TWEAK-SCHEMA-END*/;`;
+    return `${source.slice(0, insertAt)}${block}${source.slice(insertAt)}`;
+  }
+  // GAMES anchor on their GAME_TUNING block instead. A game has no
+  // TWEAK_DEFAULTS (that is a design-artifact construct living in index.html),
+  // so without this branch `declare_tweak_schema` was a guaranteed no-op on
+  // every game — the reason no game ever shipped a tweak schema.
+  const tuning = GAME_TUNING_RE.exec(source);
+  if (tuning) {
+    const tuningEnd = tuning.index + tuning[0].length;
+    const semi = source.indexOf(';', tuningEnd);
+    const insertAt = semi >= 0 ? semi + 1 : tuningEnd;
     const block = `\nconst TWEAK_SCHEMA = /*TWEAK-SCHEMA-BEGIN*/${json}/*TWEAK-SCHEMA-END*/;`;
     return `${source.slice(0, insertAt)}${block}${source.slice(insertAt)}`;
   }

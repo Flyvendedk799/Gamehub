@@ -829,6 +829,7 @@ export * from './rt-relay';
 export * from './controls-runtime';
 export * from './art-runtime';
 export * from './controls-gamepad';
+export * from './game-tuning';
 export * from './runtime-beacon';
 export * from './brand';
 export * from './game-jam';

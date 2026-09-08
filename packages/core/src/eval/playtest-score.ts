@@ -317,11 +317,78 @@ export function evaluatePredicate(
  * Score a whole predicate set against a trace. Pure; deterministic.
  * `pass` is true only when EVERY predicate passes.
  */
+/**
+ * How far the player may drift from its starting position on the gravity axis
+ * before we call it "fell out of the world" rather than "moved".
+ *
+ * Chosen well clear of legitimate play: a Phaser runner's jump arc is tens of
+ * pixels and a level's vertical extent is typically a few hundred; a Three
+ * scene works in metres, where a fall of 5000 is not a level. Anything past
+ * this in a short scripted playtest is a body that has left the map and is
+ * still accelerating.
+ */
+const OUT_OF_WORLD_DRIFT = 5000;
+
+/**
+ * Genre-agnostic "did the player fall out of the world" guard.
+ *
+ * WHY THIS IS NOT A PER-PLAYBOOK PREDICATE: it was, and that is exactly how it
+ * got missed. The runner playbook's only vertical check was
+ * `playerPos.y:changed`, which a player falling through the floor satisfies
+ * perfectly — two production runs shipped `passed 2/2` while the user reported
+ * "character falls through ground", twice, and the playbook's `watchFor` named
+ * the case in English where nothing could check it. Every gravity genre has the
+ * same hole, so the floor belongs here, applied to every trace, rather than
+ * being re-remembered in each playbook.
+ *
+ * Deliberately one-sided and enormous: it never fails a game for moving, only
+ * for leaving. Returns `null` when there is nothing to judge (no numeric
+ * position in the snapshot), so a game that exposes no `playerPos` is not
+ * penalised for it — that is the debug-contract check's job, not this one.
+ */
+export function outOfWorldFailure(trace: PlaytestTrace): PredicateResult | null {
+  const last = trace.frames[trace.frames.length - 1];
+  if (last === undefined) return null;
+
+  for (const axis of ['y', 'z'] as const) {
+    const path = `playerPos.${axis}`;
+    const start = asNumber(resolvePath(trace.baseline, path));
+    const end = asNumber(resolvePath(last.snapshot, path));
+    if (start === undefined || end === undefined) continue;
+    const drift = Math.abs(end - start);
+    if (drift <= OUT_OF_WORLD_DRIFT) continue;
+    return {
+      predicate: {
+        field: path,
+        op: 'unchanged',
+        frame: 'final',
+        against: 'baseline',
+        epsilon: OUT_OF_WORLD_DRIFT,
+        label: 'player stayed in the world (no fall-through)',
+      },
+      pass: false,
+      fieldPresent: true,
+      observed: end,
+      baseline: start,
+      reason:
+        `${path} drifted ${Math.round(drift)} from its start (${Math.round(start)} → ` +
+        `${Math.round(end)}) during a short playtest — the player left the world. ` +
+        'This is the signature of missing or broken ground collision: the body ' +
+        'falls forever instead of landing.',
+    };
+  }
+  return null;
+}
+
 export function scorePlaytest(
   trace: PlaytestTrace,
   predicates: ReadonlyArray<PlaytestPredicate>,
 ): PlaytestScore {
   const results = predicates.map((p) => evaluatePredicate(trace, p));
+  // The universal floor runs on EVERY trace, whatever the genre declared, and
+  // whether or not the genre shipped any predicates of its own.
+  const outOfWorld = outOfWorldFailure(trace);
+  if (outOfWorld !== null) results.push(outOfWorld);
   const failures = results.filter((r) => !r.pass).length;
   const observed = results.filter((r) => r.fieldPresent).length;
   return { pass: failures === 0, results, failures, observed };

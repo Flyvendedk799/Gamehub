@@ -314,6 +314,49 @@ const RUNNER: PlaytestPlaybook = {
         { field: 'playerPos.y', op: 'changed', frame: { step: 1 }, against: { step: 0 } },
       ],
     },
+    // LANDING — the predicate that makes "the player falls through the floor"
+    // an actual FAILURE. Without it the playbook's only vertical check was
+    // `playerPos.y:changed`, which a player falling out of the world satisfies
+    // perfectly: two production runs shipped `passed 2/2` while the user was
+    // reporting exactly that bug, twice. `watchFor` named the case in English
+    // and nothing ever checked it. Mirrors the PLATFORMER arc's landing step.
+    //
+    // Epsilon is deliberately loose (8px): a runner's ground can legitimately
+    // undulate, and the point is to catch a player who is METRES below the
+    // floor and still accelerating, not to grade landing precision.
+    {
+      kind: 'wait',
+      durationFrames: 90,
+      assert:
+        'Player LANDED — `playerPos.y` is back at its pre-jump ground value (±8). ' +
+        'A player still falling here has no floor collision.',
+      predicates: [
+        {
+          field: 'playerPos.y',
+          op: 'unchanged',
+          frame: { step: 2 },
+          against: { step: 0 },
+          epsilon: 8,
+          label: 'player returns to ground after a jump (no fall-through)',
+        },
+      ],
+    },
+    // The run axis must still be advancing AFTER the jump+landing cycle. A game
+    // whose forward motion dies on landing passes every step above.
+    {
+      kind: 'wait',
+      durationFrames: 60,
+      assert: 'Distance is STILL accruing after the jump — `score` increased again.',
+      predicates: [
+        {
+          field: 'score',
+          op: 'increased',
+          frame: { step: 3 },
+          against: { step: 2 },
+          label: 'run continues after landing',
+        },
+      ],
+    },
   ],
   watchFor: [
     'Jump pauses the run axis (player x stops advancing while in the air).',
@@ -686,18 +729,14 @@ const TYCOON: PlaytestPlaybook = {
       kind: 'wait',
       durationFrames: 60,
       assert: '`credits` INCREASED from passive income / producers.',
-      predicates: [
-        { field: 'credits', op: 'increased', frame: { step: 0 }, against: 'baseline' },
-      ],
+      predicates: [{ field: 'credits', op: 'increased', frame: { step: 0 }, against: 'baseline' }],
     },
     {
       kind: 'mouse',
       button: 0,
       assert:
         'Clicking a build/buy button spends credits (DECREASED) and raises rate or unlocks a producer.',
-      predicates: [
-        { field: 'credits', op: 'decreased', frame: { step: 1 }, against: { step: 0 } },
-      ],
+      predicates: [{ field: 'credits', op: 'decreased', frame: { step: 1 }, against: { step: 0 } }],
     },
   ],
   watchFor: [

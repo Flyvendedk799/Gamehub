@@ -30,7 +30,12 @@
  */
 
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
-import { type TweakSchema, parseTweakSchema, replaceTweakSchema } from '@playforge/shared';
+import {
+  type TweakSchema,
+  hasGameTuning,
+  parseTweakSchema,
+  replaceTweakSchema,
+} from '@playforge/shared';
 import { Type } from '@sinclair/typebox';
 import type { TextEditorFsCallbacks } from './text-editor.js';
 
@@ -54,6 +59,20 @@ const DeclareTweakSchemaParams = Type.Object({
   path: Type.Optional(Type.String()),
   schema: Type.Record(Type.String(), SchemaEntry),
 });
+
+/**
+ * Where a GAME declares its tunables, vs. where a DESIGN artifact does.
+ *
+ * A design artifact carries `TWEAK_DEFAULTS` in `index.html`; a game carries a
+ * `GAME_TUNING` block in its entry module (`src/main.js`). Before this, the tool
+ * only knew about the former, so on a game it had nothing to anchor to and
+ * returned "no TWEAK_DEFAULTS in artifact yet" no matter what the agent did —
+ * which is why `tweakSchemaDeclared` was false on every production game run.
+ *
+ * Order matters: the game entry is checked first, because a game also has an
+ * `index.html` (a thin bootstrap) and we must not anchor the schema there.
+ */
+const GAME_TUNING_PATHS = ['src/main.js', 'main.js', 'game.js', 'src/game.js'] as const;
 
 export interface DeclareTweakSchemaError {
   message: string;
@@ -82,7 +101,16 @@ export function makeDeclareTweakSchemaTool(
       'the previous schema. Tokens left out fall back to host heuristics.',
     parameters: DeclareTweakSchemaParams,
     async execute(_id, params): Promise<AgentToolResult<DeclareTweakSchemaDetails>> {
-      const path = params.path ?? 'index.html';
+      // Resolve the anchor file. An explicit `path` always wins; otherwise
+      // prefer a game entry that already declares GAME_TUNING, and fall back to
+      // the design artifact's index.html. See GAME_TUNING_PATHS.
+      const path =
+        params.path ??
+        GAME_TUNING_PATHS.find((p) => {
+          const f = fs.view(p);
+          return f !== null && hasGameTuning(f.content);
+        }) ??
+        'index.html';
       const errors: DeclareTweakSchemaError[] = [];
 
       // Re-validate via the shared parser by round-tripping the input through

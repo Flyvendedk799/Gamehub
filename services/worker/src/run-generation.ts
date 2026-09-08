@@ -52,8 +52,10 @@ import {
 import { GAME_ENGINE_ADAPTERS } from '@playforge/runtime/engines';
 import {
   computeImpliedCost,
+  inferTweakSchema,
   injectControlsRuntime,
   normalizeEngineCdnUrls,
+  parseGameTuning,
 } from '@playforge/shared';
 import type { ChatMessage } from '@playforge/shared';
 import type { GameSpec, ModelRef } from '@playforge/shared';
@@ -340,6 +342,10 @@ export interface GenerationResult {
    *  caller persists it on the continuation_pending row so the builder can show
    *  the question + collect an answer. Null for a normal/complete run. */
   pendingQuestion?: string | null;
+  /** Live-tweak controls derived from the shipped tree's GAME_TUNING block, for
+   *  the `snapshots.tweak_schema` column the builder's tweak panel reads. Null
+   *  when the game declared no tuning block. */
+  tweakSchema?: Record<string, unknown> | null;
 }
 
 /**
@@ -1289,6 +1295,29 @@ export async function runGeneration(
 
   const snapshot = await tree.persist(ports.store);
 
+  // ── Live-tuning schema (#tuning) ──────────────────────────────────────────
+  // Read the shipped tree's GAME_TUNING block and derive the tweak schema the
+  // builder's "Live tweaks" panel renders. This is the last of three breaks
+  // that made that panel dead for games: the bridge was React-only, the tool
+  // had no game-shaped anchor, and NOTHING ever wrote `snapshots.tweak_schema`
+  // — so even a declared schema could never reach the panel. See
+  // shared/game-tuning.ts for the whole story.
+  //
+  // Best-effort by construction: a missing or malformed block yields null and
+  // the panel simply doesn't offer sliders. It must never fail a run.
+  const tweakSchema = (() => {
+    try {
+      for (const f of tree.toTextFiles()) {
+        if (!f.path.endsWith('.js') && !f.path.endsWith('.html')) continue;
+        const tuning = parseGameTuning(f.content);
+        if (tuning !== null) return inferTweakSchema(tuning);
+      }
+    } catch {
+      /* agent-authored source — never let a parse failure sink the run */
+    }
+    return null;
+  })();
+
   const encoder = new TextEncoder();
   const fsState = tree.toSnapshotInput().map((f) => ({
     path: f.path,
@@ -1506,6 +1535,7 @@ export async function runGeneration(
       cacheWriteTokens: usedCacheWriteTokens,
     },
     pendingQuestion,
+    tweakSchema,
     ...(lastRuntimeVerify !== undefined ? { runtimeVerify: lastRuntimeVerify } : {}),
   };
 }

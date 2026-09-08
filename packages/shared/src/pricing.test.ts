@@ -195,14 +195,23 @@ describe('computeImpliedCost (Phase 3)', () => {
     ).toBeCloseTo(5, 6);
   });
 
-  it('unknown model falls back to Sonnet-4-6 pricing (sane ballpark, never $0)', () => {
+  it('unknown model falls back to the platform-default model (sane ballpark, never $0)', () => {
     const cost = computeImpliedCost(FPS_RUN, 'never-shipped-model-id');
     expect(cost).toBeGreaterThan(0);
-    const sonnet = computeImpliedCost(FPS_RUN, 'claude-sonnet-4-6');
+    // The fallback tracks PLATFORM_MODEL_ID, which is Sonnet 5.
+    const sonnet = computeImpliedCost(FPS_RUN, 'claude-sonnet-5');
     expect(cost).toBeCloseTo(sonnet, 6);
   });
 
-  it('null / undefined modelId defaults to Sonnet-4-6 rather than $0', () => {
+  it('prices Sonnet 5 below the Sonnet 4.6 it replaced (2/10 vs 3/15)', () => {
+    // The model bump must LOWER the implied cost of an identical run — if this
+    // ever inverts, a pricing entry has drifted from the published rate card.
+    expect(computeImpliedCost(FPS_RUN, 'claude-sonnet-5')).toBeLessThan(
+      computeImpliedCost(FPS_RUN, 'claude-sonnet-4-6'),
+    );
+  });
+
+  it('null / undefined modelId defaults to the platform model rather than $0', () => {
     expect(computeImpliedCost(FPS_RUN, null)).toBeGreaterThan(0);
     expect(computeImpliedCost(FPS_RUN, undefined)).toBeGreaterThan(0);
   });
