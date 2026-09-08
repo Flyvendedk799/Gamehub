@@ -3795,3 +3795,61 @@ describe('cloud saves (P10b)', () => {
     expect(res.json()).toEqual({ error: 'cloud_save_unavailable' });
   });
 });
+
+describe('re-publishing after a failed publish (status recovery)', () => {
+  /** A bundle that satisfies the static gate. */
+  async function seedPublishable(
+    repo: InstanceType<typeof InMemoryProjectRepo>,
+    store: SnapshotStore,
+  ) {
+    const proj = await repo.create({ ownerId: 'alice', name: 'My Game', engine: 'canvas2d' });
+    const { manifestKey } = await store.write([
+      {
+        path: 'index.html',
+        bytes: Buffer.from(
+          '<!doctype html><html><head><meta charset="utf-8"></head><body><canvas id="game"></canvas>' +
+            '<script>window.__game = { debug: {} };</script></body></html>',
+          'utf8',
+        ),
+      },
+    ]);
+    await repo.setCurrentSnapshot(proj.id, 'snap-1', manifestKey);
+    return proj;
+  }
+
+  it('restores a game to live after an earlier publish left it unpublished', async () => {
+    const repo = new InMemoryProjectRepo();
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const publishRepo = new InMemoryPublishRepo();
+    const project = await seedPublishable(repo, store);
+    const app = makeApp({ repo, store, publishRepo });
+
+    const first = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${project.id}/publish`,
+      headers: AS_ALICE,
+    });
+    expect(first.statusCode).toBe(200);
+
+    // Simulate the state a failed gate leaves behind (a smoke-test 422 parks the
+    // row here). `upsert` never resets status, so before this fix EVERY later
+    // publish returned 200 with a play URL that went on 404-ing forever.
+    const published = await publishRepo.getByProject(project.id);
+    expect(published).not.toBeNull();
+    await publishRepo.setStatus(published!.id, 'unpublished');
+
+    const second = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${project.id}/publish`,
+      headers: AS_ALICE,
+    });
+    expect(second.statusCode).toBe(200);
+
+    const after = await publishRepo.getByProject(project.id);
+    expect(after?.status).toBe('live');
+
+    // And the play route actually serves it again.
+    const play = await app.inject({ method: 'GET', url: `/v1/play/${after?.publishSlug}` });
+    expect(play.statusCode).toBe(200);
+  });
+});
