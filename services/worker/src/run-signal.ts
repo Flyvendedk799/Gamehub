@@ -27,6 +27,8 @@ export interface RunSignal {
   /** True when the agent committed a declare_playtest_contract — the genre-less /
    *  novel-idea path. A key "did this fit a box or not" signal. */
   contractAuthored: boolean;
+  /** ITERATION runs: did the agent declare what this turn's edit would change? */
+  editIntentDeclared: boolean;
   /** True when the run declared a tweak schema (live-tweakable params). */
   tweakSchemaDeclared: boolean;
   /** Count of str_replace tool results that reported a failure (edit thrash). */
@@ -70,6 +72,7 @@ export function createRunSignalAggregator() {
   const imported = new Set<string>();
   let invariantWarnings: string[] = [];
   let contractAuthored = false;
+  let editIntentDeclared = false;
   let tweakSchemaDeclared = false;
   let strReplaceFailures = 0;
   // BUILD_SPEED §6 — restart accounting.
@@ -112,6 +115,7 @@ export function createRunSignalAggregator() {
         if (!name) return;
         toolCalls[name] = (toolCalls[name] ?? 0) + 1;
         if (name === 'declare_playtest_contract') contractAuthored = true;
+        if (name === 'declare_edit_intent') editIntentDeclared = true;
         if (name === 'declare_tweak_schema') tweakSchemaDeclared = true;
         if (name === 'view_game_feel' || name === 'import_skill') {
           // import_skill capture is finalised on tool_execution_end (details.name
@@ -170,6 +174,7 @@ export function createRunSignalAggregator() {
           billedInputTotal > 0 ? restartReestablishTokens / billedInputTotal : 0,
         restartSegmentTurns: [...segmentTurns],
         contractAuthored,
+        editIntentDeclared,
         tweakSchemaDeclared,
         strReplaceFailures,
       };

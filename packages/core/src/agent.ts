@@ -87,6 +87,7 @@ import {
   type MotionStyleName,
   makeChooseRemotionStyleTool,
 } from './tools/choose-remotion-style.js';
+import { type SetEditIntentFn, makeDeclareEditIntentTool } from './tools/declare-edit-intent.js';
 import { type SetGameSpecFn, makeDeclareGameSpecTool } from './tools/declare-game-spec.js';
 import {
   type GetGameContractFn,
@@ -1066,6 +1067,17 @@ export interface GenerateViaAgentDeps {
          *  the tool registers but no-ops (vitest paths). */
         setContract?: SetGameContractFn | undefined;
         getContract?: GetGameContractFn | undefined;
+        /** ITERATION runs only — what the user asked for THIS turn, as
+         *  machine-checkable predicates. `setEditIntent` persists it into the
+         *  per-run mutable; the boot-and-repair loop scores it ALONGSIDE the
+         *  genre floor so an edit must both work and do what was asked. The
+         *  tool is only registered when `isIteration` is true (there is no
+         *  prior behaviour to change on a first build). Undefined ⇒ registers
+         *  but no-ops (vitest paths). */
+        setEditIntent?: SetEditIntentFn | undefined;
+        /** True when this run edits an existing game (the working tree was
+         *  seeded from a parent snapshot). Gates `declare_edit_intent`. */
+        isIteration?: boolean | undefined;
       }
     | undefined;
 }
@@ -1227,6 +1239,19 @@ export async function generateViaAgent(
         unknown
       >,
     );
+    // declare_edit_intent — ITERATIONS only. Nothing in the pipeline previously
+    // checked whether an edit did what the user asked; the genre floor kept
+    // passing because the game kept being a working game, so a request could be
+    // ignored across many runs while every run reported success. Registered only
+    // on an iteration: on a first build there is no prior behaviour to change.
+    if (deps.gameMode.isIteration === true) {
+      defaultTools.push(
+        makeDeclareEditIntentTool(deps.gameMode.setEditIntent) as unknown as AgentTool<
+          TSchema,
+          unknown
+        >,
+      );
+    }
     defaultTools.push(
       makeChooseEngineTool(deps.gameMode.setEngine, deps.gameMode.getSpec) as unknown as AgentTool<
         TSchema,

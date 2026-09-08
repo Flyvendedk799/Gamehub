@@ -17,6 +17,7 @@ import {
   type AgentEvent,
   type AttemptObservation,
   type DoneError,
+  type EditIntent,
   type RuntimeVerifyObservation as EvalRuntimeVerify,
   type GamePlaytestPlan,
   type GenerateInput,
@@ -43,6 +44,7 @@ import {
   parseVisualCritique,
   recommendSkills,
   resolveMaxRepairRounds,
+  scorePlaytest,
   selectGamePlaytestPlan,
   traceFromPlaytestResult,
 } from '@playforge/agent-core';
@@ -589,13 +591,22 @@ export async function runGeneration(
     // Agent-authored playtest contract — the deterministic verdict source for a
     // genre-less game (set via declare_playtest_contract; null otherwise).
     contract: GamePlaytestPlan | null;
+    // ITERATION only — what the user asked for THIS turn, as checkable
+    // predicates (set via declare_edit_intent; null otherwise).
+    editIntent: EditIntent | null;
   } = {
     engine: req.engine ?? null,
     // Seed the prior spec on an iteration so the agent amends it (getSpec returns
     // it) rather than declaring a fresh one and rebuilding the game.
     spec: req.spec ?? null,
     contract: null,
+    editIntent: null,
   };
+
+  /** True when this run EDITS an existing game — the working tree was seeded
+   *  from a parent snapshot. Gates `declare_edit_intent`: a first build has no
+   *  prior behaviour to change, so there is nothing for it to assert against. */
+  const isIteration = req.initialFiles !== undefined;
 
   // Wrap the caller's event sink so we can meter token usage from `turn_end`
   // events and trip the abort signal once the budget is exceeded. When no token
@@ -883,6 +894,10 @@ export async function runGeneration(
         state.contract = plan;
       },
       getContract: () => state.contract ?? undefined,
+      isIteration,
+      setEditIntent: (intent) => {
+        state.editIntent = intent;
+      },
       ...(playtester !== undefined ? { playtester } : {}),
     },
   };
@@ -1078,6 +1093,44 @@ export async function runGeneration(
         'The genre playbook needs window.__game.debug.snapshot() to read game state, but it returned no contract. Wire it in ONE line: call window.__game.debug.track({ score: () => score, player, ... }) (or set window.__game.state.*) exposing the fields the gameplay updates — otherwise the playtest cannot verify your game.',
       );
     }
+    // ── Did the edit do what the USER asked? ────────────────────────────────
+    // Everything above verifies the game as a GAME. This is the only check that
+    // asks whether THIS turn's request happened, and it is deliberately scored
+    // on its own input plan (the genre plan drives different keys).
+    //
+    // The failure it exists for: a session where 12 of 15 runs were the user
+    // re-asking for a change the agent had reported as done, and every one of
+    // them shipped `passed 2/2` — because the genre floor kept passing while the
+    // request was ignored. A failure here is a repairable fatal that quotes the
+    // user back, so the repair round is aimed at the actual complaint instead of
+    // at a generic "something is wrong".
+    const editIntent = state.editIntent;
+    if (editIntent?.plan != null && editIntent.plan.predicates.length > 0) {
+      const intentResult = await browserJobs.playtest(verifyHtml, editIntent.plan.steps);
+      if (intentResult !== null) {
+        const intentScore = scorePlaytest(
+          traceFromPlaytestResult(intentResult),
+          editIntent.plan.predicates,
+        );
+        if (!intentScore.pass) {
+          const failures = intentScore.results
+            .filter((r) => !r.pass)
+            .map((r) => `  - ${r.reason}`)
+            .join('\n');
+          fatalErrors.push(
+            `The edit did NOT do what was asked. The user's request was: "${editIntent.request}" ` +
+              `— which you said would be observable as: ${editIntent.observable}. ` +
+              `Driven in a real browser, that is not what the game does:\n${failures}\n` +
+              'Do not restate the change; the measurement above is what the game actually did. ' +
+              'Find why the edit had no effect (a value overridden elsewhere, a second hard-coded ' +
+              'copy of the same number, an early return, a branch that never runs) and fix the ' +
+              'real cause. If the assertion itself is wrong — wrong field, wrong sign for this ' +
+              "engine's axes — say so and correct it.",
+          );
+        }
+      }
+    }
+
     const observation: AttemptObservation = {
       trace: playVerdict === null ? null : traceFromPlaytestResult(playVerdict),
       fatalErrors,
@@ -1454,6 +1507,13 @@ export async function runGeneration(
     visualFindings: visualCritiques[0]?.findings ?? [],
     recommendedButUnused,
     engineEscaped,
+    // Iteration fidelity (#editIntent). `isIteration && !editIntentChecks` is the
+    // shape to watch: an edit run that committed to nothing observable is one
+    // that can silently ignore the request, which is the failure this whole
+    // mechanism exists to make impossible.
+    isIteration,
+    editIntentChecks: state.editIntent?.plan?.predicates.length ?? 0,
+    editIntentFields: [...new Set(state.editIntent?.plan?.predicates.map((p) => p.field) ?? [])],
     ...sig,
   };
   console.log(`[build-report] ${JSON.stringify(buildReport)}`);

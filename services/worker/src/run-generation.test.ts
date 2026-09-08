@@ -9,6 +9,7 @@ import {
   type AgentEvent,
   type GenerateOutput,
   type PlaytestStep,
+  planFromContract,
   starterPathsFor,
 } from '@playforge/agent-core';
 import type { GameSpec } from '@playforge/shared';
@@ -1728,5 +1729,191 @@ describe('visual critique (BUILD_SPEED §3 — one frame, twice, never a loop)',
 
     expect(browserJobs.screenshots).toBe(0);
     expect(critiques).toBe(0);
+  });
+});
+
+describe('edit-intent fidelity gate (#editIntent — did the edit do what was ASKED?)', () => {
+  const TOPDOWN_SPEC = {
+    schemaVersion: 1,
+    genre: 'topdown_arcade',
+    dimensions: '2d',
+    perspective: 'top_down',
+    cameraKind: 'follow_2d',
+    primaryInputs: ['keyboard'],
+    numActors: 1,
+    winCondition: 'Reach the exit tile.',
+    loseCondition: 'Touch an enemy.',
+    features: {},
+  } as unknown as GameSpec;
+
+  /** The user asked for a LOWER jump: after Space, y must stay above 260
+   *  (screen-space y grows downward, so "higher y" == "lower jump"). */
+  const LOWER_JUMP_CHECKS = [
+    { action: 'wait' as const, holdFrames: 20 },
+    {
+      action: 'key' as const,
+      key: 'Space',
+      holdFrames: 8,
+      assertField: 'playerPos.y',
+      assertOp: 'greaterThan' as const,
+      assertValue: 260,
+    },
+  ];
+
+  /** An agent that declares the intent, then edits. `jumpApexY` decides whether
+   *  the edit actually lowered the jump. */
+  function editingAgent(onRound: (prompt: string) => void): GenerateFn {
+    return async (input, deps) => {
+      onRound(input.prompt);
+      await deps.gameMode?.setSpec?.(TOPDOWN_SPEC);
+      await deps.gameMode?.setEditIntent?.({
+        request: 'make the jump about a quarter as high',
+        observable: 'Space lifts the player far less far off the ground',
+        // The tool projects these; here we hand the planner output in directly
+        // via the same helper the tool uses.
+        plan: planFromContract({ intent: 'lower jump', checks: LOWER_JUMP_CHECKS }),
+      });
+      await deps.fs?.create('index.html', RED_SQUARE);
+      return emptyOutput('edited');
+    };
+  }
+
+  /** Browser stub: the genre playtest always passes; the INTENT playtest
+   *  reports the apex the queue says this round produced. The two are told
+   *  apart by the steps they are driven with (the intent plan uses Space). */
+  function jumpBrowserJobs(apexPerRound: number[]): BrowserJobsPort & { intentCalls: number } {
+    let intentIdx = 0;
+    return {
+      intentCalls: 0,
+      async runtimeVerify() {
+        return { hasGameContract: true, fatalErrors: [] } satisfies RuntimeVerifyVerdict;
+      },
+      async playtest(_html, steps) {
+        const isIntentPlan = steps.some((s) => s.kind === 'key' && s.code === 'Space');
+        if (!isIntentPlan) {
+          // Genre floor — always satisfied, exactly like the production runs
+          // that shipped `passed 2/2` while ignoring the request.
+          return {
+            hasGameContract: true,
+            hasDebugContract: true,
+            baselineSnapshot: { playerPos: { x: 100, y: 100 } },
+            steps: [
+              {
+                step: { kind: 'key', code: 'KeyW' },
+                snapshotAfter: { playerPos: { x: 100, y: 70 } },
+                errors: [],
+              },
+              {
+                step: { kind: 'key', code: 'KeyS' },
+                snapshotAfter: { playerPos: { x: 100, y: 110 } },
+                errors: [],
+              },
+              {
+                step: { kind: 'key', code: 'KeyA' },
+                snapshotAfter: { playerPos: { x: 70, y: 110 } },
+                errors: [],
+              },
+              {
+                step: { kind: 'key', code: 'KeyD' },
+                snapshotAfter: { playerPos: { x: 110, y: 110 } },
+                errors: [],
+              },
+            ],
+            bootErrors: [],
+          } satisfies PlaytestVerdict;
+        }
+        this.intentCalls += 1;
+        const apex = apexPerRound[Math.min(intentIdx, apexPerRound.length - 1)] ?? 300;
+        intentIdx += 1;
+        return {
+          hasGameContract: true,
+          hasDebugContract: true,
+          baselineSnapshot: { playerPos: { x: 100, y: 300 } },
+          steps: [
+            {
+              step: { kind: 'wait', frames: 20 },
+              snapshotAfter: { playerPos: { x: 100, y: 300 } },
+              errors: [],
+            },
+            {
+              step: { kind: 'key', code: 'Space' },
+              snapshotAfter: { playerPos: { x: 100, y: apex } },
+              errors: [],
+            },
+          ],
+          bootErrors: [],
+        } satisfies PlaytestVerdict;
+      },
+    };
+  }
+
+  it('does NOT ship an edit that ignored the request, even with the genre floor passing', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    // Apex 40 == still flying way up: the jump was NOT lowered. Every round
+    // reports the same, so the loop exhausts its repairs rather than shipping.
+    const browserJobs = jumpBrowserJobs([40]);
+    const prompts: string[] = [];
+
+    const result = await runGeneration(
+      {
+        prompt: 'the jump is way too high',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+        initialFiles: [['index.html', RED_SQUARE]],
+      },
+      { store, generate: editingAgent((p) => prompts.push(p)), browserJobs },
+    );
+
+    // This is the whole point: the genre predicates passed, and it still did
+    // not ship clean. Before this gate the run reported `passed` with repair=0.
+    expect(result.repairRounds).toBeGreaterThan(0);
+    expect(result.shipReason).not.toBe('passed');
+    // And the repair prompt quotes the user's own words back.
+    expect(prompts.slice(1).join('\n')).toContain('make the jump about a quarter as high');
+  });
+
+  it('ships once the edit actually lands, with the repair prompt naming the measurement', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    // Round 0 fails (apex 40 — unchanged), round 1 lands (apex 280 — lower jump).
+    const browserJobs = jumpBrowserJobs([40, 280]);
+    const prompts: string[] = [];
+
+    const result = await runGeneration(
+      {
+        prompt: 'the jump is way too high',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+        initialFiles: [['index.html', RED_SQUARE]],
+      },
+      { store, generate: editingAgent((p) => prompts.push(p)), browserJobs },
+    );
+
+    expect(result.repairRounds).toBe(1);
+    expect(result.shipReason).toBe('passed');
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain('playerPos.y');
+  });
+
+  it('is inert on a FIRST build — there is no prior behaviour to change', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = jumpBrowserJobs([40]);
+    const agent: GenerateFn = async (_input, deps) => {
+      await deps.gameMode?.setSpec?.(TOPDOWN_SPEC);
+      await deps.fs?.create('index.html', RED_SQUARE);
+      return emptyOutput('built');
+    };
+
+    const result = await runGeneration(
+      {
+        prompt: 'a topdown game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+        // No initialFiles → first build.
+      },
+      { store, generate: agent, browserJobs },
+    );
+
+    expect(result.shipReason).toBe('passed');
+    expect(browserJobs.intentCalls).toBe(0);
   });
 });

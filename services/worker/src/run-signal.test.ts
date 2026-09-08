@@ -101,6 +101,7 @@ describe('createRunSignalAggregator', () => {
       skillsImported: [],
       invariantWarnings: [],
       contractAuthored: false,
+      editIntentDeclared: false,
       tweakSchemaDeclared: false,
       strReplaceFailures: 0,
       agentStarts: 0,

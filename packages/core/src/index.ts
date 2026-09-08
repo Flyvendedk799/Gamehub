@@ -53,7 +53,6 @@ export { generateViaAgent } from './agent.js';
 
 export type { AgentEvent, GenerateViaAgentDeps } from './agent.js';
 
-
 // S3 — scene graph: same EditorSession the agent and the builder share.
 export {
   createEditorSession,
@@ -171,6 +170,11 @@ export {
   type AuthoredContract,
   type AuthoredContractCheck,
 } from './playtest-planner.js';
+export {
+  makeDeclareEditIntentTool,
+  type EditIntent,
+  type SetEditIntentFn,
+} from './tools/declare-edit-intent.js';
 export {
   getPlaytestPlaybook,
   listSupportedGenres,
