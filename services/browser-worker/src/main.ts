@@ -955,6 +955,24 @@ export async function runRuntimeVerify(
   }
 }
 
+/**
+ * True when the game's largest canvas is WebGL — i.e. `sampleCanvasBlank` will
+ * abstain on it and the thumbnail loop must fall back to comparing composited
+ * frames. Defensive: any failure reports false, which keeps the existing 2D path.
+ */
+async function isWebglCanvas(page: Page): Promise<boolean> {
+  try {
+    return await page.evaluate(() => {
+      const canvas = document.querySelector('canvas');
+      if (!(canvas instanceof HTMLCanvasElement)) return false;
+      // A canvas already bound to WebGL returns null for a '2d' context.
+      return canvas.getContext('2d') === null;
+    });
+  } catch {
+    return false;
+  }
+}
+
 /** Bounded retries for the thumbnail non-blank loop so a legitimately-uniform 2D
  *  game (or a WebGL game sampleCanvasBlank abstains on) can't spin — the loop
  *  also has a wall-clock deadline as a second backstop. */
@@ -1073,10 +1091,32 @@ export async function runThumbnail(
       // canvas that is still genuinely uniform. The wall-clock deadline (under the
       // job hard timeout) guarantees termination.
       const deadline = Date.now() + bootTimeoutMs;
+      // `sampleCanvasBlank` deliberately ABSTAINS on a WebGL canvas (it cannot
+      // read one without preserveDrawingBuffer, and must not guess for the
+      // renderedNonBlank verdict, which fails runs). It returns false there —
+      // "not blank" — so this loop used to break on its FIRST iteration for
+      // every Three.js game and capture whatever was on screen, which for a 3D
+      // game still loading its engine and assets is the empty clear colour.
+      // That is why 3D share cards were a flat dark rectangle.
+      //
+      // So for the WebGL path, use a signal that works without reading the
+      // canvas at all: composited frames that CHANGE between ticks mean the
+      // scene is live. A rendered-but-static 3D scene never differs and simply
+      // spends the (bounded) retries before capturing anyway — no worse than
+      // before, and the animated majority now waits for real pixels.
+      const webgl = await isWebglCanvas(page);
+      let previous: Buffer | null = null;
       for (let i = 0; i < THUMBNAIL_MAX_NONBLANK_RETRIES; i += 1) {
         await tickFrames(page, JUICE_FRAME_WINDOW).catch(() => {});
         await flushCompositor();
-        if (!(await sampleCanvasBlank(page))) break;
+        if (webgl) {
+          const current = (await captureGameFrame(page, vp)).bytes;
+          const painted = previous !== null && !current.equals(previous);
+          previous = current;
+          if (painted) break;
+        } else if (!(await sampleCanvasBlank(page))) {
+          break;
+        }
         if (Date.now() >= deadline) break;
         // The title may have needed a frame to wire its start handler — re-nudge.
         if (i === 1) await dispatchStartInput(page);

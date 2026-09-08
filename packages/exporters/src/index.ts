@@ -28,6 +28,8 @@ export type { ExportMarkdownOptions, MarkdownMeta } from './markdown';
 export {
   evaluateBootCheck,
   detectEngineFromHtml,
+  bundleHasGameContract,
+  searchableBundleSource,
   type BootCheckInput,
   type BootCheckResult,
 } from './boot-check';

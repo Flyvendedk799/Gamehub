@@ -22,6 +22,7 @@ import { runChannel } from '@playforge/bus';
 import {
   type ExportGameHtmlOptions,
   buildGameHtml,
+  bundleHasGameContract,
   detectEngineFromHtml,
   evaluateBootCheck,
 } from '@playforge/exporters';
@@ -2885,9 +2886,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     });
 
     // S14 — static boot-check before smoke: reject engine mismatch early.
+    //
+    // Both scans MUST go through the decoding helpers. `buildGameHtml` rewrites
+    // every module into a base64 `data:` URL, so a raw regex over the assembled
+    // bundle cannot see the game's source at all — this check was rejecting
+    // every multi-file game with "does not expose window.__game" while the
+    // bundle booted perfectly (the publish thumbnail boots this same HTML).
     const detectedEngine = detectEngineFromHtml(html);
     const staticBoot = evaluateBootCheck({
-      hasGameContract: /window\.__game|__game\s*=/.test(html),
+      hasGameContract: bundleHasGameContract(html),
       fatalErrors: [],
       declaredEngine: engine,
       detectedEngine,
