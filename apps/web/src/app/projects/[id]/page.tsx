@@ -112,6 +112,27 @@ export default function BuilderPage() {
       .catch(() => {});
   }, [projectId]);
 
+  /**
+   * Repoint the live preview at the project's CURRENT HEAD.
+   *
+   * Always HEAD, never a run's immutable snapshot URL: on completion HEAD == the
+   * run's output, but HEAD also tracks later file-tab edits, restores, and
+   * out-of-band changes, so the builder can never get stuck on a stale run.
+   *
+   * The `?t=` stamp is load-bearing: HEAD's URL is the same string it already
+   * was, so setting it again would be a no-op React state write — the iframe src
+   * would never change and the pane would keep showing the PREVIOUS build until
+   * the user reloaded by hand. Stamping makes every finished edit repoint it.
+   *
+   * Every path that advances HEAD must call this — a completed run, a PAUSED run
+   * (finalizeRun persists the work done up to the safe boundary), a file save,
+   * and a version restore.
+   */
+  const repointPreviewAtHead = useCallback(() => {
+    if (!projectId) return;
+    setPreviewUrl(`${BASE}/v1/projects/${projectId}/preview/?t=${Date.now()}`);
+  }, [projectId]);
+
   // Track active SSE controller so we can close it on unmount / new run
   const streamCtrlRef = useRef<{ close: () => void } | null>(null);
 
@@ -173,7 +194,7 @@ export default function BuilderPage() {
             // state write — the iframe src never changes and the pane keeps
             // showing the PREVIOUS build until the user reloads by hand. Stamping
             // it makes every finished run repoint the iframe at the new HEAD.
-            setPreviewUrl(`${BASE}/v1/projects/${projectId}/preview/?t=${Date.now()}`);
+            repointPreviewAtHead();
             setIsStreaming(false);
             streamCtrlRef.current?.close();
             refreshSnapshots();
@@ -193,9 +214,18 @@ export default function BuilderPage() {
           // single `run_paused` frame, then closes the stream. Stop streaming so
           // the ChatPanel's Resume button (re-fires generateGame; the server
           // auto-applies the stored continuation) takes over. Not an error.
+          //
+          // A pause STILL advances the project HEAD (finalizeRun writes
+          // `currentManifestKey` on the paused branch too — the agent's work up to
+          // the safe boundary is persisted), so the preview must be repointed here
+          // exactly as it is on completion. Without this the builder kept showing
+          // the pre-pause build until the user resumed and that run completed —
+          // the "the game is still the old version after a continuation run" bug.
           if (event.type === 'run_paused') {
+            repointPreviewAtHead();
             setIsStreaming(false);
             streamCtrlRef.current?.close();
+            refreshSnapshots();
           }
 
           // NOTE (#34): do NOT end the streaming UI on `agent_end`. Only the
@@ -221,7 +251,7 @@ export default function BuilderPage() {
 
       streamCtrlRef.current = ctrl;
     },
-    [refreshSnapshots, projectId],
+    [refreshSnapshots, repointPreviewAtHead],
   );
 
   // Resolve which run we're streaming, hydrate chat history (deduped against the
@@ -372,8 +402,11 @@ export default function BuilderPage() {
     setIsReverting(snapshotId);
     try {
       await revertToSnapshot(projectId, snapshotId);
-      // After revert, reload the preview from the reverted snapshot
-      setPreviewUrl(`${BASE}/v1/projects/${projectId}/preview/`);
+      // After revert, reload the preview from the reverted snapshot. Must go
+      // through the STAMPED helper: HEAD's URL is unchanged by a restore, so an
+      // unstamped set was a no-op state write and the iframe kept showing the
+      // version the user just reverted away from.
+      repointPreviewAtHead();
       setShowTimeline(false);
     } catch (err) {
       setLoadError(`Restore failed — ${describeApiError(err)}`);
@@ -705,7 +738,7 @@ export default function BuilderPage() {
               onFileSaved={() => {
                 // A manual file edit created a new version — repoint the live
                 // preview at the project's current HEAD and refresh the timeline.
-                setPreviewUrl(`${BASE}/v1/projects/${projectId}/preview/?t=${Date.now()}`);
+                repointPreviewAtHead();
                 refreshSnapshots();
               }}
               onMapControls={() => {

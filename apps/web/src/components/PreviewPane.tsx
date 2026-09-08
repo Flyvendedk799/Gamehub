@@ -93,6 +93,12 @@ export function PreviewPane({
   // render loop (rAF flatlined while the thread is still beating).
   const animatedRef = useRef(false);
   const staleBeatsRef = useRef(0);
+  // Whether the running game has EVER animated a frame (runtime beacon, rAF > 0).
+  // Mirrors `animatedRef` as render state — the Controls tab's empty state needs
+  // it to tell "the game isn't running yet, so it hasn't declared its controls"
+  // apart from "this game genuinely reads input directly". Set at most once per
+  // load, so it costs one extra render.
+  const [gameAnimated, setGameAnimated] = useState(false);
   // Tracks unsaved edits in the Files tab so switching tabs can't silently
   // discard them (the FilesPanel bubbles this up via onDirtyChange).
   const [filesDirty, setFilesDirty] = useState(false);
@@ -201,6 +207,7 @@ export function PreviewPane({
       if (alive) {
         if (alive.raf > 0) {
           animatedRef.current = true;
+          setGameAnimated(true);
           staleBeatsRef.current = 0;
         } else if (animatedRef.current && typeof document !== 'undefined' && !document.hidden) {
           staleBeatsRef.current += 1;
@@ -226,6 +233,7 @@ export function PreviewPane({
     setRuntimeIssue(null);
     setIssueDismissed(false);
     animatedRef.current = false;
+    setGameAnimated(false);
     staleBeatsRef.current = 0;
     // The reloaded game re-declares its controls from scratch, so nothing we
     // pushed to the previous instance is in effect any more; and whatever the
@@ -249,27 +257,66 @@ export function PreviewPane({
     [],
   );
 
-  // Pull the manifest when the Controls tab opens (covers a game that declared
-  // its controls before this pane attached its message listener). Retry over a
-  // few seconds and stop once a manifest arrives: a Three.js game can take a
-  // moment to load its engine module + call controls.define, so a single request
-  // on open often fires before the game has declared anything.
+  // Pull the manifest while the Controls tab is open and we still don't have one.
+  //
+  // This used to be five one-shot timers that gave up after 5s. That assumed a
+  // game declares its controls at load — but generated games routinely call
+  // `controls.define` inside the PLAY scene's create(), which only runs after the
+  // player presses Start on a title screen. The Controls tab overlays the game,
+  // so the user cannot start it from there, every request came back empty, and
+  // after 5s the panel settled on the "this game reads input directly" empty
+  // state — for a game that declares its controls perfectly well. That dead end
+  // is what pushed people into spending a whole AI run to "map controls" on a
+  // game that was already mappable.
+  //
+  // Asking on an interval instead costs one postMessage per second and nothing
+  // else, and the panel now populates the moment the game reaches the scene that
+  // declares its controls. It stops as soon as a manifest arrives.
   useEffect(() => {
     if (view !== 'controls' || controlsManifest) return;
-    let cancelled = false;
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    for (const delay of [0, 700, 1500, 3000, 5000]) {
-      timers.push(
-        setTimeout(() => {
-          if (!cancelled) sendControlsRequest(iframeRef.current);
-        }, delay),
-      );
-    }
-    return () => {
-      cancelled = true;
-      for (const t of timers) clearTimeout(t);
-    };
+    sendControlsRequest(iframeRef.current);
+    const iv = setInterval(() => sendControlsRequest(iframeRef.current), 1000);
+    return () => clearInterval(iv);
   }, [view, controlsManifest]);
+
+  // localStorage key for this project's saved key bindings. Keyed on the preview
+  // URL with its query stripped: the query carries cache-busting stamps (a
+  // finished run, a file save), and keying on those made every iteration and
+  // every save look like a different game — silently discarding the user's binds.
+  const controlsStorageKey = useMemo(
+    () => `pf:controls:${previewUrl?.split('?')[0] ?? projectId}`,
+    [previewUrl, projectId],
+  );
+
+  // Push the user's SAVED binds into every fresh game instance, whichever tab is
+  // showing.
+  //
+  // The seed used to live only inside ControlsPanel, which is mounted only while
+  // the Controls tab is open. So custom binds never applied while you were just
+  // playing on the Preview tab, and — worse — reloading the preview (which the
+  // panel itself cues you to do after a rebind) dropped the manifest, restarted
+  // the game on its own declared defaults, and left your binds unapplied until
+  // you went back to the Controls tab. Seeding here, off the manifest itself,
+  // makes a rebind survive every reload and every finished iteration.
+  useEffect(() => {
+    if (!controlsManifest) return;
+    let saved: Record<string, string[]> | null = null;
+    try {
+      const raw = localStorage.getItem(controlsStorageKey);
+      const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+      if (parsed && typeof parsed === 'object') saved = parsed as Record<string, string[]>;
+    } catch {
+      /* storage unavailable (private mode) — fall back to declared defaults */
+    }
+    const defaults: Record<string, string[]> = {};
+    const seeded: Record<string, string[]> = {};
+    for (const a of controlsManifest.actions) {
+      defaults[a.id] = [...a.keys];
+      seeded[a.id] = saved?.[a.id] ?? [...a.keys];
+    }
+    applyControls(seeded, defaults);
+    // `applyControls` is a stable useCallback with no deps.
+  }, [controlsManifest, controlsStorageKey, applyControls]);
 
   // Give the game keyboard focus the moment it loads. An iframe only receives
   // keydown while it (not the host page) holds focus, so without this the
@@ -500,15 +547,23 @@ export function PreviewPane({
               <ControlsPanel
                 manifest={controlsManifest}
                 onApply={applyControls}
-                // Keyed on the preview URL with its query stripped. The query
-                // carries cache-busting stamps (a finished run, a file save), and
-                // keying on those made every iteration and every save look like a
-                // different game — silently discarding the user's key bindings.
-                storageKey={`pf:controls:${previewUrl?.split('?')[0] ?? projectId}`}
+                storageKey={controlsStorageKey}
                 // A user rebind applies live, but cue a reload so they can restart
-                // the game and test the new bindings from a clean state.
+                // the game and test the new bindings from a clean state. Safe to
+                // cue now that PreviewPane re-seeds saved binds on every load.
                 onUserRebind={() => setPreviewStale(true)}
                 gamepadConnected={gamepadConnected}
+                // Has the game actually started running? Most generated games
+                // declare their controls inside the play scene, so before the
+                // player presses Start there is genuinely nothing to show — a
+                // very different situation from "this game can't be mapped".
+                gameStarted={gameAnimated}
+                onStartGame={() => {
+                  setView('preview');
+                  // Focus after the tab swap so the keypress that starts the game
+                  // lands in the iframe rather than the builder.
+                  setTimeout(focusGame, 0);
+                }}
                 {...(onMapControls ? { onMapWithAI: onMapControls } : {})}
               />
             </div>

@@ -758,10 +758,12 @@ export async function runGeneration(
           // S1 — juice without audio is mute. When the browser measured juice,
           // require at least one audioPlays tick.
           const juice = verdict.juiceScore ?? 0;
-          const plays =
-            typeof (verdict as { audioPlays?: number }).audioPlays === 'number'
-              ? (verdict as { audioPlays: number }).audioPlays
-              : 0;
+          // `audioPlays` is an optional extra the browser worker may report but
+          // `RuntimeVerifyVerdict` doesn't declare, so read it structurally. Going
+          // via `unknown` is required: a direct cast to `{ audioPlays: number }`
+          // is a TS2352 error because the two types don't overlap.
+          const maybePlays = (verdict as unknown as { audioPlays?: unknown }).audioPlays;
+          const plays = typeof maybePlays === 'number' ? maybePlays : 0;
           if (juice >= 15 && plays <= 0) {
             errors.push({
               message:

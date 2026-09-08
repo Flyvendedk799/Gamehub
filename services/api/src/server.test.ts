@@ -816,8 +816,13 @@ describe('publish + play routes', () => {
     const { manifestKey } = await store.write([
       {
         path: 'index.html',
+        // Must carry the `window.__game` contract: publish runs a STATIC boot
+        // check (S14) before it ever gets to the thumbnail, and a bundle with no
+        // game contract is rejected 422 — so a fixture without it never reaches
+        // the capture these two tests are about.
         bytes: Buffer.from(
-          '<!doctype html><html><head><meta charset="utf-8"></head><body><canvas id="game"></canvas></body></html>',
+          '<!doctype html><html><head><meta charset="utf-8"></head><body><canvas id="game"></canvas>' +
+            '<script>window.__game = { debug: {} };</script></body></html>',
           'utf8',
         ),
       },
@@ -1570,6 +1575,36 @@ describe('preview route', () => {
     expect(script.statusCode).toBe(200);
     expect(script.headers['content-type']).toBe('text/javascript; charset=utf-8');
     expect(script.body).toBe('console.log("ok");');
+  });
+
+  // The builder repoints the preview with a `?t=` stamp after every finished run,
+  // but the game's real payload (src/main.js, assets) is loaded by the HTML at a
+  // relative, unversioned URL — the SAME URL for every iteration. If any layer is
+  // allowed to store that response, the next build loads the previous build's
+  // module: the "I hard-refreshed and the game is still the old version" bug.
+  // `no-store` is what makes that impossible, and it must cover subresources too,
+  // not just the HTML shell the stamp reaches.
+  it('serves preview HTML and its subresources uncacheable (no-store)', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const runRepo = new InMemoryRunRepo();
+    const run = await runRepo.create({ projectId: 'proj_test', userId: 'alice' });
+    const { manifestKey } = await store.write([
+      { path: 'index.html', bytes: Buffer.from('<html><head></head><body></body></html>') },
+      { path: 'src/main.js', bytes: Buffer.from('console.log("v1");') },
+    ]);
+    await runRepo.setSnapshot(run.id, manifestKey);
+    const app = makeApp({ store, runRepo });
+
+    for (const path of ['', 'src/main.js']) {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/v1/runs/${run.id}/preview/${path}`,
+        headers: AS_ALICE,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['cache-control']).toEqual(expect.stringContaining('no-store'));
+      expect(res.headers['pragma']).toBe('no-cache');
+    }
   });
 
   it('serves sub-assets from a run snapshot', async () => {
@@ -3175,6 +3210,10 @@ describe('project files (Files tab)', () => {
     expect(ok.statusCode).toBe(200);
     expect(ok.headers['content-type']).toContain('text/html');
     expect(ok.body).toContain('hi');
+    // Uncacheable, for the same reason as the run preview — this is the URL the
+    // builder points at after every iteration, and its unversioned subresources
+    // must never come back from a cache. See the run-preview no-store test.
+    expect(ok.headers['cache-control']).toEqual(expect.stringContaining('no-store'));
 
     const forbidden = await app.inject({
       method: 'GET',

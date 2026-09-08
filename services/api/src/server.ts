@@ -19,7 +19,12 @@ import { join } from 'node:path';
 import websocketPlugin from '@fastify/websocket';
 import type { EventBus } from '@playforge/bus';
 import { runChannel } from '@playforge/bus';
-import { type ExportGameHtmlOptions, buildGameHtml, detectEngineFromHtml, evaluateBootCheck } from '@playforge/exporters';
+import {
+  type ExportGameHtmlOptions,
+  buildGameHtml,
+  detectEngineFromHtml,
+  evaluateBootCheck,
+} from '@playforge/exporters';
 import { exportGameZip } from '@playforge/exporters/game-zip';
 import {
   type StoredClaudeAuth,
@@ -33,6 +38,7 @@ import {
   BRAND_NAME,
   type ModelRef,
   PROVIDER_SHORTLIST,
+  RtRelay,
   SOCIAL_OUTRO_SCHEMA_VERSION,
   type SocialOutroSummary,
   SocialOutroSummarySchema,
@@ -43,7 +49,6 @@ import {
   normalizeEngineCdnUrls,
   parseInterviewPlan,
   resolvePlayEngine,
-  RtRelay,
 } from '@playforge/shared';
 import { type SnapshotStore, contentTypeFor, isSafeBundlePath } from '@playforge/storage';
 import {
@@ -120,6 +125,35 @@ function autoMod(title: string, html: string): string[] {
 
 const PREVIEW_AUTH_COOKIE = 'pf_preview_auth';
 const PREVIEW_AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60;
+
+/**
+ * Cache headers for the BUILDER preview routes (run preview + project HEAD).
+ *
+ * These must be uncacheable, full stop. The preview HTML is re-pointed with a
+ * `?t=` stamp after every finished run — but the game's real payload
+ * (`src/main.js` and its generated assets) is loaded BY that HTML at a relative,
+ * unversioned URL, which is the same URL for every iteration of the project.
+ * So the stamp only ever busts the ~1KB shell, never the game.
+ *
+ * The old `Cache-Control: no-cache` was the weakest workable instruction and
+ * carried NO validator with it (no ETag, no Last-Modified), so any layer that
+ * stored the response could hand back the previous build's module while the
+ * freshly-stamped index.html loaded around it: a browser treating a
+ * validator-less `no-cache` as heuristically fresh, the back/forward cache, an
+ * intermediate proxy, a mobile browser's offline store. That is exactly the
+ * "I hard-refreshed and the game is still the old version" report.
+ *
+ * `no-store` removes the ambiguity: nothing may be written to any cache, so the
+ * next load of `src/main.js` is always the current HEAD. Preview traffic is
+ * owner-only and low volume, so there is nothing to lose. Published `/play`
+ * bundles are immutable and keep their long-lived caching.
+ */
+function applyPreviewCacheHeaders(reply: FastifyReply): void {
+  reply
+    .header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+    .header('Pragma', 'no-cache')
+    .header('Expires', '0');
+}
 
 /**
  * Content-Security-Policy for SERVED, UNTRUSTED game HTML. Published `/play`
@@ -2542,10 +2576,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
             'utf8',
           )
         : Buffer.from(bytes);
+      applyPreviewCacheHeaders(reply);
       return (
         reply
           .header('Content-Type', ct)
-          .header('Cache-Control', 'no-cache')
           // Preview HTML is multi-file, so it can load generated same-origin
           // modules and approved engine CDNs while preserving the same embedding
           // restrictions as the published play route. (CSP M2)
@@ -2610,9 +2644,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
             'utf8',
           )
         : Buffer.from(bytes);
+      applyPreviewCacheHeaders(reply);
       return reply
         .header('Content-Type', ct)
-        .header('Cache-Control', 'no-cache')
         .header(
           'Content-Security-Policy',
           isHtml
@@ -3079,7 +3113,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       let snapshotEngine: 'phaser' | 'three' | 'canvas2d' | null = null;
       if (project.currentSnapshotId !== null && deps.snapshotRepo) {
         const snap = await deps.snapshotRepo.getById(project.currentSnapshotId);
-        snapshotEngine = (snap?.engine as 'phaser' | 'three' | 'canvas2d' | null | undefined) ?? null;
+        snapshotEngine =
+          (snap?.engine as 'phaser' | 'three' | 'canvas2d' | null | undefined) ?? null;
       }
       await exportGameZip(dest, {
         files,
@@ -3368,7 +3403,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       let snapshotEngine: 'phaser' | 'three' | 'canvas2d' | null = null;
       if (project.currentSnapshotId !== null && deps.snapshotRepo) {
         const snap = await deps.snapshotRepo.getById(project.currentSnapshotId);
-        snapshotEngine = (snap?.engine as 'phaser' | 'three' | 'canvas2d' | null | undefined) ?? null;
+        snapshotEngine =
+          (snap?.engine as 'phaser' | 'three' | 'canvas2d' | null | undefined) ?? null;
       }
       await exportGameArtifact('game-zip', tmpPath, {
         files,

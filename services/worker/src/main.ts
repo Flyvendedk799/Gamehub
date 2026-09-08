@@ -41,6 +41,7 @@ import {
   type RuntimeVerifyResult,
   type ThumbnailResult,
 } from './browser-jobs';
+import { captureProjectThumbnail } from './capture-thumbnail';
 import { finalizeRun } from './finalize-run';
 import { enqueueRun } from './queue';
 import type { BrowserJobsPort, RunTokenUsage, WebEngine } from './run-generation';
@@ -455,6 +456,49 @@ async function main() {
       const outcome = settled.outcome;
       if (outcome === null) {
         throw new Error(`[worker] run=${runId} was never settled — no finalizeRun outcome`);
+      }
+
+      // Gameplay thumbnail for the freshly-built game (completed runs only).
+      //
+      // This used to exist ONLY in the API's in-process fallback, which runs when
+      // no REDIS_URL is set. Every Redis-backed deployment generates here in the
+      // worker, so nothing ever captured a frame and `projects.thumbnail_url`
+      // stayed NULL for every project — which is why the dashboard cards, the Hub
+      // cards, and the Share card all rendered the placeholder instead of the
+      // game. Both entrypoints now go through the shared capture path.
+      //
+      // Best-effort and non-blocking, exactly like the API's: the job's result is
+      // already decided by this point, and a thumbnail is never worth failing a
+      // run over. `browserJobs.screenshot` is the same `thumbnail` browser job
+      // the visual critique uses — it boots the game, nudges past a title screen,
+      // and captures a non-blank frame of actual play.
+      if (!outcome.paused && browserJobs?.screenshot) {
+        const shot = browserJobs.screenshot;
+        void captureProjectThumbnail(
+          {
+            store,
+            screenshot: (htmlContent) => shot(htmlContent),
+            setThumbnail: async (id, thumbnailUrl) => {
+              await db
+                .update(schema.projects)
+                .set({ thumbnailUrl, updatedAt: new Date() })
+                .where(eq(schema.projects.id, id));
+            },
+          },
+          {
+            manifestKey: outcome.manifestKey,
+            engine: (result.engine ?? engine ?? 'phaser') as 'phaser' | 'three' | 'canvas2d',
+            projectId,
+          },
+        )
+          .then((captured) => {
+            console.log(
+              `[thumbnail] run=${runId} project=${projectId} ${captured ? 'captured' : 'no frame'}`,
+            );
+          })
+          .catch((err: unknown) => {
+            console.warn(`[thumbnail] run=${runId} capture failed:`, err);
+          });
       }
 
       // NOTE: No credit debit on success — the run cost was RESERVED at enqueue

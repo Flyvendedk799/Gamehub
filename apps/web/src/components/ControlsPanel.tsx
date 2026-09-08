@@ -1,5 +1,6 @@
 'use client';
 
+import { controlsPanelState } from '@/lib/controls-panel-state';
 import type { ControlsManifest } from '@/lib/iframe-bridge';
 import {
   autoMapGamepad,
@@ -66,6 +67,8 @@ export function ControlsPanel({
   onMapWithAI,
   onUserRebind,
   gamepadConnected = false,
+  gameStarted = false,
+  onStartGame,
 }: {
   manifest: ControlsManifest | null;
   /** Push the full binding set to the running game, alongside the keys the game
@@ -85,6 +88,16 @@ export function ControlsPanel({
   onUserRebind?: () => void;
   /** True when the running game reports a connected controller (gamepad bridge). */
   gamepadConnected?: boolean;
+  /** True once the game in the preview has actually started running (its render
+   *  loop has produced a frame — reported by the runtime beacon). Most generated
+   *  games call `controls.define` inside their PLAY scene, so before the player
+   *  presses Start there is nothing to show yet — which is NOT the same as a game
+   *  that can't be mapped. Drives which empty state we show. */
+  gameStarted?: boolean;
+  /** Switch back to the Preview tab and focus the game, so the player can press
+   *  Start. This panel overlays the game, so without it a title-screen game is a
+   *  dead end: you can't start it from here and its controls never load. */
+  onStartGame?: () => void;
 }) {
   const defaults = useMemo(() => (manifest ? bindingsFromManifest(manifest) : {}), [manifest]);
   const [bindings, setBindings] = useState<Bindings>({});
@@ -199,7 +212,38 @@ export function ControlsPanel({
     commit(mergeGamepadBindings(bindings, autoMapGamepad(manifest.actions)));
   }, [manifest, bindings, commit]);
 
-  if (!manifest) {
+  // No manifest yet has two very different causes — see `controlsPanelState`.
+  const state = controlsPanelState(manifest !== null, gameStarted);
+
+  if (manifest === null) {
+    // The game hasn't rendered a frame yet: it is still loading, or sitting on a
+    // title screen waiting for a keypress. Its controls simply aren't declared
+    // yet. Send the player to the game instead of selling them a fix.
+    if (state === 'waiting-for-start') {
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
+          <p className="max-w-xs text-sm leading-relaxed text-ink-3">
+            Waiting for the game to start. Most games register their controls once play begins —
+            start the game and this list fills in on its own.
+          </p>
+          {onStartGame && (
+            <button
+              type="button"
+              onClick={onStartGame}
+              className="bg-signal px-4 py-2.5 text-sm font-bold text-chrome transition-colors hover:bg-signal-bright md:py-2"
+            >
+              ▶ Start the game
+            </button>
+          )}
+          <p className="max-w-xs text-[11px] leading-relaxed text-ink-4">
+            You can come straight back here — the controls load in the background.
+          </p>
+        </div>
+      );
+    }
+
+    // The game IS running and still hasn't declared anything, so it really does
+    // read input directly. Now the AI rescue is the right offer.
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
         <p className="max-w-xs text-sm leading-relaxed text-ink-3">
@@ -219,6 +263,15 @@ export function ControlsPanel({
           Runs once to wire a rebindable controls layer (and fix any inverted keys). New games map
           their controls automatically.
         </p>
+        {onStartGame && (
+          <button
+            type="button"
+            onClick={onStartGame}
+            className="text-[11px] text-ink-4 underline transition-colors hover:text-ink-2"
+          >
+            Still on a menu? Start the game first
+          </button>
+        )}
       </div>
     );
   }
