@@ -1203,6 +1203,7 @@ Always drive to a COMPLETE, playable result: the core mechanic works, the win AN
        "jumpVelocity": 360, "doubleJumpVelocity": 420, "wallJumpVelocity": 340,
        "gravity": 1800, "runSpeed": 240, "slideDuration": 400
      }/*GAME-TUNING-END*/;
+     window.__game = window.__game || {};
      window.__game.tuning = TUNING;
      // then, at the point of use:
      body.setVelocityY(-TUNING.jumpVelocity);

@@ -29,7 +29,7 @@
  *     worker / e2e package.
  */
 
-import { ERROR_CODES, PlayforgeError } from '@playforge/shared';
+import { ERROR_CODES, PlayforgeError, injectControlsRuntime } from '@playforge/shared';
 import type { ExportResult } from './index';
 import type { ZipAsset } from './zip';
 
@@ -575,6 +575,25 @@ export async function buildGameHtml(opts: ExportGameHtmlOptions): Promise<string
   if (opts.appBaseUrl !== undefined && opts.publishSlug !== undefined) {
     html = injectRemixCta(html, opts.appBaseUrl, opts.publishSlug);
   }
+
+  // 6b. The `window.__game` runtime (controls / debug / art / tuning).
+  //
+  //     This was injected ONLY by the two preview routes, so a game had the
+  //     contract it is written against in the builder and NOT in the bundle it
+  //     ships. Every generated game is instructed to use `window.__game` —
+  //     declare its controls through it, expose a debug snapshot, register its
+  //     tuning block — so a published bundle without it is a game running on a
+  //     contract that isn't there. It surfaced as a publish smoke-test failure,
+  //     `Cannot set properties of undefined (setting 'tuning')`: the tuning
+  //     registration runs at module scope, so the asymmetry went from latent to
+  //     fatal-at-boot.
+  //
+  //     Injecting here covers EVERY export path (publish, zip, itch) at once.
+  //     The runtime is self-contained ES5 with no network access, idempotent on
+  //     its own markers, and installs before the game module — and players get
+  //     working rebindable controls and gamepad support in the published game
+  //     for free, which is what it was always for.
+  html = injectControlsRuntime(html);
 
   // 7. Enforce the anti-exfil CSP boundary (#13): strip any author/generated
   //    CSP meta so the game can't weaken the policy, then inject our locked

@@ -481,3 +481,42 @@ function decodeAllModules(source: string): string[] {
   }
   return out;
 }
+
+describe('published bundles carry the window.__game runtime', () => {
+  /** A game written the way the workflow prompt instructs: it registers its
+   *  tuning block at module scope, against the `window.__game` contract. */
+  const GAME_MODULE = [
+    "import * as THREE from 'three';",
+    'const TUNING = /*GAME-TUNING-BEGIN*/{"jumpVelocity":360}/*GAME-TUNING-END*/;',
+    'window.__game.tuning = TUNING;',
+  ].join('\n');
+
+  const INDEX = [
+    '<!doctype html><html><head>',
+    '<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>',
+    '</head><body><canvas id="game"></canvas>',
+    '<script type="module" src="src/main.js"></script>',
+    '</body></html>',
+  ].join('\n');
+
+  it('injects the runtime so a published game has the contract it is written against', async () => {
+    // The regression: injectControlsRuntime ran ONLY on the two preview routes,
+    // so `window.__game` existed in the builder and not in the shipped bundle.
+    // Publish failed its smoke test with
+    // "Cannot set properties of undefined (setting 'tuning')" — the tuning
+    // registration runs at module scope, so the gap was fatal at boot.
+    const dest = join(workDir, 'game.html');
+    await exportGameHtml(dest, {
+      files: [
+        { path: 'index.html', content: INDEX },
+        { path: 'src/main.js', content: GAME_MODULE },
+      ],
+      engine: 'three',
+    });
+    const html = readFileSync(dest, 'utf8');
+    expect(html).toContain('pf-controls-runtime');
+    expect(html).toContain('pf-game-tuning-bridge');
+    // And it must install BEFORE the game module that depends on it.
+    expect(html.indexOf('pf-controls-runtime')).toBeLessThan(html.indexOf('data:text/javascript'));
+  });
+});

@@ -33,7 +33,7 @@
         "REDIS_URL": "redis://127.0.0.1:6379",
         "BLOB_DIR": ".playforge-blobs",
         "PLATFORM_PROVIDER": "anthropic",
-        "PLATFORM_MODEL_ID": "claude-sonnet-5",
+        "PLATFORM_MODEL_ID": "claude-sonnet-4-6",
         "CORS_ORIGINS": "http://localhost:3004 http://127.0.0.1:3004",
         "APP_BASE_URL": "http://localhost:3004",
         "MAX_CONCURRENT_RUNS": "1",
@@ -50,7 +50,7 @@
         "REDIS_URL": "redis://127.0.0.1:6379",
         "BLOB_DIR": ".playforge-blobs",
         "PLATFORM_PROVIDER": "anthropic",
-        "PLATFORM_MODEL_ID": "claude-sonnet-5",
+        "PLATFORM_MODEL_ID": "claude-sonnet-4-6",
         "WORKER_CONCURRENCY": "4"
       },
       "requiredSecrets": ["PLATFORM_API_KEY"]
