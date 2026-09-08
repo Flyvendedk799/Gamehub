@@ -3016,6 +3016,20 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       }
     }
 
+    // Every gate passed — this game is live.
+    //
+    // MUST be explicit. `upsert` updates the bundle, title and spec of an
+    // existing row but deliberately leaves `status` alone, and every gate above
+    // parks a failure at 'unpublished'. So once a publish had failed once, the
+    // row stayed 'unpublished' forever: a later, fully-passing publish returned
+    // a 200 with a slug and a play URL while `/v1/play/:slug` went on 404-ing,
+    // with no way for the owner to recover. A publish that survives the gates
+    // must say so.
+    //
+    // Placed AFTER the moderation and smoke gates, all of which return early, so
+    // this can never resurrect a game they held or rejected.
+    await deps.publishRepo.setStatus(publishedGame.id, 'live');
+
     // Async: thumbnail capture (best-effort, non-blocking). Prefer the dedicated
     // browser-worker queue (Redis deploys); fall back to in-process Chromium so a
     // no-Redis deploy still gets a real gameplay thumbnail. Either source yields a
