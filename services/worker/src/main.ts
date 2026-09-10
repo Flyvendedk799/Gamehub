@@ -248,8 +248,17 @@ async function main() {
           // BUILD_SPEED §3 — one frame for the visual critique. The `thumbnail`
           // job already boots the game, nudges past a title screen and captures a
           // non-blank frame of PLAY, which is exactly the frame worth judging.
-          async screenshot(htmlContent: string) {
-            const jobId = await browserClient.enqueueThumbnail(htmlContent);
+          //
+          // `playSettle` asks it to go one step further and PLAY for a moment
+          // first. The share-card path below deliberately does not: it wants an
+          // early, tidy frame, while the critique wants the frame that shows
+          // what a player sees ten seconds in — where a HUD that scrolls off
+          // with the camera has already gone.
+          async screenshot(htmlContent: string, opts?: { playSettle?: boolean }) {
+            const jobId = await browserClient.enqueueThumbnail(
+              htmlContent,
+              opts?.playSettle === true,
+            );
             const result = await browserClient.waitForResult<ThumbnailResult>(jobId, 30_000);
             if (result === null) return null;
             return {

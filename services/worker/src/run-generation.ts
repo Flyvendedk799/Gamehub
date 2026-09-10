@@ -35,8 +35,10 @@ import {
   type VisualCritique,
   buildInteractivityFloorPlan,
   buildRepairVerdict,
+  buildBreakageDiagnosisPrompt,
   buildVisualCritiquePrompt,
   buildVisualRepairInstruction,
+  classifyEditRequest,
   createEditorSession,
   decideRepairAction,
   detectInteractivityResponse,
@@ -143,7 +145,7 @@ export interface BrowserJobsPort {
    * older queue node (or an offline test) simply yields no visual critique rather
    * than failing the run. `null` when no frame could be captured.
    */
-  screenshot?(htmlContent: string): Promise<GameFrame | null>;
+  screenshot?(htmlContent: string, opts?: { playSettle?: boolean }): Promise<GameFrame | null>;
 }
 
 /** A captured frame of the running game. */
@@ -1006,7 +1008,7 @@ export async function runGeneration(
     // fall back to the agent-authored contract so creativity is still verified
     // against its own declared input→state behaviour instead of shipping
     // unverified. Boot + juice stay external regardless.
-    const plan = selectGamePlaytestPlan(spec.genre) ?? state.contract;
+    const plan = selectGamePlaytestPlan(spec) ?? state.contract;
     const hasPredicates = plan !== null && plan.predicates.length > 0;
 
     // Plan step 7 — booted cleanly, but the genre has no playbook predicates AND no
@@ -1142,7 +1144,17 @@ export async function runGeneration(
   // each repair round is a true continuation (the agent sees its own prior
   // work + the concrete failure), not a cold restart.
   const history: ChatMessage[] = [];
-  let nextPrompt = req.prompt;
+  // An iteration that reports the game is BROKEN gets a diagnosis pass, not a
+  // tweak pass. See `classifyEditRequest` — project 687f2ddb answered "Game does
+  // not run" by asserting that a zone counter changed, and shipped.
+  const editRequest = isIteration ? classifyEditRequest(req.prompt) : ({ kind: 'change' } as const);
+  if (editRequest.kind === 'breakage') {
+    console.log(
+      `[run-generation] iteration reads as a breakage report (matched: "${editRequest.matched}") — running the diagnosis pass`,
+    );
+  }
+  let nextPrompt =
+    editRequest.kind === 'breakage' ? buildBreakageDiagnosisPrompt(req.prompt) : req.prompt;
   let output: GenerateOutput = await generate(buildInput(nextPrompt, history), deps);
   let repairRounds = 0;
   let shipReason: ShipReason = 'no_verdict';
@@ -1186,7 +1198,9 @@ export async function runGeneration(
     if (entry === null) return null;
     visionCalls += 1;
     try {
-      const frame = await browserJobs?.screenshot?.(await inlineForVerify(entry.content));
+      const frame = await browserJobs?.screenshot?.(await inlineForVerify(entry.content), {
+        playSettle: true,
+      });
       if (frame === null || frame === undefined) return null;
       const raw = await visionCritic?.({
         pngBase64: frame.pngBase64,
@@ -1221,10 +1235,20 @@ export async function runGeneration(
     if (visualRepairDone || !canCritique) return false;
     const critique = await critiqueCurrentFrame();
     if (critique === null || critique.findings.length === 0) return false;
-    // Findings exist but there is no room to act on them: they are still recorded
-    // (critiqueCurrentFrame pushed them), which is how a "shipped looking
-    // unfinished" run becomes visible in telemetry instead of invisible.
-    if (budgetExhausted || repairRounds >= maxRepairRounds) return false;
+    // Token/tool budget really is gone — nothing can run to completion, so the
+    // findings are recorded only (critiqueCurrentFrame pushed them), which is how
+    // a "shipped looking unfinished" run stays visible in telemetry.
+    if (budgetExhausted) return false;
+    // The ROUND ceiling, though, is not a reason to discard them. It used to be:
+    // this round competed with the boot/predicate repairs for the same budget and
+    // lost whenever they had used it up, so production run e2bd3b58 shipped with
+    // three recorded visual findings, `visualRepairRan: false`, and a user whose
+    // next message was "Game does not run". Two repairs that made the game boot
+    // are exactly the runs most likely to still LOOK broken.
+    //
+    // So the visual round gets ONE reserved slot beyond the ceiling. It is granted
+    // at most once per run (`visualRepairDone`) and only when there are concrete
+    // findings to act on, so the worst case is a single extra round, never a loop.
     visualRepairDone = true;
     history.push(
       { role: 'user', content: nextPrompt },
@@ -1257,9 +1281,7 @@ export async function runGeneration(
     // playbook) when the genre has no bundled playbook and a contract was set.
     // This makes a non-completable creative game gate on its OWN contract.
     const contractAuthored =
-      state.spec !== null &&
-      selectGamePlaytestPlan(state.spec.genre) === null &&
-      state.contract !== null;
+      state.spec !== null && selectGamePlaytestPlan(state.spec) === null && state.contract !== null;
     const action = decideRepairAction(verdict, state.spec, {
       roundsRun: repairRounds,
       maxRounds: maxRepairRounds,
@@ -1512,6 +1534,10 @@ export async function runGeneration(
     // that can silently ignore the request, which is the failure this whole
     // mechanism exists to make impossible.
     isIteration,
+    // Which iterations were the user reporting a BREAK rather than asking for a
+    // change. Read `breakageReport` against `shipReason` to see whether the
+    // diagnosis pass is actually converting bug reports into verified fixes.
+    breakageReport: editRequest.kind === 'breakage',
     editIntentChecks: state.editIntent?.plan?.predicates.length ?? 0,
     editIntentFields: [...new Set(state.editIntent?.plan?.predicates.map((p) => p.field) ?? [])],
     ...sig,

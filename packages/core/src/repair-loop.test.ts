@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { PlaytestPredicate, PlaytestTrace } from './eval/playtest-score.js';
-import { selectGamePlaytestPlan } from './playtest-planner.js';
+import { resolvePlaybookGenre, selectGamePlaytestPlan } from './playtest-planner.js';
 import { getPlaytestPlaybook } from './playtest-playbooks.js';
 import {
   type AttemptObservation,
@@ -412,5 +412,103 @@ describe('selectGamePlaytestPlan (planner glue)', () => {
     expect(plan).not.toBeNull();
     expect(plan!.steps.some((s) => s.kind === 'mouseDown' || s.kind === 'mouseMove')).toBe(true);
     expect(plan!.steps.some((s) => s.kind === 'key')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `genre: 'other'` used to mean "verified for boot, never for play". Production
+// run e2bd3b58 declared `other` for a top-down twin-stick war game — the
+// topdown playbook, exactly — and shipped with zero external predicates; so did
+// its "Game does not run" follow-up, which recorded playbook 0/0.
+// ---------------------------------------------------------------------------
+describe('resolvePlaybookGenre — a spec-shaped fallback for genre-less games', () => {
+  const base = {
+    genre: 'other' as const,
+    dimensions: '2d' as const,
+    perspective: 'top_down' as const,
+  };
+
+  it('never overrides a genre that has its own playbook', () => {
+    expect(resolvePlaybookGenre({ ...base, genre: 'platformer' })).toBe('platformer');
+    expect(resolvePlaybookGenre({ ...base, genre: 'fps', perspective: 'top_down' })).toBe('fps');
+  });
+
+  it('routes the shipped MMO-war spec to the topdown playbook', () => {
+    expect(
+      resolvePlaybookGenre({
+        genre: 'other',
+        dimensions: '2d',
+        perspective: 'top_down',
+        capabilities: { controlScheme: 'twin_stick', hasPhysics: true },
+      }),
+    ).toBe('topdown_arcade');
+  });
+
+  it('routes by perspective before control scheme', () => {
+    expect(resolvePlaybookGenre({ ...base, perspective: 'first_person' })).toBe('fps');
+    expect(resolvePlaybookGenre({ ...base, perspective: 'third_person' })).toBe('tps');
+    expect(resolvePlaybookGenre({ ...base, perspective: 'isometric' })).toBe('2_5d');
+    expect(resolvePlaybookGenre({ ...base, dimensions: '3d', perspective: 'orbital' })).toBe('tps');
+  });
+
+  it('splits side-scrollers on physics', () => {
+    expect(
+      resolvePlaybookGenre({
+        ...base,
+        perspective: 'side_scroll',
+        capabilities: { hasPhysics: true },
+      }),
+    ).toBe('platformer');
+    expect(
+      resolvePlaybookGenre({
+        ...base,
+        perspective: 'side_scroll',
+        capabilities: { hasPhysics: false },
+      }),
+    ).toBe('topdown_arcade');
+  });
+
+  it('abstains when there is no movement axis to drive', () => {
+    expect(
+      resolvePlaybookGenre({
+        genre: 'other',
+        dimensions: '2d',
+        perspective: 'fixed_screen',
+        capabilities: { controlScheme: 'drag' },
+      }),
+    ).toBeNull();
+    expect(
+      resolvePlaybookGenre({
+        genre: 'other',
+        dimensions: '2d',
+        perspective: 'fixed_screen',
+        capabilities: { controlScheme: 'pointer' },
+      }),
+    ).toBeNull();
+  });
+
+  it('selectGamePlaytestPlan yields real predicates for the genre-less spec', () => {
+    const byGenreOnly = selectGamePlaytestPlan('other');
+    expect(byGenreOnly).toBeNull();
+    const bySpec = selectGamePlaytestPlan({
+      genre: 'other',
+      dimensions: '2d',
+      perspective: 'top_down',
+      capabilities: { controlScheme: 'twin_stick' },
+    });
+    expect(bySpec).not.toBeNull();
+    expect(bySpec!.predicates.length).toBeGreaterThan(0);
+    expect(bySpec!.playbook.genre).toBe('topdown_arcade');
+  });
+
+  it('still returns null for a spec we cannot drive', () => {
+    expect(
+      selectGamePlaytestPlan({
+        genre: 'other',
+        dimensions: '2d',
+        perspective: 'fixed_screen',
+        capabilities: { controlScheme: 'pointer' },
+      }),
+    ).toBeNull();
   });
 });

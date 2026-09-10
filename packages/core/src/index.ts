@@ -150,6 +150,12 @@ export type {
   TodoSnapshot,
 } from './continuation.js';
 export {
+  classifyEditRequest,
+  buildBreakageDiagnosisPrompt,
+  type EditRequestKind,
+  type EditRequestClassification,
+} from './edit-request.js';
+export {
   classifyArtifactType,
   type ArtifactType as ArtifactTypeGuess,
   type ClassifyResult,
@@ -157,6 +163,7 @@ export {
 export {
   planPlaytest,
   selectGamePlaytestPlan,
+  resolvePlaybookGenre,
   buildInteractivityFloorPlan,
   detectInteractivityResponse,
   INTERACTIVITY_FLOOR_IDLE_STEPS,
@@ -164,6 +171,7 @@ export {
   type PlaytestPlan,
   type PlaytestStep as DesignPlaytestStep,
   type GamePlaytestPlan,
+  type PlaybookGenreHints,
   type GamePlaytestStep,
   type FloorProbeResult,
   type InteractivityResponse,

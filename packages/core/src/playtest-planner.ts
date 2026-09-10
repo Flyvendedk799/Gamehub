@@ -176,13 +176,93 @@ function projectPlaybookStep(step: PlaybookStep): GamePlaytestStep | null {
     : { kind: 'mouseDown' };
 }
 
+/** The shape `resolvePlaybookGenre` reads. A structural slice of the shared
+ *  `GameSpec` so this module stays free of the zod schema. */
+export interface PlaybookGenreHints {
+  genre: GameGenre;
+  dimensions?: '2d' | '2_5d' | '3d' | undefined;
+  perspective?:
+    | 'side_scroll'
+    | 'top_down'
+    | 'isometric'
+    | 'first_person'
+    | 'third_person'
+    | 'fixed_screen'
+    | 'orbital'
+    | undefined;
+  capabilities?:
+    | {
+        controlScheme?: string | undefined;
+        hasPhysics?: boolean | undefined;
+      }
+    | undefined;
+}
+
+/**
+ * Map a spec onto the genre whose bundled playbook actually fits it.
+ *
+ * `genre: 'other'` has no playbook, by design — the enum's escape hatch for a
+ * game that is genuinely novel. But "novel premise" and "novel input→state
+ * loop" are different things, and the spec gate cannot tell them apart: the
+ * production MMO-war run (e2bd3b58) declared `other` for an idea nobody had a
+ * genre for, while its actual controls were `top_down` + `twin_stick` + WASD —
+ * the topdown playbook, exactly. It shipped with zero external predicates, and
+ * so did its follow-up run, which is why "Game does not run" could be answered
+ * with a tweak to a zone counter and still pass every gate.
+ *
+ * So: when the declared genre has no playbook, fall back to the shape the spec
+ * describes — perspective, dimensionality, control scheme. That is a *weaker*
+ * claim than a declared genre and is treated as one (the predicates it yields
+ * are the movement floor, not the genre's full fidelity set), but it is a real
+ * external check where there was none.
+ *
+ * Returns null when the spec describes nothing we can drive — a pure
+ * pointer/drag game with no movement axis has no canonical probe, and inventing
+ * one would false-fail it. Pure and total.
+ */
+export function resolvePlaybookGenre(spec: PlaybookGenreHints): GameGenre | '2_5d' | null {
+  if (getPlaytestPlaybook(spec.genre) !== null) return spec.genre;
+
+  const scheme = spec.capabilities?.controlScheme;
+  const perspective = spec.perspective;
+
+  if (perspective === 'first_person') return 'fps';
+  if (perspective === 'third_person') return 'tps';
+  if (spec.dimensions === '3d') return 'tps';
+  if (perspective === 'isometric') return '2_5d';
+  // Twin-stick is a movement scheme before it is anything else: WASD moves, the
+  // pointer aims. The topdown playbook drives exactly that.
+  if (perspective === 'top_down' || scheme === 'twin_stick') return 'topdown_arcade';
+  if (perspective === 'side_scroll') {
+    return spec.capabilities?.hasPhysics === true ? 'platformer' : 'topdown_arcade';
+  }
+  if (scheme === 'keyboard' || scheme === 'gamepad' || scheme === 'hybrid') {
+    return 'topdown_arcade';
+  }
+  // pointer / drag / touch with no spatial hint, or a fixed screen: no canonical
+  // movement probe exists. The agent-authored contract is the right source here.
+  return null;
+}
+
 /**
  * Select the canonical game playtest plan for a declared genre. Returns null
  * when no playbook is bundled for the genre (the repair loop then has no
  * deterministic verdict to gate on and ships as-is). Pure.
+ *
+ * Pass the whole spec (not just its genre) to get the `resolvePlaybookGenre`
+ * fallback for genres with no bundled playbook.
  */
-export function selectGamePlaytestPlan(genre: GameGenre): GamePlaytestPlan | null {
-  const playbook = getPlaytestPlaybook(genre);
+export function selectGamePlaytestPlan(
+  spec: GameGenre | PlaybookGenreHints,
+): GamePlaytestPlan | null {
+  const resolved =
+    typeof spec === 'string'
+      ? getPlaytestPlaybook(spec) === null
+        ? null
+        : spec
+      : resolvePlaybookGenre(spec);
+  if (resolved === null) return null;
+  const playbook = getPlaytestPlaybook(resolved);
   if (playbook === null) return null;
   const steps: GamePlaytestStep[] = [];
   for (const step of playbook.steps) {

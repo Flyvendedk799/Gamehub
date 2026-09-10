@@ -1701,12 +1701,17 @@ Every item below is a hard fail in production play-testing. The validator catche
 
 - **Three.js**: shipping without \`renderer.dispose()\` on unmount; using bare \`<script src>\` instead of the ESM importmap; missing \`addEventListener('resize')\`.
 - **Phaser**: \`this.add.image('key')\` where the key was never \`load.image\`-ed; \`this.physics.add.*\` without a \`physics:\` block in the Game config; mixing Phaser 3 and 4 APIs.
+- **Phaser, screen-space UI (the one that ships broken silently)**: a scrolling camera plus a HUD that isn't pinned to the screen. Two traps, and one production run hit both, shipping a game with NO visible UI at all ten seconds in:
+  - \`container.setScrollFactor(0)\` does **not** pin a Container's children. The signature is \`setScrollFactor(x, y, updateChildren)\` and \`updateChildren\` defaults to **false**, so every child keeps \`scrollFactor 1\` and Phaser applies it on top of the parent transform. Always \`setScrollFactor(0, 0, true)\` on a Container — or pin each child before adding it.
+  - \`camera.setZoom(z)\` scales scrollFactor-0 objects too, about the camera centre. A HUD laid out against the canvas edges (\`text(12, 566, …)\` on a 600px canvas) is pushed outside the viewport at \`z = 1.25\`, while anything near the centre still looks fine — so the first frame looks correct and the HUD is gone. When you zoom, render UI on its own unzoomed camera: \`const ui = this.cameras.add(0, 0, w, h); ui.ignore(worldObjects); this.cameras.main.ignore(uiObjects);\`.
+  - Neither shows up in a state snapshot, a boot check, or a first-frame screenshot. **After building a HUD in a scrolling-camera game, move the camera and confirm the HUD is still on screen.**
 
 ## Visual taste (game UI/HUD specifically)
 
 - **All-black or all-flat backgrounds.** Even a near-black with a subtle radial highlight reads as deliberate. Pure black reads as "I forgot the background."
 - **Default Tailwind blue / purple-on-white HUD.** The plan0305 palette diversification rules apply — pick a palette appropriate to the game's mood, not the cosmic default.
 - **Score counter in 12 px text.** HUD numbers are display-tier (≥24 px). Players check them at a glance, not via squinting.
+- **A player you can't pick out of the crowd.** When the player shares the screen with allies or NPCs that use the same sprite, the game is unplayable no matter how correct the logic is — a production run shipped one anonymous soldier among forty identical blue ones and the user reported the game as not running. The player MUST be unmistakable at a glance: an outline or contrasting rim, a marker above it, a distinct palette entry no NPC uses, or a persistent cursor/arrow. Give it a permanent tell, not a spawn-time flash.
 - **No font choice.** System sans = "I forgot to think about typography." Pick one display font (e.g. \`Press Start 2P\` for arcade, \`Bebas Neue\` for action) loaded from Google Fonts.
 
 ## Geometry (may9 Phase 8 + 8b)
