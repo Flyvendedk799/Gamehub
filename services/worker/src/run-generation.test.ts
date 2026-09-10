@@ -637,6 +637,19 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     features: {},
   } as unknown as GameSpec;
 
+  /** A spec with genuinely NO bundled or derivable playbook, for the tests that
+   *  exercise the no-predicate paths. `genre: 'other'` alone is no longer enough:
+   *  `resolvePlaybookGenre` now routes a genre-less spec by the shape it
+   *  describes, so an `other` game that says "top down, keyboard" gets the
+   *  topdown playbook. A fixed-screen pointer game has no movement axis to
+   *  drive, so nothing is derivable and the floor is all there is. */
+  const NO_PLAYBOOK_SPEC = {
+    ...TOPDOWN_SPEC,
+    genre: 'other',
+    perspective: 'fixed_screen',
+    capabilities: { controlScheme: 'pointer' },
+  } as unknown as GameSpec;
+
   /** A trace whose WASD deltas satisfy the topdown playbook predicates:
    *  W → y down, S → y up, A → x left, D → x right. Maps onto the browser-
    *  worker PlaytestVerdict shape (baseline + per-step snapshotAfter). */
@@ -1106,7 +1119,7 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     // running a probe.
     const browserJobs = queuedBrowserJobs([invertedPlaytest()]);
     const agent: GenerateFn = async (_input, deps) => {
-      await deps.gameMode?.setSpec?.({ ...TOPDOWN_SPEC, genre: 'other' } as unknown as GameSpec);
+      await deps.gameMode?.setSpec?.(NO_PLAYBOOK_SPEC);
       await deps.fs?.create('index.html', RED_SQUARE);
       return emptyOutput('other');
     };
@@ -1132,7 +1145,7 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     // (strictly no worse than the prior behavior; we didn't ask this genre to wire one).
     const browserJobs = queuedBrowserJobs([{ ...passingPlaytest(), hasDebugContract: false }]);
     const agent: GenerateFn = async (_input, deps) => {
-      await deps.gameMode?.setSpec?.({ ...TOPDOWN_SPEC, genre: 'other' } as unknown as GameSpec);
+      await deps.gameMode?.setSpec?.(NO_PLAYBOOK_SPEC);
       await deps.fs?.create('index.html', RED_SQUARE);
       return emptyOutput('other');
     };
@@ -1159,9 +1172,8 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     const browserJobs = queuedBrowserJobs([noContract, noContract, noContract, noContract]);
     const agent: GenerateFn = async (_input, deps) => {
       await deps.gameMode?.setSpec?.({
-        ...TOPDOWN_SPEC,
-        genre: 'other',
-        capabilities: { hasEnemies: true },
+        ...NO_PLAYBOOK_SPEC,
+        capabilities: { controlScheme: 'pointer', hasEnemies: true },
       } as unknown as GameSpec);
       await deps.fs?.create('index.html', RED_SQUARE);
       return emptyOutput('idle');
@@ -1212,9 +1224,8 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     const browserJobs = queuedBrowserJobs([responsive]);
     const agent: GenerateFn = async (_input, deps) => {
       await deps.gameMode?.setSpec?.({
-        ...TOPDOWN_SPEC,
-        genre: 'other',
-        capabilities: { hasEnemies: true },
+        ...NO_PLAYBOOK_SPEC,
+        capabilities: { controlScheme: 'pointer', hasEnemies: true },
       } as unknown as GameSpec);
       await deps.fs?.create('index.html', RED_SQUARE);
       return emptyOutput('a responsive other-genre game');
@@ -1252,9 +1263,8 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     const browserJobs = queuedBrowserJobs([dead]);
     const agent: GenerateFn = async (_input, deps) => {
       await deps.gameMode?.setSpec?.({
-        ...TOPDOWN_SPEC,
-        genre: 'other',
-        capabilities: { hasEnemies: true },
+        ...NO_PLAYBOOK_SPEC,
+        capabilities: { controlScheme: 'pointer', hasEnemies: true },
       } as unknown as GameSpec);
       await deps.fs?.create('index.html', RED_SQUARE);
       return emptyOutput('a dead other-genre game');
@@ -1915,5 +1925,258 @@ describe('edit-intent fidelity gate (#editIntent — did the edit do what was AS
 
     expect(result.shipReason).toBe('passed');
     expect(browserJobs.intentCalls).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The visual round's reserved slot + the settled frame. Both come from
+// production run e2bd3b58: it recorded three visual findings, spent both repair
+// rounds getting the game to boot, and shipped `visualRepairRan: false` — with a
+// HUD that had scrolled off-camera and a player indistinguishable from forty
+// identical allies, neither of which the first frame of play could show.
+// ---------------------------------------------------------------------------
+
+describe('visual critique — reserved round + settled frame', () => {
+  const SPEC = {
+    schemaVersion: 1,
+    genre: 'topdown_arcade',
+    dimensions: '2d',
+    perspective: 'top_down',
+    cameraKind: 'follow_2d',
+    primaryInputs: ['keyboard'],
+    numActors: 1,
+    winCondition: 'Reach the exit tile.',
+    loseCondition: 'Touch an enemy.',
+    features: {},
+  } as unknown as GameSpec;
+
+  const HTML =
+    '<!doctype html><html><body><canvas id="game"></canvas><script>window.__game={};</script></body></html>';
+
+  function passingTrace(): PlaytestVerdict {
+    return {
+      hasGameContract: true,
+      hasDebugContract: true,
+      baselineSnapshot: { playerPos: { x: 100, y: 100 } },
+      steps: [
+        {
+          step: { kind: 'key', code: 'KeyW' },
+          snapshotAfter: { playerPos: { x: 100, y: 70 } },
+          errors: [],
+        },
+        {
+          step: { kind: 'key', code: 'KeyS' },
+          snapshotAfter: { playerPos: { x: 100, y: 110 } },
+          errors: [],
+        },
+        {
+          step: { kind: 'key', code: 'KeyA' },
+          snapshotAfter: { playerPos: { x: 70, y: 110 } },
+          errors: [],
+        },
+        {
+          step: { kind: 'key', code: 'KeyD' },
+          snapshotAfter: { playerPos: { x: 110, y: 110 } },
+          errors: [],
+        },
+      ],
+      bootErrors: [],
+    };
+  }
+
+  it('asks for a SETTLED frame, not the opening shot', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const settleFlags: Array<boolean | undefined> = [];
+    const browserJobs: BrowserJobsPort = {
+      async runtimeVerify() {
+        return { hasGameContract: true, fatalErrors: [] } satisfies RuntimeVerifyVerdict;
+      },
+      async playtest() {
+        return passingTrace();
+      },
+      async screenshot(_html, opts) {
+        settleFlags.push(opts?.playSettle);
+        return { pngBase64: 'aGVsbG8=', width: 640, height: 360 };
+      },
+    };
+
+    await runGeneration(
+      {
+        prompt: 'a topdown arcade game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      {
+        store,
+        async generate(_input, deps) {
+          await deps.gameMode?.setSpec?.(SPEC);
+          await deps.fs?.create('index.html', HTML);
+          return emptyOutput('built it');
+        },
+        browserJobs,
+        visionCritic: async () => 'VERDICT: SHIP',
+      },
+    );
+
+    expect(settleFlags).toEqual([true]);
+  });
+
+  it('acts on findings even after the repair ceiling is spent — exactly one extra round', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const prompts: string[] = [];
+    let attempt = 0;
+    // Round 0 boots broken; the single allowed repair round fixes it. That
+    // consumes maxRepairRounds, which is precisely when the visual findings used
+    // to be recorded and dropped.
+    const browserJobs: BrowserJobsPort = {
+      async runtimeVerify() {
+        attempt += 1;
+        return attempt === 1
+          ? ({ hasGameContract: false, fatalErrors: ['boom'] } satisfies RuntimeVerifyVerdict)
+          : ({ hasGameContract: true, fatalErrors: [] } satisfies RuntimeVerifyVerdict);
+      },
+      async playtest() {
+        return passingTrace();
+      },
+      async screenshot() {
+        return { pngBase64: 'aGVsbG8=', width: 640, height: 360 };
+      },
+    };
+
+    let critiques = 0;
+    const result = await runGeneration(
+      {
+        prompt: 'a topdown arcade game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      {
+        store,
+        maxRepairRounds: 1,
+        async generate(input, deps) {
+          prompts.push(input.prompt);
+          await deps.gameMode?.setSpec?.(SPEC);
+          await deps.fs?.create('index.html', HTML);
+          return emptyOutput('built it');
+        },
+        browserJobs,
+        visionCritic: async () => {
+          critiques += 1;
+          return critiques === 1
+            ? 'FINDING: there is no HUD anywhere on screen\nVERDICT: FIX'
+            : 'VERDICT: SHIP';
+        },
+      },
+    );
+
+    // One boot repair (the ceiling) + one reserved visual repair.
+    expect(result.repairRounds).toBe(2);
+    expect(prompts).toHaveLength(3);
+    expect(prompts[2]).toContain('no HUD anywhere on screen');
+    // Still bounded: two vision calls, and the reserved slot is granted once.
+    expect(critiques).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A breakage report is not a tweak. Project 687f2ddb answered the four-word
+// follow-up "Game does not run" by declaring that a zone counter would change,
+// measuring that it changed, and shipping.
+// ---------------------------------------------------------------------------
+
+describe('breakage-report iterations get a diagnosis pass', () => {
+  const SPEC = {
+    schemaVersion: 1,
+    genre: 'topdown_arcade',
+    dimensions: '2d',
+    perspective: 'top_down',
+    cameraKind: 'follow_2d',
+    primaryInputs: ['keyboard'],
+    numActors: 1,
+    winCondition: 'Reach the exit tile.',
+    loseCondition: 'Touch an enemy.',
+    features: {},
+  } as unknown as GameSpec;
+
+  const HTML =
+    '<!doctype html><html><body><canvas id="game"></canvas><script>window.__game={};</script></body></html>';
+
+  function okBrowserJobs(): BrowserJobsPort {
+    return {
+      async runtimeVerify() {
+        return { hasGameContract: true, fatalErrors: [] } satisfies RuntimeVerifyVerdict;
+      },
+      async playtest() {
+        return {
+          hasGameContract: true,
+          hasDebugContract: true,
+          baselineSnapshot: { playerPos: { x: 100, y: 100 } },
+          steps: [
+            {
+              step: { kind: 'key', code: 'KeyW' },
+              snapshotAfter: { playerPos: { x: 100, y: 70 } },
+              errors: [],
+            },
+            {
+              step: { kind: 'key', code: 'KeyS' },
+              snapshotAfter: { playerPos: { x: 100, y: 110 } },
+              errors: [],
+            },
+            {
+              step: { kind: 'key', code: 'KeyA' },
+              snapshotAfter: { playerPos: { x: 70, y: 110 } },
+              errors: [],
+            },
+            {
+              step: { kind: 'key', code: 'KeyD' },
+              snapshotAfter: { playerPos: { x: 110, y: 110 } },
+              errors: [],
+            },
+          ],
+          bootErrors: [],
+        } satisfies PlaytestVerdict;
+      },
+    };
+  }
+
+  async function firstPromptFor(prompt: string, iteration: boolean): Promise<string> {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const prompts: string[] = [];
+    await runGeneration(
+      {
+        prompt,
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+        ...(iteration ? { initialFiles: [['index.html', HTML]] as [string, string][] } : {}),
+      },
+      {
+        store,
+        async generate(input, deps) {
+          prompts.push(input.prompt);
+          await deps.gameMode?.setSpec?.(SPEC);
+          await deps.fs?.create('index.html', HTML);
+          return emptyOutput('edited');
+        },
+        browserJobs: okBrowserJobs(),
+      },
+    );
+    return prompts[0] ?? '';
+  }
+
+  it('replaces the round-0 prompt with the diagnosis pass', async () => {
+    const first = await firstPromptFor('Game  does not run', true);
+    expect(first).toMatch(/reproduce first/i);
+    expect(first).toContain('Game  does not run');
+    expect(first).toContain('setScrollFactor(0, 0, true)');
+  });
+
+  it('leaves an ordinary tweak alone', async () => {
+    const first = await firstPromptFor('the jump is way too high', true);
+    expect(first).toBe('the jump is way too high');
+  });
+
+  it('never fires on a first build — there is nothing yet to be broken', async () => {
+    const first = await firstPromptFor('a game that does not work like the others', false);
+    expect(first).toBe('a game that does not work like the others');
   });
 });

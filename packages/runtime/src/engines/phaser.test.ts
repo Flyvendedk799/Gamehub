@@ -298,3 +298,332 @@ describe('phaserAdapter.validate (gameplan §7.6)', () => {
     expect(result.issues.some((i) => i.message.includes('eval / new Function'))).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Screen-space UI that scrolls off with the camera. Regression corpus taken
+// from production run e2bd3b58 ("Operation: Fractured Front"), which shipped a
+// complete HUD that was invisible from the first camera scroll onward and drew
+// the follow-up "Game does not run".
+// ---------------------------------------------------------------------------
+
+const HTML_OK = [
+  '<!doctype html><html><head>',
+  '<script type="importmap">{"imports":{"phaser":',
+  '"https://cdn.jsdelivr.net/npm/phaser@3.88.2/dist/phaser.esm.js"}}</script>',
+  '</head><body><div id="game"></div></body></html>',
+].join('');
+
+function validateJs(js: string) {
+  const result = phaserAdapter.validate([
+    { path: 'index.html', content: HTML_OK },
+    { path: 'src/game.js', content: js },
+  ]);
+  return result.ok ? [] : (result.issues ?? []);
+}
+
+const SCENE_PREAMBLE = [
+  'import * as Phaser from "phaser";',
+  'class PlayScene extends Phaser.Scene {',
+  '  create() {',
+  '    this.cameras.main.startFollow(this.player, true, 0.08, 0.08);',
+].join('\n');
+
+describe('phaserAdapter.validate — screen-space UI pinning', () => {
+  it('flags a Container pinned without updateChildren (the shipped bug)', () => {
+    const issues = validateJs(
+      [
+        SCENE_PREAMBLE,
+        '    this._hud = this.add.container(0, 0).setScrollFactor(0).setDepth(100);',
+        '    this._hudHp = this.add.text(12, 566, "HP");',
+        '    this._hud.add([this._hudHp]);',
+        '  }',
+        '}',
+        'new Phaser.Game({ scene: [PlayScene] });',
+      ].join('\n'),
+    );
+    const hit = issues.find((i) => i.message.includes('ui.container_children_scroll'));
+    expect(hit).toBeDefined();
+    expect(hit?.severity).toBe('error');
+    expect(hit?.path).toBe('src/game.js');
+    expect(hit?.message).toContain('setScrollFactor(0, 0, true)');
+  });
+
+  it('flags the same bug when the container is held in a local', () => {
+    const issues = validateJs(
+      [
+        SCENE_PREAMBLE,
+        '    const panel = this.add.container(400, 300);',
+        '    panel.setScrollFactor(0);',
+        '    panel.add([this.add.text(0, 0, "CHOOSE YOUR ROLE")]);',
+        '  }',
+        '}',
+      ].join('\n'),
+    );
+    expect(issues.filter((i) => i.message.includes('ui.container_children_scroll'))).toHaveLength(
+      1,
+    );
+  });
+
+  it('accepts the corrected three-argument form', () => {
+    const issues = validateJs(
+      [
+        SCENE_PREAMBLE,
+        '    this._hud = this.add.container(0, 0).setScrollFactor(0, 0, true).setDepth(100);',
+        '    this._hud.add([this.add.text(12, 566, "HP")]);',
+        '  }',
+        '}',
+      ].join('\n'),
+    );
+    expect(issues.filter((i) => i.message.includes('ui.container_children_scroll'))).toEqual([]);
+  });
+
+  it('walks back through intermediate chained calls to find the container', () => {
+    const issues = validateJs(
+      [
+        SCENE_PREAMBLE,
+        '    this.add.container(0, 0).setName("hud").setDepth(200).setScrollFactor(0, 0);',
+        '  }',
+        '}',
+      ].join('\n'),
+    );
+    expect(issues.filter((i) => i.message.includes('ui.container_children_scroll'))).toHaveLength(
+      1,
+    );
+  });
+
+  it('does not flag a pinned Text / Graphics — only Containers have the trap', () => {
+    const issues = validateJs(
+      [
+        SCENE_PREAMBLE,
+        '    this.add.text(12, 8, "SCORE").setScrollFactor(0);',
+        '    const gfx = this.add.graphics();',
+        '    gfx.setScrollFactor(0);',
+        '  }',
+        '}',
+      ].join('\n'),
+    );
+    expect(issues.filter((i) => i.message.includes('ui.container_children_scroll'))).toEqual([]);
+  });
+
+  it('does not flag a world-space container (scrollFactor left at 1)', () => {
+    const issues = validateJs(
+      [
+        SCENE_PREAMBLE,
+        '    const squad = this.add.container(200, 200);',
+        '    squad.setScrollFactor(1);',
+        '  }',
+        '}',
+      ].join('\n'),
+    );
+    expect(issues.filter((i) => i.message.includes('ui.container_children_scroll'))).toEqual([]);
+  });
+
+  it('warns when the camera scrolls, text is drawn, and nothing is pinned at all', () => {
+    const issues = validateJs(
+      [SCENE_PREAMBLE, '    this.add.text(12, 8, "SCORE: 0");', '  }', '}'].join('\n'),
+    );
+    const hit = issues.find((i) => i.message.includes('ui.no_pinned_hud'));
+    expect(hit).toBeDefined();
+    expect(hit?.severity).toBe('warn');
+  });
+
+  it('does not warn about an unpinned HUD in a fixed-camera game', () => {
+    const issues = validateJs(
+      [
+        'import * as Phaser from "phaser";',
+        'class PlayScene extends Phaser.Scene {',
+        '  create() {',
+        '    this.add.text(12, 8, "SCORE: 0");',
+        '  }',
+        '}',
+      ].join('\n'),
+    );
+    expect(issues.filter((i) => i.message.includes('ui.no_pinned_hud'))).toEqual([]);
+  });
+
+  it('does not warn when at least one object is pinned', () => {
+    const issues = validateJs(
+      [SCENE_PREAMBLE, '    this.add.text(12, 8, "SCORE: 0").setScrollFactor(0);', '  }', '}'].join(
+        '\n',
+      ),
+    );
+    expect(issues.filter((i) => i.message.includes('ui.no_pinned_hud'))).toEqual([]);
+  });
+});
+
+describe('phaserAdapter.validate — camera zoom vs screen-space UI', () => {
+  it('flags setZoom on the camera that also renders pinned UI', () => {
+    const issues = validateJs(
+      [
+        SCENE_PREAMBLE,
+        '    this.cameras.main.setZoom(1.25);',
+        '    this.add.text(12, 566, "HP").setScrollFactor(0);',
+        '  }',
+        '}',
+      ].join('\n'),
+    );
+    const hit = issues.find((i) => i.message.includes('ui.zoomed_screen_space'));
+    expect(hit).toBeDefined();
+    expect(hit?.severity).toBe('error');
+    // 300 + (566 - 300) * 1.25 = 632.5 -> 633, off a 600px canvas.
+    expect(hit?.message).toContain('633');
+  });
+
+  it('says nothing when the scene builds a dedicated UI camera', () => {
+    const issues = validateJs(
+      [
+        SCENE_PREAMBLE,
+        '    this.cameras.main.setZoom(1.25);',
+        '    const ui = this.cameras.add(0, 0, 800, 600);',
+        '    ui.ignore(this.worldLayer);',
+        '    this.add.text(12, 566, "HP").setScrollFactor(0);',
+        '  }',
+        '}',
+      ].join('\n'),
+    );
+    expect(issues.filter((i) => i.message.includes('ui.zoomed_screen_space'))).toEqual([]);
+  });
+
+  it('says nothing at zoom 1, or when there is no screen-space UI at all', () => {
+    expect(
+      validateJs(
+        [
+          SCENE_PREAMBLE,
+          '    this.cameras.main.setZoom(1);',
+          '    this.add.text(12, 566, "HP").setScrollFactor(0);',
+          '  }',
+          '}',
+        ].join('\n'),
+      ).filter((i) => i.message.includes('ui.zoomed_screen_space')),
+    ).toEqual([]);
+    expect(
+      validateJs(
+        [SCENE_PREAMBLE, '    this.cameras.main.setZoom(2);', '  }', '}'].join('\n'),
+      ).filter((i) => i.message.includes('ui.zoomed_screen_space')),
+    ).toEqual([]);
+  });
+});
+
+describe('phaserAdapter.validate — the player you cannot pick out of the crowd', () => {
+  // The shipped shape, reduced: player and AI built from the same two texture
+  // keys through differently-named ternaries, distinguished only by depth.
+  const SHARED_ART = [
+    SCENE_PREAMBLE,
+    '    this.player = this._spawnPlayer();',
+    '    for (let i = 0; i < 18; i++) this._spawnAI(0);',
+    '  }',
+    '  _spawnPlayer() {',
+    "    const p = this.physics.add.sprite(px, py, this.playerFaction === 0 ? 'soldier_blue' : 'soldier_red');",
+    '    p.setDepth(10); p.isPlayer = true;',
+    '    return p;',
+    '  }',
+    '  _spawnAI(faction) {',
+    "    const ai = this.physics.add.sprite(x, y, faction === 0 ? 'soldier_blue' : 'soldier_red');",
+    '    ai.setDepth(5);',
+    '    return ai;',
+    '  }',
+    '}',
+  ].join('\n');
+
+  it('flags the shipped shape', () => {
+    const issues = validateJs(SHARED_ART);
+    const hit = issues.find((i) => i.message.includes('ui.player_indistinguishable'));
+    expect(hit).toBeDefined();
+    expect(hit?.severity).toBe('error');
+    expect(hit?.message).toContain('"soldier_blue"');
+    expect(hit?.message).toContain('setTint');
+  });
+
+  it('is satisfied by a tint on the player', () => {
+    const issues = validateJs(
+      SHARED_ART.replace('p.setDepth(10);', 'p.setDepth(10).setTint(0xffe066);'),
+    );
+    expect(issues.filter((i) => i.message.includes('ui.player_indistinguishable'))).toEqual([]);
+  });
+
+  it('is satisfied by a marker that follows the player', () => {
+    const issues = validateJs(
+      SHARED_ART.replace(
+        '    this.player = this._spawnPlayer();',
+        [
+          '    this.player = this._spawnPlayer();',
+          "    this.playerMarker = this.add.image(0, 0, 'arrow');",
+        ].join('\n'),
+      ),
+    );
+    expect(issues.filter((i) => i.message.includes('ui.player_indistinguishable'))).toEqual([]);
+  });
+
+  it('says nothing when the player has its own texture', () => {
+    const issues = validateJs(
+      SHARED_ART.replace("this.playerFaction === 0 ? 'soldier_blue' : 'soldier_red'", "'hero'"),
+    );
+    expect(issues.filter((i) => i.message.includes('ui.player_indistinguishable'))).toEqual([]);
+  });
+
+  it('says nothing in a game with no other actors', () => {
+    const issues = validateJs(
+      [
+        SCENE_PREAMBLE,
+        "    this.player = this.physics.add.sprite(10, 10, 'hero');",
+        "    this.add.sprite(50, 50, 'crate');",
+        '  }',
+        '}',
+      ].join('\n'),
+    );
+    expect(issues.filter((i) => i.message.includes('ui.player_indistinguishable'))).toEqual([]);
+  });
+});
+
+describe('phaserAdapter.validate — player legibility is about THE PLAYER', () => {
+  // The escape hatch must be anchored to an identifier that holds the player.
+  // A bundle-wide search for `setTint` let the shipped game through: it tints an
+  // enemy on mind-control and flashes an AI white on hit, and neither helps the
+  // player be found.
+  const ENEMY_TINTS_ONLY = [
+    SCENE_PREAMBLE,
+    '    this.player = this._spawnPlayer();',
+    '    this._spawnAI(0);',
+    '  }',
+    '  _spawnPlayer() {',
+    "    const p = this.physics.add.sprite(px, py, this.faction === 0 ? 'soldier_blue' : 'soldier_red');",
+    '    p.setDepth(10);',
+    '    return p;',
+    '  }',
+    '  _spawnAI(faction) {',
+    "    const ai = this.physics.add.sprite(x, y, faction === 0 ? 'soldier_blue' : 'soldier_red');",
+    '    ai.setTint(0xffffff);',
+    '    return ai;',
+    '  }',
+    '  _mindControl(nearest) {',
+    "    nearest.setTexture('soldier_ctrl').setTint(0xcc88ff);",
+    '  }',
+    '}',
+  ].join('\n');
+
+  it('still flags a game that only ever tints its enemies', () => {
+    const hit = validateJs(ENEMY_TINTS_ONLY).find((i) =>
+      i.message.includes('ui.player_indistinguishable'),
+    );
+    expect(hit).toBeDefined();
+  });
+
+  it('clears once the same game tints the player too', () => {
+    const fixed = ENEMY_TINTS_ONLY.replace('p.setDepth(10);', 'p.setDepth(10).setTint(0xffe066);');
+    expect(
+      validateJs(fixed).filter((i) => i.message.includes('ui.player_indistinguishable')),
+    ).toEqual([]);
+  });
+
+  it('clears when a ring follows the player each frame', () => {
+    const fixed = ENEMY_TINTS_ONLY.replace(
+      '    this._spawnAI(0);',
+      ['    this._spawnAI(0);', '    this._ring.setPosition(this.player.x, this.player.y);'].join(
+        '\n',
+      ),
+    );
+    expect(
+      validateJs(fixed).filter((i) => i.message.includes('ui.player_indistinguishable')),
+    ).toEqual([]);
+  });
+});

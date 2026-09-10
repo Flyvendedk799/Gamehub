@@ -449,7 +449,25 @@ export interface BrowserJobData {
   bootTimeoutMs?: number;
   /** For playtest jobs: the ordered synthetic-input plan to dispatch. */
   steps?: PlaytestStep[];
+  /**
+   * For thumbnail jobs: after reaching a non-blank play frame, drive a movement
+   * burst and let the game settle before capturing.
+   *
+   * The share card wants the opposite (an early, tidy, representative frame),
+   * so this is opt-in and only the visual critique sets it. It exists because a
+   * whole class of defect is INVISIBLE in the first frame of play and obvious
+   * ten seconds in: a HUD that scrolls off with the camera, a player sprite
+   * indistinguishable from the crowd that gathers around it, actors piling into
+   * an unreadable heap, a world that empties out. Production run e2bd3b58
+   * shipped with all four; the critique looked at frame one and reported only
+   * that the ground was flat.
+   */
+  playSettle?: boolean;
 }
+
+/** How many RAF frames of driven movement `playSettle` spends before capture —
+ *  enough for a following camera to leave its starting scroll well behind. */
+export const PLAY_SETTLE_FRAMES = 90;
 
 export interface RuntimeVerifyResult {
   hasGameContract: boolean;
@@ -1029,6 +1047,33 @@ async function captureGameFrame(
   return { bytes: Buffer.from(bytes), width: vp.width, height: vp.height };
 }
 
+/**
+ * Play the game for a moment: hold each of the two common movement schemes in
+ * one direction long enough for a following camera to travel, dismiss any
+ * numeric-choice overlay on the way, and let the world settle.
+ *
+ * Deliberately one-directional — the point is to move the camera FAR from where
+ * it started, which a there-and-back burst would undo. Bounded by
+ * `PLAY_SETTLE_FRAMES` and, above that, the job hard timeout. Best-effort
+ * throughout: a game that ignores all of it simply gets its first frame back.
+ */
+async function drivePlaySettle(page: Page): Promise<void> {
+  // Role / difficulty / class pickers gate play behind a number key far more
+  // often than they gate it behind Space, and `dispatchStartInput` only sends
+  // Space + Enter + click. Cheap to cover, and a game that ignores digits is
+  // unaffected.
+  for (const code of ['Digit1', 'Enter']) {
+    await page.keyboard.press(code).catch(() => {});
+  }
+  const half = Math.floor(PLAY_SETTLE_FRAMES / 2);
+  for (const code of ['KeyD', 'ArrowRight']) {
+    await page.keyboard.down(code).catch(() => {});
+    await tickFrames(page, half).catch(() => {});
+    await page.keyboard.up(code).catch(() => {});
+  }
+  await tickFrames(page, JUICE_FRAME_WINDOW).catch(() => {});
+}
+
 export async function runThumbnail(
   browser: Browser,
   data: BrowserJobData,
@@ -1120,6 +1165,12 @@ export async function runThumbnail(
         if (Date.now() >= deadline) break;
         // The title may have needed a frame to wire its start handler — re-nudge.
         if (i === 1) await dispatchStartInput(page);
+      }
+
+      // Opt-in settle: play the game for a moment before looking at it.
+      if (data.playSettle === true) {
+        await drivePlaySettle(page);
+        await flushCompositor();
       }
     }
 

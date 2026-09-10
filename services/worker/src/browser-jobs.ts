@@ -29,6 +29,10 @@ interface BrowserJobData {
   htmlContent: string;
   bootTimeoutMs?: number;
   steps?: PlaytestStep[];
+  /** Thumbnail jobs: drive a movement burst before capturing (see the
+   *  browser-worker's `playSettle`). Set for the visual critique's frame, NOT
+   *  for the share card's. */
+  playSettle?: boolean;
 }
 
 export interface RuntimeVerifyResult {
@@ -90,10 +94,10 @@ export class BrowserJobsClient {
     return job.id ?? 'unknown';
   }
 
-  async enqueueThumbnail(htmlContent: string): Promise<string> {
+  async enqueueThumbnail(htmlContent: string, playSettle = false): Promise<string> {
     const job = await this.queue.add(
       'thumbnail',
-      { kind: 'thumbnail', htmlContent, bootTimeoutMs: 10_000 },
+      { kind: 'thumbnail', htmlContent, bootTimeoutMs: 10_000, playSettle },
       { removeOnComplete: 20, removeOnFail: 20 },
     );
     return job.id ?? 'unknown';

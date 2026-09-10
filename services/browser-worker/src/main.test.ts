@@ -408,6 +408,84 @@ describe('runThumbnail (gameplay capture, real Chromium)', () => {
     expect(result.height).toBe(562);
     expect(await pngIsNonUniform(result.pngBase64)).toBe(true);
   }, 30_000);
+
+  it('(d) playSettle drives the game forward so a HUD that scrolls away is IN the frame', async () => {
+    // The e2bd3b58 shape, reduced: a world that scrolls under a camera, and a
+    // "HUD" that (wrongly) scrolls with it. At camera x=0 the HUD is on screen;
+    // once the player has walked right it is not. The default capture sees the
+    // first state, `playSettle` must see the second.
+    const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+      <canvas id="game" width="640" height="360"></canvas>
+      <script>
+        const ctx = document.getElementById('game').getContext('2d');
+        let camX = 0, right = false, started = false;
+        addEventListener('keydown', function (e) {
+          if (e.code === 'Space' || e.code === 'Enter') started = true;
+          if (e.code === 'KeyD' || e.code === 'ArrowRight') right = true;
+        });
+        addEventListener('keyup', function (e) {
+          if (e.code === 'KeyD' || e.code === 'ArrowRight') right = false;
+        });
+        addEventListener('pointerdown', function () { started = true; });
+        function loop() {
+          if (started && right) camX += 12;
+          ctx.fillStyle = '#101820'; ctx.fillRect(0, 0, 640, 360);
+          // World content so the frame is never uniform.
+          for (let i = 0; i < 40; i++) {
+            ctx.fillStyle = 'hsl(' + (i * 9) + ',80%,50%)';
+            ctx.fillRect(((i * 61) - camX) % 640, (i * 29) % 320, 20, 20);
+          }
+          // The un-pinned "HUD": drawn in WORLD space, so it leaves with the camera.
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(8 - camX, 8, 180, 24);
+          requestAnimationFrame(loop);
+        }
+        loop();
+        window.__game = { debug: { snapshot() { return { camX: camX }; } } };
+      </script>
+    </body></html>`;
+
+    /** Is the HUD strip (top-left band) still painted white? */
+    async function hudVisible(b64: string): Promise<boolean> {
+      const page = await browser.newPage();
+      try {
+        return await page.evaluate(async (dataB64: string) => {
+          const img = new Image();
+          img.src = `data:image/png;base64,${dataB64}`;
+          await img.decode();
+          const cv = document.createElement('canvas');
+          cv.width = img.naturalWidth;
+          cv.height = img.naturalHeight;
+          const ctx2 = cv.getContext('2d');
+          if (ctx2 === null) return false;
+          ctx2.drawImage(img, 0, 0);
+          const d = ctx2.getImageData(10, 10, 120, 12).data;
+          for (let i = 0; i < d.length; i += 4) {
+            if ((d[i] ?? 0) > 240 && (d[i + 1] ?? 0) > 240 && (d[i + 2] ?? 0) > 240) return true;
+          }
+          return false;
+        }, b64);
+      } finally {
+        await page.close();
+      }
+    }
+
+    const job = {
+      kind: 'thumbnail' as const,
+      htmlContent: html,
+      viewport: { width: 640, height: 360 },
+      bootTimeoutMs: 5_000,
+    };
+
+    // Default capture — the share-card path — still frames the opening state.
+    const early = await runThumbnail(browser, job);
+    expect(await hudVisible(early.pngBase64)).toBe(true);
+
+    // The critique's capture plays first, and catches the HUD leaving.
+    const settled = await runThumbnail(browser, { ...job, playSettle: true });
+    expect(await hudVisible(settled.pngBase64)).toBe(false);
+    expect(await pngIsNonUniform(settled.pngBase64)).toBe(true);
+  }, 40_000);
 });
 
 describe('runPlaytest (synthetic input → snapshot diff, real Chromium)', () => {
