@@ -503,3 +503,127 @@ describe('phaserAdapter.validate — camera zoom vs screen-space UI', () => {
     ).toEqual([]);
   });
 });
+
+describe('phaserAdapter.validate — the player you cannot pick out of the crowd', () => {
+  // The shipped shape, reduced: player and AI built from the same two texture
+  // keys through differently-named ternaries, distinguished only by depth.
+  const SHARED_ART = [
+    SCENE_PREAMBLE,
+    '    this.player = this._spawnPlayer();',
+    '    for (let i = 0; i < 18; i++) this._spawnAI(0);',
+    '  }',
+    '  _spawnPlayer() {',
+    "    const p = this.physics.add.sprite(px, py, this.playerFaction === 0 ? 'soldier_blue' : 'soldier_red');",
+    '    p.setDepth(10); p.isPlayer = true;',
+    '    return p;',
+    '  }',
+    '  _spawnAI(faction) {',
+    "    const ai = this.physics.add.sprite(x, y, faction === 0 ? 'soldier_blue' : 'soldier_red');",
+    '    ai.setDepth(5);',
+    '    return ai;',
+    '  }',
+    '}',
+  ].join('\n');
+
+  it('flags the shipped shape', () => {
+    const issues = validateJs(SHARED_ART);
+    const hit = issues.find((i) => i.message.includes('ui.player_indistinguishable'));
+    expect(hit).toBeDefined();
+    expect(hit?.severity).toBe('error');
+    expect(hit?.message).toContain('"soldier_blue"');
+    expect(hit?.message).toContain('setTint');
+  });
+
+  it('is satisfied by a tint on the player', () => {
+    const issues = validateJs(
+      SHARED_ART.replace('p.setDepth(10);', 'p.setDepth(10).setTint(0xffe066);'),
+    );
+    expect(issues.filter((i) => i.message.includes('ui.player_indistinguishable'))).toEqual([]);
+  });
+
+  it('is satisfied by a marker that follows the player', () => {
+    const issues = validateJs(
+      SHARED_ART.replace(
+        '    this.player = this._spawnPlayer();',
+        [
+          '    this.player = this._spawnPlayer();',
+          "    this.playerMarker = this.add.image(0, 0, 'arrow');",
+        ].join('\n'),
+      ),
+    );
+    expect(issues.filter((i) => i.message.includes('ui.player_indistinguishable'))).toEqual([]);
+  });
+
+  it('says nothing when the player has its own texture', () => {
+    const issues = validateJs(
+      SHARED_ART.replace("this.playerFaction === 0 ? 'soldier_blue' : 'soldier_red'", "'hero'"),
+    );
+    expect(issues.filter((i) => i.message.includes('ui.player_indistinguishable'))).toEqual([]);
+  });
+
+  it('says nothing in a game with no other actors', () => {
+    const issues = validateJs(
+      [
+        SCENE_PREAMBLE,
+        "    this.player = this.physics.add.sprite(10, 10, 'hero');",
+        "    this.add.sprite(50, 50, 'crate');",
+        '  }',
+        '}',
+      ].join('\n'),
+    );
+    expect(issues.filter((i) => i.message.includes('ui.player_indistinguishable'))).toEqual([]);
+  });
+});
+
+describe('phaserAdapter.validate — player legibility is about THE PLAYER', () => {
+  // The escape hatch must be anchored to an identifier that holds the player.
+  // A bundle-wide search for `setTint` let the shipped game through: it tints an
+  // enemy on mind-control and flashes an AI white on hit, and neither helps the
+  // player be found.
+  const ENEMY_TINTS_ONLY = [
+    SCENE_PREAMBLE,
+    '    this.player = this._spawnPlayer();',
+    '    this._spawnAI(0);',
+    '  }',
+    '  _spawnPlayer() {',
+    "    const p = this.physics.add.sprite(px, py, this.faction === 0 ? 'soldier_blue' : 'soldier_red');",
+    '    p.setDepth(10);',
+    '    return p;',
+    '  }',
+    '  _spawnAI(faction) {',
+    "    const ai = this.physics.add.sprite(x, y, faction === 0 ? 'soldier_blue' : 'soldier_red');",
+    '    ai.setTint(0xffffff);',
+    '    return ai;',
+    '  }',
+    '  _mindControl(nearest) {',
+    "    nearest.setTexture('soldier_ctrl').setTint(0xcc88ff);",
+    '  }',
+    '}',
+  ].join('\n');
+
+  it('still flags a game that only ever tints its enemies', () => {
+    const hit = validateJs(ENEMY_TINTS_ONLY).find((i) =>
+      i.message.includes('ui.player_indistinguishable'),
+    );
+    expect(hit).toBeDefined();
+  });
+
+  it('clears once the same game tints the player too', () => {
+    const fixed = ENEMY_TINTS_ONLY.replace('p.setDepth(10);', 'p.setDepth(10).setTint(0xffe066);');
+    expect(
+      validateJs(fixed).filter((i) => i.message.includes('ui.player_indistinguishable')),
+    ).toEqual([]);
+  });
+
+  it('clears when a ring follows the player each frame', () => {
+    const fixed = ENEMY_TINTS_ONLY.replace(
+      '    this._spawnAI(0);',
+      ['    this._spawnAI(0);', '    this._ring.setPosition(this.player.x, this.player.y);'].join(
+        '\n',
+      ),
+    );
+    expect(
+      validateJs(fixed).filter((i) => i.message.includes('ui.player_indistinguishable')),
+    ).toEqual([]);
+  });
+});

@@ -234,6 +234,158 @@ export function findUnpinnedScreenSpaceUi(files: ReadonlyArray<InputFile>): Vali
   return issues;
 }
 
+// ---------------------------------------------------------------------------
+// The player you cannot pick out of the crowd.
+//
+// The other half of the same production report. With the HUD restored the game
+// still read as "a semi green/black screen", because the player is drawn from
+// the same texture as the NPCs around it:
+//
+//   _spawnPlayer() { …add.sprite(px, py, this.playerFaction === 0 ? 'soldier_blue' : 'soldier_red') }
+//   _spawnAI(f)    { …add.sprite(x,  y,  f === 0                 ? 'soldier_blue' : 'soldier_red') }
+//
+// Identical art, no tint, no ring, no marker — only a depth difference nobody
+// can see. Twenty allies gather around you and there is no way to tell which
+// one you are steering. Every gate passed: the player MOVED, so the predicates
+// were satisfied; the frame was not blank, so the render check was satisfied.
+// Nothing asked whether a human could find their own character.
+//
+// The gate is deliberately narrow. It fires only when the player's texture keys
+// OVERLAP another actor's AND the player is given no distinguishing treatment
+// anywhere in the bundle — a combination that is the bug essentially every
+// time, and whose fix is one line.
+// ---------------------------------------------------------------------------
+
+/** Sprite/image factory calls, capturing the receiver-side text and the args. */
+const SPRITE_CALL_RE = /\.\s*add\s*\.\s*(?:sprite|image)\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g;
+
+/** Names a function that builds the player. */
+const PLAYER_FACTORY_RE = /\b(?:_?(?:spawn|create|make|build|add)Player|playerFactory)\b/i;
+
+/** Calls that give an object a distinct look. Must be applied TO THE PLAYER to
+ *  count — a bundle-wide search is worthless here: the shipped game tints an
+ *  enemy on mind-control and flashes an AI white on hit, and neither does the
+ *  player any good. */
+const DISTINGUISHING_CALLS =
+  'setTint|setTintFill|setStrokeStyle|setPipeline|setBlendMode|setDisplaySize|postFX|preFX';
+
+/** A named marker object is its own proof the author solved this. */
+const PLAYER_MARKER_RE =
+  /\bplayer(?:Marker|Ring|Arrow|Indicator|Outline|Glow|Halo|Cursor|Highlight)\b/i;
+
+function escapeForRegExp(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Does the bundle give `player` a look of its own?
+ *
+ * Three accepted proofs, all anchored to an identifier that actually holds the
+ * player: a distinguishing call on it (directly or through a chain), a marker
+ * object positioned from its coordinates each frame, or a conventionally-named
+ * player marker.
+ */
+function playerIsMarkedApart(allJs: string, playerIds: ReadonlySet<string>): boolean {
+  if (PLAYER_MARKER_RE.test(allJs)) return true;
+  for (const id of playerIds) {
+    const ref = escapeForRegExp(id).replace(/\\?\./g, '\\s*\\.\\s*');
+    // `player.setTint(…)`, and through an intervening chain:
+    // `player.setDepth(10).setTint(…)`.
+    const direct = new RegExp(
+      `${ref}\\s*(?:\\.\\s*\\w+\\s*\\([^()]*\\)\\s*)*\\.\\s*(?:${DISTINGUISHING_CALLS})\\s*[(.]`,
+    );
+    if (direct.test(allJs)) return true;
+    // A ring / arrow / halo that tracks the player: `ring.setPosition(player.x, …)`
+    // or `ring.x = player.x`.
+    const follower = new RegExp(
+      `\\.\\s*setPosition\\s*\\(\\s*${ref}\\s*\\.\\s*x|\\.\\s*x\\s*=\\s*${ref}\\s*\\.\\s*x`,
+    );
+    if (follower.test(allJs)) return true;
+  }
+  return false;
+}
+
+/** String literals appearing in a call's argument list. */
+function stringLiteralsIn(argText: string): string[] {
+  return Array.from(argText.matchAll(/['"`]([^'"`]+)['"`]/g)).map((m) => m[1] ?? '');
+}
+
+/**
+ * The line range of the function body containing `index`, approximated as the
+ * nearest preceding function/method header. Good enough to answer "was this
+ * sprite created inside _spawnPlayer?".
+ */
+function enclosingFunctionText(src: string, index: number): string {
+  const before = src.slice(0, index);
+  const start = Math.max(
+    before.lastIndexOf('\n  }'),
+    before.lastIndexOf('\n}'),
+    before.lastIndexOf('function '),
+  );
+  return src.slice(start < 0 ? 0 : start, index);
+}
+
+export function findIndistinguishablePlayer(files: ReadonlyArray<InputFile>): ValidationIssue[] {
+  const jsFiles = files.filter((f) => /\.[jt]sx?$/.test(f.path));
+  const allJs = jsFiles.map((f) => f.content).join('\n\n');
+  // Only a game with a crowd has this problem. No other actors, no confusion.
+  if (!/\b(?:enem|npc|ai|mob|unit|soldier|ally|allies|crowd|bot)\w*/i.test(allJs)) return [];
+
+  for (const file of jsFiles) {
+    const src = file.content;
+    const playerKeys = new Set<string>();
+    const otherKeys = new Set<string>();
+    // Identifiers that hold the player: the conventional scene field, plus the
+    // local the player factory builds and returns.
+    const playerIds = new Set<string>(['this.player', 'self.player', 'scene.player']);
+    let playerLine: number | undefined;
+
+    SPRITE_CALL_RE.lastIndex = 0;
+    for (let m = SPRITE_CALL_RE.exec(src); m !== null; m = SPRITE_CALL_RE.exec(src)) {
+      const args = m[1] ?? '';
+      const keys = stringLiteralsIn(args);
+      if (keys.length === 0) continue;
+      const context = enclosingFunctionText(src, m.index);
+      const line = src.slice(0, m.index).split('\n').pop() ?? '';
+      const inPlayerFactory = PLAYER_FACTORY_RE.test(context);
+      const assignedToPlayerField = /(?:this|self|scene)\s*\.\s*player\s*=\s*[^=]*$/.test(line);
+      if (inPlayerFactory || assignedToPlayerField) {
+        for (const k of keys) playerKeys.add(k);
+        playerLine ??= lineOf(src, m.index);
+        // `const p = this.physics.add.sprite(…)` inside the factory — `p` is the
+        // player for the rest of that function, so a tint on `p` counts.
+        const local = /(?:const|let|var)\s+([\w$]+)\s*=\s*[^=]*$/.exec(line);
+        if (local?.[1] !== undefined) playerIds.add(local[1]);
+      } else {
+        for (const k of keys) otherKeys.add(k);
+      }
+    }
+
+    if (playerKeys.size === 0 || otherKeys.size === 0) continue;
+    const shared = [...playerKeys].filter((k) => otherKeys.has(k));
+    if (shared.length === 0) continue;
+    if (playerIsMarkedApart(allJs, playerIds)) continue;
+
+    return [
+      {
+        path: file.path,
+        ...(playerLine === undefined ? {} : { line: playerLine }),
+        message: [
+          'ui.player_indistinguishable: the player is drawn from the same texture as other actors',
+          `(${shared.map((k) => `"${k}"`).join(', ')}) and nothing in the bundle marks it apart — no setTint,`,
+          'no outline or stroke, no marker object. A player who looks exactly like the NPCs standing next to',
+          'them cannot be steered, however correct the movement code is: a production run shipped one soldier',
+          'among forty identical ones and the report was that the game did not run. Give the player a permanent',
+          'tell at creation — `player.setTint(0xffe066)`, a ring or arrow sprite that follows it, or its own',
+          'texture key — not a spawn-time flash that fades.',
+        ].join(' '),
+        severity: 'error',
+      },
+    ];
+  }
+  return [];
+}
+
 function phaserImportMap(version: string): string {
   return `<script type="importmap">
 {
@@ -449,6 +601,9 @@ function phaserValidate(files: ReadonlyArray<InputFile>): ValidationResult {
     // `findUnpinnedScreenSpaceUi`). The one defect in this file that a booted,
     // non-blank, input-responsive game can still ship with.
     issues.push(...findUnpinnedScreenSpaceUi(files));
+    // The player you cannot pick out of the crowd (see the block above
+    // `findIndistinguishablePlayer`) — the other half of the same report.
+    issues.push(...findIndistinguishablePlayer(files));
   }
 
   // may9 Phase 8 follow-up #27 — trigger-zone reachability for Tiled
