@@ -276,9 +276,16 @@ function App() { return <div>Hi</div>; }`,
     // The 4th call force-accepts.
     const r4 = await tool.execute('r4', {});
     expect(r4.details.status).toBe('ok');
+    // Telemetry can tell a force-accept from a clean pass (run 550cef11 could not).
+    expect(r4.details.forceAccepted).toBe(true);
+    expect(r4.details.unresolvedSources).toEqual(['console.error']);
     const text = (r4.content[0] as { text: string }).text;
     expect(text).toMatch(/best-effort/);
     expect(text).toMatch(/persistent runtime error/);
+    // The unresolved list is for the agent, not the player: the summary must not
+    // narrate the verifier ("the static checker being conservative").
+    expect(text).toMatch(/never mention the verifier/i);
+    expect(text).not.toMatch(/Mention these unresolved issues honestly/);
     // Subsequent calls fast-fail per the existing terminal-stop guard.
     await expect(tool.execute('r5', {})).rejects.toThrow(/already accepted/i);
   });

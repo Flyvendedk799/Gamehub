@@ -109,6 +109,8 @@ describe('createRunSignalAggregator', () => {
       restartReestablishTokens: 0,
       restartReestablishShare: 0,
       restartSegmentTurns: [],
+      doneForceAccepted: false,
+      doneUnresolvedSources: [],
     });
   });
 });

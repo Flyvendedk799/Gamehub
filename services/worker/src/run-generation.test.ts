@@ -426,6 +426,57 @@ describe('runGeneration onUsage port (spend survives an abort)', () => {
   });
 });
 
+describe('run quality telemetry — done force-accept', () => {
+  async function recordedFor(doneDetails: Record<string, unknown>) {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    let captured: { forceAccept: boolean; report?: unknown } | undefined;
+    const agent: GenerateFn = async (_input, deps) => {
+      await deps.fs?.create('index.html', RED_SQUARE);
+      deps.onEvent?.({
+        type: 'tool_execution_end',
+        toolName: 'done',
+        toolCallId: 'd',
+        args: {},
+        result: { content: [], details: doneDetails },
+      } as unknown as AgentEvent);
+      return emptyOutput('ok');
+    };
+    await runGeneration(
+      {
+        prompt: 'pong',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      {
+        store,
+        generate: agent,
+        recordRunQuality: async (m) => {
+          captured = m;
+        },
+      },
+    );
+    return captured;
+  }
+
+  it('records force_accept when done accepted under the best-effort policy', async () => {
+    const m = await recordedFor({
+      status: 'ok',
+      forceAccepted: true,
+      unresolvedSources: ['runtime'],
+    });
+    expect(m?.forceAccept).toBe(true);
+    expect(m?.report).toMatchObject({
+      doneForceAccepted: true,
+      doneUnresolvedSources: ['runtime'],
+    });
+  });
+
+  it('leaves force_accept false for a clean done accept', async () => {
+    const m = await recordedFor({ status: 'ok', errors: [] });
+    expect(m?.forceAccept).toBe(false);
+  });
+});
+
 describe('runGeneration browser-jobs wiring (#1.4 — out-of-process runtimeVerify + playtester)', () => {
   /** A stub browser-jobs port whose verdicts the test controls — stands in for
    *  the real round-trip to the browser-worker pool. */

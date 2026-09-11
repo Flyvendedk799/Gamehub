@@ -1419,6 +1419,11 @@ export async function runGeneration(
   // to run_quality_metrics.report.
   const sig = signal.snapshot();
   const reportScore = shippedVerdict?.score ?? null;
+  // Shipped without a clean verdict: either the playtest failed, or `done` ran
+  // out of fix attempts and accepted anyway. The second used to be invisible —
+  // run 550cef11 was force-accepted and still recorded as passed.
+  const shippedUnverified =
+    (shippedVerdict !== null && !shippedVerdict.pass) || sig.doneForceAccepted;
   // Phase 3/4/9 telemetry — did the agent ignore the skills we recommended for
   // its declared capabilities (re-derivation), and did it escape the declared
   // engine with a decoy entry? These feed the run-report analyzer.
@@ -1481,7 +1486,7 @@ export async function runGeneration(
     capabilities: state.spec?.capabilities ?? null,
     fileCount: tree.size,
     shipReason,
-    forceAccept: shippedVerdict !== null && !shippedVerdict.pass,
+    forceAccept: shippedUnverified,
     repairRounds,
     runtimeBooted: lastRuntimeVerify === undefined ? null : lastRuntimeVerify.booted,
     juiceScore: lastRuntimeVerify?.juiceScore ?? null,
@@ -1551,7 +1556,7 @@ export async function runGeneration(
     const score = shippedVerdict?.score ?? null;
     const metrics: RunQualityMetrics = {
       genre: state.spec?.genre ?? null,
-      forceAccept: shippedVerdict !== null && !shippedVerdict.pass,
+      forceAccept: shippedUnverified,
       repairRounds,
       shipReason,
       playbookPass: score === null ? 0 : score.results.length - score.failures,

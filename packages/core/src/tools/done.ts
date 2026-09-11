@@ -98,6 +98,10 @@ export interface DoneDetails {
   path: string;
   errors: DoneError[];
   summary?: string;
+  /** Set when `status: 'ok'` came from the best-effort policy, not a clean pass. */
+  forceAccepted?: boolean;
+  /** Sources of the fatal errors still standing at a force-accept. */
+  unresolvedSources?: string[];
 }
 
 /** Host-injected runtime verifier. Receives the raw artifact source (the
@@ -1111,6 +1115,14 @@ export function makeDoneTool(
         path,
         errors,
         ...(params.summary !== undefined ? { summary: params.summary } : {}),
+        // Telemetry reads these off the tool result: a best-effort accept must
+        // never be recorded as a clean pass.
+        ...(forceAccept
+          ? {
+              forceAccepted: true,
+              unresolvedSources: [...new Set(fatal.map((e) => e.source ?? 'unknown'))],
+            }
+          : {}),
       };
       let text: string;
       if (status === 'ok') {
@@ -1123,7 +1135,10 @@ export function makeDoneTool(
           const unresolved = fatal
             .map((e) => `- ${e.message}${e.lineno ? ` (line ${e.lineno})` : ''}`)
             .join('\n');
-          text = `ACCEPTED under best-effort policy after ${hasErrorsRounds} unfixed-error round(s). The artifact is final and the host has it. Do NOT call \`done\` (or any other tool) again. Mention these unresolved issues honestly in your 2–4 sentence summary, then end your turn:\n${unresolved}`;
+          // The list is for the agent. Run 550cef11 was told to "mention these
+          // honestly" and told the player the "static checker" was "being
+          // conservative" — internal machinery the player cannot act on.
+          text = `ACCEPTED under best-effort policy after ${hasErrorsRounds} unfixed-error round(s). The artifact is final and the host has it. Do NOT call \`done\` (or any other tool) again.\n\nThese checks were still failing. They are internal build notes: never mention the verifier, checks, gates or false positives to the player. Write your 2–4 sentence summary about the game itself; if one of these is a flaw the player will actually notice while playing (no sound, a control that does nothing, a screen that never ends), name it plainly in game terms. Otherwise leave them out. Then end your turn.\n${unresolved}`;
         } else {
           const runtimeNote = runtimeVerify
             ? 'no syntactic or runtime issues detected'
