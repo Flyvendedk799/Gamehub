@@ -426,6 +426,48 @@ describe('runGeneration onUsage port (spend survives an abort)', () => {
   });
 });
 
+describe('scaffold survival telemetry', () => {
+  it('does not count starter modules shipped as stubs or left unloaded', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    let report: Record<string, unknown> | undefined;
+    const agent: GenerateFn = async (_input, deps) => {
+      await deps.fs?.create(
+        'index.html',
+        '<!doctype html><html><body><canvas id="game"></canvas><script type="module" src="src/main.js"></script></body></html>',
+      );
+      // Run 550cef11's shape: rewrite the entry on the engine alone, then stub a
+      // module the rewrite no longer imports.
+      await deps.fs?.create(
+        'src/main.js',
+        "import { runLoop } from './engine/core.js';\nrunLoop(() => {});",
+      );
+      await deps.fs?.create('src/hud.js', '// unused stub\nexport {};');
+      return emptyOutput('ok');
+    };
+    await runGeneration(
+      {
+        prompt: 'pong',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+        engine: 'canvas2d',
+      },
+      {
+        store,
+        generate: agent,
+        recordRunQuality: async (m) => {
+          report = m.report as Record<string, unknown> | undefined;
+        },
+      },
+    );
+    expect(report?.['scaffoldSeeded']).toBe(starterPathsFor('canvas2d').length);
+    expect(report?.['scaffoldStubbed']).toEqual(['src/hud.js']);
+    expect(report?.['scaffoldOrphaned']).toContain('src/theme.js');
+    // Only the entry and the engine still ship code the page loads.
+    expect(report?.['scaffoldSurvived']).toBe(2);
+    expect(report?.['scaffoldDeleted']).toEqual([]);
+  });
+});
+
 describe('run quality telemetry — done force-accept', () => {
   async function recordedFor(doneDetails: Record<string, unknown>) {
     const store = new SnapshotStore(new InMemoryBlobStore());

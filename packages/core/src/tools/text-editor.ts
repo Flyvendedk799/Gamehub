@@ -16,6 +16,7 @@ import { REDACTED_PATH_SENTINEL, REDACTION_POISON_KEY } from '../context-prune.j
 import type { CameraGuard } from './camera-pin.js';
 import type { EditBudget } from './edit-budget.js';
 import { formatEditEcho } from './edit-echo.js';
+import { modulesOrphanedByRewrite } from './done-heuristics.js';
 import { findInFiles } from './find-in-files.js';
 import { assertSafeToolPath } from './path-safety.js';
 import {
@@ -147,6 +148,26 @@ export interface TextEditorDetails {
   command: 'view' | 'create' | 'str_replace' | 'insert' | 'patch' | 'find' | 'delete';
   path: string;
   result?: unknown;
+}
+
+/** Every text file in the project, for whole-project checks after an edit. */
+function projectTextFiles(fs: TextEditorFsCallbacks): Map<string, string> {
+  const files = new Map<string, string>();
+  if (fs.textFiles !== undefined) {
+    for (const f of fs.textFiles()) files.set(f.path, f.content);
+    return files;
+  }
+  let paths: string[] = [];
+  try {
+    paths = fs.listDir('.');
+  } catch {
+    paths = [];
+  }
+  for (const p of paths) {
+    const v = fs.view(p);
+    if (v !== null) files.set(p, v.content);
+  }
+  return files;
 }
 
 function ok(text: string, details: TextEditorDetails): AgentToolResult<TextEditorDetails> {
@@ -891,11 +912,22 @@ export function makeTextEditorTool(
           const byteLen = Buffer.byteLength(text, 'utf8');
           const createCap = maxCreateBytesFor(path);
           if (byteLen > createCap) throwOversizedCreate(path, byteLen, createCap);
+          const previous = /\.(m?js|cjs)$/i.test(path) ? (fs.view(path)?.content ?? null) : null;
           const result = await fs.create(path, text);
           // E3: record the mutation tick + size for post-write view stubbing.
           const sizeAfter = fs.view(path)?.content.length ?? 0;
           lastMutationByPath.set(path, { tick, size: sizeAfter });
-          return ok(`Created ${result.path}`.concat(renderOutline(path, text)), {
+          // A from-scratch rewrite of a module silently cuts loose whatever the old
+          // version imported. Say so on THIS edit, while deleting them is one call —
+          // run 550cef11 found out three verifies later and shipped stubs instead.
+          let orphanNotice = '';
+          if (previous !== null && previous !== text) {
+            const orphaned = modulesOrphanedByRewrite(path, previous, projectTextFiles(fs));
+            if (orphaned.length > 0) {
+              orphanNotice = `\n\nThis rewrite dropped the imports of ${orphaned.length} module(s) that nothing loads any more: ${orphaned.join(', ')}. If your game still needs them, import them again. If not, remove each with \`command: "delete"\` — do not replace them with empty stubs.`;
+            }
+          }
+          return ok(`Created ${result.path}`.concat(renderOutline(path, text), orphanNotice), {
             command: 'create',
             path,
             result,

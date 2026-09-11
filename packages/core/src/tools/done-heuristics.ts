@@ -523,6 +523,22 @@ export function scanOrphanedJsModules(
   knownFiles: Set<string>,
   fileContents?: ReadonlyMap<string, string>,
 ): DoneError[] {
+  return orphanedJsModulePaths(src, knownFiles, fileContents).map((path) => ({
+    message:
+      // Single template literal — Biome's noUnusedTemplateLiteral lint
+      // wants either pure interpolation or pure string. The agent reads
+      // this end-to-end so the long form is intentional.
+      `'${path}' is in the project but the rendered HTML does not load it (no \`<script src=\` or \`<script type="module" src=\` tag, no importmap entry, no inline import). If your game uses it, import it from a module the page already loads (or add \`<script type="module" src="${path}"></script>\`). If it does NOT — e.g. a starter module your rewrite replaced — remove it with \`str_replace_based_edit_tool\` \`command: "delete"\`. Never overwrite it with an empty stub or import it just to silence this check. Editing this file currently has no effect on the rendered output.`,
+    source: 'multifile.orphan_module',
+  }));
+}
+
+/** Every JS module the page can never load — see scanOrphanedJsModules. */
+export function orphanedJsModulePaths(
+  src: string,
+  knownFiles: Set<string>,
+  fileContents?: ReadonlyMap<string, string>,
+): string[] {
   if (knownFiles.size === 0) return [];
   const jsFiles = [...knownFiles].filter(
     (p) => /\.(m?js|cjs)$/i.test(p) && !p.startsWith('assets/'),
@@ -561,15 +577,7 @@ export function scanOrphanedJsModules(
     }
   }
 
-  const orphaned = jsFiles.filter((p) => !reachable.has(p));
-  return orphaned.map((path) => ({
-    message:
-      // Single template literal — Biome's noUnusedTemplateLiteral lint
-      // wants either pure interpolation or pure string. The agent reads
-      // this end-to-end so the long form is intentional.
-      `'${path}' is in the project but the rendered HTML does not load it (no \`<script src=\` or \`<script type="module" src=\` tag, no importmap entry, no inline import). If your game uses it, import it from a module the page already loads (or add \`<script type="module" src="${path}"></script>\`). If it does NOT — e.g. a starter module your rewrite replaced — remove it with \`str_replace_based_edit_tool\` \`command: "delete"\`. Never overwrite it with an empty stub or import it just to silence this check. Editing this file currently has no effect on the rendered output.`,
-    source: 'multifile.orphan_module',
-  }));
+  return jsFiles.filter((p) => !reachable.has(p));
 }
 
 /** Code left after stripping comments, whitespace and no-op module markers. */
@@ -590,16 +598,70 @@ function meaningfulModuleCode(content: string): string {
  * silence scanOrphanedJsModules.
  */
 export function scanStubModules(fileContents: ReadonlyMap<string, string>): DoneError[] {
-  const errors: DoneError[] = [];
+  return stubModulePaths(fileContents).map((path) => ({
+    message: `'${path}' is an empty stub — it has no code, only comments or \`export {}\`. Delete it with \`str_replace_based_edit_tool\` \`command: "delete"\` and remove every import or <script> tag that loads it. Do not keep placeholder modules to satisfy a check.`,
+    source: 'multifile.stub_module',
+  }));
+}
+
+/** JS modules with no code at all — see scanStubModules. */
+export function stubModulePaths(fileContents: ReadonlyMap<string, string>): string[] {
+  const paths: string[] = [];
   for (const [path, content] of fileContents) {
     if (!/\.(m?js|cjs)$/i.test(path) || path.startsWith('assets/')) continue;
-    if (meaningfulModuleCode(content).length > 0) continue;
-    errors.push({
-      message: `'${path}' is an empty stub — it has no code, only comments or \`export {}\`. Delete it with \`str_replace_based_edit_tool\` \`command: "delete"\` and remove every import or <script> tag that loads it. Do not keep placeholder modules to satisfy a check.`,
-      source: 'multifile.stub_module',
-    });
+    if (meaningfulModuleCode(content).length === 0) paths.push(path);
   }
-  return errors;
+  return paths;
+}
+
+/** Every module reachable from `root` through relative imports (root excluded). */
+function modulesReachableFrom(
+  root: string,
+  rootContent: string,
+  files: ReadonlyMap<string, string>,
+): Set<string> {
+  const known = new Set(files.keys());
+  const reached = new Set<string>();
+  const queue: Array<{ path: string; content: string }> = [{ path: root, content: rootContent }];
+  for (let next = queue.pop(); next !== undefined; next = queue.pop()) {
+    for (const spec of relativeImportSpecs(next.content)) {
+      const target = resolveImportTarget(next.path, spec, known);
+      if (target === null || target === root || reached.has(target)) continue;
+      reached.add(target);
+      const content = files.get(target);
+      if (content !== undefined) queue.push({ path: target, content });
+    }
+  }
+  return reached;
+}
+
+/**
+ * Modules a rewrite of `path` left with nothing loading them. `files` is the
+ * project AFTER the rewrite and `before` the file's previous content. With an
+ * index.html this is "orphaned now, but not before"; without one (a project
+ * whose entry does not exist yet) the rewritten file is treated as the root.
+ */
+export function modulesOrphanedByRewrite(
+  path: string,
+  before: string,
+  files: ReadonlyMap<string, string>,
+): string[] {
+  const after = files.get(path);
+  if (after === undefined) return [];
+  const entry = files.get('index.html');
+  if (entry !== undefined && path !== 'index.html') {
+    const known = new Set([...files.keys()].filter((p) => p !== 'index.html'));
+    const previous = new Map(files);
+    previous.set(path, before);
+    const orphanedBefore = new Set(orphanedJsModulePaths(entry, known, previous));
+    return orphanedJsModulePaths(entry, known, files)
+      .filter((p) => !orphanedBefore.has(p))
+      .sort();
+  }
+  const reachableAfter = modulesReachableFrom(path, after, files);
+  return [...modulesReachableFrom(path, before, files)]
+    .filter((p) => !reachableAfter.has(p))
+    .sort();
 }
 
 /** Sources that are advisory — surface to the model but never trip has_errors. */

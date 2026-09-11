@@ -43,11 +43,13 @@ import {
   decideRepairAction,
   detectInteractivityResponse,
   generateViaAgent,
+  orphanedJsModulePaths,
   parseVisualCritique,
   recommendSkills,
   resolveMaxRepairRounds,
   scorePlaytest,
   selectGamePlaytestPlan,
+  stubModulePaths,
   traceFromPlaytestResult,
 } from '@playforge/agent-core';
 // Import from the engines subpath, NOT the package root — the root pulls in
@@ -1461,8 +1463,22 @@ export async function runGeneration(
   const billedInput = usedInputTokens + usedCacheReadTokens + usedCacheWriteTokens;
   // Modular-scaffold survival + file-size shape, both read off the SHIPPED tree.
   const shippedTextFiles = tree.toTextFiles();
-  const scaffoldSurvivors = [...seededStarterPaths].filter((p) =>
-    shippedTextFiles.some((f) => f.path === p),
+  // A seeded module survives only if it still ships code the page loads. Path
+  // existence alone reported run 550cef11's scaffold as 8/8 intact while six of
+  // those files were `export {}` stubs wired in purely to quiet a check.
+  const shippedContents = new Map(shippedTextFiles.map((f) => [f.path, f.content] as const));
+  const shippedEntry = shippedContents.get('index.html');
+  const scaffoldStubbed = stubModulePaths(shippedContents).filter((p) => seededStarterPaths.has(p));
+  const scaffoldOrphaned =
+    shippedEntry === undefined
+      ? []
+      : orphanedJsModulePaths(
+          shippedEntry,
+          new Set([...shippedContents.keys()].filter((p) => p !== 'index.html')),
+          shippedContents,
+        ).filter((p) => seededStarterPaths.has(p));
+  const scaffoldSurvivors = [...seededStarterPaths].filter(
+    (p) => shippedContents.has(p) && !scaffoldStubbed.includes(p) && !scaffoldOrphaned.includes(p),
   );
   const lineCountOf = (content: string): number => content.split('\n').length;
   const entryLines = (() => {
@@ -1523,7 +1539,9 @@ export async function runGeneration(
     // and the view:mutation ratio should follow it down.
     scaffoldSeeded: seededStarterPaths.size,
     scaffoldSurvived: scaffoldSurvivors.length,
-    scaffoldDeleted: [...seededStarterPaths].filter((p) => !scaffoldSurvivors.includes(p)),
+    scaffoldDeleted: [...seededStarterPaths].filter((p) => !shippedContents.has(p)),
+    scaffoldStubbed,
+    scaffoldOrphaned,
     entryFileLines: entryLines,
     maxFileLines: maxLines,
     maxFileLinesPath: maxLinesPath,

@@ -241,6 +241,11 @@ export {
   type GetDoneGameSpecFn,
 } from './tools/done.js';
 export {
+  modulesOrphanedByRewrite,
+  orphanedJsModulePaths,
+  stubModulePaths,
+} from './tools/done-heuristics.js';
+export {
   assertGameInvariants,
   evaluateCompletabilityFloor,
   isCompletableSpec,

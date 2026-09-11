@@ -53,6 +53,10 @@ export interface BuildReport {
   scaffoldSeeded?: number;
   scaffoldSurvived?: number;
   scaffoldDeleted?: string[];
+  /** Seeded modules shipped as comment-only / `export {}` stubs. */
+  scaffoldStubbed?: string[];
+  /** Seeded modules still on disk that the page never loads. */
+  scaffoldOrphaned?: string[];
   entryFileLines?: number;
   maxFileLines?: number;
   maxFileLinesPath?: string | null;
