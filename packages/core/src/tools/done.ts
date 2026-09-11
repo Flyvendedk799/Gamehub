@@ -605,6 +605,28 @@ const VerifyParams = Type.Object({
   path: Type.Optional(Type.String()),
 });
 
+/** Hash of everything a verify verdict depends on: the entry's bytes plus every
+ *  project file's path and content. Adding, removing or editing ANY file changes
+ *  it, because the orphan scan and the runtime boot both read the whole tree. */
+function projectFingerprint(
+  fs: TextEditorFsCallbacks,
+  entryPath: string,
+  entryContent: string,
+): string {
+  const parts: string[] = [entryPath, entryContent];
+  let paths: string[] = [];
+  try {
+    paths = [...fs.listDir('.')].sort();
+  } catch {
+    /* single-file pattern — the entry is the whole project */
+  }
+  for (const p of paths) {
+    if (p === entryPath) continue;
+    parts.push(p, fs.view(p)?.content ?? '');
+  }
+  return hashContent(JSON.stringify(parts));
+}
+
 export interface VerifyDetails {
   status: 'ok' | 'has_errors';
   path: string;
@@ -648,19 +670,20 @@ export function makeVerifyArtifactTool(
     parameters: VerifyParams,
     async execute(_id, params): Promise<AgentToolResult<VerifyDetails>> {
       const path = params.path ?? 'index.html';
-      // Check the cache first — read the current file content via the
-      // FS callback and key on its hash. If we already verified this
-      // exact (path, content, artifactType) tuple, return the cached
-      // result without re-parsing.
+      // Check the cache first. The key is the whole PROJECT, not just the entry
+      // file: the orphan-module scan and the runtime boot both read every
+      // sibling, so a verify keyed on index.html alone replayed a stale verdict
+      // after an edit to src/main.js (run 550cef11 — the agent read the replay as
+      // "the verifier can't follow imports" and wired dead stubs into the page).
       const viewResult = fs.view(path);
-      const fileNow = viewResult?.content ?? null;
-      if (fileNow !== null) {
-        const key = {
+      const fingerprintBefore =
+        viewResult === null ? null : projectFingerprint(fs, path, viewResult.content);
+      if (fingerprintBefore !== null) {
+        const cached = cache.get({
           path,
-          contentHash: hashContent(fileNow),
+          contentHash: fingerprintBefore,
           artifactType: artifactType ?? null,
-        };
-        const cached = cache.get(key);
+        });
         if (cached !== undefined) {
           return {
             content: [{ type: 'text', text: cached.summary }],
@@ -693,19 +716,17 @@ export function makeVerifyArtifactTool(
       if (typeof result.content === 'string') {
         lastVerifiedContentByPath.set(path, result.content);
       }
-      // Cache only when we have the content we used. `result.content`
-      // is the post-read snapshot from runArtifactChecks; key on that
-      // exact bytes so an evicted+re-fetched read doesn't poison the
-      // cache.
-      if (typeof result.content === 'string') {
-        cache.set(
-          {
-            path,
-            contentHash: hashContent(result.content),
-            artifactType: artifactType ?? null,
-          },
-          { summary, details },
-        );
+      // Cache only when the project is byte-identical to what we started from.
+      // The runtime boot awaits, and a parallel edit landing meanwhile would
+      // otherwise file a mixed-state verdict under a fingerprint it never saw.
+      if (typeof result.content === 'string' && fingerprintBefore !== null) {
+        const fingerprintAfter = projectFingerprint(fs, path, result.content);
+        if (fingerprintAfter === fingerprintBefore) {
+          cache.set(
+            { path, contentHash: fingerprintAfter, artifactType: artifactType ?? null },
+            { summary, details },
+          );
+        }
       }
       return {
         content: [{ type: 'text', text: summary }],
