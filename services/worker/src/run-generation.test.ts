@@ -426,6 +426,29 @@ describe('runGeneration onUsage port (spend survives an abort)', () => {
   });
 });
 
+describe('run cost', () => {
+  it('returns the implied cost so the run row can persist it', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const agent: GenerateFn = async (_input, deps) => {
+      await deps.fs?.create('index.html', RED_SQUARE);
+      deps.onEvent?.({
+        type: 'turn_end',
+        message: { usage: { input: 2_000, output: 1_000, cacheRead: 50_000, cacheWrite: 5_000 } },
+      } as unknown as AgentEvent);
+      return emptyOutput('ok');
+    };
+    const result = await runGeneration(
+      {
+        prompt: 'pong',
+        model: { provider: 'anthropic', modelId: 'claude-sonnet-4-6' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: agent },
+    );
+    expect(result.costUsd).toBeGreaterThan(0);
+  });
+});
+
 describe('scaffold survival telemetry', () => {
   it('does not count starter modules shipped as stubs or left unloaded', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());

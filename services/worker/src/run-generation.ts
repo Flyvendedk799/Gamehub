@@ -351,6 +351,9 @@ export interface GenerationResult {
   /** Run-total token usage, summed from every `turn_end`. Persisted to the
    *  `runs` row for cost attribution. Zero when the provider streams no usage. */
   usage: RunTokenUsage;
+  /** Implied USD cost of the run's tokens at list price (cache-weighted), for the
+   *  `runs.cost_usd` column. */
+  costUsd: number;
   /** WS-D — set when the run paused because the agent called `ask_user`. The
    *  caller persists it on the continuation_pending row so the builder can show
    *  the question + collect an answer. Null for a normal/complete run. */
@@ -1665,6 +1668,7 @@ export async function runGeneration(
       cacheReadTokens: usedCacheReadTokens,
       cacheWriteTokens: usedCacheWriteTokens,
     },
+    costUsd,
     pendingQuestion,
     tweakSchema,
     ...(lastRuntimeVerify !== undefined ? { runtimeVerify: lastRuntimeVerify } : {}),

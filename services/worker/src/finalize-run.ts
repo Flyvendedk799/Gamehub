@@ -74,6 +74,7 @@ export async function finalizeRun(db: Db, args: FinalizeRunArgs): Promise<Finali
           outputTokens: usage.outputTokens,
           cachedInputTokens: usage.cacheReadTokens,
           cacheCreationInputTokens: usage.cacheWriteTokens,
+          costUsd: result.costUsd.toFixed(5),
           updatedAt: new Date(),
         })
         .where(eq(schema.runs.id, runId)),
@@ -194,6 +195,10 @@ export async function finalizeRun(db: Db, args: FinalizeRunArgs): Promise<Finali
         outputTokens: usage.outputTokens,
         cachedInputTokens: usage.cacheReadTokens,
         cacheCreationInputTokens: usage.cacheWriteTokens,
+        // Implied (list-price) cost of the run. The build report always computed
+        // it, but it never reached the row — every run, incl. 550cef11 at $0.86,
+        // persisted cost_usd = 0.
+        costUsd: result.costUsd.toFixed(5),
         updatedAt: new Date(),
         finishedAt: new Date(),
       })
