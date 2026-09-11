@@ -379,6 +379,31 @@ function hasDebugContract(source: string): boolean {
   );
 }
 
+/** Genres whose opposition arrives in waves — the shape the depth and
+ *  subject-art floors were written for, regardless of the declared caps. */
+const WAVE_GENRES: ReadonlySet<string> = new Set([
+  'shmup',
+  'tower_defense',
+  'topdown_arcade',
+  'runner',
+  'roguelike',
+  'fps',
+  'tps',
+]);
+
+/**
+ * Does this spec describe a game that throws escalating opposition at the
+ * player? `hasEnemies` alone is not enough: an AI paddle in Pong, a rival
+ * racer, or a chess opponent is an "enemy" that never escalates, and holding
+ * those to the waves floor produced three fatal false positives on run
+ * 550cef11 — a brief whose twist was literally "Nothing changes".
+ */
+function facesEscalatingOpposition(spec: CompletabilitySpec): boolean {
+  const caps = spec.capabilities as { escalates?: boolean; hasEnemies?: boolean } | undefined;
+  if (caps?.escalates === true) return true;
+  return caps?.hasEnemies === true && WAVE_GENRES.has(spec.genre);
+}
+
 function contentPlanMissingDepth(spec: CompletabilitySpec): boolean {
   const caps = spec.capabilities as
     | {
@@ -391,7 +416,7 @@ function contentPlanMissingDepth(spec: CompletabilitySpec): boolean {
         };
       }
     | undefined;
-  if (caps?.escalates !== true && caps?.hasEnemies !== true) return false;
+  if (caps === undefined || !facesEscalatingOpposition(spec)) return false;
   const plan = caps.contentPlan;
   if (plan === undefined) return true;
   const behaviors = plan.distinctEnemyBehaviors ?? 0;
@@ -1030,11 +1055,11 @@ export function makeDoneTool(
                 source: `${GAME_INVARIANT_SOURCE_PREFIX}fatal.content-plan`,
               });
             }
-            // S5 — circle-only subjects for representational specs.
-            const hasEnemies =
-              (spec.capabilities as { hasEnemies?: boolean } | undefined)?.hasEnemies === true;
+            // S5 — circle-only subjects for representational specs, and for games
+            // that throw escalating opposition at the player. A paddle or a ball is
+            // SUPPOSED to be a rectangle or a circle.
             if (
-              (REPRESENTATIONAL_GENRES.has(spec.genre) || hasEnemies) &&
+              (REPRESENTATIONAL_GENRES.has(spec.genre) || facesEscalatingOpposition(spec)) &&
               looksCircleOnlySubject(mainSource)
             ) {
               errors.push({
