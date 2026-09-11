@@ -74,6 +74,15 @@ export interface TextEditorFsCallbacks {
   ): Promise<EditResult> | EditResult;
   /** Optional: list files for `view` on a directory. Returns sorted paths. */
   listDir(dir: string): string[];
+  /**
+   * Remove a file from the project. Returns true when it existed.
+   *
+   * Optional so older hosts keep working (the `delete` command then refuses).
+   * Without it an agent that rewrote the scaffold had no way to drop the modules
+   * it orphaned — run 550cef11 overwrote six of them with `export {}` stubs and
+   * wired the stubs into the page to quiet the orphan check.
+   */
+  delete?(path: string): boolean | Promise<boolean>;
 }
 
 const TextEditorParams = Type.Object({
@@ -88,6 +97,9 @@ const TextEditorParams = Type.Object({
     // Locate code without reading it — see find-in-files.ts for why this had
     // to exist.
     Type.Literal('find'),
+    // Remove a file the game no longer uses (e.g. scaffold modules a rewrite
+    // orphaned). Without it the only way to quiet the orphan check was a stub.
+    Type.Literal('delete'),
   ]),
   path: Type.String(),
   /** `find`: the literal text to search for. */
@@ -132,7 +144,7 @@ const TextEditorParams = Type.Object({
 });
 
 export interface TextEditorDetails {
-  command: 'view' | 'create' | 'str_replace' | 'insert' | 'patch' | 'find';
+  command: 'view' | 'create' | 'str_replace' | 'insert' | 'patch' | 'find' | 'delete';
   path: string;
   result?: unknown;
 }
@@ -609,10 +621,12 @@ export function makeTextEditorTool(
     name: 'str_replace_based_edit_tool',
     label: 'Text editor',
     description:
-      'Read and edit files in the current design via view/find/create/str_replace/insert/patch commands. ' +
+      'Read and edit files in the current design via view/find/create/str_replace/insert/patch/delete commands. ' +
       'Paths are relative to the project root (e.g. "index.html", "assets/sprite.png"). ' +
       'Use create for new files; str_replace requires an exact match of old_str; ' +
       'view returns file content or directory listing. ' +
+      'Use delete to remove a file the game no longer uses (e.g. starter modules your rewrite replaced) — ' +
+      'never leave an empty stub behind or import a dead module just to satisfy a check. ' +
       // Navigation comes first. Hunting for code by reading it is the single
       // largest cost in a build — 62% of all model latency in the last
       // production trace followed this tool, most of it ranged views walking a
@@ -992,6 +1006,51 @@ export function makeTextEditorTool(
             }
             throw err;
           }
+        }
+        case 'delete': {
+          if (fs.delete === undefined) {
+            throw new Error(
+              'text_editor.delete is not available on this host. Remove every import / <script> tag that loads the file instead.',
+            );
+          }
+          if (path === 'index.html') {
+            throw new Error(
+              'Refusing to delete index.html — it is the page entry every game boots from. Edit it instead.',
+            );
+          }
+          let exists = fs.view(path) !== null;
+          if (!exists) {
+            try {
+              exists = fs.listDir('.').includes(path);
+            } catch {
+              exists = false;
+            }
+          }
+          if (!exists) throw new Error(`Path not found: ${path}`);
+          await fs.delete(path);
+          lastMutationByPath.delete(path);
+          lastViewByPath.delete(path);
+          viewCountByPath.delete(path);
+          resetTargetFailuresForPath(path);
+          // A delete that leaves an import behind turns a dead file into a boot
+          // crash, so name every file that still mentions it.
+          const base = path.slice(path.lastIndexOf('/') + 1);
+          let remaining: string[] = [];
+          try {
+            remaining = fs.listDir('.');
+          } catch {
+            remaining = [];
+          }
+          const referrers = remaining.filter(
+            (p) =>
+              /\.(html?|m?js|cjs|jsx|tsx?)$/i.test(p) &&
+              (fs.view(p)?.content.includes(base) ?? false),
+          );
+          const warning =
+            referrers.length === 0
+              ? ''
+              : ` These files still reference '${base}' — remove those imports / <script> tags or the game will fail to load: ${referrers.join(', ')}.`;
+          return ok(`Deleted ${path}.${warning}`, { command: 'delete', path });
         }
         case 'insert': {
           const line = params.insert_line ?? 0;

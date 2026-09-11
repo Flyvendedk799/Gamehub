@@ -442,6 +442,9 @@ export function runHeuristics(
     // both load JS via plain <script> tags, so the orphan-module heuristic
     // applies uniformly.
     ...(isMotion ? [] : scanOrphanedJsModules(src, knownFiles, options.fileContents)),
+    ...(isMotion || options.fileContents === undefined
+      ? []
+      : scanStubModules(options.fileContents)),
   ];
 }
 
@@ -564,9 +567,39 @@ export function scanOrphanedJsModules(
       // Single template literal — Biome's noUnusedTemplateLiteral lint
       // wants either pure interpolation or pure string. The agent reads
       // this end-to-end so the long form is intentional.
-      `'${path}' is in the project but the rendered HTML does not load it (no \`<script src=\` or \`<script type="module" src=\` tag, no importmap entry, no inline import). Either wire it in (e.g. \`<script type="module" src="${path}"></script>\` after the inline blocks), inline its content into an existing \`<script>\` block, or delete the file. Editing this file currently has no effect on the rendered output.`,
+      `'${path}' is in the project but the rendered HTML does not load it (no \`<script src=\` or \`<script type="module" src=\` tag, no importmap entry, no inline import). If your game uses it, import it from a module the page already loads (or add \`<script type="module" src="${path}"></script>\`). If it does NOT — e.g. a starter module your rewrite replaced — remove it with \`str_replace_based_edit_tool\` \`command: "delete"\`. Never overwrite it with an empty stub or import it just to silence this check. Editing this file currently has no effect on the rendered output.`,
     source: 'multifile.orphan_module',
   }));
+}
+
+/** Code left after stripping comments, whitespace and no-op module markers. */
+function meaningfulModuleCode(content: string): string {
+  return content
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '')
+    .replace(/\bexport\s*\{\s*\}\s*;?/g, '')
+    .replace(/(['"])use strict\1\s*;?/g, '')
+    .trim();
+}
+
+/**
+ * Flag JS modules that contain no code at all — only comments, whitespace or
+ * `export {}`. A stub like that is never the fix for an orphaned module: it ships
+ * dead files to the player and hides the real question (is this module used?).
+ * Run 550cef11 shipped six of them, each imported and `<script>`-loaded just to
+ * silence scanOrphanedJsModules.
+ */
+export function scanStubModules(fileContents: ReadonlyMap<string, string>): DoneError[] {
+  const errors: DoneError[] = [];
+  for (const [path, content] of fileContents) {
+    if (!/\.(m?js|cjs)$/i.test(path) || path.startsWith('assets/')) continue;
+    if (meaningfulModuleCode(content).length > 0) continue;
+    errors.push({
+      message: `'${path}' is an empty stub — it has no code, only comments or \`export {}\`. Delete it with \`str_replace_based_edit_tool\` \`command: "delete"\` and remove every import or <script> tag that loads it. Do not keep placeholder modules to satisfy a check.`,
+      source: 'multifile.stub_module',
+    });
+  }
+  return errors;
 }
 
 /** Sources that are advisory — surface to the model but never trip has_errors. */
@@ -591,4 +624,5 @@ export const HEURISTIC_FATAL_SOURCES = new Set<string>([
   'a11y.no_html_lang',
   'multifile.missing_ref',
   'multifile.orphan_module',
+  'multifile.stub_module',
 ]);
