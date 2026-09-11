@@ -514,6 +514,45 @@ describe('runGeneration browser-jobs wiring (#1.4 — out-of-process runtimeVeri
     expect(runtimeErrors).toEqual([]);
   });
 
+  describe('the mute-audio gate', () => {
+    async function doneErrorsFor(verdict: RuntimeVerifyVerdict): Promise<string[]> {
+      const store = new SnapshotStore(new InMemoryBlobStore());
+      let messages: string[] = [];
+      const agent: GenerateFn = async (_input, deps) => {
+        await deps.fs?.create('index.html', RED_SQUARE);
+        if (deps.runtimeVerify) {
+          messages = (await deps.runtimeVerify(RED_SQUARE)).map((e) => e.message);
+        }
+        return emptyOutput('ok');
+      };
+      await runGeneration(
+        {
+          prompt: 'pong',
+          model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+          apiKey: 'sk-test',
+        },
+        { store, generate: agent, browserJobs: stubBrowserJobs({ runtimeVerify: verdict }) },
+      );
+      return messages;
+    }
+    const juiced = { hasGameContract: true, fatalErrors: [], juiceScore: 387 };
+
+    it('passes a juiced game the browser heard play audio', async () => {
+      const errors = await doneErrorsFor({ ...juiced, audioPlays: 2 });
+      expect(errors.some((m) => m.includes('MUTE'))).toBe(false);
+    });
+
+    it('flags a juiced game the browser measured as silent', async () => {
+      const errors = await doneErrorsFor({ ...juiced, audioPlays: 0 });
+      expect(errors.some((m) => m.includes('MUTE'))).toBe(true);
+    });
+
+    it('abstains when the browser-worker reported no audio count', async () => {
+      const errors = await doneErrorsFor(juiced);
+      expect(errors.some((m) => m.includes('MUTE'))).toBe(false);
+    });
+  });
+
   it('the gameMode.playtester is wired and maps the verdict to PlaytesterOutput', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());
     const steps: PlaytestStep[] = [{ kind: 'key', code: 'KeyD', frames: 20 }];

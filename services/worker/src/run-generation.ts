@@ -191,6 +191,13 @@ export interface RuntimeVerifyVerdict {
    * gates strictly on `=== false` and can never false-flag an unverifiable game.
    */
   renderedNonBlank?: boolean;
+  /**
+   * How many times the booted game started audio (the runtime shim counts
+   * HTMLAudioElement.play + AudioContext.resume/createOscillator) after the
+   * browser-worker nudged it past its title screen. `undefined` when the queue
+   * node predates the counter — unknown is NOT mute, so the audio gate abstains.
+   */
+  audioPlays?: number;
 }
 
 /**
@@ -774,16 +781,12 @@ export async function runGeneration(
               source: 'runtime',
             });
           }
-          // S1 — juice without audio is mute. When the browser measured juice,
-          // require at least one audioPlays tick.
+          // S1 — juice without audio is mute. When the browser measured juice AND
+          // counted audio, require at least one audioPlays tick. An absent count
+          // abstains: the worker used to drop the field, so every juiced game read
+          // as mute and the agent spent turns "proving" sound it already had.
           const juice = verdict.juiceScore ?? 0;
-          // `audioPlays` is an optional extra the browser worker may report but
-          // `RuntimeVerifyVerdict` doesn't declare, so read it structurally. Going
-          // via `unknown` is required: a direct cast to `{ audioPlays: number }`
-          // is a TS2352 error because the two types don't overlap.
-          const maybePlays = (verdict as unknown as { audioPlays?: unknown }).audioPlays;
-          const plays = typeof maybePlays === 'number' ? maybePlays : 0;
-          if (juice >= 15 && plays <= 0) {
+          if (juice >= 15 && verdict.audioPlays !== undefined && verdict.audioPlays <= 0) {
             errors.push({
               message:
                 'Juice was measured but audioPlays == 0 — the game looks alive but is MUTE. Wire sfx()/WebAudio (or generate_audio_asset) into hit/jump/score handlers so sound actually plays.',
