@@ -249,6 +249,10 @@ window.__game.debug = window.__game.debug || (function () {
 // AudioContext.resume/createOscillator so playtest snapshots can assert
 // audioPlays increased. A mute game can no longer hide behind a juice score.
 (function () {
+  // The serve-time runtime (shared controls-runtime.ts) installs the same counter;
+  // whichever runs first wins, so one audio start is never counted twice.
+  if (window.__pfAudioCounter) return;
+  window.__pfAudioCounter = true;
   function bump() {
     try {
       if (window.__game && window.__game.debug) {

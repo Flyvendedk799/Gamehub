@@ -77,6 +77,40 @@ describe('the seeded scaffold is a real, bootable game', () => {
   }
 });
 
+describe('seedPremiumStarter — the entry page', () => {
+  for (const engine of ENGINES) {
+    it(`seeds ${engine}'s own index.html, without the desktop <base href>`, () => {
+      const tree = new WorkingTree();
+      seedPremiumStarter(tree, engine);
+      const entry = tree.view('index.html')?.content ?? '';
+      expect(entry).toContain('<script type="module" src="src/main.js">');
+      expect(entry).toContain('window.__game');
+      expect(entry).not.toMatch(/<base\b/i);
+    });
+
+    it(`the seeded ${engine} project passes its engine validator exactly as seeded`, () => {
+      const adapter = GAME_ENGINE_ADAPTERS.get(engine);
+      if (adapter === undefined) throw new Error(`no adapter for ${engine}`);
+      const tree = new WorkingTree();
+      seedPremiumStarter(tree, engine);
+      const result = adapter.validate(tree.toTextFiles());
+      const errors = result.ok ? [] : result.issues.filter((i) => i.severity === 'error');
+      expect(errors, JSON.stringify(errors, null, 2)).toEqual([]);
+    });
+  }
+
+  it('keeps an entry page that is already there', () => {
+    const tree = new WorkingTree([['index.html', '<!-- my page -->']]);
+    seedPremiumStarter(tree, 'canvas2d');
+    expect(tree.view('index.html')?.content).toBe('<!-- my page -->');
+  });
+
+  it('does not list index.html among the seeded scaffold modules', () => {
+    const tree = new WorkingTree();
+    expect(seedPremiumStarter(tree, 'canvas2d')).not.toContain('index.html');
+  });
+});
+
 describe('the seeded scaffold survives the inline-for-verify bundler', () => {
   beforeEach(() => {
     // The engine CDN fetch is the only network the bundler does; canvas2d skips it.

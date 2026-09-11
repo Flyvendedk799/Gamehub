@@ -403,7 +403,26 @@ export function seedPremiumStarter(
     tree.create(path, content);
     seeded.push(path);
   }
+  // The entry page too. Every engine guide says "index.html — provided by the
+  // engine starter, do NOT recreate it", but nothing provided it: run 550cef11 got
+  // "Path not found: index.html" and hand-wrote a page with its own __game stubs.
+  // Left out of `seeded` on purpose — the scaffold metrics measure the modules.
+  if (tree.view('index.html') === null) tree.create('index.html', starterEntryHtml(engine));
   return seeded;
+}
+
+/**
+ * The engine's own entry page for a cloud project: the adapter bootstrap (the
+ * canvas / importmap, the `__game` runtime shim, the module script that loads
+ * `src/main.js`) minus its desktop `<base href>`. The preview serves the project
+ * at its own URL, so relative paths already resolve without one.
+ */
+export function starterEntryHtml(engine: StarterEngine): string {
+  const adapter = GAME_ENGINE_ADAPTERS.get(engine);
+  if (adapter === undefined) throw new Error(`No engine adapter for ${engine}`);
+  return adapter
+    .bootstrap({ designId: 'starter', gameBaseUrl: 'about:blank' })
+    .replace(/[ \t]*<base\b[^>]*>[ \t]*\r?\n?/i, '');
 }
 
 /**
