@@ -57,6 +57,16 @@ export interface RunSignal {
   /** Turn count per segment — a restart that buys no work is a different problem
    *  from one that splits the run evenly. */
   restartSegmentTurns: number[];
+  /**
+   * True when `done` accepted the artifact under its best-effort policy — the
+   * fix-attempt budget ran out with fatal errors still standing. The playtest
+   * verdict can still pass, so without this a force-accepted run was recorded
+   * as `passed` / force_accept=false (3 of 5 such runs in the 14 days to
+   * 2026-09-11, including 550cef11).
+   */
+  doneForceAccepted: boolean;
+  /** Error sources that were still failing when `done` force-accepted. */
+  doneUnresolvedSources: string[];
 }
 
 function toolNameOf(event: AgentEvent): string | undefined {
@@ -75,6 +85,8 @@ export function createRunSignalAggregator() {
   let editIntentDeclared = false;
   let tweakSchemaDeclared = false;
   let strReplaceFailures = 0;
+  let doneForceAccepted = false;
+  let doneUnresolvedSources: string[] = [];
   // BUILD_SPEED §6 — restart accounting.
   let agentStarts = 0;
   let awaitingSegmentFirstTurn = false;
@@ -138,6 +150,17 @@ export function createRunSignalAggregator() {
           // PRIMARY capture (ImportSkillDetails.name is always populated).
           imported.add(details.name);
         }
+        if (name === 'done') {
+          const done = result?.details as
+            | { forceAccepted?: unknown; unresolvedSources?: unknown }
+            | undefined;
+          if (done?.forceAccepted === true) {
+            doneForceAccepted = true;
+            doneUnresolvedSources = Array.isArray(done.unresolvedSources)
+              ? done.unresolvedSources.filter((s): s is string => typeof s === 'string')
+              : [];
+          }
+        }
         if (name === 'assert_game_invariants' && details && Array.isArray(details.issues)) {
           // Keep the LAST pass — that's the state the run shipped with.
           invariantWarnings = details.issues
@@ -177,6 +200,8 @@ export function createRunSignalAggregator() {
         editIntentDeclared,
         tweakSchemaDeclared,
         strReplaceFailures,
+        doneForceAccepted,
+        doneUnresolvedSources: [...doneUnresolvedSources],
       };
     },
   };

@@ -43,11 +43,13 @@ import {
   decideRepairAction,
   detectInteractivityResponse,
   generateViaAgent,
+  orphanedJsModulePaths,
   parseVisualCritique,
   recommendSkills,
   resolveMaxRepairRounds,
   scorePlaytest,
   selectGamePlaytestPlan,
+  stubModulePaths,
   traceFromPlaytestResult,
 } from '@playforge/agent-core';
 // Import from the engines subpath, NOT the package root — the root pulls in
@@ -191,6 +193,13 @@ export interface RuntimeVerifyVerdict {
    * gates strictly on `=== false` and can never false-flag an unverifiable game.
    */
   renderedNonBlank?: boolean;
+  /**
+   * How many times the booted game started audio (the runtime shim counts
+   * HTMLAudioElement.play + AudioContext.resume/createOscillator) after the
+   * browser-worker nudged it past its title screen. `undefined` when the queue
+   * node predates the counter — unknown is NOT mute, so the audio gate abstains.
+   */
+  audioPlays?: number;
 }
 
 /**
@@ -342,6 +351,9 @@ export interface GenerationResult {
   /** Run-total token usage, summed from every `turn_end`. Persisted to the
    *  `runs` row for cost attribution. Zero when the provider streams no usage. */
   usage: RunTokenUsage;
+  /** Implied USD cost of the run's tokens at list price (cache-weighted), for the
+   *  `runs.cost_usd` column. */
+  costUsd: number;
   /** WS-D — set when the run paused because the agent called `ask_user`. The
    *  caller persists it on the continuation_pending row so the builder can show
    *  the question + collect an answer. Null for a normal/complete run. */
@@ -394,7 +406,26 @@ export function seedPremiumStarter(
     tree.create(path, content);
     seeded.push(path);
   }
+  // The entry page too. Every engine guide says "index.html — provided by the
+  // engine starter, do NOT recreate it", but nothing provided it: run 550cef11 got
+  // "Path not found: index.html" and hand-wrote a page with its own __game stubs.
+  // Left out of `seeded` on purpose — the scaffold metrics measure the modules.
+  if (tree.view('index.html') === null) tree.create('index.html', starterEntryHtml(engine));
   return seeded;
+}
+
+/**
+ * The engine's own entry page for a cloud project: the adapter bootstrap (the
+ * canvas / importmap, the `__game` runtime shim, the module script that loads
+ * `src/main.js`) minus its desktop `<base href>`. The preview serves the project
+ * at its own URL, so relative paths already resolve without one.
+ */
+export function starterEntryHtml(engine: StarterEngine): string {
+  const adapter = GAME_ENGINE_ADAPTERS.get(engine);
+  if (adapter === undefined) throw new Error(`No engine adapter for ${engine}`);
+  return adapter
+    .bootstrap({ designId: 'starter', gameBaseUrl: 'about:blank' })
+    .replace(/[ \t]*<base\b[^>]*>[ \t]*\r?\n?/i, '');
 }
 
 /**
@@ -774,16 +805,12 @@ export async function runGeneration(
               source: 'runtime',
             });
           }
-          // S1 — juice without audio is mute. When the browser measured juice,
-          // require at least one audioPlays tick.
+          // S1 — juice without audio is mute. When the browser measured juice AND
+          // counted audio, require at least one audioPlays tick. An absent count
+          // abstains: the worker used to drop the field, so every juiced game read
+          // as mute and the agent spent turns "proving" sound it already had.
           const juice = verdict.juiceScore ?? 0;
-          // `audioPlays` is an optional extra the browser worker may report but
-          // `RuntimeVerifyVerdict` doesn't declare, so read it structurally. Going
-          // via `unknown` is required: a direct cast to `{ audioPlays: number }`
-          // is a TS2352 error because the two types don't overlap.
-          const maybePlays = (verdict as unknown as { audioPlays?: unknown }).audioPlays;
-          const plays = typeof maybePlays === 'number' ? maybePlays : 0;
-          if (juice >= 15 && plays <= 0) {
+          if (juice >= 15 && verdict.audioPlays !== undefined && verdict.audioPlays <= 0) {
             errors.push({
               message:
                 'Juice was measured but audioPlays == 0 — the game looks alive but is MUTE. Wire sfx()/WebAudio (or generate_audio_asset) into hit/jump/score handlers so sound actually plays.',
@@ -1416,6 +1443,11 @@ export async function runGeneration(
   // to run_quality_metrics.report.
   const sig = signal.snapshot();
   const reportScore = shippedVerdict?.score ?? null;
+  // Shipped without a clean verdict: either the playtest failed, or `done` ran
+  // out of fix attempts and accepted anyway. The second used to be invisible —
+  // run 550cef11 was force-accepted and still recorded as passed.
+  const shippedUnverified =
+    (shippedVerdict !== null && !shippedVerdict.pass) || sig.doneForceAccepted;
   // Phase 3/4/9 telemetry — did the agent ignore the skills we recommended for
   // its declared capabilities (re-derivation), and did it escape the declared
   // engine with a decoy entry? These feed the run-report analyzer.
@@ -1453,8 +1485,22 @@ export async function runGeneration(
   const billedInput = usedInputTokens + usedCacheReadTokens + usedCacheWriteTokens;
   // Modular-scaffold survival + file-size shape, both read off the SHIPPED tree.
   const shippedTextFiles = tree.toTextFiles();
-  const scaffoldSurvivors = [...seededStarterPaths].filter((p) =>
-    shippedTextFiles.some((f) => f.path === p),
+  // A seeded module survives only if it still ships code the page loads. Path
+  // existence alone reported run 550cef11's scaffold as 8/8 intact while six of
+  // those files were `export {}` stubs wired in purely to quiet a check.
+  const shippedContents = new Map(shippedTextFiles.map((f) => [f.path, f.content] as const));
+  const shippedEntry = shippedContents.get('index.html');
+  const scaffoldStubbed = stubModulePaths(shippedContents).filter((p) => seededStarterPaths.has(p));
+  const scaffoldOrphaned =
+    shippedEntry === undefined
+      ? []
+      : orphanedJsModulePaths(
+          shippedEntry,
+          new Set([...shippedContents.keys()].filter((p) => p !== 'index.html')),
+          shippedContents,
+        ).filter((p) => seededStarterPaths.has(p));
+  const scaffoldSurvivors = [...seededStarterPaths].filter(
+    (p) => shippedContents.has(p) && !scaffoldStubbed.includes(p) && !scaffoldOrphaned.includes(p),
   );
   const lineCountOf = (content: string): number => content.split('\n').length;
   const entryLines = (() => {
@@ -1478,7 +1524,7 @@ export async function runGeneration(
     capabilities: state.spec?.capabilities ?? null,
     fileCount: tree.size,
     shipReason,
-    forceAccept: shippedVerdict !== null && !shippedVerdict.pass,
+    forceAccept: shippedUnverified,
     repairRounds,
     runtimeBooted: lastRuntimeVerify === undefined ? null : lastRuntimeVerify.booted,
     juiceScore: lastRuntimeVerify?.juiceScore ?? null,
@@ -1515,7 +1561,9 @@ export async function runGeneration(
     // and the view:mutation ratio should follow it down.
     scaffoldSeeded: seededStarterPaths.size,
     scaffoldSurvived: scaffoldSurvivors.length,
-    scaffoldDeleted: [...seededStarterPaths].filter((p) => !scaffoldSurvivors.includes(p)),
+    scaffoldDeleted: [...seededStarterPaths].filter((p) => !shippedContents.has(p)),
+    scaffoldStubbed,
+    scaffoldOrphaned,
     entryFileLines: entryLines,
     maxFileLines: maxLines,
     maxFileLinesPath: maxLinesPath,
@@ -1548,7 +1596,7 @@ export async function runGeneration(
     const score = shippedVerdict?.score ?? null;
     const metrics: RunQualityMetrics = {
       genre: state.spec?.genre ?? null,
-      forceAccept: shippedVerdict !== null && !shippedVerdict.pass,
+      forceAccept: shippedUnverified,
       repairRounds,
       shipReason,
       playbookPass: score === null ? 0 : score.results.length - score.failures,
@@ -1620,6 +1668,7 @@ export async function runGeneration(
       cacheReadTokens: usedCacheReadTokens,
       cacheWriteTokens: usedCacheWriteTokens,
     },
+    costUsd,
     pendingQuestion,
     tweakSchema,
     ...(lastRuntimeVerify !== undefined ? { runtimeVerify: lastRuntimeVerify } : {}),

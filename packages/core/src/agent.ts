@@ -1234,10 +1234,10 @@ export async function generateViaAgent(
     // genre playbook fits, so a novel game is deterministically gated on its own
     // declared input→state behaviour rather than shipping unverified.
     defaultTools.push(
-      makeDeclarePlaytestContractTool(deps.gameMode.setContract) as unknown as AgentTool<
-        TSchema,
-        unknown
-      >,
+      makeDeclarePlaytestContractTool(
+        deps.gameMode.setContract,
+        deps.gameMode.getSpec,
+      ) as unknown as AgentTool<TSchema, unknown>,
     );
     // declare_edit_intent — ITERATIONS only. Nothing in the pipeline previously
     // checked whether an edit did what the user asked; the genre floor kept

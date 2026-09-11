@@ -16,6 +16,7 @@ import { REDACTED_PATH_SENTINEL, REDACTION_POISON_KEY } from '../context-prune.j
 import type { CameraGuard } from './camera-pin.js';
 import type { EditBudget } from './edit-budget.js';
 import { formatEditEcho } from './edit-echo.js';
+import { modulesOrphanedByRewrite } from './done-heuristics.js';
 import { findInFiles } from './find-in-files.js';
 import { assertSafeToolPath } from './path-safety.js';
 import {
@@ -74,6 +75,15 @@ export interface TextEditorFsCallbacks {
   ): Promise<EditResult> | EditResult;
   /** Optional: list files for `view` on a directory. Returns sorted paths. */
   listDir(dir: string): string[];
+  /**
+   * Remove a file from the project. Returns true when it existed.
+   *
+   * Optional so older hosts keep working (the `delete` command then refuses).
+   * Without it an agent that rewrote the scaffold had no way to drop the modules
+   * it orphaned — run 550cef11 overwrote six of them with `export {}` stubs and
+   * wired the stubs into the page to quiet the orphan check.
+   */
+  delete?(path: string): boolean | Promise<boolean>;
 }
 
 const TextEditorParams = Type.Object({
@@ -88,6 +98,9 @@ const TextEditorParams = Type.Object({
     // Locate code without reading it — see find-in-files.ts for why this had
     // to exist.
     Type.Literal('find'),
+    // Remove a file the game no longer uses (e.g. scaffold modules a rewrite
+    // orphaned). Without it the only way to quiet the orphan check was a stub.
+    Type.Literal('delete'),
   ]),
   path: Type.String(),
   /** `find`: the literal text to search for. */
@@ -132,9 +145,29 @@ const TextEditorParams = Type.Object({
 });
 
 export interface TextEditorDetails {
-  command: 'view' | 'create' | 'str_replace' | 'insert' | 'patch' | 'find';
+  command: 'view' | 'create' | 'str_replace' | 'insert' | 'patch' | 'find' | 'delete';
   path: string;
   result?: unknown;
+}
+
+/** Every text file in the project, for whole-project checks after an edit. */
+function projectTextFiles(fs: TextEditorFsCallbacks): Map<string, string> {
+  const files = new Map<string, string>();
+  if (fs.textFiles !== undefined) {
+    for (const f of fs.textFiles()) files.set(f.path, f.content);
+    return files;
+  }
+  let paths: string[] = [];
+  try {
+    paths = fs.listDir('.');
+  } catch {
+    paths = [];
+  }
+  for (const p of paths) {
+    const v = fs.view(p);
+    if (v !== null) files.set(p, v.content);
+  }
+  return files;
 }
 
 function ok(text: string, details: TextEditorDetails): AgentToolResult<TextEditorDetails> {
@@ -609,10 +642,12 @@ export function makeTextEditorTool(
     name: 'str_replace_based_edit_tool',
     label: 'Text editor',
     description:
-      'Read and edit files in the current design via view/find/create/str_replace/insert/patch commands. ' +
+      'Read and edit files in the current design via view/find/create/str_replace/insert/patch/delete commands. ' +
       'Paths are relative to the project root (e.g. "index.html", "assets/sprite.png"). ' +
       'Use create for new files; str_replace requires an exact match of old_str; ' +
       'view returns file content or directory listing. ' +
+      'Use delete to remove a file the game no longer uses (e.g. starter modules your rewrite replaced) — ' +
+      'never leave an empty stub behind or import a dead module just to satisfy a check. ' +
       // Navigation comes first. Hunting for code by reading it is the single
       // largest cost in a build — 62% of all model latency in the last
       // production trace followed this tool, most of it ranged views walking a
@@ -877,11 +912,22 @@ export function makeTextEditorTool(
           const byteLen = Buffer.byteLength(text, 'utf8');
           const createCap = maxCreateBytesFor(path);
           if (byteLen > createCap) throwOversizedCreate(path, byteLen, createCap);
+          const previous = /\.(m?js|cjs)$/i.test(path) ? (fs.view(path)?.content ?? null) : null;
           const result = await fs.create(path, text);
           // E3: record the mutation tick + size for post-write view stubbing.
           const sizeAfter = fs.view(path)?.content.length ?? 0;
           lastMutationByPath.set(path, { tick, size: sizeAfter });
-          return ok(`Created ${result.path}`.concat(renderOutline(path, text)), {
+          // A from-scratch rewrite of a module silently cuts loose whatever the old
+          // version imported. Say so on THIS edit, while deleting them is one call —
+          // run 550cef11 found out three verifies later and shipped stubs instead.
+          let orphanNotice = '';
+          if (previous !== null && previous !== text) {
+            const orphaned = modulesOrphanedByRewrite(path, previous, projectTextFiles(fs));
+            if (orphaned.length > 0) {
+              orphanNotice = `\n\nThis rewrite dropped the imports of ${orphaned.length} module(s) that nothing loads any more: ${orphaned.join(', ')}. If your game still needs them, import them again. If not, remove each with \`command: "delete"\` — do not replace them with empty stubs.`;
+            }
+          }
+          return ok(`Created ${result.path}`.concat(renderOutline(path, text), orphanNotice), {
             command: 'create',
             path,
             result,
@@ -992,6 +1038,51 @@ export function makeTextEditorTool(
             }
             throw err;
           }
+        }
+        case 'delete': {
+          if (fs.delete === undefined) {
+            throw new Error(
+              'text_editor.delete is not available on this host. Remove every import / <script> tag that loads the file instead.',
+            );
+          }
+          if (path === 'index.html') {
+            throw new Error(
+              'Refusing to delete index.html — it is the page entry every game boots from. Edit it instead.',
+            );
+          }
+          let exists = fs.view(path) !== null;
+          if (!exists) {
+            try {
+              exists = fs.listDir('.').includes(path);
+            } catch {
+              exists = false;
+            }
+          }
+          if (!exists) throw new Error(`Path not found: ${path}`);
+          await fs.delete(path);
+          lastMutationByPath.delete(path);
+          lastViewByPath.delete(path);
+          viewCountByPath.delete(path);
+          resetTargetFailuresForPath(path);
+          // A delete that leaves an import behind turns a dead file into a boot
+          // crash, so name every file that still mentions it.
+          const base = path.slice(path.lastIndexOf('/') + 1);
+          let remaining: string[] = [];
+          try {
+            remaining = fs.listDir('.');
+          } catch {
+            remaining = [];
+          }
+          const referrers = remaining.filter(
+            (p) =>
+              /\.(html?|m?js|cjs|jsx|tsx?)$/i.test(p) &&
+              (fs.view(p)?.content.includes(base) ?? false),
+          );
+          const warning =
+            referrers.length === 0
+              ? ''
+              : ` These files still reference '${base}' — remove those imports / <script> tags or the game will fail to load: ${referrers.join(', ')}.`;
+          return ok(`Deleted ${path}.${warning}`, { command: 'delete', path });
         }
         case 'insert': {
           const line = params.insert_line ?? 0;

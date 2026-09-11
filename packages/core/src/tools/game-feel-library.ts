@@ -49,7 +49,14 @@ function parseWhenToUse(src: string): string {
   return out.join(' ').trim();
 }
 
-const EngineFilter = Type.Union([Type.Literal('phaser'), Type.Literal('three')]);
+// canvas2d is a valid engine to ask about even though the library has no snippets
+// for it: rejecting it failed a turn on run 550cef11, and the unfiltered retry
+// handed a canvas2d game nothing but Phaser snippets.
+const EngineFilter = Type.Union([
+  Type.Literal('phaser'),
+  Type.Literal('three'),
+  Type.Literal('canvas2d'),
+]);
 const CategoryFilter = Type.Union([Type.Literal('feel'), Type.Literal('engine')]);
 
 const ListGameFeelParams = Type.Object({
@@ -77,13 +84,29 @@ export function makeListGameFeelTool(): AgentTool<typeof ListGameFeelParams, Lis
       'Return the catalogue of JUICE/FEEL primitives + engine scaffolding for game builds. ' +
       'Feel primitives (category "feel") are the anti-slop differentiator: screen-shake, hitstop/freeze-frame, ' +
       'particle-burst, squash-&-stretch, score-pop/floating-text, screen-flash, camera-kick, knockback — ' +
-      'copy-paste-grade, framework-correct for both Phaser 3 and Three.js. ' +
+      'copy-paste-grade, framework-correct for both Phaser 3 and Three.js ' +
+      '(a canvas2d game already carries its feel kit in the seeded starter — pass `{ engine: "canvas2d" }` to be pointed at it). ' +
       'Each entry has a name, the `engine` it targets, a `category`, a `whenToUse` hint, and a byte size. ' +
       'Filter by `{ engine }` (your chosen engine) and optionally `{ category: "feel" }`. ' +
       'Call this during the polish step (workflow step 6) BEFORE wiring impact feedback, then ' +
       '`view_game_feel({ name })` the matching primitive. Skipping this means generated games feel flat.',
     parameters: ListGameFeelParams,
     async execute(_id, params): Promise<AgentToolResult<ListGameFeelDetails>> {
+      if (params.engine === 'canvas2d') {
+        return {
+          content: [
+            {
+              type: 'text',
+              text:
+                'Game-feel library: no canvas2d snippets — these primitives are written for Phaser 3 and Three.js. ' +
+                'A canvas2d game already has its feel kit in the seeded starter: src/fx.js (particle burst, kick, ' +
+                'shakeCtx screen shake) and sfx(freq, dur, type) in src/engine/core.js for synthesized WebAudio. ' +
+                'Call those from your hit / score / death handlers.',
+            },
+          ],
+          details: { skills: [] },
+        };
+      }
       const skills: GameFeelEntry[] = [];
       for (const entry of GAME_SKILLS) {
         if (params.engine !== undefined && entry.engine !== params.engine) continue;

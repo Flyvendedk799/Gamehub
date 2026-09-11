@@ -102,8 +102,22 @@ export type GetGameContractFn = () => GamePlaytestPlan | undefined;
 
 const LITERAL_OPS = new Set(['greaterThan', 'lessThan', 'equals']);
 
+/** The slice of the declared spec this tool reads. */
+type ContractSpec = { winCondition?: string | undefined; loseCondition?: string | undefined };
+export type GetContractSpecFn = () => ContractSpec | undefined | Promise<ContractSpec | undefined>;
+
+/** Snapshot fields that can move a game toward its win or lose condition. */
+const OUTCOME_FIELD_RE =
+  /score|point|goal|win|lose|lost|li(?:fe|ves)|hp|health|level|wave|progress|round|kill|coin|gem|collect|timer|distance|dead|alive|over/i;
+
+function declaresOutcome(condition: string | undefined): boolean {
+  const c = condition?.trim().toLowerCase() ?? '';
+  return c.length > 0 && c !== '—' && c !== '-' && c !== 'none' && c !== 'n/a';
+}
+
 export function makeDeclarePlaytestContractTool(
   setContract: SetGameContractFn | undefined,
+  getSpec?: GetContractSpecFn,
 ): AgentTool<typeof DeclarePlaytestContractParams, DeclarePlaytestContractDetails> {
   return {
     name: 'declare_playtest_contract',
@@ -146,6 +160,21 @@ export function makeDeclarePlaytestContractTool(
             `assertOp:"${c.assertOp}" must include assertValue (the number to compare against).`,
           );
         }
+      }
+
+      // A game that can be won or lost must check the state that decides it. Run
+      // 550cef11 (Pong, "first to 7") only asserted that the paddle and ball moved;
+      // neither score changed all playtest, so a Pong nobody can score in would
+      // have passed the same contract.
+      const spec = getSpec === undefined ? undefined : await getSpec();
+      if (
+        spec !== undefined &&
+        (declaresOutcome(spec.winCondition) || declaresOutcome(spec.loseCondition)) &&
+        !checks.some((c) => c.assertOp !== undefined && OUTCOME_FIELD_RE.test(c.assertField ?? ''))
+      ) {
+        throw new Error(
+          `This game declares how it is won or lost (win: "${spec.winCondition ?? '—'}", lose: "${spec.loseCondition ?? '—'}"), but no check asserts on the state that decides it — a game where that state never changes would still pass. Add at least one check on the score / lives / progress field the condition depends on, e.g. {action:"wait", holdFrames:240, assertField:"aiScore", assertOp:"increases"} for an opponent that scores past an idle player.`,
+        );
       }
 
       const contract: AuthoredContract = {

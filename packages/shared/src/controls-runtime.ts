@@ -91,6 +91,28 @@ export const DEBUG_RUNTIME_SNIPPET = `<script data-pf="${DEBUG_RUNTIME_MARKER}">
   window.__game.debug=api;
 })();</script>`;
 
+/** Marker for the serve-time audio counter. */
+export const AUDIO_COUNTER_MARKER = 'pf-audio-counter';
+
+/**
+ * Runtime audio evidence — counts audio starts into `window.__game.debug.audioPlays`
+ * by wrapping HTMLAudioElement.play, AudioContext.resume and oscillator.start. The
+ * browser-worker reads that count after nudging the game past its title screen.
+ *
+ * The same patch ships in the engine bootstrap (packages/runtime types.ts), but no
+ * cloud project ever received that bootstrap: every agent-written index.html read
+ * audioPlays = 0, and the done gate called a game with working WebAudio "MUTE"
+ * (run 550cef11). Injecting it here covers every page. `__pfAudioCounter` keeps
+ * the two copies from double-counting. ES5, self-contained.
+ */
+export const AUDIO_COUNTER_SNIPPET = `<script data-pf="${AUDIO_COUNTER_MARKER}">(function(){
+  if(window.__pfAudioCounter)return;
+  window.__pfAudioCounter=true;
+  function bump(){try{if(window.__game&&window.__game.debug){window.__game.debug.audioPlays=(window.__game.debug.audioPlays||0)+1;}}catch(e){}}
+  try{if(typeof HTMLAudioElement!=='undefined'&&HTMLAudioElement.prototype){var ap=HTMLAudioElement.prototype.play;if(typeof ap==='function'){HTMLAudioElement.prototype.play=function(){bump();return ap.apply(this,arguments);};}}}catch(e){}
+  try{var AC=window.AudioContext||window.webkitAudioContext;if(AC&&AC.prototype){var rs=AC.prototype.resume;if(typeof rs==='function'){AC.prototype.resume=function(){bump();return rs.apply(this,arguments);};}var osc=AC.prototype.createOscillator;if(typeof osc==='function'){AC.prototype.createOscillator=function(){var o=osc.apply(this,arguments);try{var st=o.start;if(typeof st==='function'){o.start=function(){bump();return st.apply(this,arguments);};}}catch(e2){}return o;};}}}catch(e){}
+})();</script>`;
+
 /** Marker for the end-of-body manifest bridge (separate from the head runtime). */
 export const CONTROLS_MANIFEST_BRIDGE_MARKER = 'pf-controls-manifest-bridge';
 
@@ -269,6 +291,18 @@ export function injectControlsRuntime(html: string): string {
       out = `${out.slice(0, at)}\n${DEBUG_RUNTIME_SNIPPET}${out.slice(at)}`;
     } else {
       out = `${DEBUG_RUNTIME_SNIPPET}\n${out}`;
+    }
+  }
+  // Audio counter (window.__game.debug.audioPlays) — the evidence the done gate's
+  // mute check reads. Head-injected before the game module so the very first
+  // sound is counted; idempotent via marker + the __pfAudioCounter flag.
+  if (!out.includes(AUDIO_COUNTER_MARKER)) {
+    const headOpen = /<head[^>]*>/i.exec(out);
+    if (headOpen?.index !== undefined) {
+      const at = headOpen.index + headOpen[0].length;
+      out = `${out.slice(0, at)}\n${AUDIO_COUNTER_SNIPPET}${out.slice(at)}`;
+    } else {
+      out = `${AUDIO_COUNTER_SNIPPET}\n${out}`;
     }
   }
   // Representational-art runtime (window.__game.art). Like the controls runtime, a

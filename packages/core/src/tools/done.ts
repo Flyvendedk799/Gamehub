@@ -98,6 +98,10 @@ export interface DoneDetails {
   path: string;
   errors: DoneError[];
   summary?: string;
+  /** Set when `status: 'ok'` came from the best-effort policy, not a clean pass. */
+  forceAccepted?: boolean;
+  /** Sources of the fatal errors still standing at a force-accept. */
+  unresolvedSources?: string[];
 }
 
 /** Host-injected runtime verifier. Receives the raw artifact source (the
@@ -379,6 +383,31 @@ function hasDebugContract(source: string): boolean {
   );
 }
 
+/** Genres whose opposition arrives in waves — the shape the depth and
+ *  subject-art floors were written for, regardless of the declared caps. */
+const WAVE_GENRES: ReadonlySet<string> = new Set([
+  'shmup',
+  'tower_defense',
+  'topdown_arcade',
+  'runner',
+  'roguelike',
+  'fps',
+  'tps',
+]);
+
+/**
+ * Does this spec describe a game that throws escalating opposition at the
+ * player? `hasEnemies` alone is not enough: an AI paddle in Pong, a rival
+ * racer, or a chess opponent is an "enemy" that never escalates, and holding
+ * those to the waves floor produced three fatal false positives on run
+ * 550cef11 — a brief whose twist was literally "Nothing changes".
+ */
+function facesEscalatingOpposition(spec: CompletabilitySpec): boolean {
+  const caps = spec.capabilities as { escalates?: boolean; hasEnemies?: boolean } | undefined;
+  if (caps?.escalates === true) return true;
+  return caps?.hasEnemies === true && WAVE_GENRES.has(spec.genre);
+}
+
 function contentPlanMissingDepth(spec: CompletabilitySpec): boolean {
   const caps = spec.capabilities as
     | {
@@ -391,7 +420,7 @@ function contentPlanMissingDepth(spec: CompletabilitySpec): boolean {
         };
       }
     | undefined;
-  if (caps?.escalates !== true && caps?.hasEnemies !== true) return false;
+  if (caps === undefined || !facesEscalatingOpposition(spec)) return false;
   const plan = caps.contentPlan;
   if (plan === undefined) return true;
   const behaviors = plan.distinctEnemyBehaviors ?? 0;
@@ -605,6 +634,28 @@ const VerifyParams = Type.Object({
   path: Type.Optional(Type.String()),
 });
 
+/** Hash of everything a verify verdict depends on: the entry's bytes plus every
+ *  project file's path and content. Adding, removing or editing ANY file changes
+ *  it, because the orphan scan and the runtime boot both read the whole tree. */
+function projectFingerprint(
+  fs: TextEditorFsCallbacks,
+  entryPath: string,
+  entryContent: string,
+): string {
+  const parts: string[] = [entryPath, entryContent];
+  let paths: string[] = [];
+  try {
+    paths = [...fs.listDir('.')].sort();
+  } catch {
+    /* single-file pattern — the entry is the whole project */
+  }
+  for (const p of paths) {
+    if (p === entryPath) continue;
+    parts.push(p, fs.view(p)?.content ?? '');
+  }
+  return hashContent(JSON.stringify(parts));
+}
+
 export interface VerifyDetails {
   status: 'ok' | 'has_errors';
   path: string;
@@ -648,19 +699,20 @@ export function makeVerifyArtifactTool(
     parameters: VerifyParams,
     async execute(_id, params): Promise<AgentToolResult<VerifyDetails>> {
       const path = params.path ?? 'index.html';
-      // Check the cache first — read the current file content via the
-      // FS callback and key on its hash. If we already verified this
-      // exact (path, content, artifactType) tuple, return the cached
-      // result without re-parsing.
+      // Check the cache first. The key is the whole PROJECT, not just the entry
+      // file: the orphan-module scan and the runtime boot both read every
+      // sibling, so a verify keyed on index.html alone replayed a stale verdict
+      // after an edit to src/main.js (run 550cef11 — the agent read the replay as
+      // "the verifier can't follow imports" and wired dead stubs into the page).
       const viewResult = fs.view(path);
-      const fileNow = viewResult?.content ?? null;
-      if (fileNow !== null) {
-        const key = {
+      const fingerprintBefore =
+        viewResult === null ? null : projectFingerprint(fs, path, viewResult.content);
+      if (fingerprintBefore !== null) {
+        const cached = cache.get({
           path,
-          contentHash: hashContent(fileNow),
+          contentHash: fingerprintBefore,
           artifactType: artifactType ?? null,
-        };
-        const cached = cache.get(key);
+        });
         if (cached !== undefined) {
           return {
             content: [{ type: 'text', text: cached.summary }],
@@ -693,19 +745,17 @@ export function makeVerifyArtifactTool(
       if (typeof result.content === 'string') {
         lastVerifiedContentByPath.set(path, result.content);
       }
-      // Cache only when we have the content we used. `result.content`
-      // is the post-read snapshot from runArtifactChecks; key on that
-      // exact bytes so an evicted+re-fetched read doesn't poison the
-      // cache.
-      if (typeof result.content === 'string') {
-        cache.set(
-          {
-            path,
-            contentHash: hashContent(result.content),
-            artifactType: artifactType ?? null,
-          },
-          { summary, details },
-        );
+      // Cache only when the project is byte-identical to what we started from.
+      // The runtime boot awaits, and a parallel edit landing meanwhile would
+      // otherwise file a mixed-state verdict under a fingerprint it never saw.
+      if (typeof result.content === 'string' && fingerprintBefore !== null) {
+        const fingerprintAfter = projectFingerprint(fs, path, result.content);
+        if (fingerprintAfter === fingerprintBefore) {
+          cache.set(
+            { path, contentHash: fingerprintAfter, artifactType: artifactType ?? null },
+            { summary, details },
+          );
+        }
       }
       return {
         content: [{ type: 'text', text: summary }],
@@ -1009,11 +1059,11 @@ export function makeDoneTool(
                 source: `${GAME_INVARIANT_SOURCE_PREFIX}fatal.content-plan`,
               });
             }
-            // S5 — circle-only subjects for representational specs.
-            const hasEnemies =
-              (spec.capabilities as { hasEnemies?: boolean } | undefined)?.hasEnemies === true;
+            // S5 — circle-only subjects for representational specs, and for games
+            // that throw escalating opposition at the player. A paddle or a ball is
+            // SUPPOSED to be a rectangle or a circle.
             if (
-              (REPRESENTATIONAL_GENRES.has(spec.genre) || hasEnemies) &&
+              (REPRESENTATIONAL_GENRES.has(spec.genre) || facesEscalatingOpposition(spec)) &&
               looksCircleOnlySubject(mainSource)
             ) {
               errors.push({
@@ -1065,6 +1115,14 @@ export function makeDoneTool(
         path,
         errors,
         ...(params.summary !== undefined ? { summary: params.summary } : {}),
+        // Telemetry reads these off the tool result: a best-effort accept must
+        // never be recorded as a clean pass.
+        ...(forceAccept
+          ? {
+              forceAccepted: true,
+              unresolvedSources: [...new Set(fatal.map((e) => e.source ?? 'unknown'))],
+            }
+          : {}),
       };
       let text: string;
       if (status === 'ok') {
@@ -1077,7 +1135,10 @@ export function makeDoneTool(
           const unresolved = fatal
             .map((e) => `- ${e.message}${e.lineno ? ` (line ${e.lineno})` : ''}`)
             .join('\n');
-          text = `ACCEPTED under best-effort policy after ${hasErrorsRounds} unfixed-error round(s). The artifact is final and the host has it. Do NOT call \`done\` (or any other tool) again. Mention these unresolved issues honestly in your 2–4 sentence summary, then end your turn:\n${unresolved}`;
+          // The list is for the agent. Run 550cef11 was told to "mention these
+          // honestly" and told the player the "static checker" was "being
+          // conservative" — internal machinery the player cannot act on.
+          text = `ACCEPTED under best-effort policy after ${hasErrorsRounds} unfixed-error round(s). The artifact is final and the host has it. Do NOT call \`done\` (or any other tool) again.\n\nThese checks were still failing. They are internal build notes: never mention the verifier, checks, gates or false positives to the player. Write your 2–4 sentence summary about the game itself; if one of these is a flaw the player will actually notice while playing (no sound, a control that does nothing, a screen that never ends), name it plainly in game terms. Otherwise leave them out. Then end your turn.\n${unresolved}`;
         } else {
           const runtimeNote = runtimeVerify
             ? 'no syntactic or runtime issues detected'

@@ -15,6 +15,7 @@
  * client rather than introducing a cross-service package dependency.
  */
 import { Queue } from 'bullmq';
+import type { RuntimeVerifyVerdict } from './run-generation';
 
 /** Synthetic-input step — structurally identical to the browser-worker union. */
 export type PlaytestStep =
@@ -43,6 +44,24 @@ export interface RuntimeVerifyResult {
   juiceScore?: number;
   /** Premium-completeness — false ONLY when a 2D canvas is confirmed persistently blank. */
   renderedNonBlank?: boolean;
+  /** Audio starts the runtime shim counted after the start-input nudge. */
+  audioPlays?: number;
+}
+
+/**
+ * Project a browser-worker result onto the verdict the done gate reads. Every
+ * optional field is forwarded when present and omitted when absent, so a newer
+ * measurement can never be silently lost here again (audioPlays was, and the
+ * gate then called every juiced game mute).
+ */
+export function toRuntimeVerifyVerdict(result: RuntimeVerifyResult): RuntimeVerifyVerdict {
+  return {
+    hasGameContract: result.hasGameContract,
+    fatalErrors: result.fatalErrors,
+    ...(result.juiceScore !== undefined ? { juiceScore: result.juiceScore } : {}),
+    ...(result.renderedNonBlank !== undefined ? { renderedNonBlank: result.renderedNonBlank } : {}),
+    ...(result.audioPlays !== undefined ? { audioPlays: result.audioPlays } : {}),
+  };
 }
 
 export interface PlaytestStepResult {
