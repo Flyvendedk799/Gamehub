@@ -23,6 +23,7 @@
  */
 
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+import { stripPlatformRuntime } from '@playforge/shared';
 import { Type } from '@sinclair/typebox';
 import { checkDestructiveEdit } from '../destructive-edit.js';
 import { checkFeelKit, looksCircleOnlySubject } from '../feel-kit.js';
@@ -126,7 +127,32 @@ const VOID_ELEMENTS = new Set([
   'wbr',
 ]);
 
-function findUnclosedTags(html: string): DoneError[] {
+/**
+ * Raw-text elements: per the HTML spec their content is NOT markup, so a `<div>`
+ * or a `</script>` written inside one is text, not a tag. Scanning through them
+ * was a phantom-error generator. The engine bootstrap this project seeds into
+ * every `index.html` carries the JS comment
+ *
+ *     // … Defined as its own marked <script> (ART_RUNTIME_SNIPPET) so the
+ *
+ * inside its boot script. The scanner read that comment's `<script>` as an open
+ * tag, the next real `</script>` popped the fake one instead, and the boot script
+ * stayed "unclosed" forever — so EVERY run reported five unfixable fatal errors
+ * (unclosed html/head/script plus two mismatched closers) from its first
+ * `verify_artifact` onward. Production run 54842529 spent 19.5 minutes and 131
+ * edits on it: three fix attempts against a page that was never broken, a
+ * force-accept, then a from-scratch rewrite that dropped the importmap
+ * ("Phaser is not defined") and needed two more repair rounds to undo.
+ *
+ * Same class of failure as the bracket counter removed on 2026-04-28 (see
+ * `findJsxStructuralIssues`): a scanner that doesn't know where code ends and
+ * markup begins bills the agent for its own confusion.
+ */
+const RAW_TEXT_ELEMENTS = new Set(['script', 'style', 'textarea', 'title']);
+
+/** Exported so the seeded-entry regression test can assert that no engine
+ *  bootstrap ever emits markup-looking text into a page again. */
+export function findUnclosedTags(html: string): DoneError[] {
   const issues: DoneError[] = [];
   const stack: Array<{ tag: string; lineno: number }> = [];
   const tagRe = /<\/?([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*?(\/)?>/g;
@@ -149,6 +175,14 @@ function findUnclosedTags(html: string): DoneError[] {
           lineno,
           source: 'html',
         });
+    } else if (RAW_TEXT_ELEMENTS.has(name)) {
+      // Jump the cursor past this element's raw-text body. An unterminated one
+      // (no closer anywhere) still reports as unclosed via the stack below.
+      const closeRe = new RegExp(`</${name}\\s*>`, 'i');
+      const rest = html.slice(tagRe.lastIndex);
+      const offset = rest.search(closeRe);
+      if (offset < 0) stack.push({ tag: name, lineno });
+      else tagRe.lastIndex += offset + (rest.match(closeRe)?.[0].length ?? 0);
     } else {
       stack.push({ tag: name, lineno });
     }
@@ -358,6 +392,16 @@ const REPRESENTATIONAL_GENRES: ReadonlySet<string> = new Set([
 const NETWORKING_HONESTY_RE =
   /NETWORKING_HONESTY_ACK|local multiplayer|hotseat|split[- ]screen|shared[- ]keyboard|same-origin netplay/i;
 
+/**
+ * Concatenate the game's own source for the heuristic scans.
+ *
+ * `stripPlatformRuntime` matters here: since the engine's `index.html` is seeded
+ * into every project, the entry file is mostly Playforge's runtime, and every
+ * regex invariant below was reading it as the agent's code. That is how run
+ * 54842529 — a 2D side-scrolling fighter — got told it was "a mouse-look /
+ * first-person game … effectively un-turnable", from a `pointerLockElement` in the
+ * bootstrap's own debug helper. Grade the game, not the platform.
+ */
 function collectMainSources(fs: TextEditorFsCallbacks, entryPath: string): string {
   const chunks: string[] = [];
   const paths = new Set<string>([entryPath]);
@@ -370,7 +414,8 @@ function collectMainSources(fs: TextEditorFsCallbacks, entryPath: string): strin
     const lower = p.toLowerCase();
     if (!/\.(html|js|jsx|ts|tsx|mjs|cjs)$/.test(lower)) continue;
     const v = fs.view(p);
-    if (v !== null) chunks.push(v.content);
+    if (v === null) continue;
+    chunks.push(lower.endsWith('.html') ? stripPlatformRuntime(v.content) : v.content);
   }
   return chunks.join('\n\n');
 }

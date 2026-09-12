@@ -20,7 +20,7 @@
  */
 
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
-import { hasGameTuning } from '@playforge/shared';
+import { hasGameTuning, stripPlatformRuntime } from '@playforge/shared';
 import { Type } from '@sinclair/typebox';
 import type { TextEditorFsCallbacks } from './text-editor.js';
 
@@ -134,9 +134,20 @@ export interface AssertGameInvariantsDeps {
   listFiles: () => Array<{ path: string; content: string }>;
 }
 
-/** Concatenated source of every text file that's a candidate for source-
- *  level pattern matching. Binary/asset paths are filtered out so we
- *  don't scan PNGs / WAVs by accident. */
+/**
+ * Concatenated source of every text file that's a candidate for source-level
+ * pattern matching. Binary/asset paths are filtered out so we don't scan
+ * PNGs / WAVs by accident.
+ *
+ * Platform runtime is stripped out of HTML first. Since the engine's own
+ * `index.html` is seeded into every project, the entry page is mostly Playforge's
+ * bootstrap, and every invariant below was matching against it as if the agent had
+ * written it. Run 54842529 — a 2D side-scrolling fighter — shipped with the warning
+ * "This looks like a mouse-look / first-person game … the game is effectively
+ * un-turnable" purely because `pointerLockElement` appears in that bootstrap's own
+ * debug helper. A gate that grades the platform's code teaches the agent to edit
+ * files it does not own.
+ */
 function gatherSource(deps: AssertGameInvariantsDeps): string {
   const files = deps.listFiles();
   const sources: string[] = [];
@@ -144,7 +155,7 @@ function gatherSource(deps: AssertGameInvariantsDeps): string {
     const lower = f.path.toLowerCase();
     if (!SOURCE_EXTENSIONS.some((ext) => lower.endsWith(ext))) continue;
     if (f.content.startsWith('data:')) continue;
-    sources.push(f.content);
+    sources.push(lower.endsWith('.html') ? stripPlatformRuntime(f.content) : f.content);
   }
   return sources.join('\n\n');
 }
@@ -244,6 +255,18 @@ const SCORE_PATTERNS: readonly RegExp[] = [
   // score init with a numeric RHS is still caught by the first pattern; a real score
   // MUTATION (`score += pts`, `score = score + 1`) is still caught here.
   /(?<!\b(?:const|let|var)\s+)\b(?:this\.|state\.|window\.|game\.|__game\.state\.)?(?:score|points?|coins?|stars?|kills?|money|gold|lives|wave|round|level)\s*[+\-*/]?=\s*[^=;]/i,
+  // Health IS the measurable progress signal in a fighter / brawler / boss fight:
+  // "first to drop the other's bar to zero" is the whole game, and such a game has
+  // no score to show. Run 54842529 — a UFC game whose entire HUD is two health bars,
+  // and whose own playtest trace shows playerHp/opponentHp moving on every step —
+  // was told "No score / state change detected. The player needs a measurable signal
+  // of progress." Damage dealt is that signal.
+  //
+  // The leading boundary is `(?<![\w$])` rather than `\b` so a camelCase name
+  // (`playerHp`, `cpuHealth`, `bossHp`) matches — which is how these are always
+  // written — while still anchoring the match to the START of the identifier, so the
+  // const/let/var lookbehind cannot be side-stepped by beginning mid-word.
+  /(?<![\w$])(?<!\b(?:const|let|var)\s+)(?:this\.|state\.|window\.|game\.|__game\.state\.)?(?:\w+\.)?[\w$]*(?:hp|health|hitpoints|stamina|shield|armor|armour)\s*[+\-*/]?=\s*[^=;]/i,
 ];
 
 const FEEDBACK_PATTERNS: readonly RegExp[] = [
@@ -733,8 +756,16 @@ export function assertGameInvariants(
   // never calls requestPointerLock() is un-turnable (the camera stops at the
   // window edge). The quality pass found a 3D collectathon shipped exactly this.
   // Static per-genre contract check: fps/tps perspective ⇒ must acquire lock.
+  // The "is this a mouse-look game?" clause deliberately does NOT accept a bare
+  // mention of pointer lock. It used to (`/pointerlock/i`), which made the check
+  // self-triggering: `pointerLockElement` satisfied the first clause and the second
+  // at once, so merely READING the lock state — to draw a "click to capture the
+  // mouse" hint, or in the platform's own debug helper — was enough to be told the
+  // game was un-turnable. Run 54842529, a 2D side-scrolling fighter with no camera
+  // at all, shipped with exactly that warning. Wanting mouse-look is evidenced by
+  // the genre, by saying so, or by doing the math (`movementX`).
   if (
-    (opts.genre === 'shooter' || /first[_-]?person|pointerlock|movementX/i.test(source)) &&
+    (opts.genre === 'shooter' || /first[_-]?person|mouse[_-]?look|movementX/i.test(source)) &&
     /requestPointerLock|exitPointerLock|pointerLockElement/.test(source) &&
     // Allow the call to be written with optional chaining — `el.requestPointerLock?.()`
     // is the common defensive form (confirmed false-positive otherwise).

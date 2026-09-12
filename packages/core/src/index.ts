@@ -232,6 +232,7 @@ export {
   type GenerateImageAssetResult,
 } from './tools/generate-image-asset.js';
 export {
+  findUnclosedTags,
   makeDoneTool,
   makeVerifyArtifactTool,
   type DoneDetails,

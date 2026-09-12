@@ -14,6 +14,7 @@ import {
   PREMIUM_STARTER_FILES,
   PREMIUM_STARTER_PATH,
   type StarterEngine,
+  findUnclosedTags,
   starterPathsFor,
 } from '@playforge/agent-core';
 import { GAME_ENGINE_ADAPTERS } from '@playforge/runtime/engines';
@@ -109,6 +110,37 @@ describe('seedPremiumStarter — the entry page', () => {
     const tree = new WorkingTree();
     expect(seedPremiumStarter(tree, 'canvas2d')).not.toContain('index.html');
   });
+
+  // Run 54842529: the page the agent is HANDED failed done's own tag checker, so
+  // every verify_artifact from 0.8 min onward reported five fatal errors on a
+  // byte-perfect file. The agent cannot fix what it did not write — it spent three
+  // fix attempts, force-accepted, then rewrote the page from scratch and broke the
+  // importmap. A bootstrap that does not pass the gate it will be measured by is a
+  // bug in the bootstrap, so assert it here, over the REAL seeded bytes.
+  for (const engine of ENGINES) {
+    it(`the seeded ${engine} entry page passes done's own HTML tag checker`, () => {
+      const tree = new WorkingTree();
+      seedPremiumStarter(tree, engine);
+      const entry = tree.view('index.html')?.content ?? '';
+      expect(findUnclosedTags(entry)).toEqual([]);
+    });
+
+    // The sharper half of the same rule, so it holds even if the checker is ever
+    // loosened again: a comment inside the boot script must not spell a literal
+    // tag. `findUnclosedTags` skipping raw text and the bootstrap not emitting
+    // fake markup are independent defences and both are worth keeping.
+    it(`the seeded ${engine} boot scripts contain no literal tag in their bodies`, () => {
+      const tree = new WorkingTree();
+      seedPremiumStarter(tree, engine);
+      const entry = tree.view('index.html')?.content ?? '';
+      for (const m of entry.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)) {
+        const body = m[1] ?? '';
+        expect(body, `a script body in the ${engine} bootstrap spells a tag`).not.toMatch(
+          /<\/?(?:script|html|head|body|div|style)\b/i,
+        );
+      }
+    });
+  }
 });
 
 describe('the seeded scaffold survives the inline-for-verify bundler', () => {
