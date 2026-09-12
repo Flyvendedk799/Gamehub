@@ -1225,6 +1225,55 @@ async function tickFrames(page: Page, frames: number): Promise<void> {
   }, n);
 }
 
+/**
+ * How long the baseline read below may keep asking for a debug snapshot, and how
+ * many frames it ticks between tries.
+ *
+ * `window.__game` is set SYNCHRONOUSLY by the bootstrap shim, so it says nothing
+ * about whether the game is ready — Phaser/Three still have to fetch the engine
+ * from CDN, run `main.js` and mount the play scene before the game can wire
+ * `debug.track({...})`. Sampling the baseline a fixed 8 frames (~130ms) after boot
+ * therefore read null on a perfectly instrumented game, and `hasDebugContract`
+ * came back false.
+ *
+ * Production run 54842529 shows the cost: 6 of its 7 playtests reported
+ * "NO DEBUG CONTRACT — snapshot() returned null on baseline" while the very next
+ * line of the same trace printed real state for every step. Both of that run's
+ * repair rounds were spent telling the agent to "wire window.__game.debug.track"
+ * for fields it had already wired, and the run then shipped force-accepted as
+ * `no_verdict` — where every previous fighting run earned a 3/3 play verdict.
+ *
+ * The budget is only ever spent when the snapshot is missing, which is exactly the
+ * case that used to misreport; a promptly-wired game pays one read. It stays well
+ * inside `JOB_HARD_TIMEOUT_MS` alongside the step budget.
+ */
+export const SNAPSHOT_READY_BUDGET_MS = 3_000;
+const SNAPSHOT_READY_POLL_FRAMES = 10;
+
+/**
+ * Wait for the game to expose a debug snapshot, ticking frames between tries, and
+ * return it (null when the budget runs out — a genuinely unwired contract).
+ *
+ * Re-sends the start nudge once, halfway through: a game whose title scene mounts
+ * after the caller's first `dispatchStartInput` would otherwise sit on an
+ * un-dismissed menu for the whole budget and still read null.
+ */
+async function waitForDebugSnapshot(page: Page, budgetMs: number): Promise<unknown> {
+  const deadline = Date.now() + budgetMs;
+  const renudgeAt = Date.now() + Math.floor(budgetMs / 2);
+  let renudged = false;
+  let snapshot = await readSnapshot(page);
+  while (snapshot === null && Date.now() < deadline) {
+    if (!renudged && Date.now() >= renudgeAt) {
+      renudged = true;
+      await dispatchStartInput(page).catch(() => {});
+    }
+    await tickFrames(page, SNAPSHOT_READY_POLL_FRAMES).catch(() => {});
+    snapshot = await readSnapshot(page);
+  }
+  return snapshot;
+}
+
 /** Read `window.__game.debug.snapshot()` defensively. Returns null when no
  *  debug contract is wired or the getter throws / yields an unserialisable
  *  value (the page-side JSON round-trip guarantees a structured-clonable
@@ -1316,13 +1365,15 @@ export async function runPlaytest(
     // gameplay) once the play scene runs; without this nudge the snapshot stays
     // empty for the entire playbook → 0/0 → no_verdict, i.e. the game ships
     // unverified. runRuntimeVerify and runThumbnail already do exactly this; the
-    // playtest path was the sole omission. A few settle frames let the
-    // title→play transition mount before we read the baseline.
+    // playtest path was the sole omission.
+    //
+    // Then WAIT for the snapshot rather than settling a fixed 8 frames and reading
+    // once: `window.__game` exists from the first synchronous script, so the boot
+    // gate above tells us nothing about whether the game has mounted. See
+    // SNAPSHOT_READY_BUDGET_MS for what the fixed settle cost run 54842529.
     await dispatchStartInput(page);
-    await tickFrames(page, 8);
+    const baselineSnapshot = await waitForDebugSnapshot(page, SNAPSHOT_READY_BUDGET_MS);
     bootErrors.push(...drainErrors());
-
-    const baselineSnapshot = await readSnapshot(page);
     const hasDebugContract = baselineSnapshot !== null;
 
     for (const step of steps) {

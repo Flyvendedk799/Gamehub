@@ -449,6 +449,73 @@ describe('Babel-aware static lint (backlog-1 #10)', () => {
   });
 });
 
+describe('findUnclosedTags skips raw-text element bodies (run 54842529)', () => {
+  // The engine bootstrap seeded into every index.html carries a JS comment that
+  // mentions `<script>`. Scanning script bodies as markup read it as an open tag,
+  // so the next real </script> popped the fake one and the boot script was
+  // "unclosed" from line 20 to the end of the file. Five fatal errors on a
+  // byte-perfect page, on every verify_artifact of every run.
+  const seededShape = [
+    '<!doctype html>',
+    '<html lang="en">',
+    '<head>',
+    '<script>',
+    'window.__game = {};',
+    '// Defined as its own marked <script> (ART_RUNTIME_SNIPPET) so the',
+    '// serve-time injector can re-add it if the agent replaced index.html.',
+    '</script>',
+    '</head>',
+    '<body><div id="game"></div>',
+    '<script type="module" src="src/main.js"></script>',
+    '</body>',
+    '</html>',
+  ].join('\n');
+
+  it('does not flag a page whose script body mentions <script> in a comment', async () => {
+    const fs = makeFs({ 'index.html': seededShape });
+    const tool = makeDoneTool(fs);
+    const res = await tool.execute('rawtext-comment', {});
+    expect(res.details.errors.filter((e) => e.source === 'html')).toEqual([]);
+  });
+
+  it('ignores markup written inside a <style> body', async () => {
+    const html = [
+      '<!doctype html><html><head>',
+      '<style>/* <div> in a comment, and a::after { content: "</div>" } */</style>',
+      '</head><body><main>hi</main></body></html>',
+    ].join('\n');
+    const fs = makeFs({ 'index.html': html });
+    const tool = makeDoneTool(fs);
+    const res = await tool.execute('rawtext-style', {});
+    expect(res.details.errors.filter((e) => e.source === 'html')).toEqual([]);
+  });
+
+  it('still reports a genuine imbalance OUTSIDE the script body', async () => {
+    const html = [
+      '<!doctype html><html><head>',
+      '<script>var a = 1; // <section> lives here</script>',
+      '</head><body>',
+      '<div>',
+      '</body></html>',
+    ].join('\n');
+    const fs = makeFs({ 'index.html': html });
+    const tool = makeDoneTool(fs);
+    const res = await tool.execute('rawtext-real-bug', {});
+    const html_errors = res.details.errors.filter((e) => e.source === 'html');
+    expect(html_errors.some((e) => e.message === 'Unclosed <div>')).toBe(true);
+    // …and nothing about the script, which is balanced.
+    expect(html_errors.some((e) => /script/.test(e.message))).toBe(false);
+  });
+
+  it('still reports a script that is never closed at all', async () => {
+    const html = '<!doctype html><html><head>\n<script>var a = 1;\n</head><body>x</body></html>';
+    const fs = makeFs({ 'index.html': html });
+    const tool = makeDoneTool(fs);
+    const res = await tool.execute('rawtext-unterminated', {});
+    expect(res.details.errors.some((e) => e.message === 'Unclosed <script>')).toBe(true);
+  });
+});
+
 describe('clarifyDocumentWriteError (document.write is never an engine-swap signal)', () => {
   it('rewrites a syntax-error document.write into a clear, fixable syntax error', () => {
     const out = clarifyDocumentWriteError({

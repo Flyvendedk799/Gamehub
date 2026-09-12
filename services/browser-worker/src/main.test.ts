@@ -577,6 +577,47 @@ describe('runPlaytest (synthetic input → snapshot diff, real Chromium)', () =>
     expect(snap.rotationY).toBe(-snap.playerAngle);
   }, 30_000);
 
+  // Run 54842529 — the shape of every real Phaser/Three game: the bootstrap shim
+  // publishes `window.__game` synchronously, then the engine loads and the play
+  // scene mounts some frames later and only THEN wires debug.track. Reading the
+  // baseline a fixed 8 frames after `window.__game` appeared therefore read null on
+  // a fully instrumented game, and the run's verdict layer spent two repair rounds
+  // demanding a contract that was already there. 600ms here stands in for the CDN
+  // fetch + scene create; it is far longer than the old settle, far shorter than
+  // SNAPSHOT_READY_BUDGET_MS.
+  const LATE_CONTRACT_GAME = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+    <script>
+      // The bootstrap shim: __game exists immediately, debug.snapshot() returns
+      // null until the game wires it.
+      window.__game = { debug: { snapshot: function () { return null; } } };
+      var state = { x: 0, vx: 0 };
+      setTimeout(function () {
+        window.addEventListener('keydown', function (e) { if (e.code === 'KeyD') state.vx = 1; });
+        window.addEventListener('keyup', function (e) { if (e.code === 'KeyD') state.vx = 0; });
+        function loop() { state.x += state.vx; requestAnimationFrame(loop); }
+        requestAnimationFrame(loop);
+        window.__game.debug.snapshot = function () { return { x: state.x }; };
+      }, 600);
+    </script>
+  </body></html>`;
+
+  it('(c2) waits for a game that wires its debug contract after the engine loads', async () => {
+    const result = await runPlaytest(browser, {
+      kind: 'playtest',
+      htmlContent: LATE_CONTRACT_GAME,
+      bootTimeoutMs: 5_000,
+      steps: [{ kind: 'key', code: 'KeyD', frames: 20 }],
+    });
+    expect(result.hasGameContract).toBe(true);
+    // The regression: this was false, and the baseline null, for a game that does
+    // expose state — so the playbook graded every predicate against nothing.
+    expect(result.hasDebugContract).toBe(true);
+    expect(result.baselineSnapshot).not.toBeNull();
+    const baseX = (result.baselineSnapshot as { x: number }).x;
+    const afterD = (result.steps[0]!.snapshotAfter as { x: number }).x;
+    expect(afterD).toBeGreaterThan(baseX);
+  }, 30_000);
+
   it('(d) booting __game with the default null snapshot reports no debug contract', async () => {
     const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
       <script>window.__game = { debug: { snapshot: function () { return null; } } };</script>

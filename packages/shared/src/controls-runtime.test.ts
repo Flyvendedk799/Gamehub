@@ -5,7 +5,9 @@ import {
   CONTROLS_REMAP_BRIDGE_MARKER,
   CONTROLS_RUNTIME_MARKER,
   DEBUG_RUNTIME_MARKER,
+  GAME_GLOBAL_SETUP_MARKER,
   injectControlsRuntime,
+  stripPlatformRuntime,
 } from './controls-runtime';
 
 describe('injectControlsRuntime', () => {
@@ -109,5 +111,45 @@ describe('injectControlsRuntime', () => {
     const twice = injectControlsRuntime(once);
     expect(twice).toBe(once);
     expect(twice.split(CONTROLS_MANIFEST_BRIDGE_MARKER).length - 1).toBe(1);
+  });
+});
+
+describe('stripPlatformRuntime', () => {
+  it('removes every marked platform script and the import map, keeping the game', () => {
+    const page = [
+      '<!doctype html><html><head>',
+      '<script type="importmap">{"imports":{"phaser":"https://cdn/phaser.js"}}</script>',
+      `<script data-pf="${CONTROLS_RUNTIME_MARKER}">var controls = 1;</script>`,
+      `<script data-pf="${DEBUG_RUNTIME_MARKER}">document.pointerLockElement;</script>`,
+      `<script data-pf="${ART_RUNTIME_MARKER}">var art = 2;</script>`,
+      '</head><body>',
+      '<script>window.myGame = true;</script>',
+      '<script type="module" src="src/main.js"></script>',
+      '</body></html>',
+    ].join('\n');
+    const out = stripPlatformRuntime(page);
+
+    // Platform runtime gone — including the pointerLockElement read that used to
+    // make every 2D game look like a mouse-look game to the invariants.
+    expect(out).not.toContain(CONTROLS_RUNTIME_MARKER);
+    expect(out).not.toContain(DEBUG_RUNTIME_MARKER);
+    expect(out).not.toContain(ART_RUNTIME_MARKER);
+    expect(out).not.toContain('pointerLockElement');
+    expect(out).not.toContain('importmap');
+
+    // The game's own code and module tag survive untouched.
+    expect(out).toContain('window.myGame = true;');
+    expect(out).toContain('<script type="module" src="src/main.js">');
+    expect(out).toContain('<body>');
+  });
+
+  it('leaves a page with no platform runtime unchanged', () => {
+    const page = '<!doctype html><html><body><script>let a = 1;</script></body></html>';
+    expect(stripPlatformRuntime(page)).toBe(page);
+  });
+
+  it('strips the bootstrap setup script the engine adapters emit', () => {
+    const page = `<head><script data-pf="${GAME_GLOBAL_SETUP_MARKER}">window.__game = {};</script></head>`;
+    expect(stripPlatformRuntime(page)).not.toContain('__game');
   });
 });

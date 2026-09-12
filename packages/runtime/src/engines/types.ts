@@ -5,7 +5,7 @@
  * pulling in the registry side-effects in the entry module.
  */
 
-import { ART_RUNTIME_SNIPPET } from '@playforge/shared';
+import { ART_RUNTIME_SNIPPET, GAME_GLOBAL_SETUP_MARKER } from '@playforge/shared';
 
 export type GameEngineId = 'three' | 'phaser' | 'canvas2d';
 
@@ -202,7 +202,10 @@ export function gameGlobalSetupSnippet(opts: {
   const cloudSaveType = JSON.stringify(CLOUD_SAVE_MESSAGE_TYPE);
   const cloudSaveResultType = JSON.stringify(CLOUD_SAVE_RESULT_MESSAGE_TYPE);
   const cloudSaveReadyType = JSON.stringify(CLOUD_SAVE_READY_MESSAGE_TYPE);
-  return `<script>
+  // Marked as platform runtime: this script is Playforge's, not the game's, and
+  // `stripPlatformRuntime` uses the marker to keep the quality heuristics from
+  // grading it (see the fps-no-pointer-lock false positive it used to cause).
+  return `<script data-pf="${GAME_GLOBAL_SETUP_MARKER}">
 window.__game = window.__game || {};
 window.__game.engine = ${JSON.stringify(opts.engine)};
 window.__game.params = ${params};
@@ -439,8 +442,11 @@ window.addEventListener('message', function (e) {
 // Representational-art layer — window.__game.art.draw(ctx, noun, x, y, size, opts).
 // A zero-import procedural-silhouette library so a named noun (fish, coin, rocket,
 // heart, …) is drawn as itself, never a tinted circle. Unknown nouns get a
-// labelled crest. Defined as its own marked <script> (ART_RUNTIME_SNIPPET) so the
-// serve-time injectControlsRuntime can re-add it if the agent replaced index.html.
+// labelled crest. Defined as its own marked script element (ART_RUNTIME_SNIPPET)
+// so serve-time injectControlsRuntime can re-add it if the agent replaced
+// index.html. NB: this comment ships INSIDE the page's boot script — never write
+// a literal tag here. Spelling one made done's tag checker read it as real markup
+// and report five phantom fatal errors on every run (see findUnclosedTags).
 // See packages/shared/src/art-runtime.ts.
 </script>
 ${ART_RUNTIME_SNIPPET}`;

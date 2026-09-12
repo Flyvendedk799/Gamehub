@@ -1011,3 +1011,142 @@ describe('tuning-block invariant', () => {
     expect(r.issues.map((i) => i.invariant)).toContain('tuning-block');
   });
 });
+
+describe('the invariants grade the game, not the platform (run 54842529)', () => {
+  // The seeded entry page is ~670 lines of Playforge bootstrap. Two of its own
+  // lines used to decide verdicts about the agent's game.
+  const SEEDED_ENTRY = `<!doctype html>
+<html lang="en">
+<head>
+<script type="importmap">{"imports":{"phaser":"https://cdn.example/phaser.esm.js"}}</script>
+<script data-pf="pf-game-global-setup">
+window.__game = window.__game || {};
+window.__game.debug = { snapshot: function () { return null; } };
+function collect(out) {
+  out.pointerLocked = typeof document !== 'undefined' && document.pointerLockElement ? 1 : 0;
+  return out;
+}
+</script>
+</head>
+<body><div id="game"></div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>`;
+
+  // A 2D side-scrolling fighter: keyboard only, no camera, health bars for a HUD.
+  const FIGHTER = `
+    import { TUNING } from './tuning.js';
+    let playerHp = 100, cpuHp = 100, gameOver = false;
+    window.__game.debug.track({ playerHp: () => playerHp, opponentHp: () => cpuHp });
+    window.__game.controls.define({ actions: [{ id: 'restart', label: 'Restart', keys: ['KeyR'] }] });
+    function onJabLands() {
+      cpuHp -= TUNING.jabDamage;
+      sfx('hit_punch'); shake(4); burst(x, y);
+    }
+    function onTakeHit(dmg) { playerHp -= dmg; if (playerHp <= 0) { gameOver = true; onGameOver(); } }
+    function onGameOver() { /* KO */ }
+    window.addEventListener('keydown', (e) => { if (e.code === 'KeyR') restart(); });
+    function restart() { playerHp = 100; cpuHp = 100; gameOver = false; }
+  `;
+
+  it('does not call a 2D keyboard fighter an un-turnable mouse-look game', () => {
+    const r = assertGameInvariants(
+      deps([
+        { path: 'index.html', content: SEEDED_ENTRY },
+        { path: 'src/scenes/play.js', content: FIGHTER },
+      ]),
+    );
+    expect(r.issues.map((i) => i.invariant)).not.toContain('fps-no-pointer-lock');
+  });
+
+  it('a bare pointerLockElement read is not, by itself, a mouse-look game', () => {
+    // The check used to satisfy its own first clause from its own second clause, so
+    // reading the lock state to draw a "click to capture the mouse" hint was enough.
+    const r = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: `
+            function drawHint(ctx) {
+              if (!document.pointerLockElement) ctx.fillText('Click to capture the mouse', 10, 20);
+            }
+          `,
+        },
+      ]),
+    );
+    expect(r.issues.map((i) => i.invariant)).not.toContain('fps-no-pointer-lock');
+  });
+
+  it('still warns a real mouse-look game that never acquires the lock', () => {
+    const r = assertGameInvariants(
+      deps([
+        { path: 'index.html', content: SEEDED_ENTRY },
+        {
+          path: 'src/main.js',
+          content: `
+            window.addEventListener('mousemove', (e) => { yaw += e.movementX * 0.002; });
+            function onEsc() { document.exitPointerLock?.(); }
+          `,
+        },
+      ]),
+    );
+    expect(r.issues.map((i) => i.invariant)).toContain('fps-no-pointer-lock');
+  });
+
+  it('counts depleting health as the measurable progress signal', () => {
+    // "First to drop the other's bar to zero" is the whole game; there is no score
+    // to show. The fighter above was told it had no measurable signal of progress.
+    const r = assertGameInvariants(
+      deps([
+        { path: 'index.html', content: SEEDED_ENTRY },
+        { path: 'src/scenes/play.js', content: FIGHTER },
+      ]),
+    );
+    expect(r.issues.map((i) => i.invariant)).not.toContain('score-or-state');
+  });
+
+  it('still flags a game that mutates nothing measurable', () => {
+    const r = assertGameInvariants(
+      deps([
+        { path: 'index.html', content: SEEDED_ENTRY },
+        {
+          path: 'src/main.js',
+          content: `
+            function onGameOver() {}
+            function draw(ctx) { ctx.fillRect(player.x, player.y, 8, 8); }
+          `,
+        },
+      ]),
+    );
+    expect(r.issues.map((i) => i.invariant)).toContain('score-or-state');
+  });
+
+  it('does not let a const declaration pass as a health mutation', () => {
+    const r = assertGameInvariants(
+      deps([{ path: 'src/main.js', content: 'const maxHealth = 100;\nfunction onGameOver() {}' }]),
+    );
+    expect(r.issues.map((i) => i.invariant)).toContain('score-or-state');
+  });
+
+  it('still demands a debug contract the game itself wired, with the shim stripped', () => {
+    // The bootstrap's own `window.__game.debug = { snapshot: … }` must not satisfy the
+    // check for the agent — stripping platform runtime is what keeps it honest.
+    const r = assertGameInvariants(
+      deps([
+        { path: 'index.html', content: SEEDED_ENTRY },
+        { path: 'src/main.js', content: 'let score = 0; function tick() { score += 1; }' },
+      ]),
+      { capabilities: { hasEnemies: true } },
+    );
+    expect(r.issues.map((i) => i.invariant)).toContain('debug-snapshot');
+
+    const wired = assertGameInvariants(
+      deps([
+        { path: 'index.html', content: SEEDED_ENTRY },
+        { path: 'src/scenes/play.js', content: FIGHTER },
+      ]),
+      { capabilities: { hasEnemies: true } },
+    );
+    expect(wired.issues.map((i) => i.invariant)).not.toContain('debug-snapshot');
+  });
+});

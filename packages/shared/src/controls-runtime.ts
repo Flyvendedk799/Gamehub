@@ -29,6 +29,34 @@ const REQUEST_TYPE = 'playforge:controls:request';
 /** Marker so a double pass (or a starter that already embedded it) doesn't inject twice. */
 export const CONTROLS_RUNTIME_MARKER = 'pf-controls-runtime';
 
+/**
+ * Marker for the engine bootstrap's own setup script (`gameGlobalSetupSnippet`).
+ * It is emitted by the adapter rather than injected here, so it needs no
+ * idempotency guard — the marker exists so PLATFORM runtime is distinguishable
+ * from game code in a page, which `stripPlatformRuntime` relies on.
+ */
+export const GAME_GLOBAL_SETUP_MARKER = 'pf-game-global-setup';
+
+/**
+ * Remove every platform-runtime script from a page, leaving the game's own markup
+ * and code. Use it before running any heuristic over "the game's source".
+ *
+ * Seeding the engine's own `index.html` into each project (2026-09-11) put ~670
+ * lines of Playforge runtime into a file the quality gates read, so they began
+ * grading the platform's code as if the agent had written it. Run 54842529 — a 2D
+ * side-scrolling fighter — was told it was "a mouse-look / first-person game …
+ * effectively un-turnable" because `pointerLockElement` appears in the bootstrap's
+ * own debug helper. Every regex invariant had the same exposure.
+ *
+ * Deliberately conservative: it only drops `<script data-pf="…">` blocks (and the
+ * import map, which is configuration, not code). Anything the agent wrote survives.
+ */
+export function stripPlatformRuntime(html: string): string {
+  return html
+    .replace(/<script\b[^>]*\bdata-pf\s*=\s*["'][^"']*["'][^>]*>[\s\S]*?<\/script\s*>/gi, '')
+    .replace(/<script\b[^>]*\btype\s*=\s*["']importmap["'][^>]*>[\s\S]*?<\/script\s*>/gi, '');
+}
+
 /** The injectable `<script>` — self-contained, idempotent, ES5. */
 export const CONTROLS_RUNTIME_SNIPPET = `<script data-pf="${CONTROLS_RUNTIME_MARKER}">(function(){
   window.__game = window.__game || {};
