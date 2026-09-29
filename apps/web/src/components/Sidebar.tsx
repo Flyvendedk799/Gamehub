@@ -1,7 +1,7 @@
 'use client';
 
 import { BrandMark, Wordmark } from '@/components/Logo';
-import { getMe, logout } from '@/lib/api';
+import { ApiError, getMe, logout } from '@/lib/api';
 import { clearToken, getToken } from '@/lib/auth';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -47,8 +47,11 @@ export default function Sidebar({
         setHandle(data.handle);
         setBalance(data.balance ?? null);
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (cancelled) return;
+        // A 401 means this token is dead. Drop it so a leftover cookie does not
+        // keep protected pages open.
+        if (err instanceof ApiError && err.status === 401 && getToken() === token) clearToken();
         setHandle(null);
         setBalance(null);
       });

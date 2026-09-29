@@ -1,11 +1,11 @@
 'use client';
 
 import { BrandMark, Wordmark } from '@/components/Logo';
-import { login } from '@/lib/api';
-import { setToken } from '@/lib/auth';
+import { ApiError, getMe, login } from '@/lib/api';
+import { clearToken, getToken, setToken } from '@/lib/auth';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 
 function LoginForm() {
   const router = useRouter();
@@ -16,6 +16,28 @@ function LoginForm() {
   const [password, setPassword] = useState('');
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
+
+  // A leftover cookie used to bounce this page before it rendered. The form
+  // stays on screen either way. Only a session the API still accepts leaves.
+  useEffect(() => {
+    const token = getToken();
+    if (!token) {
+      clearToken();
+      return;
+    }
+    let cancelled = false;
+    void getMe()
+      .then(() => {
+        if (!cancelled) router.replace(next);
+      })
+      .catch((err: unknown) => {
+        if (cancelled || getToken() !== token) return;
+        if (err instanceof ApiError && err.status === 401) clearToken();
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [next, router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
