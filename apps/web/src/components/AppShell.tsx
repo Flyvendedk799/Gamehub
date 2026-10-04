@@ -45,16 +45,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     setOpen(false);
   }, [pathname]);
 
-  if (isChromeless(pathname)) {
-    return <>{children}</>;
-  }
+  const chromeless = isChromeless(pathname);
 
   return (
-    <div className="flex min-h-dvh">
-      <Sidebar open={open} onNavigate={() => setOpen(false)} />
+    <div className={chromeless ? '' : 'flex min-h-dvh'}>
+      {!chromeless && <Sidebar open={open} onNavigate={() => setOpen(false)} />}
 
       {/* Mobile drawer backdrop */}
-      {open && (
+      {!chromeless && open && (
         <button
           type="button"
           aria-label="Close menu"
@@ -63,37 +61,39 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         />
       )}
 
-      <div className="flex flex-1 min-w-0 flex-col">
+      <div className={chromeless ? '' : 'flex flex-1 min-w-0 flex-col'}>
         {/* Mobile top bar — hamburger + brand (the sidebar carries it on desktop) */}
-        <header className="md:hidden safe-top sticky top-0 z-30 flex items-center gap-3 h-14 px-4 border-b border-hairline bg-chrome/90 backdrop-blur">
-          <button
-            type="button"
-            aria-label="Open menu"
-            onClick={() => setOpen(true)}
-            className="p-3 -ml-3 tap-target inline-flex items-center justify-center text-ink-3 hover:text-ink hover:bg-surface transition-colors"
-          >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
+        {!chromeless && (
+          <header className="md:hidden safe-top sticky top-0 z-30 flex items-center gap-3 h-14 px-4 border-b border-hairline bg-chrome/90 backdrop-blur">
+            <button
+              type="button"
+              aria-label="Open menu"
+              onClick={() => setOpen(true)}
+              className="p-3 -ml-3 tap-target inline-flex items-center justify-center text-ink-3 hover:text-ink hover:bg-surface transition-colors"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 6h16M4 12h16M4 18h16"
-              />
-            </svg>
-          </button>
-          <Link href="/" className="flex items-center gap-2 text-ink">
-            <BrandMark size={22} className="flex-shrink-0" />
-            <Wordmark className="text-sm" />
-          </Link>
-        </header>
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 6h16M4 12h16M4 18h16"
+                />
+              </svg>
+            </button>
+            <Link href="/" className="flex items-center gap-2 text-ink">
+              <BrandMark size={22} className="flex-shrink-0" />
+              <Wordmark className="text-sm" />
+            </Link>
+          </header>
+        )}
 
-        <main className="flex-1 min-w-0">{children}</main>
+        <main className={chromeless ? '' : 'flex-1 min-w-0'}>{children}</main>
       </div>
     </div>
   );
