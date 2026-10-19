@@ -689,3 +689,16 @@ export {
   type ThreeDAssetStyle,
   type TripoAdapterConfig,
 } from './threed-asset';
+
+export {
+  coalesceAnthropicMessages,
+  type AnthropicMessage,
+  type AnthropicContentBlock,
+  type CoalescedAnthropicMessages,
+} from './anthropic';
+
+export {
+  DemuxingToolAccumulator,
+  type RawToolCallChunk,
+  type FinalizedToolCall,
+} from './openai/accumulator';

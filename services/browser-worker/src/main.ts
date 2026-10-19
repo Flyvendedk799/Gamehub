@@ -246,7 +246,11 @@ export type RssReader = (pid: number) => number | undefined;
 
 /** Default launcher: headless Chromium, surfacing its pid when Playwright exposes one. */
 export async function launchChromium(): Promise<LaunchedBrowser> {
-  const browser = await chromium.launch({ headless: true });
+  const executablePath = process.env['PLAYWRIGHT_CHROMIUM_EXECUTABLE'] || undefined;
+  const browser = await chromium.launch({
+    headless: true,
+    ...(executablePath ? { executablePath } : {}),
+  });
   // `process()` exists on the Chromium browser at runtime but is absent from the
   // public `Browser` type; read it through a narrow, typed duck-type guard.
   const withProcess = browser as Browser & { process?: () => { pid?: number } | undefined };

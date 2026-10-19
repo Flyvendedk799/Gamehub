@@ -370,11 +370,7 @@ export function outOfWorldFailure(trace: PlaytestTrace): PredicateResult | null 
       fieldPresent: true,
       observed: end,
       baseline: start,
-      reason:
-        `${path} drifted ${Math.round(drift)} from its start (${Math.round(start)} → ` +
-        `${Math.round(end)}) during a short playtest — the player left the world. ` +
-        'This is the signature of missing or broken ground collision: the body ' +
-        'falls forever instead of landing.',
+      reason: `${path} drifted ${Math.round(drift)} from its start (${Math.round(start)} → ${Math.round(end)}) during a short playtest — the player left the world. This is the signature of missing or broken ground collision: the body falls forever instead of landing.`,
     };
   }
   return null;

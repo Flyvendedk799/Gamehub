@@ -46,6 +46,7 @@ import { captureProjectThumbnail } from './capture-thumbnail';
 import { finalizeRun } from './finalize-run';
 import { enqueueRun } from './queue';
 import type { BrowserJobsPort, RunTokenUsage, WebEngine } from './run-generation';
+import { RedisTelemetryBridge } from './telemetry';
 
 function requireEnv(name: string): string {
   const val = process.env[name];
@@ -205,6 +206,7 @@ async function main() {
 
   const db = createDb(databaseUrl);
   const bus = new RedisEventBus(redisUrl);
+  const telemetryBridge = new RedisTelemetryBridge(redisUrl);
   const store = new SnapshotStore(new LocalFsBlobStore(blobDir));
   const connection = parseRedisUrl(redisUrl);
 
@@ -264,7 +266,7 @@ async function main() {
 
   const worker = new Worker<GenerateJobData>(
     'generate',
-    async (job) => {
+    async (job, token) => {
       const {
         runId,
         projectId,
@@ -309,6 +311,16 @@ async function main() {
         outcome: Awaited<ReturnType<typeof finalizeRun>> | null;
         error: unknown;
       } = { outcome: null, error: null };
+
+      // Lock renewal: BullMQ lock extended by 30s every 15s during active processing
+      const lockRenewal = token
+        ? setInterval(() => {
+            job.extendLock(token, 30_000).catch((err: unknown) => {
+              console.warn(`[worker] extendLock failed for job ${job.id}:`, err);
+            });
+          }, 15_000)
+        : null;
+
       let result: Awaited<ReturnType<typeof enqueueRun>>;
       try {
         result = await enqueueRun(
@@ -394,6 +406,15 @@ async function main() {
                     report: row.report,
                   },
                 });
+              // Bridge quality metrics telemetry to Redis Pub/Sub
+              void telemetryBridge
+                .publishRunTelemetry(qRunId, 'run_quality_metrics', {
+                  ...row,
+                  timestamp: Date.now(),
+                })
+                .catch((err: unknown) => {
+                  console.warn(`[worker] run=${qRunId} telemetry publish failed:`, err);
+                });
             },
             onUsage: (usage) => {
               usageRef.latest = usage;
@@ -413,38 +434,44 @@ async function main() {
           },
         );
       } finally {
-        // Persist the active-generation runtime regardless of success/throw.
-        // The worker.on('failed') handler still marks the run failed; this only
-        // records timing on the row. Don't let a timing write mask the real error.
-        const aiFinishedAt = new Date();
-        const aiRuntimeMs = Math.max(0, Math.round(performance.now() - aiStartMs));
-        // Token spend goes down with the timing — but ONLY for a run that never
-        // settled. finalizeRun (in the `settle` port) now runs BEFORE this and
-        // has already written the run's own authoritative totals; re-writing the
-        // in-flight snapshot over them would lose the last turn's spend. The
-        // throw path — which is precisely the path that was losing token counts
-        // — never settles, so it still records what it spent.
-        const usage = settled.outcome === null ? usageRef.latest : null;
-        await db
-          .update(schema.runs)
-          .set({
-            aiStartedAt,
-            aiFinishedAt,
-            aiRuntimeMs,
-            updatedAt: new Date(),
-            ...(usage === null
-              ? {}
-              : {
-                  inputTokens: usage.inputTokens,
-                  outputTokens: usage.outputTokens,
-                  cachedInputTokens: usage.cacheReadTokens,
-                  cacheCreationInputTokens: usage.cacheWriteTokens,
-                }),
-          })
-          .where(eq(schema.runs.id, runId))
-          .catch((err: unknown) =>
-            console.error(`[worker] run=${runId} ai-runtime persist failed:`, err),
-          );
+        try {
+          // Persist the active-generation runtime regardless of success/throw.
+          // The worker.on('failed') handler still marks the run failed; this only
+          // records timing on the row. Don't let a timing write mask the real error.
+          const aiFinishedAt = new Date();
+          const aiRuntimeMs = Math.max(0, Math.round(performance.now() - aiStartMs));
+          // Token spend goes down with the timing — but ONLY for a run that never
+          // settled. finalizeRun (in the `settle` port) now runs BEFORE this and
+          // has already written the run's own authoritative totals; re-writing the
+          // in-flight snapshot over them would lose the last turn's spend. The
+          // throw path — which is precisely the path that was losing token counts
+          // — never settles, so it still records what it spent.
+          const usage = settled.outcome === null ? usageRef.latest : null;
+          await db
+            .update(schema.runs)
+            .set({
+              aiStartedAt,
+              aiFinishedAt,
+              aiRuntimeMs,
+              updatedAt: new Date(),
+              ...(usage === null
+                ? {}
+                : {
+                    inputTokens: usage.inputTokens,
+                    outputTokens: usage.outputTokens,
+                    cachedInputTokens: usage.cacheReadTokens,
+                    cacheCreationInputTokens: usage.cacheWriteTokens,
+                  }),
+            })
+            .where(eq(schema.runs.id, runId))
+            .catch((err: unknown) =>
+              console.error(`[worker] run=${runId} ai-runtime persist failed:`, err),
+            );
+        } finally {
+          if (lockRenewal) {
+            clearInterval(lockRenewal);
+          }
+        }
       }
 
       // The run was settled through the ONE canonical persistence path
@@ -694,6 +721,9 @@ async function main() {
           ?.close()
           .catch((err: unknown) => console.error('[browser-jobs] close failed:', err));
         await bus.close().catch((err: unknown) => console.error('[bus] close failed:', err));
+        await telemetryBridge
+          .close()
+          .catch((err: unknown) => console.error('[telemetry] close failed:', err));
         process.exit(0);
       })();
     });

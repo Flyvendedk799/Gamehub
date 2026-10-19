@@ -2,3 +2,6 @@ packages:
   - "apps/*"
   - "packages/*"
   - "services/*"
+
+patchedDependencies:
+  "@mariozechner/pi-ai@0.67.68": "patches/@mariozechner__pi-ai@0.67.68.patch"

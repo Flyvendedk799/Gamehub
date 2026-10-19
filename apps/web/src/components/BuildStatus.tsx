@@ -2,7 +2,7 @@
 
 import { BUILD_PHASES, deriveBuildStatus, formatElapsed } from '@/lib/build-status';
 import type { SseEvent } from '@/lib/types';
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 /**
  * Live build status shown while a game generates — turns the dead "Building…"

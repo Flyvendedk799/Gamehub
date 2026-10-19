@@ -186,6 +186,18 @@ export interface PlanEvent {
   timestamp: string;
 }
 
+export interface TokenUsageEvent {
+  type: 'token_usage';
+  runId: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  modelLimit?: number;
+  timestamp: string;
+}
+
 export type SseEvent =
   | AgentStartEvent
   | TurnStartEvent
@@ -202,7 +214,8 @@ export type SseEvent =
   | ThinkingDeltaEvent
   | GameSpecEvent
   | PlanEvent
-  | RunPausedEvent;
+  | RunPausedEvent
+  | TokenUsageEvent;
 
 // ─── Chat history ─────────────────────────────────────────────────────────────
 

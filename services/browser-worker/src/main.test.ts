@@ -28,7 +28,11 @@ let browser: Browser;
 
 beforeAll(async () => {
   mod = await import('./main');
-  browser = await chromium.launch({ headless: true });
+  const executablePath = process.env['PLAYWRIGHT_CHROMIUM_EXECUTABLE'] || undefined;
+  browser = await chromium.launch({
+    headless: true,
+    ...(executablePath ? { executablePath } : {}),
+  });
 }, 60_000);
 
 // Convenience accessors so the test bodies below read naturally.

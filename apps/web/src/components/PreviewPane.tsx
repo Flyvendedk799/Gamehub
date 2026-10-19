@@ -2,10 +2,12 @@
 
 import { getToken } from '@/lib/auth';
 import { useCloudSaveRelay } from '@/lib/cloud-save-relay';
+import { deriveGenerationData } from '@/lib/generation-inspector-data';
 import {
   type ControlsManifest,
   PREVIEW_IFRAME_ORIGIN,
   TWEAKS_UPDATE_MESSAGE_TYPE,
+  isPreviewIframeOrigin,
   isRedundantManifest,
   parseControlsManifestMessage,
   parseGamepadStatusMessage,
@@ -16,11 +18,15 @@ import {
   sendControlsRequest,
 } from '@/lib/iframe-bridge';
 import type { SseEvent } from '@/lib/types';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BuildStatus } from './BuildStatus';
 import { ControlsPanel } from './ControlsPanel';
 import { FilesPanel } from './FilesPanel';
+import { GenerationInspector } from './GenerationInspector';
+import { GenerationProgressStepper } from './GenerationProgressStepper';
+import { RuntimeWatchdogBridge } from './RuntimeWatchdogBridge';
 import { SceneHierarchyPanel } from './SceneHierarchy';
+import { ToolInvocationFeed } from './ToolInvocationFeed';
 
 type TweakKind = 'color' | 'number' | 'boolean';
 
@@ -75,7 +81,9 @@ export function PreviewPane({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [showTweaks, setShowTweaks] = useState(false);
   const [tweakValues, setTweakValues] = useState<Record<string, string | number | boolean>>({});
-  const [view, setView] = useState<'preview' | 'controls' | 'files' | 'scene'>('preview');
+  const [view, setView] = useState<'preview' | 'controls' | 'files' | 'scene' | 'inspector'>(
+    'preview',
+  );
   const [controlsManifest, setControlsManifest] = useState<ControlsManifest | null>(null);
   // Whether a controller is connected to the running game (the gamepad bridge
   // posts this once controller support is mapped) — drives the panel's badge.
@@ -114,6 +122,40 @@ export function PreviewPane({
   // and the render loop.
   const pushedBindingsRef = useRef<Record<string, string[]> | null>(null);
 
+  const derived = useMemo(
+    () => deriveGenerationData(events, isBuilding, hasError, errorMessage),
+    [events, isBuilding, hasError, errorMessage],
+  );
+
+  const watchdogRef = useRef<RuntimeWatchdogBridge | null>(null);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadNonce resets watchdog lifecycle on manual reload
+  useEffect(() => {
+    if (!previewUrl || hasError) {
+      watchdogRef.current?.stop();
+      return;
+    }
+    const bridge = new RuntimeWatchdogBridge({
+      timeoutMs: 8000,
+      onCrash: (crashEvent) => {
+        setRuntimeIssue(
+          (cur) =>
+            cur ?? {
+              kind: crashEvent.errorType === 'WATCHDOG_HEARTBEAT_TIMEOUT' ? 'freeze' : 'crash',
+              message: crashEvent.message || 'Game runtime encountered an unrecoverable failure.',
+            },
+        );
+      },
+    });
+    watchdogRef.current = bridge;
+    bridge.start();
+
+    return () => {
+      bridge.stop();
+      watchdogRef.current = null;
+    };
+  }, [previewUrl, hasError, reloadNonce]);
+
   const reloadPreview = useCallback(() => {
     setReloadNonce((n) => n + 1);
     setPreviewStale(false);
@@ -126,7 +168,7 @@ export function PreviewPane({
 
   // Guarded tab switch: confirm before leaving the Files tab with unsaved edits.
   const switchView = useCallback(
-    (next: 'preview' | 'controls' | 'files' | 'scene') => {
+    (next: 'preview' | 'controls' | 'files' | 'scene' | 'inspector') => {
       if (view === 'files' && next !== 'files' && filesDirty) {
         if (!window.confirm('Discard unsaved changes?')) return;
         setFilesDirty(false);
@@ -178,6 +220,18 @@ export function PreviewPane({
   // origin" gap and gives a typed seam for future bridge acks.
   useEffect(() => {
     function onMessage(event: MessageEvent<unknown>) {
+      // Validate origin: accept trusted API origin, same-origin, or sandboxed null origin (#20)
+      if (
+        !isPreviewIframeOrigin(event.origin) &&
+        event.origin !== 'null' &&
+        typeof window !== 'undefined' &&
+        event.origin !== window.location.origin
+      ) {
+        return;
+      }
+      // Supervise preview runtime via watchdog
+      watchdogRef.current?.handleMessage(event);
+
       // WS-A — the game posts its control manifest on startup (and on request).
       const controls = parseControlsManifestMessage(event);
       if (controls) {
@@ -209,6 +263,7 @@ export function PreviewPane({
           animatedRef.current = true;
           setGameAnimated(true);
           staleBeatsRef.current = 0;
+          watchdogRef.current?.handleMessage({ type: 'GAMEHUB_PREVIEW_HEARTBEAT' });
         } else if (animatedRef.current && typeof document !== 'undefined' && !document.hidden) {
           staleBeatsRef.current += 1;
           if (staleBeatsRef.current >= 2) {
@@ -403,6 +458,18 @@ export function PreviewPane({
             >
               scene
             </button>
+            <button
+              type="button"
+              onClick={() => switchView('inspector')}
+              aria-pressed={view === 'inspector'}
+              className={`px-3 py-2.5 text-xs md:py-1.5 md:text-[11px] border border-l-0 transition-colors ${
+                view === 'inspector'
+                  ? 'border-signal border-l bg-raised text-signal'
+                  : 'border-hairline text-ink-3 hover:text-ink'
+              }`}
+            >
+              inspector
+            </button>
           </div>
         )}
         {previewUrl ? (
@@ -485,15 +552,24 @@ export function PreviewPane({
               src={iframeSrc}
               title="Game preview"
               onLoad={focusGame}
-              sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-downloads"
+              sandbox="allow-scripts allow-forms allow-same-origin allow-pointer-lock allow-downloads"
               className="absolute inset-0 w-full h-full border-0"
             />
           )}
 
-          {/* Iteration build status — a slim banner over the still-running game so
+          {/* Iteration build status — progress stepper over the still-running game so
               you keep playing the current version while the next one builds. */}
           {isBuilding && previewUrl && !hasError && view === 'preview' && (
-            <BuildStatus events={events} isBuilding={isBuilding} compact />
+            <div className="absolute top-2 left-2 right-2 z-20 space-y-2 pointer-events-none">
+              <GenerationProgressStepper
+                currentPhase={derived.phase}
+                reflexionTurn={derived.reflexionTurn}
+                maxReflexionTurns={derived.maxReflexionTurns}
+                errorMessage={errorMessage}
+                className="pointer-events-auto shadow-lg backdrop-blur bg-surface/90"
+              />
+              <BuildStatus events={events} isBuilding={isBuilding} compact />
+            </div>
           )}
 
           {/* Live crash/freeze banner — the running game's runtime beacon reported
@@ -589,11 +665,37 @@ export function PreviewPane({
             </div>
           )}
 
+          {/* Inspector tab — telemetry, thinking blocks, diagnostics & tool invocations */}
+          {view === 'inspector' && (
+            <div className="absolute inset-0 z-10 bg-void overflow-y-auto p-4 space-y-4">
+              <GenerationProgressStepper
+                currentPhase={derived.phase}
+                reflexionTurn={derived.reflexionTurn}
+                maxReflexionTurns={derived.maxReflexionTurns}
+                errorMessage={errorMessage}
+              />
+              <GenerationInspector
+                telemetry={derived.telemetry}
+                thinkingBlocks={derived.thinkingBlocks}
+                diagnostics={derived.diagnostics}
+              />
+              <ToolInvocationFeed invocations={derived.invocations} />
+            </div>
+          )}
+
           {/* Building placeholder */}
           {!previewUrl && !hasError && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-6">
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 p-6 overflow-y-auto">
               {isBuilding ? (
-                <BuildStatus events={events} isBuilding={isBuilding} />
+                <div className="w-full max-w-lg space-y-4">
+                  <GenerationProgressStepper
+                    currentPhase={derived.phase}
+                    reflexionTurn={derived.reflexionTurn}
+                    maxReflexionTurns={derived.maxReflexionTurns}
+                    errorMessage={errorMessage}
+                  />
+                  <BuildStatus events={events} isBuilding={isBuilding} />
+                </div>
               ) : (
                 <>
                   <IdleGraphic />

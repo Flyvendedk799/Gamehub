@@ -14,7 +14,7 @@ describe('S5 feel-kit', () => {
   });
 
   it('flags mute flat circle games', () => {
-    const src = `ctx.beginPath(); ctx.arc(10,10,5,0,Math.PI*2); ctx.fill();`;
+    const src = 'ctx.beginPath(); ctx.arc(10,10,5,0,Math.PI*2); ctx.fill();';
     expect(checkFeelKit(src).ok).toBe(false);
     // looksCircleOnly requires PI*2 pattern or fillRect without drawSubject
     const circleOnly = `ctx.fillRect(0,0,10,10); ctx.fillStyle = 'red';`;

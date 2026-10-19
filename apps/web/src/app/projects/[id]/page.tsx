@@ -1,6 +1,7 @@
 'use client';
 
 import { ChatPanel } from '@/components/ChatPanel';
+import { GenerationProgressStepper } from '@/components/GenerationProgressStepper';
 import { BrandMark, Wordmark } from '@/components/Logo';
 import { PreviewPane, type TweakSchema } from '@/components/PreviewPane';
 import Sidebar from '@/components/Sidebar';
@@ -22,6 +23,7 @@ import { hydrateHistoryEvents, lastPreviewUrlFromHistory } from '@/lib/chat-hydr
 import { API_BASE } from '@/lib/config';
 import { engineLabel } from '@/lib/engine-label';
 import { TRANSPORT_LOST_MESSAGE } from '@/lib/event-normalize';
+import { deriveGenerationData } from '@/lib/generation-inspector-data';
 import type { Project, RunCompleteEvent, RunErrorEvent, SseEvent } from '@/lib/types';
 import { useCollab } from '@/lib/use-collab';
 import { usePresence } from '@/lib/use-presence';
@@ -416,6 +418,7 @@ export default function BuilderPage() {
   }
 
   const isBuilding = isStreaming;
+  const generationData = deriveGenerationData(events, isBuilding, hasError, errorMessage);
 
   return (
     <div className="flex h-[100dvh] overflow-hidden bg-void">
@@ -696,6 +699,18 @@ export default function BuilderPage() {
           >
             <span className="opacity-70">⚠</span>
             <span>{loadError}</span>
+          </div>
+        )}
+
+        {/* Global generation progress banner when active */}
+        {isBuilding && (
+          <div className="flex-shrink-0 border-b border-hairline bg-ground px-4 py-2">
+            <GenerationProgressStepper
+              currentPhase={generationData.phase}
+              reflexionTurn={generationData.reflexionTurn}
+              maxReflexionTurns={generationData.maxReflexionTurns}
+              errorMessage={errorMessage}
+            />
           </div>
         )}
 

@@ -11,13 +11,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { createEditorSession, type EditorSession } from '../editor/session.js';
+import { type EditorSession, createEditorSession } from '../editor/session.js';
 import {
+  type SceneEditDetails,
   makeEditSceneTool,
   makeQuerySceneTool,
   makeSceneHistoryTool,
   makeSceneTools,
-  type SceneEditDetails,
 } from './scene-edit.js';
 
 function harness(): { session: EditorSession; tools: ReturnType<typeof makeSceneTools> } {
@@ -56,9 +56,11 @@ describe('edit_scene', () => {
 
     // This is the whole reason the edits are tool calls: the viewport can move
     // the object while the agent is still talking.
-    const details = (await tool.execute('c2', {
-      commands: [{ op: 'scene.setField', id: 'b', component: 'Transform', field: 'x', value: 3 }],
-    } as never)).details as SceneEditDetails;
+    const details = (
+      await tool.execute('c2', {
+        commands: [{ op: 'scene.setField', id: 'b', component: 'Transform', field: 'x', value: 3 }],
+      } as never)
+    ).details as SceneEditDetails;
 
     expect(details.scene.nodes).toEqual([
       { id: 'a', name: 'Alpha', parent: null, components: [], prefab: null },
@@ -116,12 +118,16 @@ describe('edit_scene', () => {
     const { session } = harness();
     const tool = makeEditSceneTool(() => session);
 
-    const first = (await tool.execute('c1', {
-      commands: [{ op: 'scene.addNode', id: 'a' }],
-    } as never)).details as SceneEditDetails;
-    const failed = (await tool.execute('c2', {
-      commands: [{ op: 'scene.addNode', id: 'a' }],
-    } as never)).details as SceneEditDetails;
+    const first = (
+      await tool.execute('c1', {
+        commands: [{ op: 'scene.addNode', id: 'a' }],
+      } as never)
+    ).details as SceneEditDetails;
+    const failed = (
+      await tool.execute('c2', {
+        commands: [{ op: 'scene.addNode', id: 'a' }],
+      } as never)
+    ).details as SceneEditDetails;
 
     expect(failed.revision).toBe(first.revision);
   });
@@ -140,9 +146,7 @@ describe('edit_scene', () => {
     const { session } = harness();
     const tool = makeEditSceneTool(() => session);
     const result = await tool.execute('c', {
-      commands: [
-        { op: 'asset.import', path: '../../secrets.txt', type: 'data', content: 'x' },
-      ],
+      commands: [{ op: 'asset.import', path: '../../secrets.txt', type: 'data', content: 'x' }],
     } as never);
     // Model output is not a trusted caller.
     expect((result.details as SceneEditDetails).error?.code).toBe('unsafe_path');

@@ -7,10 +7,10 @@
  */
 
 import {
+  type McpAuthContext,
   PLAYFORGE_MCP_TOOLS,
   assertMcpProjectAccess,
   listMcpToolNames,
-  type McpAuthContext,
 } from './mcp-tools.js';
 
 export interface McpServerOptions {

@@ -49,7 +49,34 @@ export {
 } from './visual-critique.js';
 export type { VisualCritique } from './visual-critique.js';
 
-export { generateViaAgent } from './agent.js';
+export {
+  pruneContextAtomic,
+  calculateTokens,
+  type PruneOptions,
+  type PruneResult,
+  type ThinkingBlockPayload,
+} from './engine/context.js';
+
+export {
+  resolveSafePath,
+  writeAtomic,
+  createToolSchema,
+  TextEditorToolSchema,
+  SetTodosToolSchema,
+  DoneToolSchema,
+  ReadUrlToolSchema,
+  ListFilesToolSchema,
+} from './tools/index.js';
+
+export {
+  generateViaAgent,
+  StagnationDetector,
+  formatErrorRecoveryDirective,
+  suggestRemediation,
+  MODERN_PHASER_PROMPT_UPGRADES,
+  MODERN_THREE_PROMPT_UPGRADES,
+  type InvocationSignature,
+} from './agent.js';
 
 export type { AgentEvent, GenerateViaAgentDeps } from './agent.js';
 

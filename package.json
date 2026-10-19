@@ -2,7 +2,7 @@
   "name": "playforge",
   "version": "0.0.0",
   "private": true,
-  "description": "Cloud-native AI game builder \u2014 describe a game in natural language, get a real playable web game, publish and remix in a community hub. (Working codename: Playforge.)",
+  "description": "Cloud-native AI game builder — describe a game in natural language, get a real playable web game, publish and remix in a community hub. (Working codename: Playforge.)",
   "license": "UNLICENSED",
   "type": "module",
   "engines": {
@@ -32,5 +32,10 @@
   "dependencies": {
     "bullmq": "^5.78.1",
     "ioredis": "^5.11.1"
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "@mariozechner/pi-ai@0.67.68": "patches/@mariozechner__pi-ai@0.67.68.patch"
+    }
   }
 }

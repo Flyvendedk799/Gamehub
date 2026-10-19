@@ -33,9 +33,9 @@ import {
   type ShipReason,
   type StarterEngine,
   type VisualCritique,
+  buildBreakageDiagnosisPrompt,
   buildInteractivityFloorPlan,
   buildRepairVerdict,
-  buildBreakageDiagnosisPrompt,
   buildVisualCritiquePrompt,
   buildVisualRepairInstruction,
   classifyEditRequest,
@@ -74,6 +74,7 @@ import { createRunSignalAggregator } from './run-signal';
 import { analyzeSkillUsage } from './skill-usage-grep.js';
 import { buildSpecialistJobPlan } from './specialist-jobs.js';
 import { assertGeneratedJavaScriptSyntax } from './syntax-check';
+import { formatReflexionPayload, verifyGeneratedAst } from './verify/ast';
 import { WorkingTree } from './working-tree';
 
 export type WebEngine = 'three' | 'phaser' | 'canvas2d';
@@ -1147,14 +1148,7 @@ export async function runGeneration(
             .map((r) => `  - ${r.reason}`)
             .join('\n');
           fatalErrors.push(
-            `The edit did NOT do what was asked. The user's request was: "${editIntent.request}" ` +
-              `— which you said would be observable as: ${editIntent.observable}. ` +
-              `Driven in a real browser, that is not what the game does:\n${failures}\n` +
-              'Do not restate the change; the measurement above is what the game actually did. ' +
-              'Find why the edit had no effect (a value overridden elsewhere, a second hard-coded ' +
-              'copy of the same number, an early return, a branch that never runs) and fix the ' +
-              'real cause. If the assertion itself is wrong — wrong field, wrong sign for this ' +
-              "engine's axes — say so and correct it.",
+            `The edit did NOT do what was asked. The user's request was: "${editIntent.request}" — which you said would be observable as: ${editIntent.observable}. Driven in a real browser, that is not what the game does:\n${failures}\nDo not restate the change; the measurement above is what the game actually did. Find why the edit had no effect (a value overridden elsewhere, a second hard-coded copy of the same number, an early return, a branch that never runs) and fix the real cause. If the assertion itself is wrong — wrong field, wrong sign for this engine's axes — say so and correct it.`,
           );
         }
       }
@@ -1287,7 +1281,85 @@ export async function runGeneration(
     return true;
   };
 
+  // ── AST syntax verification & reflexion loop (bounded to 2 attempts) ──────
+  const MAX_AST_REFLEXION_ATTEMPTS = 2;
+  let astReflexionAttempts = 0;
+
+  interface TreeAstIssue {
+    path: string;
+    errors: Array<{ message: string; line: number; column: number }>;
+  }
+
+  const collectTreeAstIssues = async (
+    files: ReadonlyArray<{ path: string; content: string }>,
+  ): Promise<TreeAstIssue[]> => {
+    const issues: TreeAstIssue[] = [];
+    for (const f of files) {
+      const lower = f.path.toLowerCase();
+      if (
+        lower.endsWith('.js') ||
+        lower.endsWith('.mjs') ||
+        lower.endsWith('.cjs') ||
+        lower.endsWith('.ts') ||
+        lower.endsWith('.tsx') ||
+        lower.endsWith('.jsx') ||
+        lower.endsWith('.html') ||
+        lower.endsWith('.htm')
+      ) {
+        const res = await verifyGeneratedAst(f.path, f.content);
+        if (!res.valid && res.errors.length > 0) {
+          issues.push({ path: f.path, errors: res.errors });
+        }
+      }
+    }
+    return issues;
+  };
+
+  const formatTreeAstIssues = (issues: TreeAstIssue[]): string => {
+    return issues
+      .map((issue) => {
+        const file = tree.view(issue.path);
+        return formatReflexionPayload(issue.path, file?.content ?? '', issue.errors);
+      })
+      .join('\n\n');
+  };
+
+  const runAstReflexionRound = async (budgetExhausted: boolean): Promise<boolean> => {
+    const issues = await collectTreeAstIssues(tree.toTextFiles());
+    if (issues.length === 0) return false;
+
+    // Syntax errors exist in tree.
+    // Can we run a reflexion repair round?
+    // Bounded by MAX_AST_REFLEXION_ATTEMPTS (2) AND overall repair budget:
+    if (
+      astReflexionAttempts >= MAX_AST_REFLEXION_ATTEMPTS ||
+      budgetExhausted ||
+      repairRounds >= maxRepairRounds
+    ) {
+      const errorDetails = formatTreeAstIssues(issues);
+      throw new Error(
+        `Generated JavaScript syntax check failed. AST syntax verification failed (reflexion exhausted or budget reached):\n\n${errorDetails}`,
+      );
+    }
+
+    astReflexionAttempts += 1;
+    repairRounds += 1;
+    history.push(
+      { role: 'user', content: nextPrompt },
+      { role: 'assistant', content: output.message },
+    );
+    nextPrompt = formatTreeAstIssues(issues);
+    console.log(
+      `[run-generation] AST syntax verification failed (attempt ${astReflexionAttempts}/${MAX_AST_REFLEXION_ATTEMPTS}) — triggering reflexion repair`,
+    );
+    output = await generate(buildInput(nextPrompt, history), deps);
+    return true;
+  };
+
   for (;;) {
+    const budgetExhausted = aborted || output.interrupted;
+    if (await runAstReflexionRound(budgetExhausted)) continue;
+
     const verdict = await observeVerdict();
     shippedVerdict = verdict;
     if (verdict === null) {
@@ -1295,7 +1367,7 @@ export async function runGeneration(
       // artifact). Nothing to gate on — but a booted game can still be LOOKED at
       // before it ships, and a no_verdict run is exactly the one with no other
       // quality signal at all.
-      if (await runVisualCritiqueRound(aborted || output.interrupted)) continue;
+      if (await runVisualCritiqueRound(budgetExhausted)) continue;
       shipReason = 'no_verdict';
       break;
     }
@@ -1303,7 +1375,6 @@ export async function runGeneration(
     // mid-run (`aborted`) OR the agent gracefully checkpointed
     // (`output.interrupted`). Either way a further repair round can't run to
     // completion, so we stop and ship the best attempt.
-    const budgetExhausted = aborted || output.interrupted;
     // The verdict's predicates came from the agent's contract (not a genre
     // playbook) when the genre has no bundled playbook and a contract was set.
     // This makes a non-completable creative game gate on its OWN contract.
@@ -1380,6 +1451,14 @@ export async function runGeneration(
       const base = (f.path.split('/').pop() ?? '').replace(/\.(jsx?|mjs)$/, '');
       if (deadBases.has(base) && tree.delete(f.path)) removedDeadSkills.push(base);
     }
+  }
+
+  const prePersistAstIssues = await collectTreeAstIssues(tree.toTextFiles());
+  if (prePersistAstIssues.length > 0) {
+    const errorDetails = formatTreeAstIssues(prePersistAstIssues);
+    throw new Error(
+      `Generated JavaScript syntax check failed. AST syntax verification failed before snapshot persist:\n\n${errorDetails}`,
+    );
   }
 
   await assertGeneratedJavaScriptSyntax(tree.toTextFiles());
