@@ -1,12 +1,45 @@
+export interface InputMessageContentBlock {
+  type?: string;
+  text?: string;
+  tool_use_id?: string;
+  tool_call_id?: string;
+  toolCallId?: string;
+  id?: string;
+  content?: unknown;
+  name?: string;
+  toolName?: string;
+  input?: unknown;
+  arguments?: unknown;
+}
+
+export interface InputToolCall {
+  id?: string;
+  type?: string;
+  function?: {
+    name?: string;
+    arguments?: string | unknown;
+  };
+  name?: string;
+}
+
+export interface InputMessage {
+  role?: string;
+  content?: string | unknown[] | unknown;
+  result?: unknown;
+  tool_call_id?: string;
+  toolCallId?: string;
+  id?: string;
+  tool_calls?: InputToolCall[];
+}
+
 export interface AnthropicContentBlock {
   type: 'text' | 'tool_use' | 'tool_result' | string;
   text?: string;
   tool_use_id?: string;
-  content?: string | any;
+  content?: unknown;
   id?: string;
   name?: string;
-  input?: any;
-  [key: string]: any;
+  input?: unknown;
 }
 
 export interface AnthropicMessage {
@@ -25,7 +58,7 @@ export type CoalescedAnthropicMessages = Array<AnthropicMessage> & {
  * 3. Enforces strict user/assistant turn alternation.
  */
 export function coalesceAnthropicMessages(
-  messages: Array<any>,
+  messages: Array<InputMessage>,
 ): CoalescedAnthropicMessages {
   const systemParts: string[] = [];
   const normalizedTurns: Array<{
@@ -41,7 +74,13 @@ export function coalesceAnthropicMessages(
         typeof msg.content === 'string'
           ? msg.content
           : Array.isArray(msg.content)
-            ? msg.content.map((c: any) => c.text ?? JSON.stringify(c)).join('\n')
+            ? msg.content
+                .map((c: unknown) =>
+                  typeof c === 'object' && c !== null && 'text' in c
+                    ? String((c as { text: unknown }).text)
+                    : JSON.stringify(c),
+                )
+                .join('\n')
             : String(msg.content ?? '');
       if (text.trim().length > 0) {
         systemParts.push(text.trim());
@@ -75,8 +114,9 @@ export function coalesceAnthropicMessages(
       if (typeof msg.content === 'string') {
         blocks.push({ type: 'text', text: msg.content });
       } else if (Array.isArray(msg.content)) {
-        for (const item of msg.content) {
-          if (!item) continue;
+        for (const rawItem of msg.content) {
+          if (!rawItem) continue;
+          const item = rawItem as InputMessageContentBlock;
           if (item.type === 'tool_result' || item.type === 'toolResult') {
             blocks.push({
               type: 'tool_result',
@@ -88,7 +128,7 @@ export function coalesceAnthropicMessages(
           } else if (item.type === 'text') {
             blocks.push({ type: 'text', text: item.text ?? '' });
           } else {
-            blocks.push(item);
+            blocks.push(item as AnthropicContentBlock);
           }
         }
       }
@@ -101,8 +141,9 @@ export function coalesceAnthropicMessages(
       if (typeof msg.content === 'string' && msg.content.trim().length > 0) {
         blocks.push({ type: 'text', text: msg.content });
       } else if (Array.isArray(msg.content)) {
-        for (const item of msg.content) {
-          if (!item) continue;
+        for (const rawItem of msg.content) {
+          if (!rawItem) continue;
+          const item = rawItem as InputMessageContentBlock;
           if (item.type === 'text') {
             blocks.push({ type: 'text', text: item.text ?? '' });
           } else if (item.type === 'tool_use' || item.type === 'toolCall') {
@@ -113,7 +154,7 @@ export function coalesceAnthropicMessages(
               input: item.input ?? item.arguments ?? {},
             });
           } else {
-            blocks.push(item);
+            blocks.push(item as AnthropicContentBlock);
           }
         }
       }
@@ -138,7 +179,6 @@ export function coalesceAnthropicMessages(
       }
 
       normalizedTurns.push({ role: 'assistant', blocks });
-      continue;
     }
   }
 
@@ -175,7 +215,7 @@ export function coalesceAnthropicMessages(
     }
   }
 
-  const result: any = coalesced;
+  const result = coalesced as CoalescedAnthropicMessages;
   if (systemParts.length > 0) {
     result.system = systemParts.join('\n\n');
   }

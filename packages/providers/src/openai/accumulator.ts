@@ -67,9 +67,7 @@ export class DemuxingToolAccumulator {
   }
 
   finalize(): Array<FinalizedToolCall> {
-    const sorted = Array.from(this.toolCallsByIndex.values()).sort(
-      (a, b) => a.index - b.index,
-    );
+    const sorted = Array.from(this.toolCallsByIndex.values()).sort((a, b) => a.index - b.index);
 
     return sorted.map((entry) => ({
       index: entry.index,

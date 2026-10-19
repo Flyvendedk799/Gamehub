@@ -61,7 +61,7 @@ describe('assertGameInvariants', () => {
       `this.input.keyboard.once('keydown-R', () => this.scene.restart());`,
       `this.input.keyboard.on('keydown-R', reboot);`,
       `this.rKey = this.input.keyboard.addKey('R');`,
-      `this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);`,
+      'this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);',
     ]) {
       const result = assertGameInvariants(
         deps([

@@ -10,25 +10,66 @@ export interface ThinkingBlockPayload {
   thinking: string;
 }
 
+export interface ContextMessageToolCall {
+  id?: string | undefined;
+  name?: string | undefined;
+  toolName?: string | undefined;
+  function?:
+    | {
+        name?: string | undefined;
+        arguments?: string | unknown | undefined;
+      }
+    | undefined;
+}
+
+export interface ContextMessageContentBlock {
+  type?: string | undefined;
+  text?: string | undefined;
+  id?: string | undefined;
+  tool_use_id?: string | undefined;
+  tool_call_id?: string | undefined;
+  toolCallId?: string | undefined;
+  name?: string | undefined;
+  toolName?: string | undefined;
+  signature?: string | undefined;
+  thinking?: string | undefined;
+  content?: unknown;
+}
+
+export interface ContextMessage {
+  role?: string | undefined;
+  content?: string | ContextMessageContentBlock[] | unknown[] | undefined;
+  tool_calls?: ContextMessageToolCall[] | undefined;
+  tool_call_id?: string | undefined;
+  toolCallId?: string | undefined;
+  toolCall?: ContextMessageToolCall | undefined;
+  thinking?: string | { thinking?: string } | undefined;
+  thinkingSignature?: string | undefined;
+  signature?: string | undefined;
+}
+
 export interface PruneResult {
-  messages: Array<any>;
-  prunedMessages: Array<any>;
+  messages: Array<ContextMessage>;
+  prunedMessages: Array<ContextMessage>;
   extractedThinkingBlocks: Array<ThinkingBlockPayload>;
   estimatedTokens: number;
   originalTokens: number;
 }
 
-export function calculateTokens(messages: Array<any>, tokenDensityFactor = 1.35): number {
+export function calculateTokens(
+  messages: Array<ContextMessage>,
+  tokenDensityFactor = 1.35,
+): number {
   return Math.ceil(JSON.stringify(messages).length / (4 * tokenDensityFactor));
 }
 
-function getToolCalls(msg: any): Array<{ id: string; name: string }> {
+function getToolCalls(msg: ContextMessage): Array<{ id: string; name: string }> {
   const calls: Array<{ id: string; name: string }> = [];
   if (!msg) return calls;
 
   if (Array.isArray(msg.tool_calls)) {
     for (const tc of msg.tool_calls) {
-      if (tc && tc.id) {
+      if (tc?.id) {
         const name = tc.function?.name ?? tc.name ?? 'unknown';
         calls.push({ id: String(tc.id), name });
       }
@@ -36,7 +77,8 @@ function getToolCalls(msg: any): Array<{ id: string; name: string }> {
   }
 
   if (Array.isArray(msg.content)) {
-    for (const block of msg.content) {
+    for (const rawBlock of msg.content) {
+      const block = rawBlock as ContextMessageContentBlock | undefined;
       if (block && (block.type === 'tool_use' || block.type === 'toolCall')) {
         const id = block.id ?? block.tool_use_id ?? block.toolCallId;
         const name = block.name ?? block.toolName ?? 'unknown';
@@ -47,7 +89,7 @@ function getToolCalls(msg: any): Array<{ id: string; name: string }> {
     }
   }
 
-  if (msg.toolCall && msg.toolCall.id) {
+  if (msg.toolCall?.id) {
     calls.push({
       id: String(msg.toolCall.id),
       name: msg.toolCall.name ?? msg.toolCall.toolName ?? 'unknown',
@@ -57,7 +99,7 @@ function getToolCalls(msg: any): Array<{ id: string; name: string }> {
   return calls;
 }
 
-function getToolResultIds(msg: any): string[] {
+function getToolResultIds(msg: ContextMessage): string[] {
   const ids: string[] = [];
   if (!msg) return ids;
 
@@ -65,7 +107,8 @@ function getToolResultIds(msg: any): string[] {
   if (msg.toolCallId) ids.push(String(msg.toolCallId));
 
   if (Array.isArray(msg.content)) {
-    for (const block of msg.content) {
+    for (const rawBlock of msg.content) {
+      const block = rawBlock as ContextMessageContentBlock | undefined;
       if (block && (block.type === 'tool_result' || block.type === 'toolResult')) {
         const id = block.tool_use_id ?? block.tool_call_id ?? block.id ?? block.toolCallId;
         if (id) ids.push(String(id));
@@ -77,10 +120,10 @@ function getToolResultIds(msg: any): string[] {
 }
 
 function extractThinkingFromMessage(
-  msg: any,
+  msg: ContextMessage,
   turnIndex: number,
   extracted: Array<ThinkingBlockPayload>,
-): any {
+): ContextMessage {
   if (!msg || msg.role !== 'assistant') {
     return msg;
   }
@@ -88,36 +131,44 @@ function extractThinkingFromMessage(
   const cloned = { ...msg };
 
   if (Array.isArray(cloned.content)) {
-    const newContent: any[] = [];
-    for (const block of cloned.content) {
+    const newContent: unknown[] = [];
+    for (const rawBlock of cloned.content) {
+      const block = rawBlock as ContextMessageContentBlock | undefined;
       if (block && block.type === 'thinking') {
         extracted.push({
           turnIndex,
           signature: block.signature ?? '',
-          thinking: block.thinking ?? block.text ?? '',
+          thinking: String(block.thinking ?? block.text ?? ''),
         });
       } else {
-        newContent.push(block);
+        newContent.push(rawBlock);
       }
     }
     cloned.content = newContent;
   }
 
   if (cloned.thinking !== undefined) {
+    const thinkingObj = cloned.thinking;
+    const thinkingText =
+      typeof thinkingObj === 'string'
+        ? thinkingObj
+        : typeof thinkingObj === 'object' && thinkingObj !== null
+          ? String(thinkingObj.thinking ?? '')
+          : '';
     extracted.push({
       turnIndex,
-      signature: cloned.thinkingSignature ?? cloned.signature ?? '',
-      thinking: typeof cloned.thinking === 'string' ? cloned.thinking : (cloned.thinking.thinking ?? ''),
+      signature: String(cloned.thinkingSignature ?? cloned.signature ?? ''),
+      thinking: thinkingText,
     });
-    delete cloned.thinking;
-    delete cloned.thinkingSignature;
+    cloned.thinking = undefined;
+    cloned.thinkingSignature = undefined;
   }
 
   return cloned;
 }
 
 export function pruneContextAtomic(
-  messages: Array<any>,
+  messages: Array<ContextMessage>,
   options: PruneOptions = {},
 ): PruneResult {
   const tokenDensityFactor = options.tokenDensityFactor ?? 1.35;
@@ -154,7 +205,7 @@ export function pruneContextAtomic(
   const tailPool = processedMessages.slice(tailStartIndex);
 
   const prunedToolCallIds = new Set<string>();
-  const compactedCandidate: any[] = [];
+  const compactedCandidate: ContextMessage[] = [];
 
   for (const msg of candidatePool) {
     if (msg.role === 'assistant') {
@@ -178,9 +229,11 @@ export function pruneContextAtomic(
     if (resIds.length > 0 && resIds.some((id) => prunedToolCallIds.has(id))) {
       // If msg has multiple content blocks, filter out matching tool_result blocks
       if (Array.isArray(msg.content)) {
-        const remainingBlocks = msg.content.filter((b: any) => {
-          if (!b || (b.type !== 'tool_result' && b.type !== 'toolResult')) return true;
-          const bId = b.tool_use_id ?? b.tool_call_id ?? b.id ?? b.toolCallId;
+        const remainingBlocks = (msg.content as unknown[]).filter((b: unknown) => {
+          if (!b || typeof b !== 'object') return true;
+          const rec = b as ContextMessageContentBlock;
+          if (rec.type !== 'tool_result' && rec.type !== 'toolResult') return true;
+          const bId = rec.tool_use_id ?? rec.tool_call_id ?? rec.id ?? rec.toolCallId;
           return !prunedToolCallIds.has(String(bId));
         });
         if (remainingBlocks.length > 0) {
@@ -203,14 +256,16 @@ export function pruneContextAtomic(
   }
 
   // Also clean up tail pool: discard orphaned tool results whose invocations were pruned
-  const cleanedTail: any[] = [];
+  const cleanedTail: ContextMessage[] = [];
   for (const msg of tailPool) {
     const resIds = getToolResultIds(msg);
     if (resIds.length > 0 && resIds.some((id) => prunedToolCallIds.has(id))) {
       if (Array.isArray(msg.content)) {
-        const remainingBlocks = msg.content.filter((b: any) => {
-          if (!b || (b.type !== 'tool_result' && b.type !== 'toolResult')) return true;
-          const bId = b.tool_use_id ?? b.tool_call_id ?? b.id ?? b.toolCallId;
+        const remainingBlocks = (msg.content as unknown[]).filter((b: unknown) => {
+          if (!b || typeof b !== 'object') return true;
+          const rec = b as ContextMessageContentBlock;
+          if (rec.type !== 'tool_result' && rec.type !== 'toolResult') return true;
+          const bId = rec.tool_use_id ?? rec.tool_call_id ?? rec.id ?? rec.toolCallId;
           return !prunedToolCallIds.has(String(bId));
         });
         if (remainingBlocks.length > 0) {
@@ -222,7 +277,7 @@ export function pruneContextAtomic(
     cleanedTail.push(msg);
   }
 
-  let finalCandidate = [...compactedCandidate];
+  const finalCandidate = [...compactedCandidate];
 
   // If maxTokens is specified and we still exceed it, prune oldest candidate messages
   if (options.maxTokens !== undefined) {

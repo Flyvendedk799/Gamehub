@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  formatReflexionPayload,
-  verifyGeneratedAst,
-} from '../src/verify/ast.js';
 import { RedisTelemetryBridge } from '../src/telemetry.js';
+import { formatReflexionPayload, verifyGeneratedAst } from '../src/verify/ast.js';
 
 describe('AST Syntax Verification (verifyGeneratedAst)', () => {
   it('validates correct JavaScript, TypeScript, and JSX code', async () => {
@@ -117,12 +114,7 @@ describe('Diagnostic Reflexion Payload Formatting (formatReflexionPayload)', () 
   });
 
   it('formats structured error blocks with line numbers and snippet pointers', () => {
-    const code = [
-      'const a = 1;',
-      'const b = 2;',
-      'const c = ;',
-      'console.log(a + b);',
-    ].join('\n');
+    const code = ['const a = 1;', 'const b = 2;', 'const c = ;', 'console.log(a + b);'].join('\n');
 
     const errors = [
       {

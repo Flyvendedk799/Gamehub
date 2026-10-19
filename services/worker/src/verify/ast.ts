@@ -1,4 +1,4 @@
-import { parse, type ParserPlugin } from '@babel/parser';
+import { type ParserPlugin, parse } from '@babel/parser';
 
 export interface AstVerificationError {
   message: string;
@@ -26,11 +26,7 @@ function getPluginsForFilename(filename: string): ParserPlugin[] {
   return ['typescript', 'jsx'];
 }
 
-function parseCode(
-  code: string,
-  plugins: ParserPlugin[],
-  lineOffset = 0,
-): AstVerificationError[] {
+function parseCode(code: string, plugins: ParserPlugin[], lineOffset = 0): AstVerificationError[] {
   const errors: AstVerificationError[] = [];
   try {
     const ast = parse(code, {
@@ -48,11 +44,12 @@ function parseCode(
         });
       }
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const errorObj = err as { message?: string; loc?: { line?: number; column?: number } };
     errors.push({
-      message: err.message ? err.message.replace(/\s*\(\d+:\d+\)$/, '') : String(err),
-      line: (err.loc?.line ?? 1) + lineOffset,
-      column: err.loc?.column ?? 0,
+      message: errorObj.message ? errorObj.message.replace(/\s*\(\d+:\d+\)$/, '') : String(err),
+      line: (errorObj.loc?.line ?? 1) + lineOffset,
+      column: errorObj.loc?.column ?? 0,
     });
   }
   return errors;
@@ -64,14 +61,15 @@ function parseCode(
 function extractHtmlScripts(html: string): Array<{ code: string; lineOffset: number }> {
   const scripts: Array<{ code: string; lineOffset: number }> = [];
   const scriptRegex = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
-  let match: RegExpExecArray | null;
+  let match = scriptRegex.exec(html);
 
-  while ((match = scriptRegex.exec(html)) !== null) {
+  while (match !== null) {
     const attrs = match[1] ?? '';
     const scriptBody = match[2] ?? '';
 
     // Skip external script references
     if (/\bsrc\s*=/i.test(attrs)) {
+      match = scriptRegex.exec(html);
       continue;
     }
     // Skip non-javascript scripts (e.g. application/json, text/html templates)
@@ -84,6 +82,7 @@ function extractHtmlScripts(html: string): Array<{ code: string; lineOffset: num
         type !== 'text/javascript' &&
         type !== 'application/javascript'
       ) {
+        match = scriptRegex.exec(html);
         continue;
       }
     }
@@ -99,6 +98,7 @@ function extractHtmlScripts(html: string): Array<{ code: string; lineOffset: num
       code: scriptBody,
       lineOffset,
     });
+    match = scriptRegex.exec(html);
   }
 
   return scripts;
@@ -182,7 +182,7 @@ export function formatReflexionPayload(
   });
 
   sections.push(
-    `\nAction Required: Modify the code to resolve the syntax error(s) identified above. Do not repeat the same invalid syntax.`,
+    '\nAction Required: Modify the code to resolve the syntax error(s) identified above. Do not repeat the same invalid syntax.',
   );
 
   return sections.join('\n');

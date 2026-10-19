@@ -75,7 +75,9 @@ export interface SceneHierarchyPanelProps {
   nodes?: readonly FlatNode[];
   selectedId?: string | null;
   onSelect?: (id: string) => void;
-  onCommand?: (cmd: ReturnType<typeof reparentCommand> | ReturnType<typeof setFieldCommand>) => void;
+  onCommand?: (
+    cmd: ReturnType<typeof reparentCommand> | ReturnType<typeof setFieldCommand>,
+  ) => void;
 }
 
 function NodeRow({

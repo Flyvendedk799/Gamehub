@@ -53,11 +53,7 @@ describe('scanning an EXPORTED bundle (base64-inlined modules)', () => {
    *  document, it is a base64 data: URL. */
   function exportedBundle(moduleSource: string): string {
     const b64 = Buffer.from(moduleSource, 'utf8').toString('base64');
-    return (
-      '<!doctype html><html><head><title>g</title></head><body><div id="game"></div>' +
-      `<script type="module" src="data:text/javascript;base64,${b64}"></script>` +
-      '</body></html>'
-    );
+    return `<!doctype html><html><head><title>g</title></head><body><div id="game"></div><script type="module" src="data:text/javascript;base64,${b64}"></script></body></html>`;
   }
 
   const THREE_GAME = [

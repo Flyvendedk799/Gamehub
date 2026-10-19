@@ -34,10 +34,7 @@ export function resolveImageCredential(
   if (provider === 'openai' && apiKey && canGenerateImages('openai', apiKey)) {
     return { apiKey, provider: 'openai', via: 'primary' };
   }
-  const fallback =
-    env['PLAYFORGE_IMAGE_API_KEY']?.trim() ||
-    env['OPENAI_API_KEY']?.trim() ||
-    '';
+  const fallback = env['PLAYFORGE_IMAGE_API_KEY']?.trim() || env['OPENAI_API_KEY']?.trim() || '';
   if (fallback.length > 0 && canGenerateImages('openai', fallback)) {
     return { apiKey: fallback, provider: 'openai', via: 'fallback' };
   }

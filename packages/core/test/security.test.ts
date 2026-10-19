@@ -88,8 +88,8 @@ describe('Forward-Compatible Zod Schemas (.passthrough())', () => {
     });
 
     expect(parsed.command).toBe('str_replace');
-    expect((parsed as any).extra_future_field).toBe(12345);
-    expect((parsed as any).another_unknown_flag).toBe(true);
+    expect((parsed as Record<string, unknown>).extra_future_field).toBe(12345);
+    expect((parsed as Record<string, unknown>).another_unknown_flag).toBe(true);
   });
 
   it('allows unknown properties in SetTodosToolSchema', () => {
@@ -106,8 +106,8 @@ describe('Forward-Compatible Zod Schemas (.passthrough())', () => {
     });
 
     expect(parsed.todos).toHaveLength(1);
-    expect((parsed.todos[0] as any).priority).toBe('urgent');
-    expect((parsed as any).customBatchId).toBe('batch-99');
+    expect((parsed.todos[0] as Record<string, unknown>).priority).toBe('urgent');
+    expect((parsed as Record<string, unknown>).customBatchId).toBe('batch-99');
   });
 
   it('allows unknown properties in DoneToolSchema', () => {
@@ -118,7 +118,7 @@ describe('Forward-Compatible Zod Schemas (.passthrough())', () => {
     });
 
     expect(parsed.status).toBe('completed');
-    expect((parsed as any).durationMs).toBe(12000);
+    expect((parsed as Record<string, unknown>).durationMs).toBe(12000);
   });
 
   it('creates passthrough schema with createToolSchema helper', () => {
@@ -132,6 +132,6 @@ describe('Forward-Compatible Zod Schemas (.passthrough())', () => {
     });
 
     expect(parsed.action).toBe('completed');
-    expect((parsed as any).unknownOption).toBe('accepted');
+    expect((parsed as Record<string, unknown>).unknownOption).toBe('accepted');
   });
 });

@@ -150,7 +150,9 @@ describe('enqueueRun', () => {
     const parentBytes: Array<number | null | undefined> = [];
     const captureAgent: GenerateFn = async (input, deps) => {
       captured.push((input as { editMode?: boolean }).editMode);
-      parentBytes.push(deps.getParentArtifactBytes ? await deps.getParentArtifactBytes() : undefined);
+      parentBytes.push(
+        deps.getParentArtifactBytes ? await deps.getParentArtifactBytes() : undefined,
+      );
       await deps.fs?.create('index.html', '<html></html>');
       return emptyOutput();
     };

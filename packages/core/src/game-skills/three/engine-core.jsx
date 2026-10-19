@@ -22,9 +22,9 @@
  */
 /** `performance.now()` where available, falling back to `Date.now()`. */
 export function defaultNow() {
-    return typeof performance !== 'undefined' && typeof performance.now === 'function'
-        ? performance.now()
-        : Date.now();
+  return typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now();
 }
 
 // ── frame-clock ──────────────────────────────────────────────
@@ -54,102 +54,108 @@ const DEFAULT_MAX_FRAME_SECONDS = 0.05;
 const DEFAULT_FIXED_STEP_SECONDS = 1 / 60;
 const DEFAULT_MAX_CATCH_UP_STEPS = 5;
 function finite(value, fallback) {
-    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 export function createFrameClock(options = {}) {
-    const maxFrameSeconds = Math.max(1e-4, finite(options.maxFrameSeconds, DEFAULT_MAX_FRAME_SECONDS));
-    const fixedStepSeconds = Math.max(1e-4, finite(options.fixedStepSeconds, DEFAULT_FIXED_STEP_SECONDS));
-    const maxCatchUpSteps = Math.max(1, Math.floor(finite(options.maxCatchUpSteps, DEFAULT_MAX_CATCH_UP_STEPS)));
-    let timeScale = Math.max(0, finite(options.timeScale, 1));
-    let frame = 0;
-    let wallElapsed = 0;
-    let elapsed = 0;
-    let rawDelta = 0;
-    let delta = 0;
-    let accumulator = 0;
-    let alpha = 0;
-    let steps = 0;
-    let droppedSteps = 0;
-    let paused = false;
-    let lastNowMs = null;
-    function currentTick() {
-        return { frame, delta, rawDelta, elapsed, steps, alpha, droppedSteps };
-    }
-    return {
-        tick(nowMs) {
-            const now = finite(nowMs, lastNowMs ?? 0);
-            if (lastNowMs === null)
-                lastNowMs = now;
-            // Never negative: clock adjustments or a bogus timestamp must not rewind.
-            rawDelta = Math.max(0, (now - lastNowMs) / 1000);
-            lastNowMs = now;
-            wallElapsed += rawDelta;
-            const clamped = Math.min(rawDelta, maxFrameSeconds);
-            delta = paused ? 0 : clamped * timeScale;
-            elapsed += delta;
-            frame += 1;
-            accumulator += delta;
-            let pending = Math.floor(accumulator / fixedStepSeconds);
-            droppedSteps = 0;
-            if (pending > maxCatchUpSteps) {
-                droppedSteps = pending - maxCatchUpSteps;
-                pending = maxCatchUpSteps;
-                // Discard the unpayable debt instead of trying (and failing) to repay it.
-                accumulator = 0;
-            }
-            else if (pending > 0) {
-                accumulator -= pending * fixedStepSeconds;
-            }
-            steps = pending;
-            alpha = Math.min(1, Math.max(0, accumulator / fixedStepSeconds));
-            return currentTick();
-        },
-        forEachFixedStep(fn) {
-            for (let i = 0; i < steps; i++)
-                fn(fixedStepSeconds, i);
-            return steps;
-        },
-        setPaused(next) {
-            paused = !!next;
-            return paused;
-        },
-        isPaused: () => paused,
-        setTimeScale(scale) {
-            timeScale = Math.max(0, finite(scale, timeScale));
-            return timeScale;
-        },
-        getTimeScale: () => timeScale,
-        resetDelta() {
-            lastNowMs = null;
-            accumulator = 0;
-            alpha = 0;
-            steps = 0;
-        },
-        reset() {
-            frame = 0;
-            wallElapsed = 0;
-            elapsed = 0;
-            rawDelta = 0;
-            delta = 0;
-            accumulator = 0;
-            alpha = 0;
-            steps = 0;
-            droppedSteps = 0;
-            lastNowMs = null;
-        },
-        snapshot() {
-            return {
-                version: FRAME_CLOCK_VERSION,
-                ...currentTick(),
-                wallElapsed,
-                paused,
-                timeScale,
-                fixedStepSeconds,
-                maxFrameSeconds,
-                maxCatchUpSteps,
-            };
-        },
-    };
+  const maxFrameSeconds = Math.max(
+    1e-4,
+    finite(options.maxFrameSeconds, DEFAULT_MAX_FRAME_SECONDS),
+  );
+  const fixedStepSeconds = Math.max(
+    1e-4,
+    finite(options.fixedStepSeconds, DEFAULT_FIXED_STEP_SECONDS),
+  );
+  const maxCatchUpSteps = Math.max(
+    1,
+    Math.floor(finite(options.maxCatchUpSteps, DEFAULT_MAX_CATCH_UP_STEPS)),
+  );
+  let timeScale = Math.max(0, finite(options.timeScale, 1));
+  let frame = 0;
+  let wallElapsed = 0;
+  let elapsed = 0;
+  let rawDelta = 0;
+  let delta = 0;
+  let accumulator = 0;
+  let alpha = 0;
+  let steps = 0;
+  let droppedSteps = 0;
+  let paused = false;
+  let lastNowMs = null;
+  function currentTick() {
+    return { frame, delta, rawDelta, elapsed, steps, alpha, droppedSteps };
+  }
+  return {
+    tick(nowMs) {
+      const now = finite(nowMs, lastNowMs ?? 0);
+      if (lastNowMs === null) lastNowMs = now;
+      // Never negative: clock adjustments or a bogus timestamp must not rewind.
+      rawDelta = Math.max(0, (now - lastNowMs) / 1000);
+      lastNowMs = now;
+      wallElapsed += rawDelta;
+      const clamped = Math.min(rawDelta, maxFrameSeconds);
+      delta = paused ? 0 : clamped * timeScale;
+      elapsed += delta;
+      frame += 1;
+      accumulator += delta;
+      let pending = Math.floor(accumulator / fixedStepSeconds);
+      droppedSteps = 0;
+      if (pending > maxCatchUpSteps) {
+        droppedSteps = pending - maxCatchUpSteps;
+        pending = maxCatchUpSteps;
+        // Discard the unpayable debt instead of trying (and failing) to repay it.
+        accumulator = 0;
+      } else if (pending > 0) {
+        accumulator -= pending * fixedStepSeconds;
+      }
+      steps = pending;
+      alpha = Math.min(1, Math.max(0, accumulator / fixedStepSeconds));
+      return currentTick();
+    },
+    forEachFixedStep(fn) {
+      for (let i = 0; i < steps; i++) fn(fixedStepSeconds, i);
+      return steps;
+    },
+    setPaused(next) {
+      paused = !!next;
+      return paused;
+    },
+    isPaused: () => paused,
+    setTimeScale(scale) {
+      timeScale = Math.max(0, finite(scale, timeScale));
+      return timeScale;
+    },
+    getTimeScale: () => timeScale,
+    resetDelta() {
+      lastNowMs = null;
+      accumulator = 0;
+      alpha = 0;
+      steps = 0;
+    },
+    reset() {
+      frame = 0;
+      wallElapsed = 0;
+      elapsed = 0;
+      rawDelta = 0;
+      delta = 0;
+      accumulator = 0;
+      alpha = 0;
+      steps = 0;
+      droppedSteps = 0;
+      lastNowMs = null;
+    },
+    snapshot() {
+      return {
+        version: FRAME_CLOCK_VERSION,
+        ...currentTick(),
+        wallElapsed,
+        paused,
+        timeScale,
+        fixedStepSeconds,
+        maxFrameSeconds,
+        maxCatchUpSteps,
+      };
+    },
+  };
 }
 
 // ── system-scheduler ─────────────────────────────────────────
@@ -177,111 +183,102 @@ export const SYSTEM_SCHEDULER_VERSION = 'system-scheduler.v1';
 export const DEFAULT_PHASES = ['input', 'simulate', 'animate', 'viewmodel', 'render'];
 const DEFAULT_FAULT_LIMIT = 3;
 export function createSystemScheduler(options = {}) {
-    const phases = options.phases?.length
-        ? [...options.phases]
-        : DEFAULT_PHASES;
-    const faultLimit = Math.max(1, Math.floor(options.faultLimit ?? DEFAULT_FAULT_LIMIT));
-    const now = options.now ?? defaultNow;
-    const byPhase = new Map(phases.map((p) => [p, []]));
-    const byName = new Map();
-    return {
-        phases,
-        add(spec) {
-            if (typeof spec?.fn !== 'function')
-                throw new Error(`system "${spec?.name ?? '?'}" needs a fn`);
-            if (!spec.name)
-                throw new Error('system needs a name');
-            const list = byPhase.get(spec.phase);
-            if (!list)
-                throw new Error(`unknown phase "${spec.phase}" (have: ${phases.join(', ')})`);
-            if (byName.has(spec.name))
-                throw new Error(`duplicate system "${spec.name}"`);
-            const state = {
-                name: spec.name,
-                phase: spec.phase,
-                fn: spec.fn,
-                order: typeof spec.order === 'number' && Number.isFinite(spec.order) ? spec.order : 0,
-                enabled: spec.enabled !== false,
-                lastMs: 0,
-                emaMs: 0,
-                calls: 0,
-                faults: 0,
-                consecutiveFaults: 0,
-                quarantined: false,
-                lastError: null,
-            };
-            byName.set(spec.name, state);
-            list.push(state);
-            list.sort((a, b) => a.order - b.order);
-        },
-        run(phase, ctx) {
-            const list = byPhase.get(phase);
-            if (!list)
-                return { phase, ran: 0, ms: 0, faults: 0 };
-            const phaseStart = now();
-            let ran = 0;
-            let faults = 0;
-            for (const system of list) {
-                if (!system.enabled || system.quarantined)
-                    continue;
-                const started = now();
-                try {
-                    system.fn(ctx);
-                    system.consecutiveFaults = 0;
-                }
-                catch (error) {
-                    faults++;
-                    system.faults++;
-                    system.consecutiveFaults++;
-                    system.lastError = error instanceof Error ? error.message : String(error);
-                    if (system.consecutiveFaults >= faultLimit) {
-                        system.quarantined = true;
-                        options.onQuarantine?.(system.name, system.lastError);
-                    }
-                }
-                const ms = now() - started;
-                system.lastMs = ms;
-                system.emaMs = system.emaMs * 0.9 + ms * 0.1;
-                system.calls++;
-                ran++;
-            }
-            return { phase, ran, ms: now() - phaseStart, faults };
-        },
-        setEnabled(name, enabled) {
-            const system = byName.get(name);
-            if (!system)
-                return false;
-            system.enabled = !!enabled;
-            if (enabled) {
-                system.quarantined = false;
-                system.consecutiveFaults = 0;
-            }
-            return true;
-        },
-        has: (name) => byName.has(name),
-        snapshot() {
-            const systems = [...byName.values()]
-                .map((s) => ({
-                name: s.name,
-                phase: s.phase,
-                order: s.order,
-                enabled: s.enabled,
-                quarantined: s.quarantined,
-                lastMs: Number(s.lastMs.toFixed(3)),
-                emaMs: Number(s.emaMs.toFixed(3)),
-                calls: s.calls,
-                faults: s.faults,
-                lastError: s.lastError,
-            }))
-                .sort((a, b) => b.emaMs - a.emaMs);
-            return {
-                version: SYSTEM_SCHEDULER_VERSION,
-                phases: [...phases],
-                count: systems.length,
-                systems,
-            };
-        },
-    };
+  const phases = options.phases?.length ? [...options.phases] : DEFAULT_PHASES;
+  const faultLimit = Math.max(1, Math.floor(options.faultLimit ?? DEFAULT_FAULT_LIMIT));
+  const now = options.now ?? defaultNow;
+  const byPhase = new Map(phases.map((p) => [p, []]));
+  const byName = new Map();
+  return {
+    phases,
+    add(spec) {
+      if (typeof spec?.fn !== 'function')
+        throw new Error(`system "${spec?.name ?? '?'}" needs a fn`);
+      if (!spec.name) throw new Error('system needs a name');
+      const list = byPhase.get(spec.phase);
+      if (!list) throw new Error(`unknown phase "${spec.phase}" (have: ${phases.join(', ')})`);
+      if (byName.has(spec.name)) throw new Error(`duplicate system "${spec.name}"`);
+      const state = {
+        name: spec.name,
+        phase: spec.phase,
+        fn: spec.fn,
+        order: typeof spec.order === 'number' && Number.isFinite(spec.order) ? spec.order : 0,
+        enabled: spec.enabled !== false,
+        lastMs: 0,
+        emaMs: 0,
+        calls: 0,
+        faults: 0,
+        consecutiveFaults: 0,
+        quarantined: false,
+        lastError: null,
+      };
+      byName.set(spec.name, state);
+      list.push(state);
+      list.sort((a, b) => a.order - b.order);
+    },
+    run(phase, ctx) {
+      const list = byPhase.get(phase);
+      if (!list) return { phase, ran: 0, ms: 0, faults: 0 };
+      const phaseStart = now();
+      let ran = 0;
+      let faults = 0;
+      for (const system of list) {
+        if (!system.enabled || system.quarantined) continue;
+        const started = now();
+        try {
+          system.fn(ctx);
+          system.consecutiveFaults = 0;
+        } catch (error) {
+          faults++;
+          system.faults++;
+          system.consecutiveFaults++;
+          system.lastError = error instanceof Error ? error.message : String(error);
+          if (system.consecutiveFaults >= faultLimit) {
+            system.quarantined = true;
+            options.onQuarantine?.(system.name, system.lastError);
+          }
+        }
+        const ms = now() - started;
+        system.lastMs = ms;
+        system.emaMs = system.emaMs * 0.9 + ms * 0.1;
+        system.calls++;
+        ran++;
+      }
+      return { phase, ran, ms: now() - phaseStart, faults };
+    },
+    setEnabled(name, enabled) {
+      const system = byName.get(name);
+      if (!system) return false;
+      system.enabled = !!enabled;
+      if (enabled) {
+        system.quarantined = false;
+        system.consecutiveFaults = 0;
+      }
+      return true;
+    },
+    has: (name) => byName.has(name),
+    snapshot() {
+      const systems = [...byName.values()]
+        .map((s) => ({
+          name: s.name,
+          phase: s.phase,
+          order: s.order,
+          enabled: s.enabled,
+          quarantined: s.quarantined,
+          lastMs: Number(s.lastMs.toFixed(3)),
+          emaMs: Number(s.emaMs.toFixed(3)),
+          calls: s.calls,
+          faults: s.faults,
+          lastError: s.lastError,
+        }))
+        .sort((a, b) => b.emaMs - a.emaMs);
+      return {
+        version: SYSTEM_SCHEDULER_VERSION,
+        phases: [...phases],
+        count: systems.length,
+        systems,
+      };
+    },
+  };
 }
 
 // ── resource-scope ───────────────────────────────────────────
@@ -309,154 +306,136 @@ export function createSystemScheduler(options = {}) {
  */
 export const RESOURCE_SCOPE_VERSION = 'resource-scope.v1';
 function isDisposable(value) {
-    return (typeof value === 'object' &&
-        value !== null &&
-        typeof value.dispose === 'function');
+  return typeof value === 'object' && value !== null && typeof value.dispose === 'function';
 }
 export function createResourceScope(options = {}) {
-    const timers = options.timers ?? globalThis;
-    const disposables = new Set();
-    const listeners = [];
-    const intervalIds = [];
-    const timeoutIds = [];
-    const customs = [];
-    let disposed = false;
-    let disposeErrors = 0;
-    function report(error, kind) {
-        disposeErrors++;
-        options.onError?.(error, kind);
+  const timers = options.timers ?? globalThis;
+  const disposables = new Set();
+  const listeners = [];
+  const intervalIds = [];
+  const timeoutIds = [];
+  const customs = [];
+  let disposed = false;
+  let disposeErrors = 0;
+  function report(error, kind) {
+    disposeErrors++;
+    options.onError?.(error, kind);
+  }
+  function collectMaterial(material) {
+    if (!material) return;
+    const list = Array.isArray(material) ? material : [material];
+    for (const entry of list) {
+      if (!isDisposable(entry)) continue;
+      disposables.add(entry);
+      // Texture maps hang off materials; collect any disposable-valued property.
+      for (const value of Object.values(entry)) {
+        if (isDisposable(value)) disposables.add(value);
+      }
     }
-    function collectMaterial(material) {
-        if (!material)
-            return;
-        const list = Array.isArray(material) ? material : [material];
-        for (const entry of list) {
-            if (!isDisposable(entry))
-                continue;
-            disposables.add(entry);
-            // Texture maps hang off materials; collect any disposable-valued property.
-            for (const value of Object.values(entry)) {
-                if (isDisposable(value))
-                    disposables.add(value);
-            }
+  }
+  const scope = {
+    get disposed() {
+      return disposed;
+    },
+    track(resource) {
+      if (isDisposable(resource)) disposables.add(resource);
+      return resource;
+    },
+    own(root) {
+      const visit = (node) => {
+        if (isDisposable(node.geometry)) disposables.add(node.geometry);
+        collectMaterial(node.material);
+      };
+      if (typeof root.traverse === 'function') root.traverse(visit);
+      else visit(root);
+      return root;
+    },
+    addEventListener(target, type, listener, opts) {
+      target.addEventListener(type, listener, opts);
+      const entry = { target, type, listener, ...(opts === undefined ? {} : { options: opts }) };
+      listeners.push(entry);
+      return () => {
+        const index = listeners.indexOf(entry);
+        if (index >= 0) listeners.splice(index, 1);
+        try {
+          target.removeEventListener(type, listener, opts);
+        } catch (error) {
+          report(error, 'listener');
         }
-    }
-    const scope = {
-        get disposed() {
-            return disposed;
-        },
-        track(resource) {
-            if (isDisposable(resource))
-                disposables.add(resource);
-            return resource;
-        },
-        own(root) {
-            const visit = (node) => {
-                if (isDisposable(node.geometry))
-                    disposables.add(node.geometry);
-                collectMaterial(node.material);
-            };
-            if (typeof root.traverse === 'function')
-                root.traverse(visit);
-            else
-                visit(root);
-            return root;
-        },
-        addEventListener(target, type, listener, opts) {
-            target.addEventListener(type, listener, opts);
-            const entry = { target, type, listener, ...(opts === undefined ? {} : { options: opts }) };
-            listeners.push(entry);
-            return () => {
-                const index = listeners.indexOf(entry);
-                if (index >= 0)
-                    listeners.splice(index, 1);
-                try {
-                    target.removeEventListener(type, listener, opts);
-                }
-                catch (error) {
-                    report(error, 'listener');
-                }
-            };
-        },
-        setInterval(handler, ms) {
-            const id = timers.setInterval(handler, ms);
-            intervalIds.push(id);
-            return id;
-        },
-        setTimeout(handler, ms) {
-            const id = timers.setTimeout(handler, ms);
-            timeoutIds.push(id);
-            return id;
-        },
-        onDispose(cleanup) {
-            if (typeof cleanup === 'function')
-                customs.push(cleanup);
-        },
-        disposeAll() {
-            if (disposed)
-                return scope.stats();
-            disposed = true;
-            for (const entry of listeners) {
-                try {
-                    entry.target.removeEventListener(entry.type, entry.listener, entry.options);
-                }
-                catch (error) {
-                    report(error, 'listener');
-                }
-            }
-            listeners.length = 0;
-            for (const id of intervalIds) {
-                try {
-                    timers.clearInterval(id);
-                }
-                catch (error) {
-                    report(error, 'interval');
-                }
-            }
-            intervalIds.length = 0;
-            for (const id of timeoutIds) {
-                try {
-                    timers.clearTimeout(id);
-                }
-                catch (error) {
-                    report(error, 'timeout');
-                }
-            }
-            timeoutIds.length = 0;
-            for (const resource of disposables) {
-                try {
-                    resource.dispose();
-                }
-                catch (error) {
-                    report(error, 'dispose');
-                }
-            }
-            disposables.clear();
-            // Custom cleanups run last: they may depend on the above being gone.
-            for (const cleanup of customs) {
-                try {
-                    cleanup();
-                }
-                catch (error) {
-                    report(error, 'custom');
-                }
-            }
-            customs.length = 0;
-            return scope.stats();
-        },
-        stats() {
-            return {
-                version: RESOURCE_SCOPE_VERSION,
-                disposables: disposables.size,
-                listeners: listeners.length,
-                timers: intervalIds.length + timeoutIds.length,
-                customs: customs.length,
-                disposed,
-                disposeErrors,
-            };
-        },
-    };
-    return scope;
+      };
+    },
+    setInterval(handler, ms) {
+      const id = timers.setInterval(handler, ms);
+      intervalIds.push(id);
+      return id;
+    },
+    setTimeout(handler, ms) {
+      const id = timers.setTimeout(handler, ms);
+      timeoutIds.push(id);
+      return id;
+    },
+    onDispose(cleanup) {
+      if (typeof cleanup === 'function') customs.push(cleanup);
+    },
+    disposeAll() {
+      if (disposed) return scope.stats();
+      disposed = true;
+      for (const entry of listeners) {
+        try {
+          entry.target.removeEventListener(entry.type, entry.listener, entry.options);
+        } catch (error) {
+          report(error, 'listener');
+        }
+      }
+      listeners.length = 0;
+      for (const id of intervalIds) {
+        try {
+          timers.clearInterval(id);
+        } catch (error) {
+          report(error, 'interval');
+        }
+      }
+      intervalIds.length = 0;
+      for (const id of timeoutIds) {
+        try {
+          timers.clearTimeout(id);
+        } catch (error) {
+          report(error, 'timeout');
+        }
+      }
+      timeoutIds.length = 0;
+      for (const resource of disposables) {
+        try {
+          resource.dispose();
+        } catch (error) {
+          report(error, 'dispose');
+        }
+      }
+      disposables.clear();
+      // Custom cleanups run last: they may depend on the above being gone.
+      for (const cleanup of customs) {
+        try {
+          cleanup();
+        } catch (error) {
+          report(error, 'custom');
+        }
+      }
+      customs.length = 0;
+      return scope.stats();
+    },
+    stats() {
+      return {
+        version: RESOURCE_SCOPE_VERSION,
+        disposables: disposables.size,
+        listeners: listeners.length,
+        timers: intervalIds.length + timeoutIds.length,
+        customs: customs.length,
+        disposed,
+        disposeErrors,
+      };
+    },
+  };
+  return scope;
 }
 
 // ── playerzero-bridge ────────────────────────────────────────
@@ -488,139 +467,118 @@ export function createResourceScope(options = {}) {
  */
 export const PLAYERZERO_BRIDGE_VERSION = 'playerzero-bridge.v1';
 function resolveGame(explicit) {
-    if (explicit)
-        return explicit;
-    const found = globalThis.__game;
-    return typeof found === 'object' && found !== null ? found : undefined;
+  if (explicit) return explicit;
+  const found = globalThis.__game;
+  return typeof found === 'object' && found !== null ? found : undefined;
 }
 export function createPlayerZeroBridge(options = {}) {
-    const game = resolveGame(options.game);
-    const host = options.host ??
-        (typeof globalThis.addEventListener === 'function'
-            ? globalThis
-            : undefined);
-    // Action handlers are held here rather than only in the shim so an
-    // unsubscribe works even though `controls.on` offers no `off`.
-    const handlers = new Map();
-    const boundActions = new Set();
-    let disposed = false;
-    function ensureBound(actionId) {
-        if (boundActions.has(actionId) || !game?.controls)
-            return;
-        boundActions.add(actionId);
-        game.controls.on(actionId, () => {
-            if (disposed)
-                return;
-            for (const fn of handlers.get(actionId) ?? []) {
-                // One bad listener must not stop the others, or block input entirely.
-                try {
-                    fn();
-                }
-                catch {
-                    /* a throwing handler is not fatal */
-                }
-            }
-        });
-    }
-    let paramsListener = null;
-    if (options.onParamsChanged && host) {
-        paramsListener = () => {
-            if (disposed)
-                return;
-            options.onParamsChanged?.(game?.params ?? {});
-        };
-        host.addEventListener('game:params-changed', paramsListener);
-    }
-    const bridge = {
-        get connected() {
-            return game !== undefined;
-        },
-        get params() {
-            return game?.params ?? {};
-        },
-        get startMuted() {
-            return game?.config?.['startMuted'] === true;
-        },
-        param(key, fallback) {
-            const value = game?.params?.[key];
-            if (typeof value !== typeof fallback)
-                return fallback;
-            // A NaN/Infinity slider value would silently poison the simulation.
-            if (typeof value === 'number' && !Number.isFinite(value))
-                return fallback;
-            return value;
-        },
-        defineControls(actions) {
-            if (!game?.controls)
-                return;
-            game.controls.define({ actions: actions.map((action) => ({ ...action })) });
-            // A `define` resets the shim's handler tables, so rebind ours after it.
-            boundActions.clear();
-            for (const actionId of handlers.keys())
-                ensureBound(actionId);
-        },
-        isDown(actionId) {
-            try {
-                return game?.controls?.isDown(actionId) === true;
-            }
-            catch {
-                return false;
-            }
-        },
-        onAction(actionId, fn) {
-            let set = handlers.get(actionId);
-            if (!set) {
-                set = new Set();
-                handlers.set(actionId, set);
-            }
-            set.add(fn);
-            ensureBound(actionId);
-            return () => {
-                set?.delete(fn);
-            };
-        },
-        trackDebug(spec) {
-            if (!game?.debug || typeof game.debug.track !== 'function')
-                return;
-            game.debug.track(spec);
-        },
-        setState(patch) {
-            if (!game)
-                return;
-            game.state = { ...(game.state ?? {}), ...patch };
-        },
-        setWorld(world) {
-            if (!game)
-                return;
-            game.world = { triggers: world.triggers, colliders: world.colliders };
-        },
-        reportScore(score) {
-            const value = Number(score);
-            if (!Number.isFinite(value))
-                return;
-            try {
-                game?.reportScore?.(value);
-            }
-            catch {
-                /* cross-origin parent may throw */
-            }
-        },
-        dispose() {
-            if (disposed)
-                return;
-            disposed = true;
-            if (paramsListener && host)
-                host.removeEventListener('game:params-changed', paramsListener);
-            paramsListener = null;
-            handlers.clear();
-            boundActions.clear();
-        },
+  const game = resolveGame(options.game);
+  const host =
+    options.host ?? (typeof globalThis.addEventListener === 'function' ? globalThis : undefined);
+  // Action handlers are held here rather than only in the shim so an
+  // unsubscribe works even though `controls.on` offers no `off`.
+  const handlers = new Map();
+  const boundActions = new Set();
+  let disposed = false;
+  function ensureBound(actionId) {
+    if (boundActions.has(actionId) || !game?.controls) return;
+    boundActions.add(actionId);
+    game.controls.on(actionId, () => {
+      if (disposed) return;
+      for (const fn of handlers.get(actionId) ?? []) {
+        // One bad listener must not stop the others, or block input entirely.
+        try {
+          fn();
+        } catch {
+          /* a throwing handler is not fatal */
+        }
+      }
+    });
+  }
+  let paramsListener = null;
+  if (options.onParamsChanged && host) {
+    paramsListener = () => {
+      if (disposed) return;
+      options.onParamsChanged?.(game?.params ?? {});
     };
-    if (options.actions?.length)
-        bridge.defineControls(options.actions);
-    if (options.debug)
-        bridge.trackDebug(options.debug);
-    return bridge;
+    host.addEventListener('game:params-changed', paramsListener);
+  }
+  const bridge = {
+    get connected() {
+      return game !== undefined;
+    },
+    get params() {
+      return game?.params ?? {};
+    },
+    get startMuted() {
+      return game?.config?.['startMuted'] === true;
+    },
+    param(key, fallback) {
+      const value = game?.params?.[key];
+      if (typeof value !== typeof fallback) return fallback;
+      // A NaN/Infinity slider value would silently poison the simulation.
+      if (typeof value === 'number' && !Number.isFinite(value)) return fallback;
+      return value;
+    },
+    defineControls(actions) {
+      if (!game?.controls) return;
+      game.controls.define({ actions: actions.map((action) => ({ ...action })) });
+      // A `define` resets the shim's handler tables, so rebind ours after it.
+      boundActions.clear();
+      for (const actionId of handlers.keys()) ensureBound(actionId);
+    },
+    isDown(actionId) {
+      try {
+        return game?.controls?.isDown(actionId) === true;
+      } catch {
+        return false;
+      }
+    },
+    onAction(actionId, fn) {
+      let set = handlers.get(actionId);
+      if (!set) {
+        set = new Set();
+        handlers.set(actionId, set);
+      }
+      set.add(fn);
+      ensureBound(actionId);
+      return () => {
+        set?.delete(fn);
+      };
+    },
+    trackDebug(spec) {
+      if (!game?.debug || typeof game.debug.track !== 'function') return;
+      game.debug.track(spec);
+    },
+    setState(patch) {
+      if (!game) return;
+      game.state = { ...(game.state ?? {}), ...patch };
+    },
+    setWorld(world) {
+      if (!game) return;
+      game.world = { triggers: world.triggers, colliders: world.colliders };
+    },
+    reportScore(score) {
+      const value = Number(score);
+      if (!Number.isFinite(value)) return;
+      try {
+        game?.reportScore?.(value);
+      } catch {
+        /* cross-origin parent may throw */
+      }
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      if (paramsListener && host) host.removeEventListener('game:params-changed', paramsListener);
+      paramsListener = null;
+      handlers.clear();
+      boundActions.clear();
+    },
+  };
+  if (options.actions?.length) bridge.defineControls(options.actions);
+  if (options.debug) bridge.trackDebug(options.debug);
+  return bridge;
 }
 
 // ── game-loop ────────────────────────────────────────────────
@@ -653,143 +611,131 @@ export function createPlayerZeroBridge(options = {}) {
 
 export const GAME_LOOP_VERSION = 'game-loop.v1';
 export function createGameLoop(options = {}) {
-    const now = options.now ?? defaultNow;
-    const requestFrame = options.requestFrame ??
-        ((cb) => {
-            const raf = globalThis
-                .requestAnimationFrame;
-            return raf ? raf(cb) : setTimeout(() => cb(now()), 16);
-        });
-    const cancelFrame = options.cancelFrame ??
-        ((handle) => {
-            const caf = globalThis
-                .cancelAnimationFrame;
-            if (caf)
-                caf(handle);
-            else
-                clearTimeout(handle);
-        });
-    const clock = createFrameClock(options);
-    const resources = createResourceScope();
-    const systems = createSystemScheduler({
-        ...(options.onSystemFault ? { onQuarantine: options.onSystemFault } : {}),
+  const now = options.now ?? defaultNow;
+  const requestFrame =
+    options.requestFrame ??
+    ((cb) => {
+      const raf = globalThis.requestAnimationFrame;
+      return raf ? raf(cb) : setTimeout(() => cb(now()), 16);
     });
-    let running = false;
-    let disposed = false;
-    let frameHandle = null;
-    /** Paused by the author, tracked separately from visibility auto-pause. */
-    let manualPaused = false;
-    const visibility = options.visibility ??
-        (typeof document !== 'undefined'
-            ? document
-            : undefined);
-    const pauseWhenHidden = options.pauseWhenHidden !== false;
-    function applyPaused() {
-        const hidden = pauseWhenHidden && visibility ? visibility.hidden === true : false;
-        clock.setPaused(manualPaused || hidden);
-    }
-    if (pauseWhenHidden && visibility) {
-        const onVisibility = () => {
-            // Coming back from hidden: drop the accumulated wall time so the game does
-            // not try to simulate the entire time the tab was in the background.
-            if (visibility.hidden !== true)
-                clock.resetDelta();
-            applyPaused();
-        };
-        visibility.addEventListener('visibilitychange', onVisibility);
-        resources.onDispose(() => visibility.removeEventListener('visibilitychange', onVisibility));
-    }
-    function runFrame(nowMs) {
-        if (disposed)
-            return;
-        const tick = clock.tick(nowMs);
-        const base = {
-            step: tick.delta,
-            delta: tick.delta,
-            alpha: tick.alpha,
-            elapsed: tick.elapsed,
-            frame: tick.frame,
-        };
-        systems.run('input', base);
-        // Fixed-step simulation: deterministic regardless of display rate.
-        clock.forEachFixedStep((stepSeconds) => {
-            systems.run('simulate', { ...base, step: stepSeconds });
-        });
-        systems.run('animate', base);
-        systems.run('viewmodel', base);
-        systems.run('render', base);
-        if (options.render) {
-            try {
-                options.render(tick.alpha, base);
-            }
-            catch (error) {
-                // A render throw must not kill the RAF chain.
-                options.onSystemFault?.('render', error instanceof Error ? error.message : String(error));
-            }
-        }
-    }
-    function scheduleNext() {
-        if (!running || disposed)
-            return;
-        frameHandle = requestFrame((nowMs) => {
-            if (!running || disposed)
-                return;
-            runFrame(nowMs);
-            scheduleNext();
-        });
-    }
-    const loop = {
-        clock,
-        systems,
-        resources,
-        addSystem(spec) {
-            systems.add(spec);
-        },
-        setSystemEnabled: (name, enabled) => systems.setEnabled(name, enabled),
-        start() {
-            if (running || disposed)
-                return;
-            running = true;
-            // Fresh delta so a long gap before start() is not simulated.
-            clock.resetDelta();
-            applyPaused();
-            scheduleNext();
-        },
-        stop() {
-            running = false;
-            if (frameHandle !== null) {
-                cancelFrame(frameHandle);
-                frameHandle = null;
-            }
-        },
-        tick(nowMs) {
-            runFrame(nowMs);
-        },
-        setPaused(paused) {
-            manualPaused = !!paused;
-            applyPaused();
-            return clock.isPaused();
-        },
-        setTimeScale: (scale) => clock.setTimeScale(scale),
-        dispose() {
-            if (disposed)
-                return;
-            loop.stop();
-            disposed = true;
-            resources.disposeAll();
-        },
-        snapshot() {
-            return {
-                version: GAME_LOOP_VERSION,
-                running,
-                disposed,
-                clock: clock.snapshot(),
-                systems: systems.snapshot(),
-                resources: resources.stats(),
-            };
-        },
+  const cancelFrame =
+    options.cancelFrame ??
+    ((handle) => {
+      const caf = globalThis.cancelAnimationFrame;
+      if (caf) caf(handle);
+      else clearTimeout(handle);
+    });
+  const clock = createFrameClock(options);
+  const resources = createResourceScope();
+  const systems = createSystemScheduler({
+    ...(options.onSystemFault ? { onQuarantine: options.onSystemFault } : {}),
+  });
+  let running = false;
+  let disposed = false;
+  let frameHandle = null;
+  /** Paused by the author, tracked separately from visibility auto-pause. */
+  let manualPaused = false;
+  const visibility = options.visibility ?? (typeof document !== 'undefined' ? document : undefined);
+  const pauseWhenHidden = options.pauseWhenHidden !== false;
+  function applyPaused() {
+    const hidden = pauseWhenHidden && visibility ? visibility.hidden === true : false;
+    clock.setPaused(manualPaused || hidden);
+  }
+  if (pauseWhenHidden && visibility) {
+    const onVisibility = () => {
+      // Coming back from hidden: drop the accumulated wall time so the game does
+      // not try to simulate the entire time the tab was in the background.
+      if (visibility.hidden !== true) clock.resetDelta();
+      applyPaused();
     };
-    return loop;
+    visibility.addEventListener('visibilitychange', onVisibility);
+    resources.onDispose(() => visibility.removeEventListener('visibilitychange', onVisibility));
+  }
+  function runFrame(nowMs) {
+    if (disposed) return;
+    const tick = clock.tick(nowMs);
+    const base = {
+      step: tick.delta,
+      delta: tick.delta,
+      alpha: tick.alpha,
+      elapsed: tick.elapsed,
+      frame: tick.frame,
+    };
+    systems.run('input', base);
+    // Fixed-step simulation: deterministic regardless of display rate.
+    clock.forEachFixedStep((stepSeconds) => {
+      systems.run('simulate', { ...base, step: stepSeconds });
+    });
+    systems.run('animate', base);
+    systems.run('viewmodel', base);
+    systems.run('render', base);
+    if (options.render) {
+      try {
+        options.render(tick.alpha, base);
+      } catch (error) {
+        // A render throw must not kill the RAF chain.
+        options.onSystemFault?.('render', error instanceof Error ? error.message : String(error));
+      }
+    }
+  }
+  function scheduleNext() {
+    if (!running || disposed) return;
+    frameHandle = requestFrame((nowMs) => {
+      if (!running || disposed) return;
+      runFrame(nowMs);
+      scheduleNext();
+    });
+  }
+  const loop = {
+    clock,
+    systems,
+    resources,
+    addSystem(spec) {
+      systems.add(spec);
+    },
+    setSystemEnabled: (name, enabled) => systems.setEnabled(name, enabled),
+    start() {
+      if (running || disposed) return;
+      running = true;
+      // Fresh delta so a long gap before start() is not simulated.
+      clock.resetDelta();
+      applyPaused();
+      scheduleNext();
+    },
+    stop() {
+      running = false;
+      if (frameHandle !== null) {
+        cancelFrame(frameHandle);
+        frameHandle = null;
+      }
+    },
+    tick(nowMs) {
+      runFrame(nowMs);
+    },
+    setPaused(paused) {
+      manualPaused = !!paused;
+      applyPaused();
+      return clock.isPaused();
+    },
+    setTimeScale: (scale) => clock.setTimeScale(scale),
+    dispose() {
+      if (disposed) return;
+      loop.stop();
+      disposed = true;
+      resources.disposeAll();
+    },
+    snapshot() {
+      return {
+        version: GAME_LOOP_VERSION,
+        running,
+        disposed,
+        clock: clock.snapshot(),
+        systems: systems.snapshot(),
+        resources: resources.stats(),
+      };
+    },
+  };
+  return loop;
 }
 
 // ── Three.js binding ────────────────────────────────────────────────────────
@@ -986,4 +932,3 @@ export function createGame(options = {}) {
 //     if (game.isDown('right')) player.position.x += speed * step;
 //   });
 //   game.start();
-

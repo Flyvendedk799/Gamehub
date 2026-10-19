@@ -48,7 +48,6 @@ import { enqueueRun } from './queue';
 import type { BrowserJobsPort, RunTokenUsage, WebEngine } from './run-generation';
 import { RedisTelemetryBridge } from './telemetry';
 
-
 function requireEnv(name: string): string {
   const val = process.env[name];
   if (!val) throw new Error(`Missing required env var: ${name}`);

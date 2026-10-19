@@ -90,7 +90,9 @@ describe('StagnationDetector & Error Recovery Directives', () => {
     expect(directive).toContain('[Error Recovery Directive: Tool str_replace_based_edit_tool');
     expect(directive).toContain('Target string not found');
     expect(directive).toContain('Do not repeat identical parameters.');
-    expect(directive).toContain('Suggested remediation: View the file first to check exact indentation.');
+    expect(directive).toContain(
+      'Suggested remediation: View the file first to check exact indentation.',
+    );
   });
 
   it('suggests domain-specific remediation based on error and tool type', () => {
@@ -100,7 +102,10 @@ describe('StagnationDetector & Error Recovery Directives', () => {
     );
     expect(remediationNotFound).toMatch(/view.*exact current lines/i);
 
-    const remediationValidate = suggestRemediation('validate_game_scene', 'SyntaxError: Unexpected token');
+    const remediationValidate = suggestRemediation(
+      'validate_game_scene',
+      'SyntaxError: Unexpected token',
+    );
     expect(remediationValidate).toMatch(/compiler\/runtime errors/i);
 
     const remediationGeneral = suggestRemediation('unknown_tool', 'General timeout');

@@ -1922,7 +1922,10 @@ export async function generateViaAgent(
   let pendingWallClockAbort = false;
   let stuckSteerEmitted = false;
   const stagnationDetector = new StagnationDetector(3);
-  const inFlightToolInvocations = new Map<string, { toolName: string; args: Record<string, unknown> }>();
+  const inFlightToolInvocations = new Map<
+    string,
+    { toolName: string; args: Record<string, unknown> }
+  >();
   // Single-session execution (post-2026-04-27 framework simplification):
   // budget steering nudges that lived here previously were workarounds
   // for the 5-min chunk constraint. With the entire run inside one
@@ -1949,7 +1952,11 @@ export async function generateViaAgent(
     }
     if (event.type === 'tool_execution_start' && budgetReason === null) {
       toolCallCount += 1;
-      const ev = event as { toolCallId?: string; toolName?: string; args?: Record<string, unknown> };
+      const ev = event as {
+        toolCallId?: string;
+        toolName?: string;
+        args?: Record<string, unknown>;
+      };
       if (ev.toolCallId && ev.toolName) {
         inFlightToolInvocations.set(ev.toolCallId, { toolName: ev.toolName, args: ev.args ?? {} });
       }
@@ -2038,7 +2045,9 @@ export async function generateViaAgent(
       if (check.isStagnant && !stuckSteerEmitted) {
         stuckSteerEmitted = true;
         const errorMsg = evEnd.isError
-          ? (typeof evEnd.result === 'string' ? evEnd.result : JSON.stringify(evEnd.result ?? 'Tool execution failed'))
+          ? typeof evEnd.result === 'string'
+            ? evEnd.result
+            : JSON.stringify(evEnd.result ?? 'Tool execution failed')
           : `Stagnation detected: 3 consecutive identical tool invocations for ${toolName}`;
         const remediation = suggestRemediation(toolName, errorMsg);
         const directive = formatErrorRecoveryDirective(toolName, errorMsg, remediation);

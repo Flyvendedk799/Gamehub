@@ -33,9 +33,9 @@ import {
   type ShipReason,
   type StarterEngine,
   type VisualCritique,
+  buildBreakageDiagnosisPrompt,
   buildInteractivityFloorPlan,
   buildRepairVerdict,
-  buildBreakageDiagnosisPrompt,
   buildVisualCritiquePrompt,
   buildVisualRepairInstruction,
   classifyEditRequest,
@@ -1147,14 +1147,7 @@ export async function runGeneration(
             .map((r) => `  - ${r.reason}`)
             .join('\n');
           fatalErrors.push(
-            `The edit did NOT do what was asked. The user's request was: "${editIntent.request}" ` +
-              `— which you said would be observable as: ${editIntent.observable}. ` +
-              `Driven in a real browser, that is not what the game does:\n${failures}\n` +
-              'Do not restate the change; the measurement above is what the game actually did. ' +
-              'Find why the edit had no effect (a value overridden elsewhere, a second hard-coded ' +
-              'copy of the same number, an early return, a branch that never runs) and fix the ' +
-              'real cause. If the assertion itself is wrong — wrong field, wrong sign for this ' +
-              "engine's axes — say so and correct it.",
+            `The edit did NOT do what was asked. The user's request was: "${editIntent.request}" — which you said would be observable as: ${editIntent.observable}. Driven in a real browser, that is not what the game does:\n${failures}\nDo not restate the change; the measurement above is what the game actually did. Find why the edit had no effect (a value overridden elsewhere, a second hard-coded copy of the same number, an early return, a branch that never runs) and fix the real cause. If the assertion itself is wrong — wrong field, wrong sign for this engine's axes — say so and correct it.`,
           );
         }
       }

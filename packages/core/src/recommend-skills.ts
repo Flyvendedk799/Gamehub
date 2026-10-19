@@ -206,10 +206,7 @@ export function recommendSkills(
   // S9 — horror capability pack (no dedicated genre enum): keyword trigger.
   const horrorKeywords = ['horror', 'scary', 'fear', 'jump.?scare', 'dread', 'haunted'];
   if (horrorKeywords.some((kw) => mechanicsLower.some((m) => new RegExp(kw, 'i').test(m)))) {
-    push(
-      'audio-cue',
-      'horror-adjacent: sparse stingers + darkness; avoid constant looping music',
-    );
+    push('audio-cue', 'horror-adjacent: sparse stingers + darkness; avoid constant looping music');
     push('screen-shake', 'horror jump-scares pair with brief low-intensity screen-shake');
   }
 

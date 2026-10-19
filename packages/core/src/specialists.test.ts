@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  planSpecialists,
   isPathAllowedForSpecialist,
   mergeSpecialistWrites,
+  planSpecialists,
 } from './specialists.js';
 
 describe('S7 specialists', () => {
@@ -20,8 +20,20 @@ describe('S7 specialists', () => {
   it('merges without letting art overwrite systems entrypoints', () => {
     const base = new Map([['src/main.js', 'BASE']]);
     const merged = mergeSpecialistWrites(base, [
-      { kind: 'systems' as const, files: new Map([['src/main.js', 'SYS'], ['src/game.js', 'G']]) },
-      { kind: 'art' as const, files: new Map([['src/main.js', 'HACK'], ['assets/a.png', 'PNG']]) },
+      {
+        kind: 'systems' as const,
+        files: new Map([
+          ['src/main.js', 'SYS'],
+          ['src/game.js', 'G'],
+        ]),
+      },
+      {
+        kind: 'art' as const,
+        files: new Map([
+          ['src/main.js', 'HACK'],
+          ['assets/a.png', 'PNG'],
+        ]),
+      },
     ]);
     expect(merged.get('src/main.js')).toBe('SYS');
     expect(merged.get('assets/a.png')).toBe('PNG');

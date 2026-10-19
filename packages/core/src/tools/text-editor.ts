@@ -14,9 +14,9 @@ import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import { REDACTED_PATH_SENTINEL, REDACTION_POISON_KEY } from '../context-prune.js';
 import type { CameraGuard } from './camera-pin.js';
+import { modulesOrphanedByRewrite } from './done-heuristics.js';
 import type { EditBudget } from './edit-budget.js';
 import { formatEditEcho } from './edit-echo.js';
-import { modulesOrphanedByRewrite } from './done-heuristics.js';
 import { findInFiles } from './find-in-files.js';
 import { assertSafeToolPath } from './path-safety.js';
 import {

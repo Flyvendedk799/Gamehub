@@ -62,10 +62,7 @@ export function planSpecialists(input: {
 }
 
 /** Reject a specialist write that escapes its sandbox. */
-export function isPathAllowedForSpecialist(
-  kind: SpecialistKind,
-  path: string,
-): boolean {
+export function isPathAllowedForSpecialist(kind: SpecialistKind, path: string): boolean {
   const normalized = path.replace(/^\.?\//, '');
   return ALLOWED[kind].some(
     (prefix) => normalized === prefix.replace(/\/$/, '') || normalized.startsWith(prefix),

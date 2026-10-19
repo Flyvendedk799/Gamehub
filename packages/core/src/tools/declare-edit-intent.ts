@@ -177,10 +177,7 @@ export function makeDeclareEditIntentTool(
           content: [
             {
               type: 'text',
-              text:
-                `Edit intent recorded as UNOBSERVABLE: "${request}". No play-check will gate this edit, ` +
-                'so the genre floor alone applies. If the user would in fact see a difference, call this ' +
-                'again with checks — an unverified behavioural edit is how a request gets silently ignored.',
+              text: `Edit intent recorded as UNOBSERVABLE: "${request}". No play-check will gate this edit, so the genre floor alone applies. If the user would in fact see a difference, call this again with checks — an unverified behavioural edit is how a request gets silently ignored.`,
             },
           ],
           details: { request, predicates: 0, fields: [], unobservable: true },
@@ -252,11 +249,7 @@ export function makeDeclareEditIntentTool(
         content: [
           {
             type: 'text',
-            text:
-              `Edit intent recorded: ${plan.predicates.length} assertion(s) over ${plan.steps.length} input step(s) ` +
-              `on field(s) ${fields.join(', ')}. The run will be gated on these IN ADDITION to the genre floor, ` +
-              `so make sure every asserted field is exposed in window.__game.debug.snapshot() before you finish. ` +
-              `Now make the edit.`,
+            text: `Edit intent recorded: ${plan.predicates.length} assertion(s) over ${plan.steps.length} input step(s) on field(s) ${fields.join(', ')}. The run will be gated on these IN ADDITION to the genre floor, so make sure every asserted field is exposed in window.__game.debug.snapshot() before you finish. Now make the edit.`,
           },
         ],
         details: { request, predicates: plan.predicates.length, fields, unobservable: false },

@@ -9,8 +9,8 @@
  * agent finishing → server-side boot/repair) enters Test; run_complete is Ready.
  */
 import { type Activity, collapseSteps, describeActivity } from './build-activity';
-import { EDIT_TOOL } from './event-normalize';
 import type { BuildStep } from './build-activity';
+import { EDIT_TOOL } from './event-normalize';
 import type { SseEvent } from './types';
 
 export const BUILD_PHASES = ['Design', 'Build', 'Test', 'Ready'] as const;

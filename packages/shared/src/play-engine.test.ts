@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolvePlayEngine, isEngineMismatch } from './play-engine.js';
+import { isEngineMismatch, resolvePlayEngine } from './play-engine.js';
 
 describe('resolvePlayEngine (S0 ship honesty)', () => {
   it('prefers the project engine chosen by choose_engine', () => {

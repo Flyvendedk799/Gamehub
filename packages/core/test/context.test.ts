@@ -177,8 +177,10 @@ describe('Context Pruning & Compaction (pruneContextAtomic)', () => {
     ];
 
     const result = pruneContextAtomic(messages, { preserveTailTurns: 4 });
-    const orphanResult = result.messages.find((m) =>
-      Array.isArray(m.content) && m.content.some((b: any) => b.tool_use_id === 'call_x'),
+    const orphanResult = result.messages.find(
+      (m) =>
+        Array.isArray(m.content) &&
+        (m.content as Array<{ tool_use_id?: string }>).some((b) => b.tool_use_id === 'call_x'),
     );
     expect(orphanResult).toBeUndefined();
   });
