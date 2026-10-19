@@ -1466,8 +1466,15 @@ window.__game.debug.track({
 
 Use these exact keys (\`playerPos\`, \`cameraYaw\`, and \`score\` or \`itemsCollected\`) so the genre playbook's predicates can resolve them. \`debug.track\` accepts live object refs OR \`() => value\` getters. Wire it BEFORE your first frame.
 
+## Hard rules & Three.js r160+ Modern Standards (REQUIRED)
+
+- Output Color Space: Enforce \`renderer.outputColorSpace = THREE.SRGBColorSpace\`. The legacy \`sRGBEncoding\` property is deprecated and forbidden.
+- WebGL Context Loss: Attach a context loss listener to the canvas: \`canvas.addEventListener('webglcontextlost', (e) => e.preventDefault())\`.
+- Explicit GPU Resource Disposal: Always explicitly dispose geometries, materials, and textures (\`geometry.dispose()\`, \`material.dispose()\`, \`texture.dispose()\`) on entity removal or scene destruction to prevent WebGL leaks.
+
 ## Forbidden
 
+- Deprecated color spaces (\`sRGBEncoding\`).
 - Loading Three.js from any URL other than the pinned \`cdn.jsdelivr.net/npm/three@0.170.0/...\`.
 - \`eval\` / \`new Function\` — the iframe sandbox CSP rejects these anyway.
 - Frame-rate-dependent movement. Always scale by delta-time: \`pos += speed * dt\`.
@@ -1624,6 +1631,11 @@ Call \`sfx(...)\` on hits/pickups/jumps/win (vary \`freq\`/\`type\`). For a REAL
 
 ## Hard rules (validator enforces)
 
+- Phaser 3.80+ Modern Standards:
+  - Custom game objects must be registered via \`scene.add.existing(obj)\`.
+  - Modern loader pipelines: use \`this.load.*\` with proper completion/error tracking.
+  - Physics body bounds updates: always synchronize physics body bounds using \`body.updateFromGameObject()\` or \`body.setSize()\` when scaling or resizing objects.
+  - User-gesture audio resume: WebAudio contexts must resume on user interaction gesture (\`pointerdown\`/\`keydown\`) before playback to comply with autoplay policy.
 - Every asset key used in \`this.add.image(x, y, 'key')\` / \`this.add.sprite(...)\` MUST be loaded earlier in \`preload()\` via \`this.load.image('key', 'path')\` / \`this.load.spritesheet\` / \`this.load.atlas\`. Orphan keys throw a "missing texture" warning at runtime that blanks the sprite.
 - Using \`this.physics.add.*\` requires \`physics: { default: 'arcade' | 'matter' }\` in the \`Phaser.Game\` config. Without it the call throws "physics is undefined."
 - Scenes declare at least one of \`preload\` / \`create\` / \`update\`. A scene with only a constructor is dead code.

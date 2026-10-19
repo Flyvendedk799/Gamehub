@@ -14,3 +14,12 @@ export {
   type WebEngine,
 } from './run-generation';
 export { enqueueRun, type EnqueueInput, type QueuePorts } from './queue';
+export {
+  verifyGeneratedAst,
+  formatReflexionPayload,
+  type AstVerificationError,
+  type AstVerificationResult,
+} from './verify/ast';
+export { RedisTelemetryBridge, type TelemetryPayload } from './telemetry';
+
+

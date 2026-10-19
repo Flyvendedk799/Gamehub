@@ -172,6 +172,96 @@ interface PiAssistantMessage {
   timestamp: number;
 }
 
+export interface InvocationSignature {
+  toolName: string;
+  argsHash: string;
+  outputHash: string;
+}
+
+export class StagnationDetector {
+  private consecutiveStreak = 0;
+  private lastSignature: InvocationSignature | null = null;
+  private readonly strikeLimit: number;
+
+  constructor(strikeLimit = 3) {
+    this.strikeLimit = strikeLimit;
+  }
+
+  recordAndCheck(inv: InvocationSignature): { isStagnant: boolean; strikeCount: number } {
+    if (
+      this.lastSignature &&
+      this.lastSignature.toolName === inv.toolName &&
+      this.lastSignature.argsHash === inv.argsHash &&
+      this.lastSignature.outputHash === inv.outputHash
+    ) {
+      this.consecutiveStreak += 1;
+    } else {
+      this.consecutiveStreak = 1;
+      this.lastSignature = { ...inv };
+    }
+
+    return {
+      isStagnant: this.consecutiveStreak >= this.strikeLimit,
+      strikeCount: this.consecutiveStreak,
+    };
+  }
+
+  reset(): void {
+    this.consecutiveStreak = 0;
+    this.lastSignature = null;
+  }
+}
+
+export function hashSignatureValue(val: unknown): string {
+  try {
+    return typeof val === 'string' ? val : JSON.stringify(val ?? '');
+  } catch {
+    return String(val);
+  }
+}
+
+export function formatErrorRecoveryDirective(
+  toolName: string,
+  errorMessage: string,
+  remediationSuggestion: string,
+): string {
+  return `[Error Recovery Directive: Tool ${toolName} failed with: "${errorMessage}". Do not repeat identical parameters. Suggested remediation: ${remediationSuggestion}]`;
+}
+
+export function suggestRemediation(toolName: string, errorMessage: string): string {
+  if (toolName === 'str_replace_based_edit_tool' || toolName === 'text_editor') {
+    if (errorMessage.includes('not found') || errorMessage.includes('mismatch')) {
+      return 'Inspect the file using view to obtain the exact current lines, or use command: patch with line numbers.';
+    }
+    return 'Verify the target file path and contents before retrying the edit.';
+  }
+  if (toolName === 'validate_game_scene') {
+    return 'Read the compiler/runtime errors, fix syntax or missing variables, and re-validate.';
+  }
+  if (toolName === 'playtest_game') {
+    return 'Inspect the failing assertions and update player input bindings or game state mechanics.';
+  }
+  if (toolName === 'done') {
+    return 'Resolve all outstanding errors, ensure required scenes and contracts are satisfied, and re-run done.';
+  }
+  return 'Review input parameters, inspect surrounding code/state, and adjust arguments before retrying.';
+}
+
+export const MODERN_PHASER_PROMPT_UPGRADES = `
+## Phaser 3.80+ Modern Standards (MANDATORY)
+1. Scene Additions: Always use scene.add.existing(customGameObject) when instantiating custom GameObjects or physics entities.
+2. Modern Loader Pipelines: Use modern loader pipelines (scene.load.* with structured error listeners); do not use legacy asset managers.
+3. Physics Body Bounds: Call body.updateFromGameObject() or body.setSize() after any size, origin, or scale transformation to ensure bounds remain synchronized.
+4. User-Gesture Audio Resume: Enforce user-gesture audio resume on pointerdown or keydown before playing WebAudio/sound (audioCtx.resume() on user interaction).
+`.trim();
+
+export const MODERN_THREE_PROMPT_UPGRADES = `
+## Three.js r160+ Modern Standards (MANDATORY)
+1. Output Color Space: Enforce renderer.outputColorSpace = THREE.SRGBColorSpace (sRGBEncoding is deprecated and forbidden).
+2. WebGL Context Loss: Attach WebGL context loss listener: canvas.addEventListener('webglcontextlost', (e) => e.preventDefault()).
+3. Explicit Disposal: Enforce explicit geometry, material, and texture disposal (geometry.dispose(), texture.dispose(), material.dispose()) on entity destruction or scene cleanup to avoid GPU leaks.
+`.trim();
+
 // ---------------------------------------------------------------------------
 // Prompt assembly (byte-identical to index.ts generate() up to the system +
 // user message construction). Duplicated intentionally so this file has zero
@@ -1830,6 +1920,9 @@ export async function generateViaAgent(
   // tool_calls aborts stay immediate because they're a runaway-loop
   // signal and waiting for turn_end could let the loop balloon further.
   let pendingWallClockAbort = false;
+  let stuckSteerEmitted = false;
+  const stagnationDetector = new StagnationDetector(3);
+  const inFlightToolInvocations = new Map<string, { toolName: string; args: Record<string, unknown> }>();
   // Single-session execution (post-2026-04-27 framework simplification):
   // budget steering nudges that lived here previously were workarounds
   // for the 5-min chunk constraint. With the entire run inside one
@@ -1856,12 +1949,10 @@ export async function generateViaAgent(
     }
     if (event.type === 'tool_execution_start' && budgetReason === null) {
       toolCallCount += 1;
-      // may9 Phase 9b follow-up #24 — track validate_game_scene and
-      // playtest_game invocation counts so done.ts can require both
-      // before accepting a game-mode artifact. The FPS Wave Defense
-      // run logged 1 of each across 28 snapshots; the gate ensures
-      // the agent actually exercises the validators.
-      const ev = event as { toolName?: string; args?: Record<string, unknown> };
+      const ev = event as { toolCallId?: string; toolName?: string; args?: Record<string, unknown> };
+      if (ev.toolCallId && ev.toolName) {
+        inFlightToolInvocations.set(ev.toolCallId, { toolName: ev.toolName, args: ev.args ?? {} });
+      }
       if (typeof ev.toolName === 'string') {
         if (ev.toolName === 'validate_game_scene') validateGameSceneCount += 1;
         else if (ev.toolName === 'playtest_game') playtestGameCount += 1;
@@ -1922,6 +2013,47 @@ export async function generateViaAgent(
           maxToolCalls,
         });
         agent.abort();
+      }
+      return;
+    }
+    if (event.type === 'tool_execution_end') {
+      const evEnd = event as {
+        toolCallId?: string;
+        toolName?: string;
+        result?: unknown;
+        isError?: boolean;
+      };
+      const inFlight = evEnd.toolCallId ? inFlightToolInvocations.get(evEnd.toolCallId) : null;
+      if (evEnd.toolCallId) inFlightToolInvocations.delete(evEnd.toolCallId);
+      const toolName = evEnd.toolName ?? inFlight?.toolName ?? 'unknown_tool';
+      const argsHash = hashSignatureValue(inFlight?.args ?? {});
+      const outputHash = hashSignatureValue(evEnd.result ?? '');
+
+      const check = stagnationDetector.recordAndCheck({
+        toolName,
+        argsHash,
+        outputHash,
+      });
+
+      if (check.isStagnant && !stuckSteerEmitted) {
+        stuckSteerEmitted = true;
+        const errorMsg = evEnd.isError
+          ? (typeof evEnd.result === 'string' ? evEnd.result : JSON.stringify(evEnd.result ?? 'Tool execution failed'))
+          : `Stagnation detected: 3 consecutive identical tool invocations for ${toolName}`;
+        const remediation = suggestRemediation(toolName, errorMsg);
+        const directive = formatErrorRecoveryDirective(toolName, errorMsg, remediation);
+        log.warn('[agent] step=error_recovery_directive', {
+          ...ctx,
+          toolName,
+          isError: !!evEnd.isError,
+          isStagnant: check.isStagnant,
+          strikeCount: check.strikeCount,
+        });
+        agent.steer({
+          role: 'user',
+          content: directive,
+          timestamp: Date.now(),
+        });
       }
       return;
     }
@@ -2058,7 +2190,7 @@ export async function generateViaAgent(
     { path: string; bucket: string; sampleRange?: [number, number] }
   >();
   let stuckTurnIndex = 0;
-  let stuckSteerEmitted = false;
+  stuckSteerEmitted = false;
   const normalizeStuckKey = (toolName: string, args: unknown): string => {
     let argsStr = '';
     try {

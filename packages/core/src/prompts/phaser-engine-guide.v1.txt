@@ -149,6 +149,11 @@ Call `sfx(...)` on hits/pickups/jumps/win (vary `freq`/`type`). For a REAL recor
 
 ## Hard rules (validator enforces)
 
+- Phaser 3.80+ Modern Standards:
+  - Custom game objects must be registered via `scene.add.existing(obj)`.
+  - Modern loader pipelines: use `this.load.*` with proper completion/error tracking.
+  - Physics body bounds updates: always synchronize physics body bounds using `body.updateFromGameObject()` or `body.setSize()` when scaling or resizing objects.
+  - User-gesture audio resume: WebAudio contexts must resume on user interaction gesture (`pointerdown`/`keydown`) before playback to comply with autoplay policy.
 - Every asset key used in `this.add.image(x, y, 'key')` / `this.add.sprite(...)` MUST be loaded earlier in `preload()` via `this.load.image('key', 'path')` / `this.load.spritesheet` / `this.load.atlas`. Orphan keys throw a "missing texture" warning at runtime that blanks the sprite.
 - Using `this.physics.add.*` requires `physics: { default: 'arcade' | 'matter' }` in the `Phaser.Game` config. Without it the call throws "physics is undefined."
 - Scenes declare at least one of `preload` / `create` / `update`. A scene with only a constructor is dead code.

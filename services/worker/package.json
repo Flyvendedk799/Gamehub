@@ -11,6 +11,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@babel/parser": "^8.0.7",
     "@playforge/agent-core": "workspace:*",
     "@playforge/bus": "workspace:*",
     "@playforge/db": "workspace:*",
@@ -20,7 +21,8 @@
     "@playforge/shared": "workspace:*",
     "@playforge/storage": "workspace:*",
     "bullmq": "^5.78.1",
-    "drizzle-orm": "^0.38.3"
+    "drizzle-orm": "^0.38.3",
+    "ioredis": "^5.11.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

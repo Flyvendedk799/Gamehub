@@ -23,7 +23,8 @@
     "@playforge/providers": "workspace:*",
     "@playforge/shared": "workspace:*",
     "@playforge/templates": "workspace:*",
-    "@sinclair/typebox": "^0.34.49"
+    "@sinclair/typebox": "^0.34.49",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@playforge/runtime": "workspace:*",
