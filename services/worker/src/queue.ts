@@ -245,7 +245,6 @@ export async function enqueueRun(input: EnqueueInput, ports: QueuePorts): Promis
               totalTokens: usage.totalTokens,
               cacheReadTokens: usage.cacheReadTokens,
               cacheWriteTokens: usage.cacheWriteTokens,
-              ...(input.maxTokens !== undefined ? { modelLimit: input.maxTokens } : {}),
             })
             .catch((err: unknown) => {
               console.warn('[worker] token_usage publish failed:', err);

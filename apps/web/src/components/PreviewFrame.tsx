@@ -59,7 +59,8 @@ export function PreviewFrame({
 
     const handleWindowMessage = (event: MessageEvent) => {
       // Validate source window matches our iframe
-      if (iframeRef.current && event.source !== iframeRef.current.contentWindow) {
+      const frameWindow = iframeRef.current?.contentWindow;
+      if (!frameWindow || event.source !== frameWindow) {
         return;
       }
       // Validate origin (trusted preview origin, same-origin, or sandboxed null origin)

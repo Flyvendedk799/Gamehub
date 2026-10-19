@@ -12,7 +12,8 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "outputs": ["coverage/**"]
+      "outputs": ["coverage/**"],
+      "env": ["PLAYWRIGHT_CHROMIUM_EXECUTABLE", "PLAYWRIGHT_BROWSERS_PATH"]
     },
     "typecheck": {
       "dependsOn": ["^build"],

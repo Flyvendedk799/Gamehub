@@ -26,7 +26,7 @@ export interface DiagnosticItem {
 
 export interface TokenTelemetryData {
   usedTokens?: number;
-  modelLimit?: number; // Defaults to 200_000 (e.g. Claude 3.7 / GPT-4o window)
+  modelLimit?: number; // Optional context limit if known
   inputTokens?: number;
   outputTokens?: number;
   cachedTokens?: number;
@@ -43,7 +43,7 @@ export function TokenTelemetryGauge({ telemetry, className = '' }: TokenTelemetr
   const hasMeasurement = typeof telemetry.usedTokens === 'number';
   const hasLimit = typeof telemetry.modelLimit === 'number' && telemetry.modelLimit > 0;
   const usedTokens = hasMeasurement ? Math.max(0, telemetry.usedTokens!) : undefined;
-  const modelLimit = hasLimit ? telemetry.modelLimit : hasMeasurement ? 200_000 : undefined;
+  const modelLimit = hasLimit ? telemetry.modelLimit : undefined;
   const percentage =
     hasMeasurement && modelLimit
       ? Math.min(100, Math.round((usedTokens! / modelLimit) * 100))
@@ -57,7 +57,7 @@ export function TokenTelemetryGauge({ telemetry, className = '' }: TokenTelemetr
     >
       <div className="flex items-center justify-between text-xs mb-1.5">
         <span className="type-label text-ink flex items-center gap-1.5">
-          <span>⚡ Context Window</span>
+          <span>⚡ Token Usage</span>
           {isCompactionWarning && (
             <span
               data-testid="compaction-badge"
@@ -70,9 +70,16 @@ export function TokenTelemetryGauge({ telemetry, className = '' }: TokenTelemetr
         <span className="text-ink-3 tabular-nums text-[11px]">
           {hasMeasurement ? (
             <>
-              <strong className="text-ink font-semibold">{usedTokens!.toLocaleString()}</strong> /{' '}
-              {modelLimit ? `${modelLimit.toLocaleString()} tokens` : '—'}{' '}
-              {percentage !== null ? `(${percentage}%)` : ''}
+              <strong className="text-ink font-semibold">{usedTokens!.toLocaleString()}</strong>
+              {modelLimit ? (
+                <>
+                  {' '}
+                  / {`${modelLimit.toLocaleString()} tokens`}{' '}
+                  {percentage !== null ? `(${percentage}%)` : ''}
+                </>
+              ) : (
+                ' tokens'
+              )}
             </>
           ) : (
             <span className="text-ink-4 italic" data-testid="telemetry-unavailable">
@@ -98,32 +105,30 @@ export function TokenTelemetryGauge({ telemetry, className = '' }: TokenTelemetr
         />
 
         {/* 80% Compaction Threshold Marker */}
-        <div
-          data-testid="compaction-threshold-marker"
-          className="absolute top-0 bottom-0 w-0.5 bg-amber-500 z-10 shadow-[0_0_6px_rgba(245,158,11,0.8)]"
-          style={{ left: '80%' }}
-          title="80% Compaction Threshold: Atomic context pruning activates here"
-        />
+        {modelLimit !== undefined && (
+          <div
+            data-testid="compaction-threshold-marker"
+            className="absolute top-0 bottom-0 w-0.5 bg-amber-500 z-10 shadow-[0_0_6px_rgba(245,158,11,0.8)]"
+            style={{ left: '80%' }}
+            title="80% Compaction Threshold: Atomic context pruning activates here"
+          />
+        )}
       </div>
 
       {/* Markers legend */}
-      <div className="relative mt-1 flex justify-between text-[10px] text-ink-4">
-        <span>0</span>
-        <span
-          data-testid="compaction-threshold-label"
-          className="text-amber-400 font-semibold absolute -translate-x-1/2"
-          style={{ left: '80%' }}
-        >
-          80% Compaction
-        </span>
-        <span>
-          {modelLimit
-            ? modelLimit >= 1000
-              ? `${Math.round(modelLimit / 1000)}k`
-              : modelLimit
-            : '—'}
-        </span>
-      </div>
+      {modelLimit !== undefined && (
+        <div className="relative mt-1 flex justify-between text-[10px] text-ink-4">
+          <span>0</span>
+          <span
+            data-testid="compaction-threshold-label"
+            className="text-amber-400 font-semibold absolute -translate-x-1/2"
+            style={{ left: '80%' }}
+          >
+            80% Compaction
+          </span>
+          <span>{modelLimit >= 1000 ? `${Math.round(modelLimit / 1000)}k` : modelLimit}</span>
+        </div>
+      )}
 
       {/* Token breakdown if available */}
       {(telemetry.inputTokens !== undefined || telemetry.outputTokens !== undefined) && (
