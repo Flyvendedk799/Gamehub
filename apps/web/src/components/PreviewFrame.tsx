@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { isPreviewIframeOrigin } from '../lib/iframe-bridge';
 import { RuntimeWatchdogBridge, type WatchdogCrashEvent } from './RuntimeWatchdogBridge';
 
 export interface PreviewFrameProps {
@@ -57,6 +58,19 @@ export function PreviewFrame({
     watchdogRef.current = bridge;
 
     const handleWindowMessage = (event: MessageEvent) => {
+      // Validate source window matches our iframe
+      if (iframeRef.current && event.source !== iframeRef.current.contentWindow) {
+        return;
+      }
+      // Validate origin (trusted preview origin, same-origin, or sandboxed null origin)
+      if (
+        event.origin !== 'null' &&
+        typeof window !== 'undefined' &&
+        event.origin !== window.location.origin &&
+        !isPreviewIframeOrigin(event.origin)
+      ) {
+        return;
+      }
       bridge.handleMessage(event.data);
     };
 
@@ -92,6 +106,14 @@ export function PreviewFrame({
     if (iframeRef.current) {
       if (previewUrl) {
         iframeRef.current.src = previewUrl;
+      } else if (srcDoc) {
+        const currentDoc = srcDoc;
+        iframeRef.current.srcdoc = '';
+        setTimeout(() => {
+          if (iframeRef.current) {
+            iframeRef.current.srcdoc = currentDoc;
+          }
+        }, 0);
       }
     }
   };

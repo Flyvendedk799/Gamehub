@@ -285,15 +285,6 @@ async function main() {
 
       console.log(`[worker] starting job ${job.id} run=${runId}${continuation ? ' (resume)' : ''}`);
 
-      // Lock renewal: BullMQ lock extended by 30s every 15s during active processing
-      const lockRenewal = token
-        ? setInterval(() => {
-            job.extendLock(token, 30_000).catch((err: unknown) => {
-              console.warn(`[worker] extendLock failed for job ${job.id}:`, err);
-            });
-          }, 15_000)
-        : null;
-
       await db
         .update(schema.runs)
         .set({ status: 'running', updatedAt: new Date() })
@@ -320,6 +311,16 @@ async function main() {
         outcome: Awaited<ReturnType<typeof finalizeRun>> | null;
         error: unknown;
       } = { outcome: null, error: null };
+
+      // Lock renewal: BullMQ lock extended by 30s every 15s during active processing
+      const lockRenewal = token
+        ? setInterval(() => {
+            job.extendLock(token, 30_000).catch((err: unknown) => {
+              console.warn(`[worker] extendLock failed for job ${job.id}:`, err);
+            });
+          }, 15_000)
+        : null;
+
       let result: Awaited<ReturnType<typeof enqueueRun>>;
       try {
         result = await enqueueRun(

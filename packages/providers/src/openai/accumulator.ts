@@ -1,3 +1,9 @@
+/**
+ * Supported public-library utility for OpenAI parallel tool-call stream accumulation.
+ * Note: Production generation delegates raw serialization and streaming directly
+ * to the installed `@mariozechner/pi-ai` runtime. This utility is provided for
+ * standalone gateway callers, custom adapters, and tool stream demuxing by chunk index.
+ */
 export interface RawToolCallChunk {
   index: number;
   id?: string;

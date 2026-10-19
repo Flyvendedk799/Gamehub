@@ -1387,7 +1387,7 @@ describe('generateViaAgent() — stuck-detector — Improver1 §3', () => {
           type: 'tool_execution_end',
           toolCallId: 'a',
           toolName: 'str_replace_based_edit_tool',
-          result: 'fail',
+          result: 'fail 1',
           isError: true,
         },
         {
@@ -1404,7 +1404,7 @@ describe('generateViaAgent() — stuck-detector — Improver1 §3', () => {
           type: 'tool_execution_end',
           toolCallId: 'b',
           toolName: 'str_replace_based_edit_tool',
-          result: 'fail',
+          result: 'fail 2',
           isError: true,
         },
         {
@@ -1421,7 +1421,7 @@ describe('generateViaAgent() — stuck-detector — Improver1 §3', () => {
           type: 'tool_execution_end',
           toolCallId: 'c',
           toolName: 'str_replace_based_edit_tool',
-          result: 'fail',
+          result: 'fail 3',
           isError: true,
         },
       ],
@@ -1433,6 +1433,88 @@ describe('generateViaAgent() — stuck-detector — Improver1 §3', () => {
       apiKey: 'sk-test',
     });
     expect(agentCalls[0]?.steers).toHaveLength(1);
+  });
+
+  it('stagnation remediation steer is not suppressed when repeat detector already fired earlier', async () => {
+    // 1) Repeat detector fires on 3 identical tool starts
+    // 2) Stagnation detector fires on 3 consecutive identical tool errors
+    // Both steers must fire (remediation must not be suppressed by earlier repeat steer).
+    scriptedAgent = {
+      assistantText: RESPONSE_WITH_ARTIFACT,
+      events: [
+        {
+          type: 'tool_execution_start',
+          toolCallId: 'r1',
+          toolName: 'set_todos',
+          args: { items: [{ text: 'task 1', checked: false }] },
+        },
+        {
+          type: 'tool_execution_start',
+          toolCallId: 'r2',
+          toolName: 'set_todos',
+          args: { items: [{ text: 'task 1', checked: false }] },
+        },
+        {
+          type: 'tool_execution_start',
+          toolCallId: 'r3',
+          toolName: 'set_todos',
+          args: { items: [{ text: 'task 1', checked: false }] },
+        },
+        {
+          type: 'turn_end',
+        },
+        {
+          type: 'tool_execution_start',
+          toolCallId: 's1',
+          toolName: 'str_replace_based_edit_tool',
+          args: { command: 'str_replace', path: 'src/main.js', old_str: 'foo', new_str: 'bar' },
+        },
+        {
+          type: 'tool_execution_end',
+          toolCallId: 's1',
+          toolName: 'str_replace_based_edit_tool',
+          result: 'Target string not found',
+          isError: true,
+        },
+        {
+          type: 'tool_execution_start',
+          toolCallId: 's2',
+          toolName: 'str_replace_based_edit_tool',
+          args: { command: 'str_replace', path: 'src/main.js', old_str: 'foo', new_str: 'bar' },
+        },
+        {
+          type: 'tool_execution_end',
+          toolCallId: 's2',
+          toolName: 'str_replace_based_edit_tool',
+          result: 'Target string not found',
+          isError: true,
+        },
+        {
+          type: 'tool_execution_start',
+          toolCallId: 's3',
+          toolName: 'str_replace_based_edit_tool',
+          args: { command: 'str_replace', path: 'src/main.js', old_str: 'foo', new_str: 'bar' },
+        },
+        {
+          type: 'tool_execution_end',
+          toolCallId: 's3',
+          toolName: 'str_replace_based_edit_tool',
+          result: 'Target string not found',
+          isError: true,
+        },
+      ] as unknown as AgentEvent[],
+    };
+    await generateViaAgent({
+      prompt: 'remediation',
+      history: [],
+      model: MODEL,
+      apiKey: 'sk-test',
+    });
+    const steers = agentCalls[0]?.steers ?? [];
+    expect(steers).toHaveLength(2);
+    expect(steers[0]?.content).toMatch(/repeated the same tool call/i);
+    expect(steers[1]?.content).toMatch(/\[Error Recovery Directive:/i);
+    expect(steers[1]?.content).toMatch(/Suggested remediation:/i);
   });
 });
 

@@ -22,10 +22,22 @@ function getPluginsForFilename(filename: string): ParserPlugin[] {
   if (lower.endsWith('.jsx')) {
     return ['jsx'];
   }
-  if (lower.endsWith('.js') || lower.endsWith('.mjs') || lower.endsWith('.cjs')) {
-    return [];
+  // Standard plain JavaScript files for browser execution
+  return [];
+}
+
+function getPluginsForScriptType(typeAttr: string | undefined): ParserPlugin[] {
+  if (!typeAttr) return [];
+  const lower = typeAttr.trim().toLowerCase();
+  if (lower === 'text/typescript' || lower === 'application/typescript') {
+    return ['typescript'];
   }
-  // Default for general web game scripts
+  if (lower === 'text/tsx') {
+    return ['typescript', 'jsx'];
+  }
+  if (lower === 'text/jsx' || lower === 'text/babel') {
+    return ['jsx'];
+  }
   return [];
 }
 
@@ -61,8 +73,10 @@ function parseCode(code: string, plugins: ParserPlugin[], lineOffset = 0): AstVe
 /**
  * Extracts inline script tag contents and their starting line numbers from HTML.
  */
-function extractHtmlScripts(html: string): Array<{ code: string; lineOffset: number }> {
-  const scripts: Array<{ code: string; lineOffset: number }> = [];
+function extractHtmlScripts(
+  html: string,
+): Array<{ code: string; lineOffset: number; plugins: ParserPlugin[] }> {
+  const scripts: Array<{ code: string; lineOffset: number; plugins: ParserPlugin[] }> = [];
   const scriptRegex = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
   let match = scriptRegex.exec(html);
 
@@ -77,13 +91,18 @@ function extractHtmlScripts(html: string): Array<{ code: string; lineOffset: num
     }
     // Skip non-javascript scripts (e.g. application/json, text/html templates)
     const typeMatch = attrs.match(/\btype\s*=\s*['"]?([^'"]+)['"]?/i);
-    if (typeMatch) {
-      const type = typeMatch[1]?.trim().toLowerCase();
+    const rawType = typeMatch ? typeMatch[1]?.trim() : undefined;
+    const scriptType = rawType?.toLowerCase();
+    if (scriptType) {
       if (
-        type &&
-        type !== 'module' &&
-        type !== 'text/javascript' &&
-        type !== 'application/javascript'
+        scriptType !== 'module' &&
+        scriptType !== 'text/javascript' &&
+        scriptType !== 'application/javascript' &&
+        scriptType !== 'text/typescript' &&
+        scriptType !== 'application/typescript' &&
+        scriptType !== 'text/tsx' &&
+        scriptType !== 'text/jsx' &&
+        scriptType !== 'text/babel'
       ) {
         match = scriptRegex.exec(html);
         continue;
@@ -100,6 +119,7 @@ function extractHtmlScripts(html: string): Array<{ code: string; lineOffset: num
     scripts.push({
       code: scriptBody,
       lineOffset,
+      plugins: getPluginsForScriptType(scriptType),
     });
     match = scriptRegex.exec(html);
   }
@@ -125,13 +145,7 @@ export async function verifyGeneratedAst(
 
     const allErrors: AstVerificationError[] = [];
     for (const script of scripts) {
-      let scriptErrors = parseCode(script.code, [], script.lineOffset);
-      if (scriptErrors.length > 0) {
-        const fallbackErrors = parseCode(script.code, ['typescript', 'jsx'], script.lineOffset);
-        if (fallbackErrors.length < scriptErrors.length) {
-          scriptErrors = fallbackErrors;
-        }
-      }
+      const scriptErrors = parseCode(script.code, script.plugins, script.lineOffset);
       allErrors.push(...scriptErrors);
     }
 
@@ -142,21 +156,7 @@ export async function verifyGeneratedAst(
   }
 
   const plugins = getPluginsForFilename(filename);
-  let errors = parseCode(code, plugins);
-
-  if (errors.length > 0 && plugins.length === 0) {
-    const jsxErrors = parseCode(code, ['jsx']);
-    if (jsxErrors.length === 0) {
-      errors = [];
-    } else {
-      const tsxErrors = parseCode(code, ['typescript', 'jsx']);
-      if (tsxErrors.length === 0) {
-        errors = [];
-      } else if (tsxErrors.length < errors.length) {
-        errors = tsxErrors;
-      }
-    }
-  }
+  const errors = parseCode(code, plugins);
 
   return {
     valid: errors.length === 0,

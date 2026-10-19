@@ -112,9 +112,64 @@ describe('PreviewPane & Event Adapter Integration', () => {
       expect(derived.thinkingBlocks[0]?.turnIndex).toBe(0);
       expect(derived.thinkingBlocks[0]?.thinking).toBe('Designing core arcade physics loop...');
 
-      // Valid telemetry bounds (no invented event fields)
-      expect(derived.telemetry.modelLimit).toBe(200_000);
-      expect(derived.telemetry.usedTokens).toBeGreaterThan(0);
+      // Honest unavailable state when no token_usage events are present (no fake numbers)
+      expect(derived.telemetry.usedTokens).toBeUndefined();
+      expect(derived.telemetry.modelLimit).toBeUndefined();
+    });
+
+    it('derives real telemetry from token_usage events with accumulation and unknown state handling', () => {
+      // 1) When no usage events exist: honest unavailable state
+      const emptyDerived = deriveGenerationData([], true, false);
+      expect(emptyDerived.telemetry.usedTokens).toBeUndefined();
+      expect(emptyDerived.telemetry.inputTokens).toBeUndefined();
+      expect(emptyDerived.telemetry.outputTokens).toBeUndefined();
+      expect(emptyDerived.telemetry.cachedTokens).toBeUndefined();
+      expect(emptyDerived.telemetry.modelLimit).toBeUndefined();
+
+      // 2) Real typed token_usage event payload values
+      const usageEvents: SseEvent[] = [
+        {
+          type: 'token_usage',
+          runId: 'r1',
+          inputTokens: 12500,
+          outputTokens: 3200,
+          totalTokens: 15700,
+          cacheReadTokens: 4000,
+          cacheWriteTokens: 1000,
+          modelLimit: 128000,
+          timestamp: '2026-10-19T10:01:00.000Z',
+        },
+      ];
+
+      const withUsage = deriveGenerationData(usageEvents, true, false);
+      expect(withUsage.telemetry.usedTokens).toBe(15700);
+      expect(withUsage.telemetry.inputTokens).toBe(12500);
+      expect(withUsage.telemetry.outputTokens).toBe(3200);
+      expect(withUsage.telemetry.cachedTokens).toBe(4000);
+      expect(withUsage.telemetry.modelLimit).toBe(128000);
+
+      // 3) Subsequent turn updates update to cumulative totals
+      const multiTurnUsageEvents: SseEvent[] = [
+        ...usageEvents,
+        {
+          type: 'token_usage',
+          runId: 'r1',
+          inputTokens: 25000,
+          outputTokens: 6800,
+          totalTokens: 31800,
+          cacheReadTokens: 8500,
+          cacheWriteTokens: 2000,
+          modelLimit: 128000,
+          timestamp: '2026-10-19T10:02:00.000Z',
+        },
+      ];
+
+      const multiTurn = deriveGenerationData(multiTurnUsageEvents, false, false);
+      expect(multiTurn.telemetry.usedTokens).toBe(31800);
+      expect(multiTurn.telemetry.inputTokens).toBe(25000);
+      expect(multiTurn.telemetry.outputTokens).toBe(6800);
+      expect(multiTurn.telemetry.cachedTokens).toBe(8500);
+      expect(multiTurn.telemetry.modelLimit).toBe(128000);
     });
 
     it('maps run_error into diagnostic items and failed phase', () => {

@@ -111,6 +111,82 @@ describe('AST Syntax Verification (verifyGeneratedAst)', () => {
     expect(res.valid).toBe(true);
     expect(res.errors).toHaveLength(0);
   });
+
+  it('rejects TypeScript annotations and JSX in plain .js/.mjs/.cjs files', async () => {
+    const jsWithTs = `
+      export function add(a: number, b: number): number {
+        return a + b;
+      }
+    `;
+    const resTs = await verifyGeneratedAst('src/main.js', jsWithTs);
+    expect(resTs.valid).toBe(false);
+    expect(resTs.errors.length).toBeGreaterThan(0);
+
+    const jsWithJsx = `
+      export function render() {
+        return <div className="game-container">Play</div>;
+      }
+    `;
+    const resJsx = await verifyGeneratedAst('src/main.js', jsWithJsx);
+    expect(resJsx.valid).toBe(false);
+    expect(resJsx.errors.length).toBeGreaterThan(0);
+
+    // Valid transformed plain JavaScript must be accepted
+    const validTransformedJs = `
+      export function render() {
+        return React.createElement('div', { className: 'game-container' }, 'Play');
+      }
+    `;
+    const resValid = await verifyGeneratedAst('src/main.js', validTransformedJs);
+    expect(resValid.valid).toBe(true);
+    expect(resValid.errors).toHaveLength(0);
+  });
+
+  it('rejects TypeScript annotations and JSX in ordinary HTML script tags', async () => {
+    const htmlWithTsScript = `
+      <!DOCTYPE html>
+      <html>
+        <body>
+          <script>
+            let score: number = 0;
+            console.log(score);
+          </script>
+        </body>
+      </html>
+    `;
+    const resTs = await verifyGeneratedAst('index.html', htmlWithTsScript);
+    expect(resTs.valid).toBe(false);
+    expect(resTs.errors.length).toBeGreaterThan(0);
+
+    const htmlWithJsxScript = `
+      <!DOCTYPE html>
+      <html>
+        <body>
+          <script>
+            const el = <span>Test</span>;
+          </script>
+        </body>
+      </html>
+    `;
+    const resJsx = await verifyGeneratedAst('index.html', htmlWithJsxScript);
+    expect(resJsx.valid).toBe(false);
+    expect(resJsx.errors.length).toBeGreaterThan(0);
+
+    // Explicit script type supports appropriate parser
+    const htmlWithExplicitTs = `
+      <!DOCTYPE html>
+      <html>
+        <body>
+          <script type="text/typescript">
+            let score: number = 100;
+          </script>
+        </body>
+      </html>
+    `;
+    const resExplicit = await verifyGeneratedAst('index.html', htmlWithExplicitTs);
+    expect(resExplicit.valid).toBe(true);
+    expect(resExplicit.errors).toHaveLength(0);
+  });
 });
 
 describe('Diagnostic Reflexion Payload Formatting (formatReflexionPayload)', () => {

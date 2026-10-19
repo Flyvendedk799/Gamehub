@@ -235,7 +235,22 @@ export async function enqueueRun(input: EnqueueInput, ports: QueuePorts): Promis
             }
           : {}),
         ...(input.maxTokens !== undefined ? { maxTokens: input.maxTokens } : {}),
-        ...(ports.onUsage !== undefined ? { onUsage: ports.onUsage } : {}),
+        onUsage: (usage) => {
+          ports.onUsage?.(usage);
+          void recorder
+            .control({
+              type: 'token_usage',
+              inputTokens: usage.inputTokens,
+              outputTokens: usage.outputTokens,
+              totalTokens: usage.totalTokens,
+              cacheReadTokens: usage.cacheReadTokens,
+              cacheWriteTokens: usage.cacheWriteTokens,
+              ...(input.maxTokens !== undefined ? { modelLimit: input.maxTokens } : {}),
+            })
+            .catch((err: unknown) => {
+              console.warn('[worker] token_usage publish failed:', err);
+            });
+        },
         ...(ports.visionCritic !== undefined ? { visionCritic: ports.visionCritic } : {}),
         onEvent: (event: AgentEvent) => {
           // Capture the latest set_todos for continuation building.

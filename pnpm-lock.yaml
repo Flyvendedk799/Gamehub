@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@mariozechner/pi-ai@0.67.68':
+    hash: 6wqkrgieuutepjczap4pzdaoca
+    path: patches/@mariozechner__pi-ai@0.67.68.patch
+
 importers:
 
   .:
@@ -113,7 +118,7 @@ importers:
         version: 0.67.68(ws@8.21.0)(zod@3.25.76)
       '@mariozechner/pi-ai':
         specifier: ^0.67.68
-        version: 0.67.68(ws@8.21.0)(zod@3.25.76)
+        version: 0.67.68(patch_hash=6wqkrgieuutepjczap4pzdaoca)(ws@8.21.0)(zod@3.25.76)
       '@playforge/artifacts':
         specifier: workspace:*
         version: link:../artifacts
@@ -222,7 +227,7 @@ importers:
     dependencies:
       '@mariozechner/pi-ai':
         specifier: ^0.67.68
-        version: 0.67.68(ws@8.21.0)(zod@3.25.76)
+        version: 0.67.68(patch_hash=6wqkrgieuutepjczap4pzdaoca)(ws@8.21.0)(zod@3.25.76)
       '@playforge/shared':
         specifier: workspace:*
         version: link:../shared
@@ -3606,7 +3611,7 @@ snapshots:
 
   '@mariozechner/pi-agent-core@0.67.68(ws@8.21.0)(zod@3.25.76)':
     dependencies:
-      '@mariozechner/pi-ai': 0.67.68(ws@8.21.0)(zod@3.25.76)
+      '@mariozechner/pi-ai': 0.67.68(patch_hash=6wqkrgieuutepjczap4pzdaoca)(ws@8.21.0)(zod@3.25.76)
     transitivePeerDependencies:
       - '@modelcontextprotocol/sdk'
       - bufferutil
@@ -3615,7 +3620,7 @@ snapshots:
       - ws
       - zod
 
-  '@mariozechner/pi-ai@0.67.68(ws@8.21.0)(zod@3.25.76)':
+  '@mariozechner/pi-ai@0.67.68(patch_hash=6wqkrgieuutepjczap4pzdaoca)(ws@8.21.0)(zod@3.25.76)':
     dependencies:
       '@anthropic-ai/sdk': 0.90.0(zod@3.25.76)
       '@aws-sdk/client-bedrock-runtime': 3.1069.0

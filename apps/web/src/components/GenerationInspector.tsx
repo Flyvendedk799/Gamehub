@@ -25,7 +25,7 @@ export interface DiagnosticItem {
 // ─── Token Telemetry Types ──────────────────────────────────────────────────
 
 export interface TokenTelemetryData {
-  usedTokens: number;
+  usedTokens?: number;
   modelLimit?: number; // Defaults to 200_000 (e.g. Claude 3.7 / GPT-4o window)
   inputTokens?: number;
   outputTokens?: number;
@@ -40,11 +40,15 @@ export interface TokenTelemetryGaugeProps {
 }
 
 export function TokenTelemetryGauge({ telemetry, className = '' }: TokenTelemetryGaugeProps) {
-  const modelLimit =
-    telemetry.modelLimit && telemetry.modelLimit > 0 ? telemetry.modelLimit : 200_000;
-  const usedTokens = Math.max(0, telemetry.usedTokens || 0);
-  const percentage = Math.min(100, Math.round((usedTokens / modelLimit) * 100));
-  const isCompactionWarning = percentage >= 80;
+  const hasMeasurement = typeof telemetry.usedTokens === 'number';
+  const hasLimit = typeof telemetry.modelLimit === 'number' && telemetry.modelLimit > 0;
+  const usedTokens = hasMeasurement ? Math.max(0, telemetry.usedTokens!) : undefined;
+  const modelLimit = hasLimit ? telemetry.modelLimit : hasMeasurement ? 200_000 : undefined;
+  const percentage =
+    hasMeasurement && modelLimit
+      ? Math.min(100, Math.round((usedTokens! / modelLimit) * 100))
+      : null;
+  const isCompactionWarning = percentage !== null && percentage >= 80;
 
   return (
     <div
@@ -64,8 +68,17 @@ export function TokenTelemetryGauge({ telemetry, className = '' }: TokenTelemetr
           )}
         </span>
         <span className="text-ink-3 tabular-nums text-[11px]">
-          <strong className="text-ink font-semibold">{usedTokens.toLocaleString()}</strong> /{' '}
-          {modelLimit.toLocaleString()} tokens ({percentage}%)
+          {hasMeasurement ? (
+            <>
+              <strong className="text-ink font-semibold">{usedTokens!.toLocaleString()}</strong> /{' '}
+              {modelLimit ? `${modelLimit.toLocaleString()} tokens` : '—'}{' '}
+              {percentage !== null ? `(${percentage}%)` : ''}
+            </>
+          ) : (
+            <span className="text-ink-4 italic" data-testid="telemetry-unavailable">
+              Unavailable
+            </span>
+          )}
         </span>
       </div>
 
@@ -75,9 +88,13 @@ export function TokenTelemetryGauge({ telemetry, className = '' }: TokenTelemetr
         <div
           data-testid="token-gauge-bar"
           className={`h-full transition-all duration-500 ease-out ${
-            percentage >= 95 ? 'bg-rose-500' : percentage >= 80 ? 'bg-amber-400' : 'bg-signal'
+            percentage !== null && percentage >= 95
+              ? 'bg-rose-500'
+              : percentage !== null && percentage >= 80
+                ? 'bg-amber-400'
+                : 'bg-signal'
           }`}
-          style={{ width: `${percentage}%` }}
+          style={{ width: `${percentage ?? 0}%` }}
         />
 
         {/* 80% Compaction Threshold Marker */}
@@ -99,7 +116,13 @@ export function TokenTelemetryGauge({ telemetry, className = '' }: TokenTelemetr
         >
           80% Compaction
         </span>
-        <span>{modelLimit >= 1000 ? `${Math.round(modelLimit / 1000)}k` : modelLimit}</span>
+        <span>
+          {modelLimit
+            ? modelLimit >= 1000
+              ? `${Math.round(modelLimit / 1000)}k`
+              : modelLimit
+            : '—'}
+        </span>
       </div>
 
       {/* Token breakdown if available */}

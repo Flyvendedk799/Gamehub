@@ -1,0 +1,178 @@
+diff --git a/dist/providers/openai-completions.js b/dist/providers/openai-completions.js
+index 3c76d767f1d3637ef421f0d3979a3c2183d254d0..28c34063877222f27b65d3354c1a6db3790f31c8 100644
+--- a/dist/providers/openai-completions.js
++++ b/dist/providers/openai-completions.js
+@@ -60,14 +60,17 @@ export const streamOpenAICompletions = (model, context, options) => {
+             await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
+             stream.push({ type: "start", partial: output });
+             let currentBlock = null;
++            const toolCallBlocks = new Map();
+             const blocks = output.content;
+             const blockIndex = () => blocks.length - 1;
+             const finishCurrentBlock = (block) => {
+                 if (block) {
++                    const idx = blocks.indexOf(block);
++                    const contentIndex = idx >= 0 ? idx : blockIndex();
+                     if (block.type === "text") {
+                         stream.push({
+                             type: "text_end",
+-                            contentIndex: blockIndex(),
++                            contentIndex,
+                             content: block.text,
+                             partial: output,
+                         });
+@@ -75,25 +78,34 @@ export const streamOpenAICompletions = (model, context, options) => {
+                     else if (block.type === "thinking") {
+                         stream.push({
+                             type: "thinking_end",
+-                            contentIndex: blockIndex(),
++                            contentIndex,
+                             content: block.thinking,
+                             partial: output,
+                         });
+                     }
+                     else if (block.type === "toolCall") {
+-                        block.arguments = parseStreamingJson(block.partialArgs);
+-                        // Finalize in-place and strip the scratch buffer so replay only
+-                        // carries parsed arguments.
+-                        delete block.partialArgs;
+-                        stream.push({
+-                            type: "toolcall_end",
+-                            contentIndex: blockIndex(),
+-                            toolCall: block,
+-                            partial: output,
+-                        });
++                        if ("partialArgs" in block) {
++                            block.arguments = parseStreamingJson(block.partialArgs);
++                            // Finalize in-place and strip the scratch buffer so replay only
++                            // carries parsed arguments.
++                            delete block.partialArgs;
++                            stream.push({
++                                type: "toolcall_end",
++                                contentIndex,
++                                toolCall: block,
++                                partial: output,
++                            });
++                        }
+                     }
+                 }
+             };
++            const finishAllToolCalls = () => {
++                const entries = Array.from(toolCallBlocks.values()).sort((a, b) => a.contentIndex - b.contentIndex);
++                for (const entry of entries) {
++                    finishCurrentBlock(entry.block);
++                }
++                toolCallBlocks.clear();
++            };
+             for await (const chunk of openaiStream) {
+                 if (!chunk || typeof chunk !== "object")
+                     continue;
+@@ -123,7 +135,9 @@ export const streamOpenAICompletions = (model, context, options) => {
+                         choice.delta.content !== undefined &&
+                         choice.delta.content.length > 0) {
+                         if (!currentBlock || currentBlock.type !== "text") {
+-                            finishCurrentBlock(currentBlock);
++                            if (currentBlock && (currentBlock.type === "text" || currentBlock.type === "thinking")) {
++                                finishCurrentBlock(currentBlock);
++                            }
+                             currentBlock = { type: "text", text: "" };
+                             output.content.push(currentBlock);
+                             stream.push({ type: "text_start", contentIndex: blockIndex(), partial: output });
+@@ -156,7 +170,9 @@ export const streamOpenAICompletions = (model, context, options) => {
+                     }
+                     if (foundReasoningField) {
+                         if (!currentBlock || currentBlock.type !== "thinking") {
+-                            finishCurrentBlock(currentBlock);
++                            if (currentBlock && (currentBlock.type === "text" || currentBlock.type === "thinking")) {
++                                finishCurrentBlock(currentBlock);
++                            }
+                             currentBlock = {
+                                 type: "thinking",
+                                 thinking: "",
+@@ -177,39 +193,49 @@ export const streamOpenAICompletions = (model, context, options) => {
+                         }
+                     }
+                     if (choice?.delta?.tool_calls) {
++                        if (currentBlock && (currentBlock.type === "text" || currentBlock.type === "thinking")) {
++                            finishCurrentBlock(currentBlock);
++                            currentBlock = null;
++                        }
+                         for (const toolCall of choice.delta.tool_calls) {
+-                            if (!currentBlock ||
+-                                currentBlock.type !== "toolCall" ||
+-                                (toolCall.id && currentBlock.id !== toolCall.id)) {
+-                                finishCurrentBlock(currentBlock);
+-                                currentBlock = {
++                            const toolIndex = typeof toolCall.index === "number" ? toolCall.index : 0;
++                            let entry = toolCallBlocks.get(toolIndex);
++                            if (entry && toolCall.id && entry.block.id && entry.block.id !== toolCall.id) {
++                                finishCurrentBlock(entry.block);
++                                toolCallBlocks.delete(toolIndex);
++                                entry = undefined;
++                            }
++                            if (!entry) {
++                                const block = {
+                                     type: "toolCall",
+                                     id: toolCall.id || "",
+                                     name: toolCall.function?.name || "",
+                                     arguments: {},
+                                     partialArgs: "",
+                                 };
+-                                output.content.push(currentBlock);
+-                                stream.push({ type: "toolcall_start", contentIndex: blockIndex(), partial: output });
++                                output.content.push(block);
++                                const contentIndex = blocks.length - 1;
++                                entry = { block, contentIndex };
++                                toolCallBlocks.set(toolIndex, entry);
++                                stream.push({ type: "toolcall_start", contentIndex, partial: output });
+                             }
+-                            if (currentBlock.type === "toolCall") {
+-                                if (toolCall.id)
+-                                    currentBlock.id = toolCall.id;
+-                                if (toolCall.function?.name)
+-                                    currentBlock.name = toolCall.function.name;
+-                                let delta = "";
+-                                if (toolCall.function?.arguments) {
+-                                    delta = toolCall.function.arguments;
+-                                    currentBlock.partialArgs += toolCall.function.arguments;
+-                                    currentBlock.arguments = parseStreamingJson(currentBlock.partialArgs);
+-                                }
+-                                stream.push({
+-                                    type: "toolcall_delta",
+-                                    contentIndex: blockIndex(),
+-                                    delta,
+-                                    partial: output,
+-                                });
++                            currentBlock = entry.block;
++                            if (toolCall.id)
++                                entry.block.id = toolCall.id;
++                            if (toolCall.function?.name)
++                                entry.block.name = toolCall.function.name;
++                            let delta = "";
++                            if (toolCall.function?.arguments) {
++                                delta = toolCall.function.arguments;
++                                entry.block.partialArgs += toolCall.function.arguments;
++                                entry.block.arguments = parseStreamingJson(entry.block.partialArgs);
+                             }
++                            stream.push({
++                                type: "toolcall_delta",
++                                contentIndex: entry.contentIndex,
++                                delta,
++                                partial: output,
++                            });
+                         }
+                     }
+                     const reasoningDetails = choice.delta.reasoning_details;
+@@ -225,7 +251,11 @@ export const streamOpenAICompletions = (model, context, options) => {
+                     }
+                 }
+             }
+-            finishCurrentBlock(currentBlock);
++            if (currentBlock && (currentBlock.type === "text" || currentBlock.type === "thinking")) {
++                finishCurrentBlock(currentBlock);
++                currentBlock = null;
++            }
++            finishAllToolCalls();
+             if (options?.signal?.aborted) {
+                 throw new Error("Request was aborted");
+             }

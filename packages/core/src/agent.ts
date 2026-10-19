@@ -39,7 +39,6 @@ import type { RetryDecision, RetryReason } from '@playforge/providers';
 import {
   classifyError,
   claudeCodeIdentityHeaders,
-  coalesceAnthropicMessages,
   errorCodeForUpstreamType,
   filterActive,
   formatSkillsForPrompt,
@@ -1930,6 +1929,7 @@ export async function generateViaAgent(
   // signal and waiting for turn_end could let the loop balloon further.
   let pendingWallClockAbort = false;
   let stuckSteerEmitted = false;
+  let stagnationSteerEmitted = false;
   const stagnationDetector = new StagnationDetector(3);
   const inFlightToolInvocations = new Map<
     string,
@@ -2051,8 +2051,8 @@ export async function generateViaAgent(
         outputHash,
       });
 
-      if (check.isStagnant && !stuckSteerEmitted) {
-        stuckSteerEmitted = true;
+      if (check.isStagnant && !stagnationSteerEmitted) {
+        stagnationSteerEmitted = true;
         const errorMsg = evEnd.isError
           ? typeof evEnd.result === 'string'
             ? evEnd.result

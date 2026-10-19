@@ -1,3 +1,9 @@
+/**
+ * Supported public-library utility for Anthropic Messages API normalization and coalescing.
+ * Note: Production generation delegates raw serialization and streaming directly
+ * to the installed `@mariozechner/pi-ai` runtime. This utility is provided for
+ * standalone integrations, custom proxies, and client-side message preparation.
+ */
 export interface InputMessageContentBlock {
   type?: string;
   text?: string;
@@ -119,6 +125,7 @@ export function coalesceAnthropicMessages(
           const item = rawItem as InputMessageContentBlock;
           if (item.type === 'tool_result' || item.type === 'toolResult') {
             blocks.push({
+              ...item,
               type: 'tool_result',
               tool_use_id: String(
                 item.tool_use_id ?? item.tool_call_id ?? item.id ?? item.toolCallId ?? '',
@@ -126,7 +133,7 @@ export function coalesceAnthropicMessages(
               content: item.content ?? '',
             });
           } else if (item.type === 'text') {
-            blocks.push({ type: 'text', text: item.text ?? '' });
+            blocks.push({ ...item, type: 'text', text: item.text ?? '' });
           } else {
             blocks.push(item as AnthropicContentBlock);
           }
@@ -145,9 +152,10 @@ export function coalesceAnthropicMessages(
           if (!rawItem) continue;
           const item = rawItem as InputMessageContentBlock;
           if (item.type === 'text') {
-            blocks.push({ type: 'text', text: item.text ?? '' });
+            blocks.push({ ...item, type: 'text', text: item.text ?? '' });
           } else if (item.type === 'tool_use' || item.type === 'toolCall') {
             blocks.push({
+              ...item,
               type: 'tool_use',
               id: String(item.id ?? item.tool_use_id ?? item.toolCallId ?? ''),
               name: item.name ?? item.toolName ?? 'unknown',

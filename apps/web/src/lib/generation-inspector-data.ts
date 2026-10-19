@@ -34,12 +34,23 @@ export function deriveGenerationData(
   let currentTurnIndex = 0;
   const diagnostics: DiagnosticItem[] = [];
 
-  const usedTokens = 0;
-  const inputTokens = 0;
-  const outputTokens = 0;
-  const cachedTokens = 0;
+  let hasUsage = false;
+  let latestInputTokens: number | undefined;
+  let latestOutputTokens: number | undefined;
+  let latestTotalTokens: number | undefined;
+  let latestCacheReadTokens: number | undefined;
+  let latestModelLimit: number | undefined;
 
   for (const event of events) {
+    if (event.type === 'token_usage') {
+      hasUsage = true;
+      if (typeof event.inputTokens === 'number') latestInputTokens = event.inputTokens;
+      if (typeof event.outputTokens === 'number') latestOutputTokens = event.outputTokens;
+      if (typeof event.totalTokens === 'number') latestTotalTokens = event.totalTokens;
+      if (typeof event.cacheReadTokens === 'number') latestCacheReadTokens = event.cacheReadTokens;
+      if (typeof event.modelLimit === 'number') latestModelLimit = event.modelLimit;
+    }
+
     if (event.type === 'turn_start') {
       currentTurnIndex = event.turnIndex ?? currentTurnIndex;
     }
@@ -150,12 +161,20 @@ export function deriveGenerationData(
     invocations: Array.from(invocationsMap.values()),
     thinkingBlocks,
     diagnostics,
-    telemetry: {
-      usedTokens: usedTokens || (isBuilding ? 45_000 : 12_000),
-      modelLimit: 200_000,
-      inputTokens,
-      outputTokens,
-      cachedTokens,
-    },
+    telemetry: hasUsage
+      ? {
+          usedTokens: latestTotalTokens ?? (latestInputTokens ?? 0) + (latestOutputTokens ?? 0),
+          modelLimit: latestModelLimit,
+          inputTokens: latestInputTokens,
+          outputTokens: latestOutputTokens,
+          cachedTokens: latestCacheReadTokens,
+        }
+      : {
+          usedTokens: undefined,
+          modelLimit: undefined,
+          inputTokens: undefined,
+          outputTokens: undefined,
+          cachedTokens: undefined,
+        },
   };
 }
