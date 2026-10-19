@@ -433,41 +433,44 @@ async function main() {
           },
         );
       } finally {
-        if (lockRenewal) {
-          clearInterval(lockRenewal);
+        try {
+          // Persist the active-generation runtime regardless of success/throw.
+          // The worker.on('failed') handler still marks the run failed; this only
+          // records timing on the row. Don't let a timing write mask the real error.
+          const aiFinishedAt = new Date();
+          const aiRuntimeMs = Math.max(0, Math.round(performance.now() - aiStartMs));
+          // Token spend goes down with the timing — but ONLY for a run that never
+          // settled. finalizeRun (in the `settle` port) now runs BEFORE this and
+          // has already written the run's own authoritative totals; re-writing the
+          // in-flight snapshot over them would lose the last turn's spend. The
+          // throw path — which is precisely the path that was losing token counts
+          // — never settles, so it still records what it spent.
+          const usage = settled.outcome === null ? usageRef.latest : null;
+          await db
+            .update(schema.runs)
+            .set({
+              aiStartedAt,
+              aiFinishedAt,
+              aiRuntimeMs,
+              updatedAt: new Date(),
+              ...(usage === null
+                ? {}
+                : {
+                    inputTokens: usage.inputTokens,
+                    outputTokens: usage.outputTokens,
+                    cachedInputTokens: usage.cacheReadTokens,
+                    cacheCreationInputTokens: usage.cacheWriteTokens,
+                  }),
+            })
+            .where(eq(schema.runs.id, runId))
+            .catch((err: unknown) =>
+              console.error(`[worker] run=${runId} ai-runtime persist failed:`, err),
+            );
+        } finally {
+          if (lockRenewal) {
+            clearInterval(lockRenewal);
+          }
         }
-        // Persist the active-generation runtime regardless of success/throw.
-        // The worker.on('failed') handler still marks the run failed; this only
-        // records timing on the row. Don't let a timing write mask the real error.
-        const aiFinishedAt = new Date();
-        const aiRuntimeMs = Math.max(0, Math.round(performance.now() - aiStartMs));
-        // Token spend goes down with the timing — but ONLY for a run that never
-        // settled. finalizeRun (in the `settle` port) now runs BEFORE this and
-        // has already written the run's own authoritative totals; re-writing the
-        // in-flight snapshot over them would lose the last turn's spend. The
-        // throw path — which is precisely the path that was losing token counts
-        // — never settles, so it still records what it spent.
-        const usage = settled.outcome === null ? usageRef.latest : null;
-        await db
-          .update(schema.runs)
-          .set({
-            aiStartedAt,
-            aiFinishedAt,
-            aiRuntimeMs,
-            updatedAt: new Date(),
-            ...(usage === null
-              ? {}
-              : {
-                  inputTokens: usage.inputTokens,
-                  outputTokens: usage.outputTokens,
-                  cachedInputTokens: usage.cacheReadTokens,
-                  cacheCreationInputTokens: usage.cacheWriteTokens,
-                }),
-          })
-          .where(eq(schema.runs.id, runId))
-          .catch((err: unknown) =>
-            console.error(`[worker] run=${runId} ai-runtime persist failed:`, err),
-          );
       }
 
       // The run was settled through the ONE canonical persistence path

@@ -39,6 +39,7 @@ import type { RetryDecision, RetryReason } from '@playforge/providers';
 import {
   classifyError,
   claudeCodeIdentityHeaders,
+  coalesceAnthropicMessages,
   errorCodeForUpstreamType,
   filterActive,
   formatSkillsForPrompt,
@@ -61,6 +62,7 @@ import type { TSchema } from '@sinclair/typebox';
 import { resolveCachePolicy } from './cache-policy.js';
 import { buildTransformContext } from './context-prune.js';
 import type { EditorSession } from './editor/session.js';
+import { type ContextMessage, pruneContextAtomic } from './engine/context.js';
 import { remapProviderError } from './errors.js';
 import type {
   AttachmentContext,
@@ -1782,12 +1784,19 @@ export async function generateViaAgent(
         (m): m is PiAiMessage =>
           m.role === 'user' || m.role === 'assistant' || m.role === 'toolResult',
       ),
-    // Sliding-window compaction — stubs toolResult.content for rounds older
-    // than the last 8 (or 4 if total size still exceeds the safety cap).
-    // Without this, assistant.toolCall.input + big view results grow O(N²)
-    // in LLM-facing size across a long tool-using run and blow past 1 M
-    // tokens. See context-prune.ts for the full strategy.
-    transformContext: buildTransformContext(log),
+    // Sliding-window compaction and atomic pair-safe context pruning:
+    // 1. pruneContextAtomic preserves initial user intent, completes tool cycles,
+    //    ensures provider protocol validity, and preserves signed thinking blocks.
+    // 2. buildTransformContext enforces per-block byte limits and aggressive compaction.
+    transformContext: (messages) => {
+      const atomicResult = pruneContextAtomic(messages as ContextMessage[], {
+        preserveTailTurns: 4,
+        preserveSignedThinking: true,
+        summaryRole: 'user',
+      });
+      const pruneTransform = buildTransformContext(log);
+      return pruneTransform(atomicResult.messages as AgentMessage[]);
+    },
     // Async getter so OAuth tokens can be refreshed between agent turns. On a
     // long tool-using run, `input.apiKey` captured at start-of-request would
     // eventually expire; the caller passes `input.getApiKey` for codex so each

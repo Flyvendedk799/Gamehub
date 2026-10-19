@@ -184,4 +184,156 @@ describe('Context Pruning & Compaction (pruneContextAtomic)', () => {
     );
     expect(orphanResult).toBeUndefined();
   });
+
+  it('preserves signed thinking blocks when preserveSignedThinking is true', () => {
+    const messages = [
+      { role: 'system', content: 'Sys' },
+      { role: 'user', content: 'Build game' },
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'thinking',
+            thinking: 'Signed reasoning block',
+            signature: 'sig_valid_123',
+          },
+          { type: 'text', text: 'Plan outlined' },
+        ],
+      },
+    ];
+
+    const result = pruneContextAtomic(messages, { preserveSignedThinking: true });
+    expect(result.extractedThinkingBlocks).toHaveLength(1);
+    expect(result.extractedThinkingBlocks[0]?.signature).toBe('sig_valid_123');
+
+    const assistantMsg = result.messages[2];
+    expect(assistantMsg?.content).toEqual([
+      {
+        type: 'thinking',
+        thinking: 'Signed reasoning block',
+        signature: 'sig_valid_123',
+      },
+      { type: 'text', text: 'Plan outlined' },
+    ]);
+  });
+
+  it('adapts to pi-agent-core shape where no system message is in messages array', () => {
+    const messages = [
+      { role: 'user', content: 'First user prompt without system in array' },
+      {
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: 'call_pi_1', name: 'set_todos' }],
+      },
+      {
+        role: 'toolResult',
+        toolCallId: 'call_pi_1',
+        content: [{ type: 'text', text: 'Todos set' }],
+      },
+      { role: 'assistant', content: 'Done step 1' },
+      { role: 'user', content: 'Continue' },
+    ];
+
+    const result = pruneContextAtomic(messages, { preserveTailTurns: 2, summaryRole: 'user' });
+    // Pin preserves the first user message
+    expect(result.messages[0]).toEqual({
+      role: 'user',
+      content: 'First user prompt without system in array',
+    });
+    // Tail is preserved
+    expect(result.messages[result.messages.length - 2]).toEqual({
+      role: 'assistant',
+      content: 'Done step 1',
+    });
+    expect(result.messages[result.messages.length - 1]).toEqual({
+      role: 'user',
+      content: 'Continue',
+    });
+  });
+
+  it('preserves pi-ai ThinkingContent with thinkingSignature and redacted blocks', () => {
+    const messages = [
+      { role: 'user', content: 'Generate character' },
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'thinking',
+            thinking: 'Hidden reasoning',
+            thinkingSignature: 'pi_sig_abc',
+          },
+          {
+            type: 'thinking',
+            thinking: '[Reasoning redacted]',
+            thinkingSignature: 'redacted_data_xyz',
+            redacted: true,
+          },
+          { type: 'text', text: 'Character ready' },
+        ],
+      },
+    ];
+
+    const result = pruneContextAtomic(messages, { preserveSignedThinking: true });
+    expect(result.extractedThinkingBlocks).toHaveLength(2);
+    expect(result.extractedThinkingBlocks[0]?.signature).toBe('pi_sig_abc');
+    expect(result.extractedThinkingBlocks[1]?.signature).toBe('redacted_data_xyz');
+
+    const assistantMsg = result.messages[1];
+    expect(assistantMsg?.content).toEqual([
+      {
+        type: 'thinking',
+        thinking: 'Hidden reasoning',
+        thinkingSignature: 'pi_sig_abc',
+      },
+      {
+        type: 'thinking',
+        thinking: '[Reasoning redacted]',
+        thinkingSignature: 'redacted_data_xyz',
+        redacted: true,
+      },
+      { type: 'text', text: 'Character ready' },
+    ]);
+  });
+
+  it('retains valid remaining tool results in mixed message without non-tool text', () => {
+    const messages = [
+      { role: 'system', content: 'System instruction' },
+      { role: 'user', content: 'First prompt' },
+      // Candidate assistant turn with tool call call_pruned
+      {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'call_pruned', name: 'search_code' }],
+      },
+      // Intermediate turn
+      { role: 'assistant', content: 'Intermediate step' },
+      // Tail turn with assistant calling call_retained
+      {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'call_retained', name: 'write_file' }],
+      },
+      // Mixed user message containing tool results for both call_pruned AND call_retained, but NO text
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'call_pruned', content: 'search results' },
+          { type: 'tool_result', tool_use_id: 'call_retained', content: 'file written' },
+        ],
+      },
+      { role: 'assistant', content: 'Final response' },
+    ];
+
+    const result = pruneContextAtomic(messages, { preserveTailTurns: 3 });
+
+    // The mixed user message in the tail should have call_pruned removed,
+    // but MUST retain call_retained block even though it has no text blocks!
+    const userMsg = result.messages.find(
+      (m) =>
+        m.role === 'user' &&
+        Array.isArray(m.content) &&
+        m.content.some((b: unknown) => (b as { type?: string }).type === 'tool_result'),
+    );
+    expect(userMsg).toBeDefined();
+    expect(userMsg?.content).toEqual([
+      { type: 'tool_result', tool_use_id: 'call_retained', content: 'file written' },
+    ]);
+  });
 });

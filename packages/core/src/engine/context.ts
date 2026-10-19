@@ -2,6 +2,8 @@ export interface PruneOptions {
   maxTokens?: number;
   preserveTailTurns?: number;
   tokenDensityFactor?: number;
+  preserveSignedThinking?: boolean;
+  summaryRole?: 'system' | 'user';
 }
 
 export interface ThinkingBlockPayload {
@@ -14,6 +16,7 @@ export interface ContextMessageToolCall {
   id?: string | undefined;
   name?: string | undefined;
   toolName?: string | undefined;
+  thoughtSignature?: string | undefined;
   function?:
     | {
         name?: string | undefined;
@@ -32,6 +35,9 @@ export interface ContextMessageContentBlock {
   name?: string | undefined;
   toolName?: string | undefined;
   signature?: string | undefined;
+  thinkingSignature?: string | undefined;
+  thoughtSignature?: string | undefined;
+  redacted?: boolean | undefined;
   thinking?: string | undefined;
   content?: unknown;
 }
@@ -123,6 +129,7 @@ function extractThinkingFromMessage(
   msg: ContextMessage,
   turnIndex: number,
   extracted: Array<ThinkingBlockPayload>,
+  preserveSignedThinking = false,
 ): ContextMessage {
   if (!msg || msg.role !== 'assistant') {
     return msg;
@@ -135,11 +142,17 @@ function extractThinkingFromMessage(
     for (const rawBlock of cloned.content) {
       const block = rawBlock as ContextMessageContentBlock | undefined;
       if (block && block.type === 'thinking') {
+        const signature = block.thinkingSignature ?? block.signature ?? '';
+        const thinking = String(block.thinking ?? block.text ?? '');
+        const isRedacted = block.redacted === true;
         extracted.push({
           turnIndex,
-          signature: block.signature ?? '',
-          thinking: String(block.thinking ?? block.text ?? ''),
+          signature,
+          thinking,
         });
+        if (preserveSignedThinking && (signature.length > 0 || isRedacted)) {
+          newContent.push(rawBlock);
+        }
       } else {
         newContent.push(rawBlock);
       }
@@ -155,13 +168,17 @@ function extractThinkingFromMessage(
         : typeof thinkingObj === 'object' && thinkingObj !== null
           ? String(thinkingObj.thinking ?? '')
           : '';
+    const signature = String(cloned.thinkingSignature ?? cloned.signature ?? '');
+    const isRedacted = (cloned as unknown as { redacted?: boolean }).redacted === true;
     extracted.push({
       turnIndex,
-      signature: String(cloned.thinkingSignature ?? cloned.signature ?? ''),
+      signature,
       thinking: thinkingText,
     });
-    cloned.thinking = undefined;
-    cloned.thinkingSignature = undefined;
+    if (!preserveSignedThinking || (signature.length === 0 && !isRedacted)) {
+      cloned.thinking = undefined;
+      cloned.thinkingSignature = undefined;
+    }
   }
 
   return cloned;
@@ -173,12 +190,14 @@ export function pruneContextAtomic(
 ): PruneResult {
   const tokenDensityFactor = options.tokenDensityFactor ?? 1.35;
   const preserveTailTurns = options.preserveTailTurns ?? 4;
+  const preserveSignedThinking = options.preserveSignedThinking ?? false;
+  const summaryRole = options.summaryRole ?? 'system';
   const originalTokens = calculateTokens(messages, tokenDensityFactor);
 
   if (messages.length <= 2) {
     const extractedThinkingBlocks: Array<ThinkingBlockPayload> = [];
     const processed = messages.map((m, idx) =>
-      extractThinkingFromMessage(m, idx, extractedThinkingBlocks),
+      extractThinkingFromMessage(m, idx, extractedThinkingBlocks, preserveSignedThinking),
     );
     return {
       messages: processed,
@@ -191,17 +210,47 @@ export function pruneContextAtomic(
 
   const extractedThinkingBlocks: Array<ThinkingBlockPayload> = [];
   const processedMessages = messages.map((m, idx) =>
-    extractThinkingFromMessage(m, idx, extractedThinkingBlocks),
+    extractThinkingFromMessage(m, idx, extractedThinkingBlocks, preserveSignedThinking),
   );
 
-  // Pinned: index 0 and 1
-  const pinned = processedMessages.slice(0, 2);
+  // Dynamically pin system instruction and initial user intent:
+  // - Leading system messages (0 or more)
+  // - First user message (initial user intent)
+  // Assistant messages / tool cycles are NEVER pinned to avoid orphan tool calls
+  let pinnedCount = 0;
+  let seenUser = false;
+  for (let i = 0; i < processedMessages.length; i++) {
+    const role = processedMessages[i]?.role;
+    if (role === 'system') {
+      if (!seenUser) {
+        pinnedCount = i + 1;
+      } else {
+        break;
+      }
+    } else if (role === 'user') {
+      if (!seenUser) {
+        seenUser = true;
+        pinnedCount = i + 1;
+      } else {
+        break;
+      }
+    } else {
+      break;
+    }
+  }
+  // Fallback: if no leading system/user messages found, pin index 0
+  if (pinnedCount === 0) {
+    pinnedCount = Math.min(1, processedMessages.length);
+  }
 
-  // Tail turns: last `preserveTailTurns`
-  const tailCount = Math.min(preserveTailTurns, processedMessages.length - 2);
+  const pinned = processedMessages.slice(0, pinnedCount);
+
+  // Candidate and tail pool division
+  const remainingCount = processedMessages.length - pinnedCount;
+  const tailCount = Math.min(preserveTailTurns, remainingCount);
   const tailStartIndex = processedMessages.length - tailCount;
 
-  const candidatePool = processedMessages.slice(2, tailStartIndex);
+  const candidatePool = processedMessages.slice(pinnedCount, tailStartIndex);
   const tailPool = processedMessages.slice(tailStartIndex);
 
   const prunedToolCallIds = new Set<string>();
@@ -216,9 +265,13 @@ export function pruneContextAtomic(
         }
         const toolNames = Array.from(new Set(toolCalls.map((tc) => tc.name))).join(', ');
         const summaryText = `[Summary: Executed ${toolCalls.length} tool call(s) including ${toolNames}]`;
+        const content =
+          summaryRole === 'user' && Array.isArray(msg.content)
+            ? [{ type: 'text', text: summaryText }]
+            : summaryText;
         compactedCandidate.push({
-          role: 'system',
-          content: summaryText,
+          role: summaryRole,
+          content,
         });
         continue;
       }
@@ -227,7 +280,9 @@ export function pruneContextAtomic(
     // Check if this candidate message is a tool result corresponding to pruned tool call
     const resIds = getToolResultIds(msg);
     if (resIds.length > 0 && resIds.some((id) => prunedToolCallIds.has(id))) {
-      // If msg has multiple content blocks, filter out matching tool_result blocks
+      if (msg.role === 'tool' || msg.role === 'toolResult') {
+        continue;
+      }
       if (Array.isArray(msg.content)) {
         const remainingBlocks = (msg.content as unknown[]).filter((b: unknown) => {
           if (!b || typeof b !== 'object') return true;
@@ -240,7 +295,6 @@ export function pruneContextAtomic(
           compactedCandidate.push({ ...msg, content: remainingBlocks });
         }
       }
-      // If entire message was tool result for pruned tool call, it is discarded
       continue;
     }
 
@@ -260,6 +314,9 @@ export function pruneContextAtomic(
   for (const msg of tailPool) {
     const resIds = getToolResultIds(msg);
     if (resIds.length > 0 && resIds.some((id) => prunedToolCallIds.has(id))) {
+      if (msg.role === 'tool' || msg.role === 'toolResult') {
+        continue;
+      }
       if (Array.isArray(msg.content)) {
         const remainingBlocks = (msg.content as unknown[]).filter((b: unknown) => {
           if (!b || typeof b !== 'object') return true;
@@ -274,6 +331,12 @@ export function pruneContextAtomic(
       }
       continue;
     }
+    if (msg.role === 'tool' || msg.role === 'toolResult') {
+      const callId = msg.tool_call_id ?? msg.toolCallId;
+      if (callId && prunedToolCallIds.has(String(callId))) {
+        continue;
+      }
+    }
     cleanedTail.push(msg);
   }
 
@@ -281,12 +344,16 @@ export function pruneContextAtomic(
 
   // If maxTokens is specified and we still exceed it, prune oldest candidate messages
   if (options.maxTokens !== undefined) {
-    while (
-      finalCandidate.length > 0 &&
-      calculateTokens([...pinned, ...finalCandidate, ...cleanedTail], tokenDensityFactor) >
-        options.maxTokens
-    ) {
+    let currentTokens = calculateTokens(
+      [...pinned, ...finalCandidate, ...cleanedTail],
+      tokenDensityFactor,
+    );
+    while (finalCandidate.length > 0 && currentTokens > options.maxTokens) {
       finalCandidate.shift();
+      currentTokens = calculateTokens(
+        [...pinned, ...finalCandidate, ...cleanedTail],
+        tokenDensityFactor,
+      );
     }
   }
 

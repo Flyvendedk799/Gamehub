@@ -42,6 +42,13 @@ describe('AST Syntax Verification (verifyGeneratedAst)', () => {
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
 
+    const dupResult = await verifyGeneratedAst(
+      'src/main.js',
+      "import * as Phaser from 'phaser';\nlet timer;\nlet timer;",
+    );
+    expect(dupResult.valid).toBe(false);
+    expect(dupResult.errors.some((e) => e.message.includes('timer'))).toBe(true);
+
     const firstErr = result.errors[0];
     expect(firstErr?.line).toBe(3);
     expect(firstErr?.column).toBeDefined();

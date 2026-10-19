@@ -204,6 +204,131 @@ describe('runGeneration generated JavaScript syntax gate', () => {
       ),
     ).rejects.toThrow(/Generated JavaScript syntax check failed[\s\S]*src\/main\.js[\s\S]*timer/);
   });
+
+  it('triggers AST reflexion loop on syntax error and succeeds when repaired', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    let calls = 0;
+    const promptsReceived: string[] = [];
+
+    const selfRepairingAgent: GenerateFn = async (input, deps) => {
+      calls += 1;
+      promptsReceived.push(input.prompt);
+      if (calls === 1) {
+        await deps.fs?.create('index.html', '<!doctype html><script src="src/main.js"></script>');
+        // Invalid JS with syntax error
+        await deps.fs?.create('src/main.js', 'const x = ;');
+        return emptyOutput('first attempt syntax broken');
+      }
+      // Fixed JS on reflexion attempt
+      await deps.fs?.create('src/main.js', 'const x = 42;\nconsole.log(x);');
+      return emptyOutput('repaired syntax');
+    };
+
+    const result = await runGeneration(
+      {
+        prompt: 'make a game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: selfRepairingAgent },
+    );
+
+    expect(calls).toBe(2);
+    expect(promptsReceived[1]).toContain('[SYNTAX_VERIFICATION_FAILURE]');
+    expect(promptsReceived[1]).toContain('src/main.js');
+    expect(result.repairRounds).toBe(1);
+    const bytes = await store.readFile(result.snapshot.manifest, 'src/main.js');
+    expect(new TextDecoder().decode(bytes)).toContain('const x = 42;');
+  });
+
+  it('rejects explicitly after invalid -> still invalid twice across reflexion attempts (TS/HTML)', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    let calls = 0;
+
+    const stubbornlyBrokenAgent: GenerateFn = async (_input, deps) => {
+      calls += 1;
+      // TS syntax error with invalid syntax in script
+      await deps.fs?.create('index.html', '<!doctype html><script>const a = ;</script>');
+      await deps.fs?.create('src/game.ts', 'export const score: number = ;');
+      return emptyOutput('broken ts');
+    };
+
+    await expect(
+      runGeneration(
+        {
+          prompt: 'make a game in typescript',
+          model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+          apiKey: 'sk-test',
+        },
+        { store, generate: stubbornlyBrokenAgent },
+      ),
+    ).rejects.toThrow(/AST syntax verification failed[\s\S]*reflexion exhausted or budget reached/);
+
+    // Initial turn (1) + 2 bounded reflexion repair attempts (2) = 3 calls total
+    expect(calls).toBe(3);
+  });
+
+  it('rejects explicitly when budget is interrupted with invalid AST output', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    let calls = 0;
+
+    const interruptedAgent: GenerateFn = async (_input, deps) => {
+      calls += 1;
+      await deps.fs?.create('index.html', '<!doctype html><script>let x = ;</script>');
+      // Agent is interrupted (e.g. wall clock or continuation pause)
+      return { ...emptyOutput('interrupted with broken syntax'), interrupted: true };
+    };
+
+    await expect(
+      runGeneration(
+        {
+          prompt: 'make a game',
+          model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+          apiKey: 'sk-test',
+        },
+        { store, generate: interruptedAgent },
+      ),
+    ).rejects.toThrow(/AST syntax verification failed[\s\S]*reflexion exhausted or budget reached/);
+
+    // Interrupted on turn 1, so no further repair rounds run
+    expect(calls).toBe(1);
+  });
+
+  it('successfully repairs TypeScript and HTML inline scripts across AST extensions', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    let calls = 0;
+
+    const multiExtensionAgent: GenerateFn = async (input, deps) => {
+      calls += 1;
+      if (calls === 1) {
+        // Broken TS and broken inline HTML script
+        await deps.fs?.create('index.html', '<!doctype html><script>const inlineVal = ;</script>');
+        await deps.fs?.create('src/player.tsx', 'export const Player = () => { return <div >; };');
+        return emptyOutput('multi broken');
+      }
+      // Fixed TSX and fixed inline HTML script
+      await deps.fs?.create('index.html', '<!doctype html><script>const inlineVal = 100;</script>');
+      await deps.fs?.create(
+        'src/player.tsx',
+        'export const Player = () => { return <div>Hero</div>; };',
+      );
+      return emptyOutput('multi repaired');
+    };
+
+    const result = await runGeneration(
+      {
+        prompt: 'make a react game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: multiExtensionAgent },
+    );
+
+    expect(calls).toBe(2);
+    expect(result.repairRounds).toBe(1);
+    const tsxBytes = await store.readFile(result.snapshot.manifest, 'src/player.tsx');
+    expect(new TextDecoder().decode(tsxBytes)).toContain('<div>Hero</div>');
+  });
 });
 
 describe('runGeneration token ceiling (#18)', () => {

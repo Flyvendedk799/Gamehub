@@ -22,8 +22,11 @@ function getPluginsForFilename(filename: string): ParserPlugin[] {
   if (lower.endsWith('.jsx')) {
     return ['jsx'];
   }
-  // Default for JS/CJS/MJS and general web game scripts: allow both TS and JSX features
-  return ['typescript', 'jsx'];
+  if (lower.endsWith('.js') || lower.endsWith('.mjs') || lower.endsWith('.cjs')) {
+    return [];
+  }
+  // Default for general web game scripts
+  return [];
 }
 
 function parseCode(code: string, plugins: ParserPlugin[], lineOffset = 0): AstVerificationError[] {
@@ -122,7 +125,13 @@ export async function verifyGeneratedAst(
 
     const allErrors: AstVerificationError[] = [];
     for (const script of scripts) {
-      const scriptErrors = parseCode(script.code, ['typescript', 'jsx'], script.lineOffset);
+      let scriptErrors = parseCode(script.code, [], script.lineOffset);
+      if (scriptErrors.length > 0) {
+        const fallbackErrors = parseCode(script.code, ['typescript', 'jsx'], script.lineOffset);
+        if (fallbackErrors.length < scriptErrors.length) {
+          scriptErrors = fallbackErrors;
+        }
+      }
       allErrors.push(...scriptErrors);
     }
 
@@ -133,7 +142,21 @@ export async function verifyGeneratedAst(
   }
 
   const plugins = getPluginsForFilename(filename);
-  const errors = parseCode(code, plugins);
+  let errors = parseCode(code, plugins);
+
+  if (errors.length > 0 && plugins.length === 0) {
+    const jsxErrors = parseCode(code, ['jsx']);
+    if (jsxErrors.length === 0) {
+      errors = [];
+    } else {
+      const tsxErrors = parseCode(code, ['typescript', 'jsx']);
+      if (tsxErrors.length === 0) {
+        errors = [];
+      } else if (tsxErrors.length < errors.length) {
+        errors = tsxErrors;
+      }
+    }
+  }
 
   return {
     valid: errors.length === 0,
