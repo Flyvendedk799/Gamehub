@@ -197,6 +197,14 @@ export class PartyWebSocketGateway {
           this.roomManager.startMatch(ctx.roomCode, ctx.memberId);
           break;
 
+        case 'party.skip_intermission':
+          this.roomManager.skipIntermission(ctx.roomCode, ctx.memberId);
+          break;
+
+        case 'party.rematch':
+          this.roomManager.requestRematch(ctx.roomCode);
+          break;
+
         case 'party.kick_player':
           if (!payload?.targetMemberId) {
             this.sendError(

@@ -160,6 +160,8 @@ export const PartyOpCodeSchema = z.enum([
   'party.chat',
   'party.config_update',
   'party.start_match',
+  'party.skip_intermission',
+  'party.rematch',
   'party.kick_player',
   'party.reconnect',
   // S2C
