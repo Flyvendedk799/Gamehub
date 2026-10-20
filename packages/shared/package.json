@@ -13,7 +13,8 @@
     "./game-jam": "./src/game-jam.ts",
     "./controls-gamepad": "./src/controls-gamepad.ts",
     "./runtime-beacon": "./src/runtime-beacon.ts",
-    "./design-interview": "./src/design-interview.ts"
+    "./design-interview": "./src/design-interview.ts",
+    "./party": "./src/party.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

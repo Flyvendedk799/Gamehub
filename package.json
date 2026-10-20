@@ -13,7 +13,7 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "test": "turbo run test",
-    "typecheck": "turbo run typecheck",
+    "typecheck": "turbo run typecheck --concurrency=3",
     "eval:games": "pnpm --filter @playforge/agent-core eval:games",
     "analyze:runs": "pnpm --filter @playforge/agent-core analyze:runs",
     "trace:run": "pnpm --filter @playforge/agent-core trace:run",
