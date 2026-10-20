@@ -163,6 +163,7 @@ export const PartyOpCodeSchema = z.enum([
   'party.skip_intermission',
   'party.rematch',
   'party.kick_player',
+  'party.submit_round_scores',
   'party.reconnect',
   // S2C
   'room.snapshot',

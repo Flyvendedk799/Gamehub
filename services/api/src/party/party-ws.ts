@@ -201,8 +201,21 @@ export class PartyWebSocketGateway {
           this.roomManager.skipIntermission(ctx.roomCode, ctx.memberId);
           break;
 
+        case 'party.submit_round_scores':
+          if (!payload?.scores || typeof payload.scores !== 'object') {
+            this.sendError(
+              ctx.socket,
+              ctx.roomCode,
+              'INVALID_PAYLOAD',
+              'scores object is required',
+            );
+            return;
+          }
+          this.roomManager.submitRoundScores(ctx.roomCode, payload.scores, ctx.memberId);
+          break;
+
         case 'party.rematch':
-          this.roomManager.requestRematch(ctx.roomCode);
+          this.roomManager.requestRematch(ctx.roomCode, ctx.memberId);
           break;
 
         case 'party.kick_player':

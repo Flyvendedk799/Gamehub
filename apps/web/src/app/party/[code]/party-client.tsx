@@ -178,6 +178,15 @@ export function PartyClient({ roomCode: rawCode }: PartyClientProps) {
     router.push('/party');
   };
 
+  // Sync session isHost with authoritative server state
+  useEffect(() => {
+    if (currentMember && session && currentMember.isHost !== session.isHost) {
+      const updatedSession: PartySession = { ...session, isHost: currentMember.isHost };
+      savePartySession(updatedSession);
+      setSession(updatedSession);
+    }
+  }, [currentMember, session]);
+
   // 1. Loading State
   if (initialLoading) {
     return (
@@ -327,7 +336,7 @@ export function PartyClient({ roomCode: rawCode }: PartyClientProps) {
 
   // 4. In Party Room - Active FSM State Rendering
   const activeRoom = room;
-  const isHost = Boolean(session?.isHost || currentMember?.isHost);
+  const isHost = currentMember ? Boolean(currentMember.isHost) : Boolean(session?.isHost);
   const spectators = members.filter((m) => m.role === 'SPECTATOR');
   const currentState = activeRoom?.state || 'LOBBY';
 
@@ -440,7 +449,7 @@ export function PartyClient({ roomCode: rawCode }: PartyClientProps) {
           podiumState={activeRoom.podiumState}
           isHost={isHost}
           onRematch={requestRematch}
-          onReturnToLobby={handleLeave}
+          onReturnToLobby={isHost ? requestRematch : handleLeave}
         />
       )}
     </main>

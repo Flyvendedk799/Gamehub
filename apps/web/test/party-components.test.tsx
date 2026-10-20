@@ -440,5 +440,18 @@ describe('Party Mode Intermission & Podium Components', () => {
     expect(html).toContain('Rematch (Same Party)');
     expect(html).toContain('Return to Lobby');
     expect(html).toContain('Share Results Card');
+
+    const participantHtml = renderToString(
+      <PostGameActionSuite
+        roomCode="PARTY9"
+        roomTitle="Arcade Night"
+        placements={[]}
+        isHost={false}
+        onRematch={() => {}}
+        onReturnToLobby={() => {}}
+      />,
+    );
+    expect(participantHtml).toContain('Request Rematch');
+    expect(participantHtml).toContain('Leave Party');
   });
 });

@@ -60,7 +60,7 @@ export function PostGameActionSuite({
           onClick={onReturnToLobby}
           className="px-5 py-2.5 rounded-2xl bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white font-semibold text-xs sm:text-sm border border-neutral-800 transition-colors flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-neutral-600 min-h-[48px]"
         >
-          <span>🏠</span> Return to Lobby
+          <span>🏠</span> {isHost ? 'Return to Lobby' : 'Leave Party'}
         </button>
       </div>
 

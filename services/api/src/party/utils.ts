@@ -89,10 +89,10 @@ export function calculateGrandPrixPoints(
     result[id] = 0;
   }
 
-  // Sort eligible members by round score descending
+  // Sort eligible members by round score descending (non-participants or missing scores last)
   const sorted = [...eligibleMemberIds].sort((a, b) => {
-    const scoreA = roundScores[a] ?? 0;
-    const scoreB = roundScores[b] ?? 0;
+    const scoreA = roundScores[a] !== undefined ? roundScores[a] : Number.NEGATIVE_INFINITY;
+    const scoreB = roundScores[b] !== undefined ? roundScores[b] : Number.NEGATIVE_INFINITY;
     return scoreB - scoreA;
   });
 
@@ -101,11 +101,16 @@ export function calculateGrandPrixPoints(
     const memberId = sorted[i];
     if (!memberId) continue;
 
+    const rawScore = roundScores[memberId];
+    if (rawScore === undefined || rawScore <= 0) {
+      result[memberId] = 0;
+      continue;
+    }
+
     if (i > 0) {
       const prevId = sorted[i - 1];
-      const prevScore = (prevId !== undefined ? roundScores[prevId] : undefined) ?? 0;
-      const currScore = roundScores[memberId] ?? 0;
-      if (currScore < prevScore) {
+      const prevScore = prevId !== undefined ? roundScores[prevId] : undefined;
+      if (prevScore !== undefined && rawScore < prevScore) {
         currentRank = i + 1;
       }
     }

@@ -229,4 +229,32 @@ describe('Party Mode WebSocket Gateway (/ws/party)', () => {
     expect(pong).toBeDefined();
     expect(pong.timestamp).toBeDefined();
   });
+
+  it('supports party.submit_round_scores and transitions to ROUND_OVER', () => {
+    const { roomCode, hostSessionToken, memberId: hostId } = roomManager.createRoom();
+    const guest = roomManager.joinRoom(roomCode, { displayName: 'Guest' });
+
+    const hostSocket = new MockWebSocket();
+    gateway.handleConnection(hostSocket, { query: { token: hostSessionToken } });
+
+    // Transition room to IN_GAME
+    const room = roomManager.getRoom(roomCode)!;
+    room.state = 'IN_GAME';
+    room.activeMinigameId = 'tap-tempo';
+
+    hostSocket.sentMessages = [];
+    hostSocket.simulateMessage({
+      op: 'party.submit_round_scores',
+      payload: {
+        scores: {
+          [hostId]: 100,
+          [guest.memberId]: 50,
+        },
+      },
+    });
+
+    expect(room.state).toBe('ROUND_OVER');
+    expect(room.members[hostId]?.currentRoundScore).toBe(10);
+    expect(room.members[guest.memberId]?.currentRoundScore).toBe(7);
+  });
 });

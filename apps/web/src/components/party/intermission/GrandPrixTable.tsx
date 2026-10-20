@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { GRAND_PRIX_POINTS, PARTY_AVATARS, type PartyMember } from '../../../lib/party/party-types';
+import { PARTY_AVATARS, type PartyMember } from '../../../lib/party/party-types';
 import { StreakBadge } from './StreakBadge';
 
 export interface GrandPrixTableProps {
@@ -49,9 +49,6 @@ export function GrandPrixTable({ members, currentMemberId }: GrandPrixTableProps
               // Simulated streak count for players with high scores
               const streak = player.currentRoundScore >= 10 ? 2 : 0;
 
-              // Placement reward for rank
-              const gpPoints = GRAND_PRIX_POINTS[rank as keyof typeof GRAND_PRIX_POINTS] || 0;
-
               return (
                 <tr
                   key={player.id}
@@ -90,7 +87,7 @@ export function GrandPrixTable({ members, currentMemberId }: GrandPrixTableProps
                   <td className="py-3 text-center font-mono">
                     {player.currentRoundScore > 0 ? (
                       <span className="text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                        +{gpPoints} pts
+                        +{player.currentRoundScore} pts
                       </span>
                     ) : (
                       <span className="text-neutral-500">—</span>

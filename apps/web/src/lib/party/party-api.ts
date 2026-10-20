@@ -16,6 +16,8 @@ export interface CreatePartyRoomParams {
   hostName?: string;
   avatarId?: string;
   avatarColor?: string;
+  hostAvatarId?: string;
+  hostAvatarColor?: string;
 }
 
 export interface CreatePartyRoomResult {

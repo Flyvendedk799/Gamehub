@@ -40,6 +40,8 @@ export interface CreatePartyRoomInput {
   hostName?: string;
   hostAvatarId?: string;
   hostAvatarColor?: string;
+  avatarId?: string;
+  avatarColor?: string;
 }
 
 export interface JoinPartyRoomInput {

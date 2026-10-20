@@ -389,5 +389,107 @@ describe('Party RoomManager & FSM Engine', () => {
       expect(room.members[guest.memberId]?.isHost).toBe(true);
       expect(room.members[guest.memberId]?.role).toBe('HOST');
     });
+
+    it('cleans up room immediately when sole host leaves', () => {
+      const { roomCode, memberId: hostId } = manager.createRoom({ hostName: 'Host' });
+      manager.leaveRoom(roomCode, hostId);
+      expect(manager.getRoom(roomCode)).toBeUndefined();
+    });
+
+    it('assigns host role on member reconnect if room lacks a connected host', () => {
+      const { roomCode, memberId: hostId } = manager.createRoom({ hostName: 'Host' });
+      const guest = manager.joinRoom(roomCode, { displayName: 'Guest' });
+
+      // Both disconnect
+      manager.handleSocketDisconnect(roomCode, hostId);
+      manager.handleSocketDisconnect(roomCode, guest.memberId);
+
+      // Advance 15s so host migration grace expires while guest is disconnected (no eligible connected players)
+      vi.advanceTimersByTime(15000);
+
+      // Guest reconnects
+      const recon = manager.reconnectMember(roomCode, {
+        memberId: guest.memberId,
+        sessionToken: guest.sessionToken,
+      });
+
+      expect(recon.success).toBe(true);
+      const room = manager.getRoom(roomCode)!;
+      expect(room.hostId).toBe(guest.memberId);
+      expect(room.members[guest.memberId]?.isHost).toBe(true);
+      expect(room.members[guest.memberId]?.role).toBe('HOST');
+    });
+  });
+
+  describe('Privileged Host Session Authorization', () => {
+    it('prevents former demoted host from executing privileged actions', () => {
+      const { roomCode, memberId: hostId } = manager.createRoom({ hostName: 'Host' });
+      const guest = manager.joinRoom(roomCode, { displayName: 'Guest' });
+
+      // Host disconnects and 15s host migration expires -> guest promoted, original host demoted
+      manager.handleSocketDisconnect(roomCode, hostId);
+      vi.advanceTimersByTime(15000);
+
+      const room = manager.getRoom(roomCode)!;
+      expect(room.hostId).toBe(guest.memberId);
+      expect(room.members[hostId]?.isHost).toBe(false);
+
+      // Demoted former host tries to start match
+      expect(() => manager.startMatch(roomCode, hostId)).toThrow('UNAUTHORIZED');
+
+      // Demoted former host tries to kick player
+      expect(() => manager.kickPlayer(roomCode, hostId, guest.memberId)).toThrow('UNAUTHORIZED');
+
+      // Demoted former host tries to skip intermission
+      room.state = 'ROUND_OVER';
+      expect(() => manager.skipIntermission(roomCode, hostId)).toThrow('UNAUTHORIZED');
+
+      // Demoted former host tries to request rematch
+      room.state = 'PODIUM_CELEBRATION';
+      expect(() => manager.requestRematch(roomCode, hostId)).toThrow('UNAUTHORIZED');
+    });
+  });
+
+  describe('Grand Prix Scoring Edge Cases', () => {
+    it('handles zero scores, negative scores, ties with rank displacement, and non-participants', () => {
+      const { roomCode, memberId: hostId } = manager.createRoom({ hostName: 'Host' });
+      const p1 = manager.joinRoom(roomCode, { displayName: 'P1' });
+      const p2 = manager.joinRoom(roomCode, { displayName: 'P2' });
+      const p3 = manager.joinRoom(roomCode, { displayName: 'P3' });
+
+      const room = manager.getRoom(roomCode)!;
+      room.state = 'IN_GAME';
+
+      // Scores:
+      // Host: 100 (1st tie -> 10 pts)
+      // P1: 100 (1st tie -> 10 pts)
+      // P2: 50 (3rd rank displaced -> 5 pts)
+      // P3: 0 (zero score -> 0 pts)
+      manager.submitRoundScores(roomCode, {
+        [hostId]: 100,
+        [p1.memberId]: 100,
+        [p2.memberId]: 50,
+        [p3.memberId]: 0,
+      });
+
+      expect(room.members[hostId]?.currentRoundScore).toBe(10);
+      expect(room.members[p1.memberId]?.currentRoundScore).toBe(10);
+      expect(room.members[p2.memberId]?.currentRoundScore).toBe(5);
+      expect(room.members[p3.memberId]?.currentRoundScore).toBe(0);
+    });
+  });
+
+  describe('Room Appearance & Cleanup Lifecycle', () => {
+    it('accepts both avatarId and hostAvatarId alias fields', () => {
+      const room1 = manager.createRoom({ avatarId: 'fox', avatarColor: '#ff0000' });
+      const r1 = manager.getRoom(room1.roomCode)!;
+      expect(r1.members[room1.memberId]?.avatarId).toBe('fox');
+      expect(r1.members[room1.memberId]?.avatarColor).toBe('#ff0000');
+
+      const room2 = manager.createRoom({ hostAvatarId: 'cat', hostAvatarColor: '#00ff00' });
+      const r2 = manager.getRoom(room2.roomCode)!;
+      expect(r2.members[room2.memberId]?.avatarId).toBe('cat');
+      expect(r2.members[room2.memberId]?.avatarColor).toBe('#00ff00');
+    });
   });
 });

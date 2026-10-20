@@ -190,8 +190,8 @@ export class RoomManager {
     const now = Date.now();
 
     const hostName = sanitizeDisplayName(input.hostName || 'Host', []);
-    const hostAvatarId = input.hostAvatarId || 'avatar-1';
-    const hostAvatarColor = input.hostAvatarColor || '#3b82f6';
+    const hostAvatarId = input.avatarId || input.hostAvatarId || 'avatar-1';
+    const hostAvatarColor = input.avatarColor || input.hostAvatarColor || '#3b82f6';
 
     const hostMember: PartyMember = {
       id: hostMemberId,
@@ -393,6 +393,23 @@ export class RoomManager {
     member.disconnectedAt = undefined;
     room.updatedAt = Date.now();
 
+    // Check if room lacks a connected host
+    const currentHost = room.members[room.hostId];
+    const hasConnectedHost = currentHost?.isHost && currentHost.status !== 'DISCONNECTED_GRACE';
+    if (!hasConnectedHost) {
+      if (currentHost && currentHost.id !== member.id) {
+        currentHost.isHost = false;
+        currentHost.role = 'PLAYER';
+      }
+      member.isHost = true;
+      member.role = 'HOST';
+      room.hostId = member.id;
+      this.broadcast(room.roomCode, 'room.host_migrated', {
+        previousHostId: currentHost?.id ?? '',
+        newHostId: member.id,
+      });
+    }
+
     this.broadcast(room.roomCode, 'room.player_updated', { member });
 
     return {
@@ -417,7 +434,17 @@ export class RoomManager {
       this.disconnectGraceTimers.delete(graceKey);
     }
 
+    const wasHost = member.isHost || room.hostId === memberId;
+    if (wasHost) {
+      const hostTimer = this.hostMigrationTimers.get(room.roomCode);
+      if (hostTimer) {
+        clearTimeout(hostTimer);
+        this.hostMigrationTimers.delete(room.roomCode);
+      }
+    }
+
     this.unregisterSocket(room.roomCode, memberId);
+    this.rateLimiter.cleanupMember(memberId);
     delete room.members[memberId];
     room.updatedAt = Date.now();
 
@@ -426,14 +453,15 @@ export class RoomManager {
       reason: 'voluntary_departure',
     });
 
-    // If host left, trigger immediate host migration
-    if (member.isHost) {
-      this.migrateHostImmediately(room.roomCode, memberId);
-    }
-
-    // Check if room is empty
+    // Check if room is empty before migration
     if (Object.keys(room.members).length === 0) {
       this.cleanupRoom(room.roomCode);
+      return;
+    }
+
+    // If host left, trigger immediate host migration
+    if (wasHost) {
+      this.migrateHostImmediately(room.roomCode, memberId);
     }
   }
 
@@ -441,10 +469,7 @@ export class RoomManager {
     const room = this.getRoom(codeOrId);
     if (!room) throw new Error('ROOM_NOT_FOUND');
 
-    const caller = room.members[hostMemberId];
-    if (!caller || (caller.role !== 'HOST' && caller.role !== 'CO_HOST')) {
-      throw new Error('UNAUTHORIZED');
-    }
+    this.verifyHostAuthority(room, hostMemberId);
 
     const target = room.members[targetMemberId];
     if (!target) throw new Error('TARGET_NOT_FOUND');
@@ -492,7 +517,8 @@ export class RoomManager {
     const graceTimer = setTimeout(() => {
       this.disconnectGraceTimers.delete(graceKey);
       if (room.members[memberId]?.status === 'DISCONNECTED_GRACE') {
-        const wasHost = room.members[memberId].isHost;
+        const wasHost = room.members[memberId].isHost || room.hostId === memberId;
+        this.rateLimiter.cleanupMember(memberId);
         delete room.members[memberId];
         room.updatedAt = Date.now();
 
@@ -501,12 +527,13 @@ export class RoomManager {
           reason: 'grace_expired',
         });
 
-        if (wasHost) {
-          this.migrateHostImmediately(room.roomCode, memberId);
-        }
-
         if (Object.keys(room.members).length === 0) {
           this.cleanupRoom(room.roomCode);
+          return;
+        }
+
+        if (wasHost) {
+          this.migrateHostImmediately(room.roomCode, memberId);
         }
       }
     }, this.timerOptions.disconnectGraceMs);
@@ -533,6 +560,12 @@ export class RoomManager {
   private migrateHostImmediately(roomCode: string, previousHostId: string): void {
     const room = this.rooms.get(roomCode);
     if (!room) return;
+
+    const hostTimer = this.hostMigrationTimers.get(roomCode);
+    if (hostTimer) {
+      clearTimeout(hostTimer);
+      this.hostMigrationTimers.delete(roomCode);
+    }
 
     const eligible = Object.values(room.members).filter(
       (m) => m.id !== previousHostId && m.status !== 'DISCONNECTED_GRACE',
@@ -573,6 +606,15 @@ export class RoomManager {
     this.broadcast(room.roomCode, 'room.player_updated', { member: newHost });
   }
 
+  private verifyHostAuthority(room: PartyRoom, memberId: string): void {
+    const caller = room.members[memberId];
+    const isHost = caller && (caller.isHost || caller.role === 'HOST') && room.hostId === memberId;
+    const isCoHost = caller && caller.role === 'CO_HOST';
+    if (!caller || (!isHost && !isCoHost)) {
+      throw new Error('UNAUTHORIZED');
+    }
+  }
+
   // ── FSM & Gameplay Lifecycle ──────────────────────────────────────────────
 
   public setPlayerReady(codeOrId: string, memberId: string, ready: boolean): void {
@@ -602,10 +644,7 @@ export class RoomManager {
     const room = this.getRoom(codeOrId);
     if (!room) throw new Error('ROOM_NOT_FOUND');
 
-    const caller = room.members[hostMemberId];
-    if (!caller || (caller.role !== 'HOST' && caller.role !== 'CO_HOST')) {
-      throw new Error('UNAUTHORIZED');
-    }
+    this.verifyHostAuthority(room, hostMemberId);
 
     if (room.state !== 'LOBBY') {
       throw new Error('INVALID_ROOM_STATE');
@@ -812,10 +851,18 @@ export class RoomManager {
     });
   }
 
-  public submitRoundScores(codeOrId: string, scores: Record<string, number>): void {
+  public submitRoundScores(
+    codeOrId: string,
+    scores: Record<string, number>,
+    callerMemberId?: string,
+  ): void {
     const room = this.getRoom(codeOrId);
     if (!room || room.state !== 'IN_GAME') {
       throw new Error('INVALID_SCORE_SUBMISSION_STATE');
+    }
+
+    if (callerMemberId) {
+      this.verifyHostAuthority(room, callerMemberId);
     }
 
     const activeMembers = Object.values(room.members).filter((m) => m.role !== 'SPECTATOR');
@@ -876,10 +923,7 @@ export class RoomManager {
     const room = this.getRoom(codeOrId);
     if (!room || room.state !== 'ROUND_OVER') return;
 
-    const caller = room.members[hostMemberId];
-    if (!caller || (caller.role !== 'HOST' && caller.role !== 'CO_HOST')) {
-      throw new Error('UNAUTHORIZED');
-    }
+    this.verifyHostAuthority(room, hostMemberId);
 
     this.cancelFsmTimer(room.roomCode);
     this.advancePlaylistOrPodium(room.roomCode);
@@ -925,9 +969,13 @@ export class RoomManager {
     this.broadcast(roomCode, 'podium.announced', { podiumState: room.podiumState });
   }
 
-  public requestRematch(codeOrId: string): void {
+  public requestRematch(codeOrId: string, hostMemberId?: string): void {
     const room = this.getRoom(codeOrId);
     if (!room || room.state !== 'PODIUM_CELEBRATION') return;
+
+    if (hostMemberId) {
+      this.verifyHostAuthority(room, hostMemberId);
+    }
 
     this.cancelFsmTimer(room.roomCode);
     room.state = 'LOBBY';
@@ -1079,8 +1127,29 @@ export class RoomManager {
       this.hostMigrationTimers.delete(roomCode);
     }
 
+    for (const [key, timer] of this.disconnectGraceTimers.entries()) {
+      if (key.startsWith(`${roomCode}:`)) {
+        clearTimeout(timer);
+        this.disconnectGraceTimers.delete(key);
+      }
+    }
+
+    const roomSockets = this.sockets.get(roomCode);
+    if (roomSockets) {
+      for (const socket of roomSockets.values()) {
+        try {
+          socket.close(1000, 'Room closed');
+        } catch {
+          // ignore
+        }
+      }
+    }
+
     const room = this.rooms.get(roomCode);
     if (room) {
+      for (const mId of Object.keys(room.members)) {
+        this.rateLimiter.cleanupMember(mId);
+      }
       this.roomCodeById.delete(room.roomId);
       this.rooms.delete(roomCode);
     }
@@ -1106,6 +1175,16 @@ export class RoomManager {
       clearInterval(timer as unknown as NodeJS.Timeout);
     }
     this.activeFsmTimers.clear();
+
+    for (const roomSockets of this.sockets.values()) {
+      for (const socket of roomSockets.values()) {
+        try {
+          socket.close(1000, 'Server shutting down');
+        } catch {
+          // ignore
+        }
+      }
+    }
 
     this.rooms.clear();
     this.roomCodeById.clear();
