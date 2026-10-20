@@ -81,6 +81,7 @@ import { type EmailPort, buildPasswordResetEmail } from './email';
 import type { HubRepo } from './hub-repo';
 import type { JamRepo } from './jam-repo';
 import { registerJamRoutes } from './jam-routes';
+import { RoomManager, registerPartyRoutes, registerPartyWebSocket } from './party';
 import type { PublishRepo } from './publish-repo';
 import type { Engine, ProjectRepo, Visibility } from './repo';
 import type { Run, RunRepo } from './run-repo';
@@ -349,6 +350,8 @@ export interface ServerDeps {
    * party surface; the rest of the API is unaffected either way.
    */
   jamRepo?: JamRepo;
+  /** Optional (Party Mode): Party room manager for real-time multiplayer party mode. */
+  partyRoomManager?: RoomManager;
   /** Optional: max concurrent runs per user (default 1 free / 3 pro — enforced if set). */
   maxConcurrentRunsPerUser?: number;
   /** Optional: admin token for moderation endpoints. */
@@ -4094,6 +4097,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       getRunStatus: async (runId) => (await deps.runRepo.get(runId))?.status ?? null,
     });
   }
+
+  // ── Party Mode (real-time multiplayer) ────────────────────────────────────
+  const partyRoomManager = deps.partyRoomManager ?? new RoomManager();
+  registerPartyRoutes(app, partyRoomManager);
+  registerPartyWebSocket(app, partyRoomManager);
 
   // ── admin metrics (autoscaling signal) ────────────────────────────────────
 

@@ -833,6 +833,7 @@ export * from './game-tuning';
 export * from './runtime-beacon';
 export * from './brand';
 export * from './game-jam';
+export * from './party';
 export {
   SOCIAL_OUTRO_SCHEMA_VERSION,
   SocialOutroProjectSchema,
