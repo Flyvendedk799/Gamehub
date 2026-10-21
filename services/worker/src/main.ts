@@ -29,7 +29,7 @@ import { createDb, schema } from '@playforge/db';
  *   WORKER_CONCURRENCY  parallel jobs per instance (default: 2)
  */
 import { complete } from '@playforge/providers';
-import type { AbortKind, GameSpec, ModelRef } from '@playforge/shared';
+import type { AbortKind, GameSpec, ModelRef, WireApi } from '@playforge/shared';
 import { classifyAbortKind } from '@playforge/shared';
 import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
 import { Queue, Worker } from 'bullmq';
@@ -183,6 +183,9 @@ interface GenerateJobData {
   gameSpec?: GameSpec;
   /** BYOK: per-job API key override. */
   apiKey?: string;
+  /** Wire + gateway headers for subscription credentials (Codex, Antigravity). */
+  wire?: WireApi;
+  httpHeaders?: Record<string, string>;
   model?: ModelRef;
   /** Resume a previously paused run — replaces prompt with buildContinuationPrompt. */
   continuation?: ContinuationPromptInput;
@@ -275,6 +278,8 @@ async function main() {
         engine,
         gameSpec,
         apiKey: jobApiKey,
+        wire,
+        httpHeaders,
         model: jobModel,
         continuation,
         maxTokens,
@@ -330,6 +335,8 @@ async function main() {
             prompt,
             model,
             apiKey,
+            ...(wire !== undefined ? { wire } : {}),
+            ...(httpHeaders !== undefined ? { httpHeaders } : {}),
             ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
             ...(engine !== undefined ? { engine } : {}),
             ...(gameSpec !== undefined ? { gameSpec } : {}),
@@ -367,6 +374,8 @@ async function main() {
             visionCritic: async ({ pngBase64, mimeType, prompt }) => {
               const res = await complete(model, [{ role: 'user', content: prompt }], {
                 apiKey,
+                ...(wire !== undefined ? { wire } : {}),
+                ...(httpHeaders !== undefined ? { httpHeaders } : {}),
                 maxTokens: 500,
                 userImages: [{ data: pngBase64, mimeType }],
               });
