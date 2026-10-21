@@ -14,6 +14,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@flyvendedk799/ai-auth": "github:Flyvendedk799/ai-auth",
     "@mariozechner/pi-ai": "^0.67.68",
     "@playforge/shared": "workspace:*"
   },

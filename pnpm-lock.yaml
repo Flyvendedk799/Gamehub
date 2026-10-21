@@ -225,6 +225,9 @@ importers:
 
   packages/providers:
     dependencies:
+      '@flyvendedk799/ai-auth':
+        specifier: github:Flyvendedk799/ai-auth
+        version: https://codeload.github.com/Flyvendedk799/ai-auth/tar.gz/e84b9cb87780b75c457451a562c2c491762fbbcd(fastify@5.8.5)(react@19.2.7)
       '@mariozechner/pi-ai':
         specifier: ^0.67.68
         version: 0.67.68(patch_hash=6wqkrgieuutepjczap4pzdaoca)(ws@8.21.0)(zod@3.25.76)
@@ -308,6 +311,9 @@ importers:
       '@fastify/websocket':
         specifier: ^11.2.0
         version: 11.2.0
+      '@flyvendedk799/ai-auth':
+        specifier: github:Flyvendedk799/ai-auth
+        version: https://codeload.github.com/Flyvendedk799/ai-auth/tar.gz/e84b9cb87780b75c457451a562c2c491762fbbcd(fastify@5.8.5)(react@19.2.7)
       '@playforge/bus':
         specifier: workspace:*
         version: link:../../packages/bus
@@ -1222,6 +1228,19 @@ packages:
 
   '@fastify/websocket@11.2.0':
     resolution: {integrity: sha512-3HrDPbAG1CzUCqnslgJxppvzaAZffieOVbLp1DAy1huCSynUWPifSvfdEDUR8HlJLp3sp1A36uOM2tJogADS8w==}
+
+  '@flyvendedk799/ai-auth@https://codeload.github.com/Flyvendedk799/ai-auth/tar.gz/e84b9cb87780b75c457451a562c2c491762fbbcd':
+    resolution: {tarball: https://codeload.github.com/Flyvendedk799/ai-auth/tar.gz/e84b9cb87780b75c457451a562c2c491762fbbcd}
+    version: 0.9.1
+    engines: {node: '>=20'}
+    peerDependencies:
+      fastify: '>=4'
+      react: '>=18'
+    peerDependenciesMeta:
+      fastify:
+        optional: true
+      react:
+        optional: true
 
   '@google/genai@1.52.0':
     resolution: {integrity: sha512-gwSvbpiN/17O9TbsqSsE/OzZcpv5Fo4RQjdngGgogtuB9RsyJ8ZHhX5KjHj1bp5N9snN2eK8LDGXSaWW2hof8Q==}
@@ -3579,6 +3598,11 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+
+  '@flyvendedk799/ai-auth@https://codeload.github.com/Flyvendedk799/ai-auth/tar.gz/e84b9cb87780b75c457451a562c2c491762fbbcd(fastify@5.8.5)(react@19.2.7)':
+    optionalDependencies:
+      fastify: 5.8.5
+      react: 19.2.7
 
   '@google/genai@1.52.0':
     dependencies:

@@ -36,6 +36,8 @@ export const WireApiSchema = z.enum([
   'openai-responses',
   'anthropic',
   'openai-codex-responses',
+  // Google Antigravity (Cloud Code) subscription — see @playforge/providers antigravity-stream.
+  'antigravity-cloudcode',
 ]);
 export type WireApi = z.infer<typeof WireApiSchema>;
 

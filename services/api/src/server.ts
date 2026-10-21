@@ -28,13 +28,15 @@ import {
 } from '@playforge/exporters';
 import { exportGameZip } from '@playforge/exporters/game-zip';
 import {
-  type StoredClaudeAuth,
+  ANTIGRAVITY_DEFAULT_MODEL,
+  ANTIGRAVITY_PROJECT_HEADER,
+  ANTIGRAVITY_PROVIDER,
   type StoredCodexAuth,
   complete,
   decodeJwtClaims,
-  readClaudeCodeKeychainCredentials,
   readCodexAuthFile,
 } from '@playforge/providers';
+import { antigravityAuthRoutes, claudeAuthRoutes } from '@flyvendedk799/ai-auth/fastify';
 import {
   BRAND_NAME,
   type ModelRef,
@@ -406,9 +408,13 @@ export interface ServerDeps {
   /** Optional: Claude subscription credential store. When connected, generation
    *  runs on the subscription (OAuth over the real Anthropic API) and the
    *  /v1/auth/claude/* routes are enabled. */
-  claudeAuthStore?: import('@playforge/providers').ClaudeTokenStore;
+  claudeAccounts?: import('@flyvendedk799/ai-auth').ClaudeAccountStore;
   /** Claude model used when the subscription is the active credential. */
   claudeSubscriptionModel?: string;
+  /** Optional: per-user Google Antigravity (agy) subscription store (ai-auth). */
+  antigravityAccounts?: import('@flyvendedk799/ai-auth').AntigravityAccountStore;
+  /** Gemini model used when the Antigravity subscription is the active credential. */
+  antigravitySubscriptionModel?: string;
   /** Optional: Codex / ChatGPT subscription credential store. When connected,
    *  generation runs on it over the openai-codex-responses wire + account header. */
   codexAuthStore?: import('@playforge/providers').CodexTokenStore;
@@ -457,7 +463,13 @@ const ACCOUNT_PROVIDERS: AccountProvider[] = [
   'openai',
   'claude-subscription',
   'codex-subscription',
+  'antigravity-subscription',
 ];
+const SUBSCRIPTION_LABELS: Record<SubscriptionProvider, string> = {
+  'claude-subscription': 'Claude (subscription)',
+  'codex-subscription': 'Codex (subscription)',
+  'antigravity-subscription': 'Gemini (Antigravity subscription)',
+};
 const DEFAULT_PLATFORM_MODEL: ModelRef = { provider: 'anthropic', modelId: 'claude-sonnet-4-6' };
 
 /**
@@ -979,14 +991,24 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (provider === 'claude-subscription')
       return deps.claudeSubscriptionModel ?? 'claude-sonnet-4-6';
     if (provider === 'codex-subscription') return deps.codexSubscriptionModel ?? 'gpt-5.5';
+    if (provider === 'antigravity-subscription')
+      return deps.antigravitySubscriptionModel ?? ANTIGRAVITY_DEFAULT_MODEL;
     return DEFAULT_BYOK_MODELS[provider];
   }
 
   /** True when the named subscription has a connected identity in its store. */
-  async function isSubscriptionConnected(provider: SubscriptionProvider): Promise<boolean> {
+  async function isSubscriptionConnected(
+    provider: SubscriptionProvider,
+    userId: string,
+  ): Promise<boolean> {
     try {
       if (provider === 'claude-subscription') {
-        return deps.claudeAuthStore ? await deps.claudeAuthStore.isConnected() : false;
+        return deps.claudeAccounts ? (await deps.claudeAccounts.status(userId)).connected : false;
+      }
+      if (provider === 'antigravity-subscription') {
+        return deps.antigravityAccounts
+          ? (await deps.antigravityAccounts.status(userId)).connected
+          : false;
       }
       return deps.codexAuthStore ? (await deps.codexAuthStore.read()) !== null : false;
     } catch {
@@ -998,8 +1020,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const keyByProvider = new Map(settings.keys.map((key) => [key.provider, key]));
     const defaultModelId =
       settings.defaultModelId?.trim() || defaultModelForProvider(settings.defaultProvider);
-    const claudeConnected = await isSubscriptionConnected('claude-subscription');
-    const codexConnected = await isSubscriptionConnected('codex-subscription');
+    const connectedByProvider: Record<SubscriptionProvider, boolean> = {
+      'claude-subscription': await isSubscriptionConnected('claude-subscription', settings.userId),
+      'codex-subscription': await isSubscriptionConnected('codex-subscription', settings.userId),
+      'antigravity-subscription': await isSubscriptionConnected(
+        'antigravity-subscription',
+        settings.userId,
+      ),
+    };
     return {
       user: {
         id: settings.userId,
@@ -1024,12 +1052,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
             active: settings.defaultProvider === provider,
           };
         }
-        if (provider === 'claude-subscription' || provider === 'codex-subscription') {
-          const connected = provider === 'claude-subscription' ? claudeConnected : codexConnected;
+        if (isSubscriptionProvider(provider)) {
+          const connected = connectedByProvider[provider];
           return {
             provider,
-            label:
-              provider === 'claude-subscription' ? 'Claude (subscription)' : 'Codex (subscription)',
+            label: SUBSCRIPTION_LABELS[provider],
             // 'configured' = connected, so the picker shows the right badge and can
             // gate selection on a live connection.
             configured: connected,
@@ -1099,8 +1126,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       try {
         if (
           provider === 'claude-subscription' &&
-          deps.claudeAuthStore &&
-          (await deps.claudeAuthStore.isConnected())
+          deps.claudeAccounts &&
+          (await deps.claudeAccounts.status(userId)).connected
         ) {
           return {
             ok: true,
@@ -1108,8 +1135,26 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
               provider: 'anthropic',
               modelId: deps.claudeSubscriptionModel ?? 'claude-sonnet-4-6',
             },
-            apiKey: await deps.claudeAuthStore.getValidAccessToken(),
+            // ai-auth refreshes the token if it has aged out.
+            apiKey: await deps.claudeAccounts.token(userId),
           };
+        }
+        if (provider === 'antigravity-subscription' && deps.antigravityAccounts) {
+          const status = await deps.antigravityAccounts.status(userId);
+          if (status.connected) {
+            return {
+              ok: true,
+              model: {
+                provider: ANTIGRAVITY_PROVIDER,
+                modelId: deps.antigravitySubscriptionModel ?? ANTIGRAVITY_DEFAULT_MODEL,
+              },
+              apiKey: await deps.antigravityAccounts.token(userId),
+              wire: 'antigravity-cloudcode',
+              ...(status.projectId
+                ? { httpHeaders: { [ANTIGRAVITY_PROJECT_HEADER]: status.projectId } }
+                : {}),
+            };
+          }
         }
         if (provider === 'codex-subscription' && deps.codexAuthStore) {
           const current = await deps.codexAuthStore.read();
@@ -1499,74 +1544,30 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     return reply.send(await accountSettingsResponse(settings));
   });
 
-  // ── Claude subscription (OAuth) ──────────────────────────────────────────────
-  // Connect / Re-auth harvest the local Claude Code OAuth identity from the
-  // macOS Keychain (no browser redirect — Gamehub runs on the same Mac where
-  // `claude` is logged in). When connected, resolveGenerationCredentials runs
-  // generation on the subscription. Re-auth simply re-harvests the now-fresh
-  // keychain token IN PLACE — no disconnect→reconnect dance.
-  function claudeStatusBody(auth: StoredClaudeAuth | null): Record<string, unknown> {
-    if (!auth) return { connected: false };
-    return {
-      connected: true,
-      email: auth.email,
-      expiresAt: auth.expiresAt,
-      scopes: auth.scopes,
-      canRefresh: auth.refreshToken.length > 0 && auth.clientId.length > 0,
-    };
-  }
-
-  async function connectClaudeFromKeychain(reply: FastifyReply): Promise<void> {
-    const store = deps.claudeAuthStore;
-    if (!store) {
-      await reply.code(503).send({ error: 'claude_auth_unavailable' });
-      return;
-    }
-    const creds = await readClaudeCodeKeychainCredentials();
-    if (!creds) {
-      await reply.code(400).send({ error: 'claude_code_not_logged_in' });
-      return;
-    }
-    const now = Date.now();
-    await store.write({
-      schemaVersion: 1,
-      accessToken: creds.accessToken,
-      refreshToken: creds.refreshToken ?? '',
-      clientId: creds.oauthClientId ?? '',
-      expiresAt: creds.expiresAt ?? now + 60 * 60 * 1000,
-      email: null,
-      scopes: creds.scopes ?? null,
-      updatedAt: now,
-    });
-    await reply.send(claudeStatusBody(await store.peek()));
-  }
-
-  app.get('/v1/auth/claude/status', async (req, reply) => {
+  // ── Claude Code + Antigravity subscriptions (per-user browser login) ─────────
+  // @flyvendedk799/ai-auth mounts POST {prefix}/login, POST {prefix}/login/complete,
+  // GET {prefix}, DELETE {prefix}: the user approves in their browser and pastes the code back,
+  // exactly the `claude` / `agy` CLI flow, so each account brings its OWN plan. Sessions are the
+  // app's own bearer tokens. The pending PKCE login is held in memory by the plugin (a restart
+  // mid-login costs one click), so these assume a single API instance per login attempt.
+  const resolveAuthAccount = async (req: FastifyRequest, reply: FastifyReply) => {
     const user = await requireUser(req, reply);
-    if (!user) return;
-    if (!deps.claudeAuthStore) return reply.code(503).send({ error: 'claude_auth_unavailable' });
-    return reply.send(claudeStatusBody(await deps.claudeAuthStore.peek()));
-  });
-
-  app.post('/v1/auth/claude/connect', async (req, reply) => {
-    const user = await requireUser(req, reply);
-    if (!user) return;
-    return connectClaudeFromKeychain(reply);
-  });
-
-  app.post('/v1/auth/claude/reauth', async (req, reply) => {
-    const user = await requireUser(req, reply);
-    if (!user) return;
-    return connectClaudeFromKeychain(reply);
-  });
-
-  app.delete('/v1/auth/claude', async (req, reply) => {
-    const user = await requireUser(req, reply);
-    if (!user) return;
-    if (!deps.claudeAuthStore) return reply.code(503).send({ error: 'claude_auth_unavailable' });
-    await deps.claudeAuthStore.clear();
-    return reply.send({ connected: false });
-  });
+    return user ? { id: user.userId } : null;
+  };
+  void app.register(
+    claudeAuthRoutes({
+      store: deps.claudeAccounts ?? null,
+      resolveAccount: resolveAuthAccount,
+      prefix: '/v1/auth/claude-code',
+    }),
+  );
+  void app.register(
+    antigravityAuthRoutes({
+      store: deps.antigravityAccounts ?? null,
+      resolveAccount: resolveAuthAccount,
+      prefix: '/v1/auth/antigravity',
+    }),
+  );
 
   // ── Codex / ChatGPT subscription (OAuth) ─────────────────────────────────────
   // Symmetric to Claude — Connect / Re-auth harvest the local `codex` CLI login

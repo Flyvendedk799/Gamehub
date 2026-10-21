@@ -739,7 +739,8 @@ export type AccountProvider =
   | 'anthropic'
   | 'openai'
   | 'claude-subscription'
-  | 'codex-subscription';
+  | 'codex-subscription'
+  | 'antigravity-subscription';
 
 export interface AccountProviderState {
   provider: AccountProvider;
@@ -801,32 +802,48 @@ export async function deleteAccountProvider(provider: Exclude<AccountProvider, '
   });
 }
 
-// ─── Claude subscription (OAuth) ──────────────────────────────────────────────
+// ─── Claude Code + Antigravity subscriptions (per-user browser login) ──────────
+//
+// The same flow the `claude` / `agy` CLIs run: the server returns a consent URL, the user
+// approves it in their browser and pastes the code back. Tokens never reach the browser.
 
-export interface ClaudeSubscriptionStatus {
+export interface BrowserLoginStatus {
   connected: boolean;
+  plan?: string | null;
   email?: string | null;
-  /** Unix-ms expiry of the current access token. */
-  expiresAt?: number;
-  scopes?: string | null;
-  /** Whether the stored identity can auto-refresh (else re-auth re-harvests). */
-  canRefresh?: boolean;
+  projectId?: string | null;
+  /** Unix-ms expiry of the access token (it refreshes itself on next use). */
+  expiresAt?: number | null;
+  available?: boolean;
 }
 
-export async function getClaudeAuthStatus(): Promise<ClaudeSubscriptionStatus> {
-  return apiFetch<ClaudeSubscriptionStatus>('/v1/auth/claude/status');
+export type BrowserLoginProvider = 'claude-code' | 'antigravity';
+
+export async function getSubscriptionStatus(p: BrowserLoginProvider): Promise<BrowserLoginStatus> {
+  return apiFetch<BrowserLoginStatus>(`/v1/auth/${p}`);
 }
 
-/** Connect (or, with reauth=true, re-harvest in place) the local Claude Code
- *  OAuth identity — no disconnect needed for re-auth. */
-export async function connectClaude(reauth = false): Promise<ClaudeSubscriptionStatus> {
-  return apiFetch<ClaudeSubscriptionStatus>(`/v1/auth/claude/${reauth ? 'reauth' : 'connect'}`, {
+export async function startSubscriptionLogin(
+  p: BrowserLoginProvider,
+): Promise<{ url: string; expiresInSeconds: number }> {
+  return apiFetch<{ url: string; expiresInSeconds: number }>(`/v1/auth/${p}/login`, {
     method: 'POST',
+    body: JSON.stringify({}),
   });
 }
 
-export async function disconnectClaude(): Promise<ClaudeSubscriptionStatus> {
-  return apiFetch<ClaudeSubscriptionStatus>('/v1/auth/claude', { method: 'DELETE' });
+export async function completeSubscriptionLogin(
+  p: BrowserLoginProvider,
+  code: string,
+): Promise<BrowserLoginStatus> {
+  return apiFetch<BrowserLoginStatus>(`/v1/auth/${p}/login/complete`, {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  });
+}
+
+export async function disconnectSubscription(p: BrowserLoginProvider): Promise<BrowserLoginStatus> {
+  return apiFetch<BrowserLoginStatus>(`/v1/auth/${p}`, { method: 'DELETE' });
 }
 
 // ─── Codex / ChatGPT subscription (OAuth) ─────────────────────────────────────

@@ -4,10 +4,14 @@ import { and, eq, isNull } from 'drizzle-orm';
 
 export const BYOK_PROVIDERS = ['anthropic', 'openai'] as const;
 export type ByokProvider = (typeof BYOK_PROVIDERS)[number];
-/** Subscription credentials — no pasted key; connected via /v1/auth/<id>/connect
- *  and backed by a local token store, but SELECTABLE as the default like a BYOK
+/** Subscription credentials — no pasted key; connected per user (Claude Code and
+ *  Antigravity via browser login, ai-auth; Codex via a local token store), but SELECTABLE as the default like a BYOK
  *  provider. */
-export const SUBSCRIPTION_PROVIDERS = ['claude-subscription', 'codex-subscription'] as const;
+export const SUBSCRIPTION_PROVIDERS = [
+  'claude-subscription',
+  'codex-subscription',
+  'antigravity-subscription',
+] as const;
 export type SubscriptionProvider = (typeof SUBSCRIPTION_PROVIDERS)[number];
 export type AccountProvider = 'platform' | ByokProvider | SubscriptionProvider;
 
