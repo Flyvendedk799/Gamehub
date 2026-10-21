@@ -861,25 +861,78 @@ describe('generateViaAgent() — first-turn retry', () => {
 });
 
 describe('generateViaAgent() — per-run safety budget', () => {
-  it('aborts and throws AGENT_BUDGET_EXCEEDED when tool-call budget is exceeded', async () => {
+  it('checkpoints (ships what landed) instead of failing when the tool-call budget is exceeded', async () => {
     scriptedAgent = {
-      assistantText: '',
+      assistantText: RESPONSE_WITH_ARTIFACT,
       stopReason: 'aborted',
       events: [
         { type: 'tool_execution_start', toolCallId: 't1', toolName: 'text_editor', args: {} },
         { type: 'tool_execution_start', toolCallId: 't2', toolName: 'text_editor', args: {} },
+        { type: 'turn_end', message: {} as never, toolResults: [] },
       ],
     };
-    await expect(
-      generateViaAgent({
-        prompt: 'design a dashboard',
-        history: [],
-        model: MODEL,
-        apiKey: 'sk-test',
-        agentBudget: { maxToolCalls: 1 },
-      }),
-    ).rejects.toMatchObject({ code: ERROR_CODES.AGENT_BUDGET_EXCEEDED });
+    const result = await generateViaAgent({
+      prompt: 'design a dashboard',
+      history: [],
+      model: MODEL,
+      apiKey: 'sk-test',
+      agentBudget: { maxToolCalls: 1 },
+    });
     expect(agentCalls[0]?.aborted).toBe(true);
+    expect(result.interrupted).toBe(true);
+    expect(result.artifacts).toHaveLength(1);
+    expect(result.message).toMatch(/Paused after \d+ steps/);
+  });
+
+  it('nudges a model that only reads files, once per streak, and resets on an edit', async () => {
+    const reads = (n: number) =>
+      Array.from({ length: n }, (_, i) => [
+        { type: 'tool_execution_start', toolCallId: `r${i}`, toolName: 'list_files', args: {} },
+        {
+          type: 'tool_execution_end',
+          toolCallId: `r${i}`,
+          toolName: 'list_files',
+          result: 'x',
+          isError: false,
+        },
+      ]).flat();
+    scriptedAgent = {
+      assistantText: RESPONSE_WITH_ARTIFACT,
+      events: reads(14) as never,
+    };
+    await generateViaAgent({ prompt: 'p', history: [], model: MODEL, apiKey: 'sk-test' });
+    const nudges = agentCalls[0]?.steers.filter((m) => m.content.includes('only read or checked'));
+    expect(nudges).toHaveLength(1);
+  });
+
+  it('stops the run after an accepted done when the model keeps calling tools', async () => {
+    scriptedAgent = {
+      assistantText: RESPONSE_WITH_ARTIFACT,
+      stopReason: 'aborted',
+      events: [
+        { type: 'tool_execution_start', toolCallId: 'd1', toolName: 'done', args: {} },
+        {
+          type: 'tool_execution_end',
+          toolCallId: 'd1',
+          toolName: 'done',
+          result: 'ok',
+          isError: false,
+        },
+        { type: 'turn_end', message: {} as never, toolResults: [] },
+        { type: 'tool_execution_start', toolCallId: 'x1', toolName: 'list_files', args: {} },
+        { type: 'turn_end', message: {} as never, toolResults: [] },
+      ],
+    };
+    const result = await generateViaAgent({
+      prompt: 'design a dashboard',
+      history: [],
+      model: MODEL,
+      apiKey: 'sk-test',
+    });
+    expect(agentCalls[0]?.aborted).toBe(true);
+    // A deliberate stop after done is a normal finish, not a paused/interrupted run.
+    expect(result.interrupted).toBe(false);
+    expect(result.artifacts).toHaveLength(1);
   });
 
   it('does NOT abort when tool-call count stays within budget', async () => {
@@ -1533,7 +1586,7 @@ describe('generateViaAgent() — convergence-detector — Improver1 §7', () => 
         toolName: 'str_replace_based_edit_tool',
         args: { command: 'str_replace', path, old_str: 'a', new_str: 'b' },
       });
-      events.push({ type: 'turn_end' });
+      events.push({ type: 'turn_end', message: {} as never, toolResults: [] });
     }
     return events;
   }
@@ -1591,7 +1644,7 @@ describe('generateViaAgent() — convergence-detector — Improver1 §7', () => 
         toolName: 'str_replace_based_edit_tool',
         args: { command: 'str_replace', path: 'index.html', old_str: 'a', new_str: 'b' },
       });
-      events.push({ type: 'turn_end' });
+      events.push({ type: 'turn_end', message: {} as never, toolResults: [] });
     }
     // Turn 23 — verify_artifact
     events.push({ type: 'turn_start' });
@@ -1601,7 +1654,7 @@ describe('generateViaAgent() — convergence-detector — Improver1 §7', () => 
       toolName: 'verify_artifact',
       args: {},
     });
-    events.push({ type: 'turn_end' });
+    events.push({ type: 'turn_end', message: {} as never, toolResults: [] });
     // Turns 24-26 — three more small edits. Buffer at turn 26 holds
     // [22, 23, 24, 25, 26] — turn 23's verify is still in window.
     for (let i = 0; i < 3; i += 1) {
@@ -1612,7 +1665,7 @@ describe('generateViaAgent() — convergence-detector — Improver1 §7', () => 
         toolName: 'str_replace_based_edit_tool',
         args: { command: 'str_replace', path: 'index.html', old_str: 'a', new_str: 'b' },
       });
-      events.push({ type: 'turn_end' });
+      events.push({ type: 'turn_end', message: {} as never, toolResults: [] });
     }
     scriptedAgent = {
       assistantText: RESPONSE_WITH_ARTIFACT,
@@ -1647,7 +1700,7 @@ describe('generateViaAgent() — convergence-detector — Improver1 §7', () => 
           new_str: 'b',
         },
       });
-      events.push({ type: 'turn_end' });
+      events.push({ type: 'turn_end', message: {} as never, toolResults: [] });
     }
     scriptedAgent = {
       assistantText: RESPONSE_WITH_ARTIFACT,

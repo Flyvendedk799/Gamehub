@@ -1899,7 +1899,11 @@ export async function generateViaAgent(
   // Wall_clock is GRACEFUL (returns the partial artifact + a "paused"
   // hint, see the catch block below). tool_calls stays HARD because a
   // runaway loop must fail loudly, not silently checkpoint.
-  const DEFAULT_MAX_TOOL_CALLS = 120;
+  // A STOP, not a failure: hitting it checkpoints the run and ships what landed (like the
+  // wall-clock budget). The loop guards below (read-only nudge, stop-after-done) are what keep
+  // runs short; this is only the backstop. Sized for a build plus its validate/playtest/repair
+  // tail on a model that re-reads a lot (Gemini does).
+  const DEFAULT_MAX_TOOL_CALLS = 200;
   // Per-chunk wall-clock budget scales with reasoning level. The 5-min
   // default works fine for reasoning=off (one turn = ~10-30s, lots of
   // tool calls per chunk). With reasoning enabled, each turn includes
@@ -1944,6 +1948,11 @@ export async function generateViaAgent(
   // tool_calls aborts stay immediate because they're a runaway-loop
   // signal and waiting for turn_end could let the loop balloon further.
   let pendingWallClockAbort = false;
+  let doneAccepted = false;
+  let turnsAfterDone = 0;
+  let readOnlyStreak = 0;
+  let readOnlyNudges = 0;
+  const READ_ONLY_NUDGE_EVERY = 14;
   let stuckSteerEmitted = false;
   let stagnationSteerEmitted = false;
   const stagnationDetector = new StagnationDetector(3);
@@ -2044,7 +2053,9 @@ export async function generateViaAgent(
           toolCallCount,
           maxToolCalls,
         });
-        agent.abort();
+        // Checkpoint at the next turn boundary so the in-flight turn settles cleanly and the
+        // files written so far ship, instead of throwing the whole run away.
+        pendingWallClockAbort = true;
       }
       return;
     }
@@ -2060,6 +2071,41 @@ export async function generateViaAgent(
       const toolName = evEnd.toolName ?? inFlight?.toolName ?? 'unknown_tool';
       const argsHash = hashSignatureValue(inFlight?.args ?? {});
       const outputHash = hashSignatureValue(evEnd.result ?? '');
+
+      // `done` accepted (no error): the build is finished. Some models (Gemini) keep calling
+      // tools after it; turn_end below ends the run after one closing turn.
+      if (toolName === 'done' && evEnd.isError !== true) doneAccepted = true;
+
+      // Read-only dithering guard. A model that only views/finds/lists and never edits is not
+      // making progress; tell it so before it burns the whole tool budget re-reading files.
+      const editorCommand = String(
+        (inFlight?.args as { command?: unknown } | undefined)?.command ?? '',
+      );
+      const isReadOnlyCall =
+        (toolName === 'str_replace_based_edit_tool' &&
+          ['view', 'find', 'view_range'].includes(editorCommand)) ||
+        [
+          'list_files',
+          'get_playtest_playbook',
+          'verify_artifact',
+          'validate_game_scene',
+          'assert_game_invariants',
+        ].includes(toolName);
+      if (isReadOnlyCall) {
+        readOnlyStreak += 1;
+        if (readOnlyStreak >= READ_ONLY_NUDGE_EVERY * (readOnlyNudges + 1) && readOnlyNudges < 3) {
+          readOnlyNudges += 1;
+          log.warn('[generate] step=read_only_steer', { ...ctx, readOnlyStreak });
+          agent.steer({
+            role: 'user',
+            content: `[system-reminder] Your last ${readOnlyStreak} tool calls only read or checked files - nothing was changed. Re-reading will not tell you anything new. Decide now: make the edit you intend (create/str_replace), or, if the game already runs and meets the brief, call \`done\`. Do not list, view, or verify again before acting.`,
+            timestamp: Date.now(),
+          });
+        }
+      } else if (toolName !== 'done') {
+        readOnlyStreak = 0;
+        readOnlyNudges = 0;
+      }
 
       const check = stagnationDetector.recordAndCheck({
         toolName,
@@ -2092,6 +2138,16 @@ export async function generateViaAgent(
       return;
     }
     if (event.type === 'turn_end') {
+      if (doneAccepted) {
+        turnsAfterDone += 1;
+        // Turn 1 is the one that called `done`; turn 2 is the closing summary. If the model
+        // is STILL calling tools after that, it is not going to stop on its own.
+        if (turnsAfterDone >= 2) {
+          log.info('[generate] step=stop_after_done', { ...ctx, toolCallCount });
+          agent.abort();
+          return;
+        }
+      }
       if (pendingWallClockAbort) {
         pendingWallClockAbort = false;
         agent.abort();
@@ -2809,15 +2865,7 @@ export async function generateViaAgent(
       await withBackoff(sendOnce, retryOpts);
     }
   } catch (err) {
-    if (budgetReason === 'tool_calls') {
-      // tool_calls = runaway loop signal; keep failing loudly.
-      clearTimeout(budgetTimer);
-      throw new PlayforgeError(
-        `Agent run aborted by safety budget (tool_calls: ${toolCallCount}/${maxToolCalls} calls)`,
-        ERROR_CODES.AGENT_BUDGET_EXCEEDED,
-      );
-    }
-    if (budgetReason === 'wall_clock') {
+    if (budgetReason === 'wall_clock' || budgetReason === 'tool_calls' || doneAccepted) {
       // wall_clock = checkpoint signal; fall through to parse_response so
       // the user sees the partial artifact + a "say continue" hint.
       // Enriched payload feeds Step 5's auto-continue + post-launch
@@ -2829,7 +2877,7 @@ export async function generateViaAgent(
       log.warn('[generate] step=send_request.checkpoint', {
         ...ctx,
         ms: Date.now() - sendStart,
-        reason: 'wall_clock',
+        reason: budgetReason ?? 'done',
         maxWallClockMs,
         toolCallCount,
         assistantMessagesAdded,
@@ -2851,12 +2899,6 @@ export async function generateViaAgent(
   if (!finalAssistant) {
     throw new PlayforgeError('Agent produced no assistant message', ERROR_CODES.PROVIDER_ERROR);
   }
-  if (budgetReason === 'tool_calls' && finalAssistant.stopReason === 'aborted') {
-    throw new PlayforgeError(
-      `Agent run aborted by safety budget (tool_calls: ${toolCallCount}/${maxToolCalls} calls)`,
-      ERROR_CODES.AGENT_BUDGET_EXCEEDED,
-    );
-  }
   // wall_clock + aborted is a checkpoint, not a failure — proceed to
   // parse_response so the user gets the partial artifact and the
   // "paused — say continue" hint appended below.
@@ -2874,11 +2916,15 @@ export async function generateViaAgent(
     finalAssistant.stopReason === 'aborted' &&
     typeof finalAssistant.errorMessage === 'string' &&
     finalAssistant.errorMessage.startsWith('Paused at safe boundary');
+  // A budget stop (wall-clock OR tool-call count) is a checkpoint, never a failure: the files
+  // written so far ship and the user can say "continue".
   const isWallClockCheckpoint =
-    (budgetReason === 'wall_clock' && finalAssistant.stopReason === 'aborted') ||
-    isContinuationPause;
+    (budgetReason !== null && finalAssistant.stopReason !== 'error') || isContinuationPause;
+  // Stopped on purpose right after an accepted `done`: a normal finish, not an abort.
+  const isDoneStop = doneAccepted && finalAssistant.stopReason === 'aborted';
   if (
     !isWallClockCheckpoint &&
+    !isDoneStop &&
     (finalAssistant.stopReason === 'error' || finalAssistant.stopReason === 'aborted')
   ) {
     // Prefer the original `getApiKey` throw (e.g. PROVIDER_AUTH_MISSING after
@@ -2982,8 +3028,12 @@ export async function generateViaAgent(
   // the user knows this isn't a failure and the chat history threads the
   // next prompt naturally onto the partial state.
   const baseMessage = stripEmptyFences(collected.text);
+  const pausedAfter =
+    budgetReason === 'tool_calls'
+      ? `${toolCallCount} steps`
+      : `${Math.round(maxWallClockMs / 1000)}s of work`;
   const message = isWallClockCheckpoint
-    ? `${baseMessage}${baseMessage.length > 0 ? '\n\n' : ''}— Paused after ${Math.round(maxWallClockMs / 1000)}s of work to keep this turn responsive. The artifact above is what landed; type **continue** (or any follow-up) to pick up where I left off. —`
+    ? `${baseMessage}${baseMessage.length > 0 ? '\n\n' : ''}— Paused after ${pausedAfter} to keep this turn responsive. The artifact above is what landed; type **continue** (or any follow-up) to pick up where I left off. —`
     : baseMessage;
   const output: GenerateOutput = {
     message,

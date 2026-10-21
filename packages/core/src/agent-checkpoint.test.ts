@@ -9,7 +9,7 @@
  *
  * Coverage:
  * - wall_clock budget fires → no throw, message includes "Paused after"
- * - tool_calls budget fires → still throws AGENT_BUDGET_EXCEEDED
+ * - tool_calls budget fires → checkpoint (no throw), message includes "Paused after N steps"
  * - user signal abort (no budget) → throws (non-budget abort)
  */
 
@@ -223,20 +223,20 @@ describe('generateViaAgent — graceful wall_clock checkpoint', () => {
     expect(result.outputTokens).toBe(50);
   });
 
-  it('still throws AGENT_BUDGET_EXCEEDED on tool_calls overrun', async () => {
-    // maxToolCalls: 0 → real code aborts on the first tool_execution_start
-    // with budgetReason='tool_calls'. Mock emits one tool_execution_start
-    // before parking, so the subscriber fires and triggers the cap.
+  it('checkpoints on tool_calls overrun instead of failing the run', async () => {
+    // maxToolCalls: 0 → the first tool_execution_start trips the cap; the abort is deferred to
+    // the next turn_end (heartbeat), and the run ships as a paused checkpoint, not an error.
     mockState.emitToolBeforeAbort = true;
-    await expect(
-      generateViaAgent({
-        prompt: 'runaway prompt',
-        history: [],
-        model: MODEL,
-        apiKey: 'sk-test',
-        agentBudget: { maxToolCalls: 0, maxWallClockMs: 60_000 },
-      }),
-    ).rejects.toThrow(/safety budget.*tool_calls/);
+    mockState.heartbeat = true;
+    const result = await generateViaAgent({
+      prompt: 'runaway prompt',
+      history: [],
+      model: MODEL,
+      apiKey: 'sk-test',
+      agentBudget: { maxToolCalls: 0, maxWallClockMs: 60_000 },
+    });
+    expect(result.interrupted).toBe(true);
+    expect(result.message).toMatch(/Paused after \d+ steps/);
   });
 
   it('throws on non-budget user-signal abort (no graceful checkpoint)', async () => {
