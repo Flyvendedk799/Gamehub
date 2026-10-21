@@ -13,6 +13,7 @@ import {
   PlayforgeError,
   type WireApi,
 } from '@playforge/shared';
+import { streamAntigravity } from './antigravity-stream';
 import {
   claudeCodeIdentityHeaders,
   looksLikeClaudeOAuthToken,
@@ -352,6 +353,50 @@ export async function complete(
 
   const piContext = toPiContext(messages, piModel, opts);
 
+  // Antigravity (Google subscription) is not a pi-ai wire: it has its own Cloud Code stream.
+  if (opts.wire === 'antigravity-cloudcode') {
+    const agyModel = {
+      ...piModel,
+      ...(opts.httpHeaders !== undefined ? { headers: { ...opts.httpHeaders } } : {}),
+    };
+    const agyStream = streamAntigravity(agyModel as never, piContext as never, {
+      apiKey,
+      ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+      ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
+    });
+    for await (const event of agyStream) {
+      if (event.type === 'text_delta' && opts.onTextDelta) opts.onTextDelta(event.delta);
+    }
+    const agyResult = await agyStream.result();
+    if (agyResult.stopReason === 'error') {
+      const err = new PlayforgeError(
+        agyResult.errorMessage ?? 'Antigravity returned an error',
+        'PROVIDER_ERROR',
+      );
+      const status = /Antigravity error: (\d{3})/.exec(agyResult.errorMessage ?? '')?.[1];
+      if (status) (err as { status?: number }).status = Number(status);
+      throw err;
+    }
+    const agyText = agyResult.content
+      .filter((c) => c.type === 'text')
+      .map((c) => (c as { text: string }).text)
+      .join('');
+    if (agyText.length === 0) {
+      throw new PlayforgeError(
+        'Model returned no text content.',
+        ERROR_CODES.MODEL_RETURNED_ONLY_THINKING,
+      );
+    }
+    return {
+      content: agyText,
+      inputTokens: agyResult.usage.input + agyResult.usage.cacheRead,
+      outputTokens: agyResult.usage.output,
+      cachedInputTokens: agyResult.usage.cacheRead,
+      cacheCreationInputTokens: 0,
+      costUsd: 0,
+    };
+  }
+
   const piOpts: {
     apiKey: string;
     baseUrl?: string;
@@ -601,6 +646,15 @@ export function detectProviderFromKey(key: string): ModelRef['provider'] | null 
   if (trimmed.startsWith('gsk_')) return 'groq';
   return null;
 }
+
+export {
+  ANTIGRAVITY_API,
+  ANTIGRAVITY_DEFAULT_MODEL,
+  ANTIGRAVITY_PROJECT_HEADER,
+  ANTIGRAVITY_PROVIDER,
+  streamAntigravity,
+  toAntigravityContents,
+} from './antigravity-stream';
 
 export { pingProvider } from './validate';
 export type { ValidateResult } from './validate';

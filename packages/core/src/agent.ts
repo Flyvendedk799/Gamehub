@@ -37,6 +37,7 @@ import {
 import { type ArtifactEvent, createArtifactParser } from '@playforge/artifacts';
 import type { RetryDecision, RetryReason } from '@playforge/providers';
 import {
+  ANTIGRAVITY_API,
   classifyError,
   claudeCodeIdentityHeaders,
   errorCodeForUpstreamType,
@@ -45,6 +46,7 @@ import {
   looksLikeClaudeOAuthToken,
   parseUpstreamErrorMessage,
   shouldForceClaudeCodeIdentity,
+  streamAntigravity,
   withBackoff,
 } from '@playforge/providers';
 import {
@@ -439,6 +441,7 @@ function apiForWire(wire: WireApi | undefined): string {
   if (wire === 'anthropic') return 'anthropic-messages';
   if (wire === 'openai-responses') return 'openai-responses';
   if (wire === 'openai-codex-responses') return 'openai-codex-responses';
+  if (wire === 'antigravity-cloudcode') return ANTIGRAVITY_API;
   // openai-chat is the canonical fallback for everything else that uses the
   // openai chat-completions wire format (openai, openrouter, deepseek, etc.).
   return 'openai-completions';
@@ -468,12 +471,16 @@ export function buildPiModel(
   const resolvedBaseUrl =
     baseUrl && baseUrl.trim().length > 0
       ? baseUrl
-      : wire === 'openai-codex-responses'
-        ? // ChatGPT/Codex subscription auth lives on the chatgpt.com backend, NOT
-          // api.openai.com (the subscription token 401s there). pi-ai's codex wire
-          // appends `/codex/responses` to this bare base.
-          'https://chatgpt.com/backend-api'
-        : (BUILTIN_PUBLIC_BASE_URLS[model.provider] ?? '');
+      : wire === 'antigravity-cloudcode'
+        ? // Cloud Code is addressed by streamAntigravity itself; this only satisfies the
+          // "has a baseUrl" invariant (the real host comes from ai-auth).
+          'https://daily-cloudcode-pa.googleapis.com/v1internal'
+        : wire === 'openai-codex-responses'
+          ? // ChatGPT/Codex subscription auth lives on the chatgpt.com backend, NOT
+            // api.openai.com (the subscription token 401s there). pi-ai's codex wire
+            // appends `/codex/responses` to this bare base.
+            'https://chatgpt.com/backend-api'
+          : (BUILTIN_PUBLIC_BASE_URLS[model.provider] ?? '');
   if (resolvedBaseUrl.length === 0) {
     throw new PlayforgeError(
       `Provider "${model.provider}" has no baseUrl configured. Add one in Settings or re-import the config.`,
@@ -492,9 +499,10 @@ export function buildPiModel(
   // pasted in an older build). No-op for configs saved post-fix.
   // For openai-codex-responses, canonicalBaseUrl only strips trailing slashes
   // — pi-ai's codex wire appends `/codex/responses` from the bare base itself.
-  const canonicalBase = effectiveWire
-    ? canonicalBaseUrl(resolvedBaseUrl, effectiveWire)
-    : resolvedBaseUrl;
+  const canonicalBase =
+    effectiveWire && effectiveWire !== 'antigravity-cloudcode'
+      ? canonicalBaseUrl(resolvedBaseUrl, effectiveWire)
+      : resolvedBaseUrl;
   const out: PiModel = {
     id: model.modelId,
     name: model.modelId,
@@ -1766,6 +1774,14 @@ export async function generateViaAgent(
       } else {
         lowered['thinkingEnabled'] = false;
       }
+    }
+    if (model.api === ANTIGRAVITY_API) {
+      // Not a pi-ai wire: Google Antigravity (Cloud Code) subscription.
+      return streamAntigravity(model as never, context, {
+        ...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
+        ...(options?.signal !== undefined ? { signal: options.signal } : {}),
+        maxTokens: options?.maxTokens ?? 65_536,
+      });
     }
     return piStream(model, context, lowered);
   };

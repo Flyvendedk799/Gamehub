@@ -24,9 +24,8 @@ import { createDb, schema } from '@playforge/db';
  *   API_KEY_ENCRYPTION_SECRET  Secret for BYOK key encryption (falls back to PLATFORM_API_KEY)
  */
 import {
-  ClaudeTokenStore,
+  ANTIGRAVITY_DEFAULT_MODEL,
   CodexTokenStore,
-  readClaudeCodeKeychainCredentials,
   readCodexAuthFile,
 } from '@playforge/providers';
 import { ERROR_CODES, PlayforgeError } from '@playforge/shared';
@@ -41,6 +40,7 @@ import { finalizeRun } from '../../worker/src/finalize-run';
 import { enqueueRun } from '../../worker/src/queue';
 import type { RunQualityMetrics } from '../../worker/src/run-generation';
 import { DrizzleAccountRepo } from './account-repo';
+import { type PostgresJsLike, createAiAuthStores, ensureAiAuthSchema } from './ai-auth';
 import { SessionAuthenticator } from './auth';
 import { BrowserJobQueue } from './browser-queue';
 import { type CreditPurchaseProvider, MockCreditProvider } from './credit-purchase';
@@ -176,34 +176,16 @@ async function main() {
   const bus: EventBus = redisUrl ? new RedisEventBus(redisUrl) : new InMemoryEventBus();
   const store = new SnapshotStore(new LocalFsBlobStore(blobDir));
 
-  // Claude subscription credential (OAuth, harvested from local Claude Code).
-  // When connected, generation runs on the subscription against the REAL
-  // Anthropic API. File-based (single local subscription) — mirrors the Codex
-  // token-store pattern. CLAUDE_SUBSCRIPTION_MODEL picks the Claude model used.
-  //
-  // "Refresh" RE-HARVESTS the current token from the Claude Code keychain rather
-  // than doing the OAuth exchange ourselves. Claude Code rotates + refreshes its
-  // own token; re-reading it (a) needs no client_id (absent from the blob) and
-  // (b) never rotates the refresh token out from under the `claude` CLI, so the
-  // user's Claude Code session is never broken by Gamehub.
-  const claudeAuthStore = new ClaudeTokenStore({
-    filePath: process.env['CLAUDE_AUTH_FILE'] ?? `${blobDir}/claude-auth.json`,
-    refreshFn: async () => {
-      const creds = await readClaudeCodeKeychainCredentials();
-      if (!creds) {
-        throw new PlayforgeError(
-          'Claude Code is not logged in on this machine — reconnect required.',
-          ERROR_CODES.CLAUDE_CODE_REIMPORT_REQUIRED,
-        );
-      }
-      return {
-        accessToken: creds.accessToken,
-        refreshToken: creds.refreshToken ?? '',
-        expiresAt: creds.expiresAt ?? Date.now() + 60 * 60 * 1000,
-      };
-    },
-  });
+  // Claude Code + Google Antigravity subscriptions: each USER signs in to their own plan in the
+  // browser (@flyvendedk799/ai-auth), sealed in Postgres keyed by user id. Generation then runs
+  // on that user's plan against the real provider API. CLAUDE_SUBSCRIPTION_MODEL /
+  // ANTIGRAVITY_SUBSCRIPTION_MODEL pick the models used.
+  const pgClient = (db as unknown as { $client: PostgresJsLike }).$client;
+  await ensureAiAuthSchema(pgClient);
+  const aiAuth = createAiAuthStores({ client: pgClient, secret: apiKeyEncryptionSecret });
   const claudeSubscriptionModel = process.env['CLAUDE_SUBSCRIPTION_MODEL'] ?? 'claude-sonnet-4-6';
+  const antigravitySubscriptionModel =
+    process.env['ANTIGRAVITY_SUBSCRIPTION_MODEL'] ?? ANTIGRAVITY_DEFAULT_MODEL;
 
   // Codex / ChatGPT subscription credential — symmetric to Claude, harvested
   // from the `codex` CLI's ~/.codex/auth.json. "Refresh" re-reads that file
@@ -522,8 +504,10 @@ async function main() {
     platformModel,
     platformApiKey,
     interviewModel,
-    claudeAuthStore,
+    claudeAccounts: aiAuth.claude,
     claudeSubscriptionModel,
+    antigravityAccounts: aiAuth.antigravity,
+    antigravitySubscriptionModel,
     codexAuthStore,
     codexSubscriptionModel,
     apiKeyEncryptionSecret,

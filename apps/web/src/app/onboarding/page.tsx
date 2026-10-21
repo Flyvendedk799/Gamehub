@@ -21,6 +21,7 @@ const MODEL_OPTIONS: Record<AccountProvider, string[]> = {
   openai: ['gpt-5.5', 'gpt-4.1'],
   'claude-subscription': [],
   'codex-subscription': [],
+  'antigravity-subscription': [],
 };
 
 // One interactive color (signal) — a selected card is not a provider-brand

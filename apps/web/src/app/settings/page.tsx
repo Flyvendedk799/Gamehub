@@ -3,13 +3,15 @@
 import {
   type AccountProvider,
   type AccountSettingsResponse,
-  connectClaude,
+  type BrowserLoginProvider,
+  completeSubscriptionLogin,
   connectCodex,
   deleteAccountProvider,
-  disconnectClaude,
   disconnectCodex,
+  disconnectSubscription,
   getAccountSettings,
   saveAccountProvider,
+  startSubscriptionLogin,
   updateAccountProfile,
 } from '@/lib/api';
 import Link from 'next/link';
@@ -21,12 +23,18 @@ const MODEL_OPTIONS: Record<AccountProvider, string[]> = {
   openai: ['gpt-5.5', 'gpt-4.1'],
   'claude-subscription': [],
   'codex-subscription': [],
+  'antigravity-subscription': [],
 };
 
-function isSubscriptionProvider(
-  p: AccountProvider,
-): p is 'claude-subscription' | 'codex-subscription' {
-  return p === 'claude-subscription' || p === 'codex-subscription';
+type SubscriptionProviderId =
+  | 'claude-subscription'
+  | 'codex-subscription'
+  | 'antigravity-subscription';
+
+function isSubscriptionProvider(p: AccountProvider): p is SubscriptionProviderId {
+  return (
+    p === 'claude-subscription' || p === 'codex-subscription' || p === 'antigravity-subscription'
+  );
 }
 
 // One interactive color (signal) — selection is a state, not a provider-brand
@@ -263,6 +271,7 @@ export default function SettingsPage() {
                     'anthropic',
                     'openai',
                     'claude-subscription',
+                    'antigravity-subscription',
                     'codex-subscription',
                   ] as AccountProvider[]
                 ).map((option) => {
@@ -282,9 +291,10 @@ export default function SettingsPage() {
                       <span className="flex items-center justify-between gap-3">
                         <span className="text-sm font-bold text-ink">{meta?.label ?? option}</span>
                         <span className="flex shrink-0 items-center gap-1.5">
-                          {/* Subscription credentials are harvested from a CLI login on the
-                              machine running the API, so they only ever work in local dev. */}
-                          {isSubscriptionProvider(option) && (
+                          {/* Codex is still harvested from a CLI login on the machine running
+                              the API, so it only ever works in local dev. Claude Code and
+                              Antigravity are per-user browser logins and work anywhere. */}
+                          {option === 'codex-subscription' && (
                             <span
                               title="Reads a CLI login from the machine running the API — local development only, never a deployed server."
                               className="border border-live px-2 py-1 font-mono text-[10px] uppercase tracking-[.12em] text-live"
@@ -458,22 +468,182 @@ function SubscriptionConnect({
   disabled,
   onChanged,
 }: {
-  provider: 'claude-subscription' | 'codex-subscription';
+  provider: SubscriptionProviderId;
+  connected: boolean;
+  disabled: boolean;
+  onChanged: () => void;
+}) {
+  if (provider === 'codex-subscription') {
+    return <CodexConnect connected={connected} disabled={disabled} onChanged={onChanged} />;
+  }
+  return (
+    <BrowserLoginConnect
+      login={provider === 'claude-subscription' ? 'claude-code' : 'antigravity'}
+      connected={connected}
+      disabled={disabled}
+      onChanged={onChanged}
+    />
+  );
+}
+
+const BROWSER_LOGIN_COPY: Record<BrowserLoginProvider, { blurb: string; cli: string }> = {
+  'claude-code': {
+    blurb:
+      'Runs on your own Claude Code subscription — the real Anthropic API, your prompt, billed to your plan.',
+    cli: 'claude',
+  },
+  antigravity: {
+    blurb:
+      'Runs Gemini on your own Google AI / Antigravity subscription — your prompt, billed to your plan.',
+    cli: 'agy',
+  },
+};
+
+/** The `claude` / `agy` CLI login, in the browser: open the consent page, paste the code back. */
+function BrowserLoginConnect({
+  login,
+  connected,
+  disabled,
+  onChanged,
+}: {
+  login: BrowserLoginProvider;
   connected: boolean;
   disabled: boolean;
   onChanged: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const isClaude = provider === 'claude-subscription';
+  const [pendingUrl, setPendingUrl] = useState<string | null>(null);
+  const [code, setCode] = useState('');
+  const copy = BROWSER_LOGIN_COPY[login];
+
+  const guard = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    setErr('');
+    try {
+      await fn();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Action failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const start = () =>
+    guard(async () => {
+      const { url } = await startSubscriptionLogin(login);
+      setPendingUrl(url);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    });
+
+  const finish = () =>
+    guard(async () => {
+      await completeSubscriptionLogin(login, code.trim());
+      setPendingUrl(null);
+      setCode('');
+      onChanged();
+    });
+
+  const disconnect = () =>
+    guard(async () => {
+      await disconnectSubscription(login);
+      onChanged();
+    });
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-ink-3">{copy.blurb}</p>
+      {!connected && !pendingUrl && (
+        <button
+          type="button"
+          disabled={busy || disabled}
+          onClick={start}
+          className="bg-signal px-4 py-3 text-sm font-bold text-chrome transition-colors hover:bg-signal-bright disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {busy ? 'Opening…' : 'Sign in'}
+        </button>
+      )}
+      {!connected && pendingUrl && (
+        <div className="space-y-2">
+          <p className="text-xs text-ink-4">
+            Approve access in the tab that just opened (
+            <a
+              href={pendingUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-signal underline"
+            >
+              reopen it
+            </a>
+            ), then paste the code it shows you — the same step as <code>{copy.cli}</code> in a
+            terminal.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <input
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="Paste code"
+              aria-label="Authorization code"
+              autoComplete="off"
+              spellCheck={false}
+              className="min-w-0 flex-1 border border-hairline bg-surface px-3 py-3 font-mono text-sm text-ink"
+            />
+            <button
+              type="button"
+              disabled={busy || disabled || code.trim().length === 0}
+              onClick={finish}
+              className="bg-signal px-4 py-3 text-sm font-bold text-chrome transition-colors hover:bg-signal-bright disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {busy ? 'Connecting…' : 'Connect'}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setPendingUrl(null);
+                setCode('');
+                setErr('');
+              }}
+              className="border border-hairline px-4 py-3 text-sm text-ink-3 transition-colors hover:border-edge hover:text-ink disabled:opacity-40"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {connected && (
+        <button
+          type="button"
+          disabled={busy || disabled}
+          onClick={disconnect}
+          className="border border-hairline px-4 py-3 text-sm text-ink-3 transition-colors hover:border-edge hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {busy ? 'Disconnecting…' : 'Disconnect'}
+        </button>
+      )}
+      {err && <p className="text-sm text-fail">{err}</p>}
+    </div>
+  );
+}
+
+function CodexConnect({
+  connected,
+  disabled,
+  onChanged,
+}: {
+  connected: boolean;
+  disabled: boolean;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
 
   const run = async (action: 'connect' | 'reauth' | 'disconnect') => {
     setBusy(true);
     setErr('');
     try {
-      if (action === 'disconnect') await (isClaude ? disconnectClaude() : disconnectCodex());
-      else
-        await (isClaude ? connectClaude(action === 'reauth') : connectCodex(action === 'reauth'));
+      if (action === 'disconnect') await disconnectCodex();
+      else await connectCodex(action === 'reauth');
       onChanged();
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Action failed');
@@ -485,16 +655,14 @@ function SubscriptionConnect({
   return (
     <div className="space-y-3">
       <p className="text-sm text-ink-3">
-        {isClaude
-          ? 'Runs on your Claude Code subscription — the real Anthropic API, your prompt, billed to the subscription. Reads the local Claude Code login on this machine.'
-          : 'Runs on your ChatGPT/Codex subscription — the real OpenAI Codex API, your prompt, billed to the subscription. Reads the local codex CLI login on this machine.'}
+        Runs on your ChatGPT/Codex subscription — the real OpenAI Codex API, your prompt, billed to
+        the subscription. Reads the local codex CLI login on this machine.
       </p>
       <p className="border border-live/40 bg-live/5 px-3 py-2 text-xs leading-relaxed text-live">
         <span className="font-semibold">Local development only.</span> The credential is harvested
-        from the {isClaude ? 'Claude Code' : 'codex CLI'} login on the machine running the API
-        {isClaude ? ' (macOS keychain only)' : ''}, and refreshing re-reads that same local login.
-        On a deployed server there is nothing to read, so connecting will fail — use an API key
-        instead.
+        from the codex CLI login on the machine running the API, and refreshing re-reads that same
+        local login. On a deployed server there is nothing to read, so connecting will fail — use
+        an API key instead.
       </p>
       <div className="flex flex-wrap gap-2">
         {!connected && (
