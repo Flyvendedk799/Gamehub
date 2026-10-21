@@ -108,7 +108,7 @@ export class BrowserJobsClient {
     const job = await this.queue.add(
       'runtime-verify',
       { kind: 'runtime-verify', htmlContent, bootTimeoutMs: 10_000 },
-      { removeOnComplete: 20, removeOnFail: 20 },
+      { removeOnComplete: { age: 3600, count: 2 }, removeOnFail: { age: 86_400, count: 5 } },
     );
     return job.id ?? 'unknown';
   }
@@ -117,7 +117,7 @@ export class BrowserJobsClient {
     const job = await this.queue.add(
       'thumbnail',
       { kind: 'thumbnail', htmlContent, bootTimeoutMs: 10_000, playSettle },
-      { removeOnComplete: 20, removeOnFail: 20 },
+      { removeOnComplete: { age: 3600, count: 2 }, removeOnFail: { age: 86_400, count: 5 } },
     );
     return job.id ?? 'unknown';
   }
@@ -126,7 +126,7 @@ export class BrowserJobsClient {
     const job = await this.queue.add(
       'playtest',
       { kind: 'playtest', htmlContent, steps, bootTimeoutMs: 10_000 },
-      { removeOnComplete: 20, removeOnFail: 20 },
+      { removeOnComplete: { age: 3600, count: 2 }, removeOnFail: { age: 86_400, count: 5 } },
     );
     return job.id ?? 'unknown';
   }

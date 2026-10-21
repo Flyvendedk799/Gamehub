@@ -130,6 +130,11 @@ export function safeParseStreamData(raw: string): { ok: true; value: unknown } |
  * history, so the browser can reconnect to a different instance without
  * missing events.
  */
+/** Approximate max entries kept per run stream. */
+const STREAM_MAXLEN = 30_000;
+/** Idle lifetime of a run stream; refreshed on every publish. */
+const STREAM_TTL_SECONDS = 3 * 24 * 60 * 60;
+
 export class RedisEventBus implements EventBus {
   private readonly redisUrl: string;
 
@@ -171,7 +176,14 @@ export class RedisEventBus implements EventBus {
   }
 
   async publish(channel: string, message: unknown): Promise<void> {
-    await this.getPublisher().xadd(channel, '*', 'data', JSON.stringify(message));
+    // Bound each run's stream: approximate-trim to STREAM_MAXLEN entries and
+    // slide a TTL so finished runs fall out of Redis instead of living forever.
+    // (Untrimmed, a single run held 70+ MB and nothing was ever evicted.)
+    await this.getPublisher()
+      .multi()
+      .xadd(channel, 'MAXLEN', '~', String(STREAM_MAXLEN), '*', 'data', JSON.stringify(message))
+      .expire(channel, STREAM_TTL_SECONDS)
+      .exec();
   }
 
   async subscribe(

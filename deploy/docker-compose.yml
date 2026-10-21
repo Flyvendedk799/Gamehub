@@ -32,7 +32,7 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     # appendonly so queued-but-unstarted generations survive a restart.
-    command: ['redis-server', '--appendonly', 'yes']
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory', '768mb', '--maxmemory-policy', 'volatile-lru']
     volumes:
       - redis-data:/data
     healthcheck:

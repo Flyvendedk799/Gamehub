@@ -9,9 +9,21 @@ import { InMemoryEventBus, RedisEventBus, runChannel, safeParseStreamData } from
 class FakeRedis {
   disconnected = false;
   readonly added: Array<{ channel: string; data: string }> = [];
-  async xadd(channel: string, _star: string, _field: string, data: string): Promise<string> {
-    this.added.push({ channel, data });
-    return '1-0';
+  multi(): { xadd: (...a: string[]) => unknown; expire: (...a: unknown[]) => unknown; exec: () => Promise<unknown[]> } {
+    let pending: { channel: string; data: string } | null = null;
+    const chain = {
+      xadd: (channel: string, ...rest: string[]) => {
+        // channel, MAXLEN, ~, <n>, '*', 'data', <json>
+        pending = { channel, data: rest[rest.length - 1] ?? '' };
+        return chain;
+      },
+      expire: () => chain,
+      exec: async () => {
+        if (pending) this.added.push(pending);
+        return [];
+      },
+    };
+    return chain;
   }
   disconnect(): void {
     this.disconnected = true;

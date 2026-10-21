@@ -73,7 +73,7 @@ export class BrowserJobQueue {
         viewport: { width: 1280, height: 720 },
         bootTimeoutMs: 8000,
       },
-      { removeOnComplete: 10, removeOnFail: 10 },
+      { removeOnComplete: { age: 3600, count: 2 }, removeOnFail: { age: 86_400, count: 5 } },
     );
     return job.id ?? 'unknown';
   }
@@ -82,7 +82,7 @@ export class BrowserJobQueue {
     const job = await this.queue.add(
       'runtime-verify',
       { kind: 'runtime-verify', htmlContent, bootTimeoutMs: 10_000 },
-      { removeOnComplete: 10, removeOnFail: 10 },
+      { removeOnComplete: { age: 3600, count: 2 }, removeOnFail: { age: 86_400, count: 5 } },
     );
     return job.id ?? 'unknown';
   }
@@ -91,7 +91,7 @@ export class BrowserJobQueue {
     const job = await this.queue.add(
       'playtest',
       { kind: 'playtest', htmlContent, steps, bootTimeoutMs: 10_000 },
-      { removeOnComplete: 10, removeOnFail: 10 },
+      { removeOnComplete: { age: 3600, count: 2 }, removeOnFail: { age: 86_400, count: 5 } },
     );
     return job.id ?? 'unknown';
   }
