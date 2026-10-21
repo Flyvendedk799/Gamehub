@@ -33,7 +33,7 @@ import type { AbortKind, GameSpec, ModelRef, WireApi } from '@playforge/shared';
 import { classifyAbortKind } from '@playforge/shared';
 import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
 import { Queue, Worker } from 'bullmq';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import {
   BrowserJobsClient,
   type PlaytestResult,
@@ -681,6 +681,32 @@ async function main() {
         .set({ status: 'failed', abortKind, updatedAt: now, finishedAt: now })
         .where(eq(schema.runs.id, runId))
         .catch(() => {});
+
+      // Leave the failure in the project's history. A failed run publishes no snapshot and no
+      // assistant message, so without this a reload shows only the user's prompt - the error,
+      // and the Fix-it affordance that goes with it, vanish with the live stream.
+      const projectIdForHistory = job?.data.projectId;
+      if (projectIdForHistory) {
+        const [seqRow] = await db
+          .select({ val: sql<number>`COALESCE(MAX(${schema.chatMessages.seq}), -1)` })
+          .from(schema.chatMessages)
+          .where(eq(schema.chatMessages.projectId, projectIdForHistory))
+          .catch(() => []);
+        await db
+          .insert(schema.chatMessages)
+          .values({
+            projectId: projectIdForHistory,
+            seq: (seqRow?.val ?? -1) + 1,
+            kind: 'error',
+            payload: {
+              runId,
+              error: (err instanceof Error ? err.message : String(err)).slice(0, 600),
+            },
+          })
+          .catch((historyErr: unknown) => {
+            console.error(`[worker] could not record failure in history for ${runId}:`, historyErr);
+          });
+      }
 
       // Refund the enqueue-time reservation so a failed run costs nothing. The
       // partial unique 'credit_ledger_refund_key' (run_id WHERE reason='refund')
