@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@fastify/websocket": "^11.2.0",
-    "@flyvendedk799/ai-auth": "github:Flyvendedk799/ai-auth#feat/sync-openbot-antigravity",
+    "@flyvendedk799/ai-auth": "github:Flyvendedk799/ai-auth",
     "@playforge/bus": "workspace:*",
     "@playforge/db": "workspace:*",
     "@playforge/exporters": "workspace:*",
