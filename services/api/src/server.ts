@@ -72,6 +72,7 @@ import {
   isByokProvider,
   isSubscriptionProvider,
 } from './account-repo';
+import { listAntigravityModels } from './ai-auth';
 import { decryptApiKey, encryptApiKey, last4OfApiKey } from './api-key-crypto';
 import type { AuthedUser, Authenticator } from './auth';
 import { generateSessionToken, hashPassword, sessionExpiresAt, verifyPassword } from './auth';
@@ -1146,7 +1147,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
               ok: true,
               model: {
                 provider: ANTIGRAVITY_PROVIDER,
-                modelId: deps.antigravitySubscriptionModel ?? ANTIGRAVITY_DEFAULT_MODEL,
+                // The user's pick from the live list, else the server default.
+                modelId:
+                  settings?.defaultModelId?.trim() ||
+                  (deps.antigravitySubscriptionModel ?? ANTIGRAVITY_DEFAULT_MODEL),
               },
               apiKey: await deps.antigravityAccounts.token(userId),
               wire: 'antigravity-cloudcode',
@@ -1516,7 +1520,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const settings = await deps.accountRepo.saveProvider(user.userId, {
       provider,
       // Platform + subscriptions use a server-fixed model; only BYOK stores one.
-      modelId: provider === 'platform' || isSubscriptionProvider(provider) ? null : modelId,
+      modelId:
+        provider === 'platform' ||
+        (isSubscriptionProvider(provider) && provider !== 'antigravity-subscription')
+          ? null
+          : modelId,
       markOnboardingComplete,
     });
     if (!settings) return reply.code(404).send({ error: 'not_found' });
@@ -1561,6 +1569,20 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       prefix: '/v1/auth/claude-code',
     }),
   );
+  app.get('/v1/auth/antigravity/models', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    if (!deps.antigravityAccounts) return reply.code(503).send({ error: 'antigravity_unavailable' });
+    const status = await deps.antigravityAccounts.status(user.userId);
+    if (!status.connected) return reply.send({ models: [] });
+    try {
+      const token = await deps.antigravityAccounts.token(user.userId);
+      return reply.send({ models: await listAntigravityModels(token, status.projectId) });
+    } catch (err) {
+      console.warn(`[antigravity] model list unavailable: ${String(err)}`);
+      return reply.code(502).send({ error: 'model_list_unavailable' });
+    }
+  });
   void app.register(
     antigravityAuthRoutes({
       store: deps.antigravityAccounts ?? null,

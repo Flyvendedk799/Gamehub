@@ -6,7 +6,11 @@
  * This replaces the old single-machine keychain harvest, which could only ever serve whoever
  * happened to be logged in to Claude Code on the API host.
  */
-import { AntigravityAccountStore, ClaudeAccountStore } from '@flyvendedk799/ai-auth';
+import {
+  AntigravityAccountStore,
+  ClaudeAccountStore,
+  antigravityCliOptions,
+} from '@flyvendedk799/ai-auth';
 import {
   PostgresCredentialStore,
   type Queryable,
@@ -43,4 +47,53 @@ export function createAiAuthStores(opts: { client: PostgresJsLike; secret: strin
     claude: new ClaudeAccountStore(common),
     antigravity: new AntigravityAccountStore(common),
   };
+}
+
+export interface AntigravityModelChoice {
+  id: string;
+  label: string;
+}
+
+const TIERED_FLASH = 'gemini-3.8-flash-tiered';
+
+/**
+ * The models THIS login can actually call, from Cloud Code's own list. A hard-coded id that
+ * the list lacks 404s every request, so the picker is fed from here rather than a constant.
+ * The tiered Flash is one wire id whose effort is a request setting, so it is offered as the
+ * three ids ai-auth maps back onto it.
+ */
+export async function listAntigravityModels(
+  accessToken: string,
+  projectId: string | null,
+  fetchImpl: typeof fetch = fetch,
+): Promise<AntigravityModelChoice[]> {
+  const cli = antigravityCliOptions({
+    accessToken,
+    refreshToken: null,
+    expiresAt: 0,
+    email: null,
+    projectId,
+  });
+  const res = await fetchImpl(`${cli.baseURL}:fetchAvailableModels`, {
+    method: 'POST',
+    headers: cli.defaultHeaders as Record<string, string>,
+    body: '{}',
+  });
+  if (!res.ok) throw new Error(`fetchAvailableModels ${res.status}`);
+  const data = (await res.json()) as { models?: Record<string, { displayName?: string }> };
+  const out: AntigravityModelChoice[] = [];
+  for (const [id, info] of Object.entries(data.models ?? {})) {
+    if (!id.startsWith('gemini-') || /image|embedding|-agent$/.test(id)) continue;
+    if (id === TIERED_FLASH) {
+      for (const level of ['high', 'medium', 'low']) {
+        out.push({
+          id: `gemini-3.8-flash-${level}`,
+          label: `Gemini 3.8 Flash (${level[0]?.toUpperCase()}${level.slice(1)})`,
+        });
+      }
+    } else {
+      out.push({ id, label: info.displayName?.trim() || id });
+    }
+  }
+  return out;
 }

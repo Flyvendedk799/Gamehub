@@ -10,6 +10,7 @@ import {
   disconnectCodex,
   disconnectSubscription,
   getAccountSettings,
+  getAntigravityModels,
   saveAccountProvider,
   startSubscriptionLogin,
   updateAccountProfile,
@@ -79,6 +80,30 @@ export default function SettingsPage() {
     () => settings?.providers.find((item) => item.provider === provider) ?? null,
     [provider, settings],
   );
+
+  const [agyModels, setAgyModels] = useState<Array<{ id: string; label: string }>>([]);
+  const agyConnected =
+    settings?.providers.find((p) => p.provider === 'antigravity-subscription')?.configured ?? false;
+  useEffect(() => {
+    if (!agyConnected) {
+      setAgyModels([]);
+      return;
+    }
+    let cancelled = false;
+    getAntigravityModels()
+      .then((m) => {
+        if (cancelled) return;
+        setAgyModels(m);
+        // A saved id this login no longer offers would 404; fall back to one it does.
+        setModelId((current) => (m.some((x) => x.id === current) ? current : (m[0]?.id ?? current)));
+      })
+      .catch(() => {
+        if (!cancelled) setAgyModels([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [agyConnected]);
 
   function hydrate(data: AccountSettingsResponse) {
     setSettings(data);
@@ -397,6 +422,33 @@ export default function SettingsPage() {
                       ))}
                     </select>
                   </div>
+                </div>
+              )}
+
+              {provider === 'antigravity-subscription' && agyConnected && agyModels.length > 0 && (
+                <div>
+                  <label
+                    htmlFor="agyModel"
+                    className="type-label-xs mb-2 block tracking-[.14em] text-ink-3"
+                  >
+                    Model
+                  </label>
+                  <select
+                    id="agyModel"
+                    value={agyModels.some((m) => m.id === modelId) ? modelId : agyModels[0]?.id}
+                    onChange={(e) => setModelId(e.target.value)}
+                    disabled={disabled}
+                    className="w-full border border-hairline bg-ground px-3 py-3 text-sm text-ink outline-none transition-colors focus:border-signal disabled:opacity-50"
+                  >
+                    {agyModels.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-2 text-xs text-ink-4">
+                    Only models your Google login can actually call are listed. Save to apply.
+                  </p>
                 </div>
               )}
 
