@@ -184,11 +184,64 @@ describe('streamAntigravity', () => {
     const s = streamAntigravity(
       model,
       { messages: [{ role: 'user', content: 'hi', timestamp: 0 }] },
-      { apiKey: 'tok', fetchImpl },
+      { apiKey: 'tok', fetchImpl, sleepImpl: async () => {} },
     );
     const result = await s.result();
     expect(result.stopReason).toBe('error');
     expect(result.errorMessage).toContain('429');
+  });
+
+  it('retries a transient 503 and then succeeds, without emitting anything for the failed tries', async () => {
+    let calls = 0;
+    const sleeps: number[] = [];
+    const fetchImpl = (async () => {
+      calls += 1;
+      if (calls < 3) return new Response('{"error":{"status":"UNAVAILABLE"}}', { status: 503 });
+      return sseResponse([
+        { response: { candidates: [{ content: { parts: [{ text: 'ok' }] } }] } },
+      ]);
+    }) as unknown as typeof fetch;
+    const s = streamAntigravity(
+      model,
+      { messages: [{ role: 'user', content: 'hi', timestamp: 0 }] },
+      { apiKey: 'tok', fetchImpl, sleepImpl: async (ms) => void sleeps.push(ms) },
+    );
+    const result = await s.result();
+    expect(calls).toBe(3);
+    expect(sleeps).toHaveLength(2);
+    expect(result.stopReason).toBe('stop');
+    expect(result.content[0]).toMatchObject({ text: 'ok' });
+  });
+
+  it('gives up after the attempt cap and reports the last status', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return new Response('down', { status: 503 });
+    }) as unknown as typeof fetch;
+    const s = streamAntigravity(
+      model,
+      { messages: [{ role: 'user', content: 'hi', timestamp: 0 }] },
+      { apiKey: 'tok', fetchImpl, sleepImpl: async () => {} },
+    );
+    const result = await s.result();
+    expect(calls).toBe(5);
+    expect(result.errorMessage).toContain('503');
+  });
+
+  it('does not retry a permanent error', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return new Response('nope', { status: 400 });
+    }) as unknown as typeof fetch;
+    const s = streamAntigravity(
+      model,
+      { messages: [{ role: 'user', content: 'hi', timestamp: 0 }] },
+      { apiKey: 'tok', fetchImpl, sleepImpl: async () => {} },
+    );
+    await s.result();
+    expect(calls).toBe(1);
   });
 
   it('errors clearly with no token', async () => {

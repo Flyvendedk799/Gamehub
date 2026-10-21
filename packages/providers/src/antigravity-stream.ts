@@ -177,7 +177,36 @@ function emptyMessage(model: Model<string>): AssistantMessage {
 export type AntigravityStreamOptions = Pick<StreamOptions, 'apiKey' | 'signal' | 'maxTokens'> & {
   /** Override for tests. */
   fetchImpl?: typeof fetch;
+  /** Override for tests (backoff sleep). */
+  sleepImpl?: (ms: number, signal?: AbortSignal) => Promise<void>;
 };
+
+/** Cloud Code answers these transiently (overload, restarts, per-minute quota). */
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 5;
+const BASE_DELAY_MS = 1_000;
+const MAX_DELAY_MS = 20_000;
+
+function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(t);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+}
+
+function retryDelayMs(attempt: number, retryAfter: string | null): number {
+  const seconds = retryAfter === null ? Number.NaN : Number(retryAfter);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, MAX_DELAY_MS);
+  const exp = Math.min(BASE_DELAY_MS * 2 ** attempt, MAX_DELAY_MS);
+  return exp / 2 + Math.random() * (exp / 2);
+}
 
 export function streamAntigravity(
   model: Model<string>,
@@ -220,20 +249,39 @@ export function streamAntigravity(
         },
       });
 
-      const response = await (options.fetchImpl ?? fetch)(
-        `${cli.baseURL}:streamGenerateContent?alt=sse`,
-        {
-          method: 'POST',
-          headers: cli.defaultHeaders as Record<string, string>,
-          body: JSON.stringify(body),
-          ...(options.signal ? { signal: options.signal } : {}),
-        },
-      );
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw Object.assign(new Error(`Antigravity error: ${response.status} ${text}`), {
-          status: response.status,
-        });
+      // Nothing has been emitted to the consumer until a response is accepted, so retrying the
+      // request itself is safe — unlike a mid-stream failure, which would replay partial output.
+      const doFetch = options.fetchImpl ?? fetch;
+      const sleep = options.sleepImpl ?? defaultSleep;
+      let response!: Response;
+      for (let attempt = 0; ; attempt++) {
+        let failure: { status: number; text: string; retryAfter: string | null } | null = null;
+        try {
+          response = await doFetch(`${cli.baseURL}:streamGenerateContent?alt=sse`, {
+            method: 'POST',
+            headers: cli.defaultHeaders as Record<string, string>,
+            body: JSON.stringify(body),
+            ...(options.signal ? { signal: options.signal } : {}),
+          });
+          if (response.ok) break;
+          failure = {
+            status: response.status,
+            text: await response.text().catch(() => ''),
+            retryAfter: response.headers.get('retry-after'),
+          };
+        } catch (netErr) {
+          // A dropped connection before any response is as transient as a 503.
+          if (options.signal?.aborted || attempt + 1 >= MAX_ATTEMPTS) throw netErr;
+          await sleep(retryDelayMs(attempt, null), options.signal);
+          continue;
+        }
+        if (!RETRYABLE_STATUS.has(failure.status) || attempt + 1 >= MAX_ATTEMPTS) {
+          throw Object.assign(new Error(`Antigravity error: ${failure.status} ${failure.text}`), {
+            status: failure.status,
+          });
+        }
+        await sleep(retryDelayMs(attempt, failure.retryAfter), options.signal);
+        if (options.signal?.aborted) throw new Error('aborted');
       }
 
       let textIndex = -1;
