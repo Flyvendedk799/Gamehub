@@ -105,6 +105,12 @@ export function toAntigravityContents(messages: Message[]): CodeAssistContent[] 
       }
     }
   }
+  // Cloud Code rejects a request whose last turn is the model's ("Requests ending with a model
+  // turn are not supported"). The agent can legitimately resume after its own text-only reply,
+  // so close the gap with a neutral user turn rather than failing the run.
+  if (out[out.length - 1]?.role === 'model') {
+    out.push({ role: 'user', parts: [{ text: 'Continue.' }] });
+  }
   return out;
 }
 
