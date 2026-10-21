@@ -68,6 +68,25 @@ describe('toAntigravityContents', () => {
   });
 });
 
+describe('toAntigravityContents turn order', () => {
+  it('never ends on a model turn', () => {
+    const contents = toAntigravityContents([
+      { role: 'user', content: 'go', timestamp: 0 },
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'thinking out loud' }],
+        api: ANTIGRAVITY_API,
+        provider: 'antigravity',
+        model: 'm',
+        usage: {} as never,
+        stopReason: 'stop',
+        timestamp: 0,
+      },
+    ]);
+    expect(contents.map((c) => c.role)).toEqual(['user', 'model', 'user']);
+  });
+});
+
 describe('streamAntigravity', () => {
   it('streams text, whole function calls and usage from Cloud Code frames', async () => {
     let seenUrl = '';
