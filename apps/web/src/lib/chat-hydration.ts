@@ -33,6 +33,18 @@ export function chatMessageToEvents(msg: ChatHistoryMessage): SseEvent[] {
       },
     ];
   }
+  // A failed run leaves this row so the error (and its Fix-it) survives a reload.
+  if (msg.kind === 'error') {
+    const p = msg.payload as { runId?: string; error?: string } | null;
+    return [
+      {
+        type: 'run_error',
+        runId: p?.runId ?? '',
+        error: p?.error ?? 'This run failed.',
+        timestamp: msg.createdAt,
+      },
+    ];
+  }
   // Phase 2.5 — a `continuation_pending` row means a long run paused at a safe
   // boundary. Hydrating it as a `run_paused` event makes the Resume button
   // reappear after a reload; resuming re-fires generateGame (the server
@@ -69,7 +81,9 @@ export function hydrateHistoryEvents(
   for (const msg of messages) {
     if (
       streamRunId &&
-      (msg.kind === 'artifact_delivered' || msg.kind === 'continuation_pending') &&
+      (msg.kind === 'artifact_delivered' ||
+        msg.kind === 'continuation_pending' ||
+        msg.kind === 'error') &&
       (msg.payload as { runId?: string } | null)?.runId === streamRunId
     ) {
       continue;

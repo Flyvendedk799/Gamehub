@@ -130,3 +130,24 @@ describe('lastPreviewUrlFromHistory', () => {
     expect(lastPreviewUrlFromHistory([msg({ kind: 'user', payload: { text: 'a' } })])).toBeNull();
   });
 });
+
+describe('failed-run history', () => {
+  const failed = msg({
+    kind: 'error',
+    payload: { runId: 'r1', error: 'PlayforgeError: Antigravity error: 503' },
+  });
+
+  it('hydrates a recorded failure into a run_error so it survives a reload', () => {
+    const [event] = chatMessageToEvents(failed);
+    expect(event).toMatchObject({
+      type: 'run_error',
+      runId: 'r1',
+      error: 'PlayforgeError: Antigravity error: 503',
+    });
+  });
+
+  it('does not duplicate the failure for the run whose live stream is replaying it', () => {
+    expect(hydrateHistoryEvents([failed], 'r1')).toEqual([]);
+    expect(hydrateHistoryEvents([failed], 'other')).toHaveLength(1);
+  });
+});
