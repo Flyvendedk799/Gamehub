@@ -842,6 +842,14 @@ export async function completeSubscriptionLogin(
   });
 }
 
+/** The models this Antigravity login can actually call (live list from Cloud Code). */
+export async function getAntigravityModels(): Promise<Array<{ id: string; label: string }>> {
+  const res = await apiFetch<{ models: Array<{ id: string; label: string }> }>(
+    '/v1/auth/antigravity/models',
+  );
+  return res.models;
+}
+
 export async function disconnectSubscription(p: BrowserLoginProvider): Promise<BrowserLoginStatus> {
   return apiFetch<BrowserLoginStatus>(`/v1/auth/${p}`, { method: 'DELETE' });
 }

@@ -6,6 +6,7 @@ import {
 import { InMemoryEventBus } from '@playforge/bus';
 import { describe, expect, it } from 'vitest';
 import { InMemoryAccountRepo } from './account-repo';
+import { listAntigravityModels } from './ai-auth';
 import { HeaderAuthenticator } from './auth';
 import { InMemoryProjectRepo } from './repo';
 import { InMemoryRunRepo } from './run-repo';
@@ -111,5 +112,30 @@ describe('per-user subscription login (ai-auth)', () => {
       headers: as('alice'),
     });
     expect(after.json<{ connected: boolean }>().connected).toBe(false);
+  });
+});
+
+describe('listAntigravityModels', () => {
+  it('offers only callable Gemini chat models and expands the tiered Flash into effort levels', async () => {
+    const fetchImpl = (async () =>
+      new Response(
+        JSON.stringify({
+          models: {
+            'gemini-3.8-flash-tiered': {},
+            'gemini-2.5-pro': { displayName: 'Gemini 2.5 Pro' },
+            'gemini-3.1-flash-image': { displayName: 'Image' },
+            'claude-sonnet-4-6': { displayName: 'Claude' },
+            chat_23310: {},
+          },
+        }),
+        { status: 200 },
+      )) as unknown as typeof fetch;
+    const models = await listAntigravityModels('tok', null, fetchImpl);
+    expect(models.map((m) => m.id)).toEqual([
+      'gemini-3.8-flash-high',
+      'gemini-3.8-flash-medium',
+      'gemini-3.8-flash-low',
+      'gemini-2.5-pro',
+    ]);
   });
 });

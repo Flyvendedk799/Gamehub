@@ -31,7 +31,12 @@ import {
 
 export const ANTIGRAVITY_API = 'antigravity-cloudcode';
 export const ANTIGRAVITY_PROVIDER = 'antigravity';
-export const ANTIGRAVITY_DEFAULT_MODEL = 'gemini-3.1-pro';
+/**
+ * `gemini-3.1-pro` maps to `gemini-3.1-pro-low`, which a personal login's Cloud Code model list
+ * does not contain (every call 404s NOT_FOUND). The Gemini 3.8 Flash tiered id is the newest
+ * model that list reliably carries; effort is a request setting, not part of the id.
+ */
+export const ANTIGRAVITY_DEFAULT_MODEL = 'gemini-3.8-flash-high';
 
 /**
  * Header the caller uses to hand the (optional) GCP project through `Model.headers`. It is
