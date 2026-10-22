@@ -65,6 +65,7 @@ import { buildTransformContext } from './context-prune.js';
 import type { EditorSession } from './editor/session.js';
 import { type ContextMessage, pruneContextAtomic } from './engine/context.js';
 import { remapProviderError } from './errors.js';
+import { repairUnresolvedImports } from './import-repair.js';
 import type {
   AttachmentContext,
   GenerateInput,
@@ -2955,6 +2956,68 @@ export async function generateViaAgent(
     }
   }
   clearTimeout(budgetTimer);
+
+  // Antigravity/Gemini often ends a build with a half-converted project: the gameplay modules
+  // rewritten, the wiring modules still the placeholder starter, so nothing can load. The open
+  // loop did not fix that in ~100 turns even with a precise error; one loop-free repair call
+  // does. Non-fatal by design - a failed repair leaves the project exactly as the run left it.
+  if (
+    piModel.api === ANTIGRAVITY_API &&
+    isGameMode &&
+    deps.fs?.textFiles !== undefined &&
+    input.signal?.aborted !== true
+  ) {
+    try {
+      const fsForRepair = deps.fs;
+      const original = input.history.find((m) => m.role === 'user')?.content;
+      const brief =
+        typeof original === 'string' && original.length > 0 && original !== input.prompt
+          ? `${original}
+
+Latest request: ${input.prompt}`
+          : input.prompt;
+      const repair = await repairUnresolvedImports({
+        brief,
+        spec: await deps.gameMode?.getSpec?.(),
+        listFiles: () => fsForRepair.textFiles?.() ?? [],
+        write: async (path, content) => {
+          await fsForRepair.create(path, content);
+        },
+        generate: async (system, user) => {
+          const apiKey = (await input.getApiKey?.()) ?? input.apiKey;
+          const repairStream = streamAntigravity(
+            piModel as never,
+            {
+              systemPrompt: system,
+              messages: [{ role: 'user', content: user, timestamp: Date.now() }],
+            },
+            {
+              apiKey,
+              ...(input.signal !== undefined ? { signal: input.signal } : {}),
+              maxTokens: 60_000,
+              reasoning: 'low',
+            },
+          );
+          const done = await repairStream.result();
+          if (done.stopReason === 'error' || done.stopReason === 'aborted') {
+            throw new Error(done.errorMessage ?? 'repair completion failed');
+          }
+          return done.content
+            .filter((c) => c.type === 'text')
+            .map((c) => (c as { text: string }).text)
+            .join('');
+        },
+      });
+      log.info('[generate] step=import_repair', {
+        ...ctx,
+        attempts: repair.attempts,
+        written: repair.written,
+        remaining: repair.remaining.length,
+      });
+    } catch (err) {
+      log.warn('[generate] step=import_repair.failed', { ...ctx, error: String(err) });
+    }
+  }
 
   const finalAssistant = findFinalAssistantMessage(agent.state.messages);
   if (!finalAssistant) {
