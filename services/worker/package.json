@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@babel/parser": "^8.0.7",
+    "@flyvendedk799/ai-auth": "github:Flyvendedk799/ai-auth",
     "@playforge/agent-core": "workspace:*",
     "@playforge/bus": "workspace:*",
     "@playforge/db": "workspace:*",

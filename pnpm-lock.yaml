@@ -400,6 +400,9 @@ importers:
       '@babel/parser':
         specifier: ^8.0.7
         version: 8.0.7
+      '@flyvendedk799/ai-auth':
+        specifier: github:Flyvendedk799/ai-auth
+        version: https://codeload.github.com/Flyvendedk799/ai-auth/tar.gz/4cdd066c7576b3021da91709e219f2b1123963a8(fastify@5.8.5)(react@19.2.7)
       '@playforge/agent-core':
         specifier: workspace:*
         version: link:../../packages/core

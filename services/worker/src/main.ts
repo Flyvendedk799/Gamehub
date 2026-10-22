@@ -46,6 +46,7 @@ import { captureProjectThumbnail } from './capture-thumbnail';
 import { finalizeRun } from './finalize-run';
 import { enqueueRun } from './queue';
 import type { BrowserJobsPort, RunTokenUsage, WebEngine } from './run-generation';
+import { type PostgresJsLike, createSubscriptionTokenSource } from './subscription-token';
 import { RedisTelemetryBridge } from './telemetry';
 
 function requireEnv(name: string): string {
@@ -208,6 +209,12 @@ async function main() {
   const concurrency = parsePositiveIntEnv(process.env['WORKER_CONCURRENCY'], 2);
 
   const db = createDb(databaseUrl);
+  // Fresh Claude Code / Antigravity tokens per turn (the one in the job payload may be stale).
+  const subscriptionTokens = createSubscriptionTokenSource({
+    client: (db as unknown as { $client: PostgresJsLike }).$client,
+    // Must match the API's secret (it falls back to the platform key the same way).
+    secret: process.env['API_KEY_ENCRYPTION_SECRET'] ?? platformApiKey,
+  });
   const bus = new RedisEventBus(redisUrl);
   const telemetryBridge = new RedisTelemetryBridge(redisUrl);
   const store = new SnapshotStore(new LocalFsBlobStore(blobDir));
@@ -286,6 +293,14 @@ async function main() {
         isRemix,
       } = job.data;
       const apiKey = jobApiKey ?? platformApiKey;
+      // For a subscription job: resolve the CURRENT token every turn instead of trusting the
+      // one captured at enqueue time (it can be an hour old by the time a turn runs).
+      const getFreshApiKey = subscriptionTokens.forJob({
+        userId: job.data.userId,
+        wire,
+        provider: (jobModel ?? { provider: modelProvider }).provider,
+        apiKey,
+      });
       const model: ModelRef = jobModel ?? { provider: modelProvider, modelId };
 
       console.log(`[worker] starting job ${job.id} run=${runId}${continuation ? ' (resume)' : ''}`);
@@ -335,6 +350,7 @@ async function main() {
             prompt,
             model,
             apiKey,
+            ...(getFreshApiKey !== undefined ? { getApiKey: getFreshApiKey } : {}),
             ...(wire !== undefined ? { wire } : {}),
             ...(httpHeaders !== undefined ? { httpHeaders } : {}),
             ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),

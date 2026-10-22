@@ -49,6 +49,8 @@ export interface EnqueueInput {
   prompt: string;
   model: ModelRef;
   apiKey: string;
+  /** Resolves the CURRENT subscription token each turn (the `apiKey` above can have aged out). */
+  getApiKey?: () => Promise<string>;
   /** Wire-format override (e.g. 'openai-codex-responses' for a Codex subscription). */
   wire?: import('@playforge/shared').WireApi;
   /** Extra HTTP headers for the model call (e.g. chatgpt-account-id for Codex). */
@@ -216,6 +218,7 @@ export async function enqueueRun(input: EnqueueInput, ports: QueuePorts): Promis
         prompt: effectivePrompt,
         model: input.model,
         apiKey: input.apiKey,
+        ...(input.getApiKey !== undefined ? { getApiKey: input.getApiKey } : {}),
         provider: input.model.provider,
         ...(input.wire !== undefined ? { wire: input.wire } : {}),
         ...(input.httpHeaders !== undefined ? { httpHeaders: input.httpHeaders } : {}),
