@@ -113,3 +113,44 @@ describe('done — pre-done gate (Phase 9b #24)', () => {
     expect(text).not.toContain('pre_done_gate');
   });
 });
+
+describe('done — unmodified-starter gate', () => {
+  it('REJECTS a fresh game build that never wrote a file (the seeded toy would ship)', async () => {
+    const tool = makeDoneTool(
+      fakeFs(),
+      undefined,
+      undefined,
+      'game',
+      undefined,
+      'a sword fighting game',
+      () => 1,
+      () => 1,
+      undefined,
+      () => 0, // zero successful writes
+    );
+    const res = await tool.execute('id-1', { path: 'index.html' });
+    const text = res.content[0]?.type === 'text' ? res.content[0].text : '';
+    expect(res.details.status).toBe('has_errors');
+    expect(text).toContain('unmodified STARTER');
+  });
+
+  it('does not gate when the run wrote something, or when no write counter is supplied', async () => {
+    for (const getWrites of [() => 3, undefined]) {
+      const tool = makeDoneTool(
+        fakeFs(),
+        undefined,
+        undefined,
+        'game',
+        undefined,
+        'a sword fighting game',
+        () => 1,
+        () => 1,
+        undefined,
+        getWrites,
+      );
+      const res = await tool.execute('id-1', { path: 'index.html' });
+      const text = res.content[0]?.type === 'text' ? res.content[0].text : '';
+      expect(text).not.toContain('unmodified STARTER');
+    }
+  });
+});

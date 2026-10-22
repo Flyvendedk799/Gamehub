@@ -820,6 +820,8 @@ export function makeDoneTool(
   getValidateGameSceneCount?: GetToolCallCountFn,
   getPlaytestGameCount?: GetToolCallCountFn,
   getGameSpec?: GetDoneGameSpecFn,
+  /** Successful file writes this run. Absent = do not gate on writes. */
+  getWriteCount?: GetToolCallCountFn,
 ): AgentTool<typeof DoneParams, DoneDetails> {
   // Per-tool-instance state. `makeDoneTool` is called once per `Agent`
   // construction (see generateViaAgent), so these counters are naturally
@@ -871,6 +873,33 @@ export function makeDoneTool(
       // 1 of each across 28 snapshots — this gate forces both into the
       // critical path of every game run.
       if (artifactType === 'game') {
+        // A fresh build starts from a seeded STARTER (a placeholder dodge toy). Calling done
+        // without ever writing a file ships that toy under the user's prompt - an airplane game
+        // for "a sword fighting game". Refuse until the starter has actually been changed.
+        if (getWriteCount !== undefined && getWriteCount() === 0) {
+          const details: DoneDetails = {
+            status: 'has_errors',
+            path,
+            errors: [
+              {
+                message:
+                  'No file has been created or edited this run - the project is still the unmodified starter.',
+                source: 'pre_done_gate',
+              },
+            ],
+            ...(params.summary !== undefined ? { summary: params.summary } : {}),
+          };
+          logger.warn('[done] step=pre_done_gate.starter_unmodified', {});
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'has_errors\n- pre_done_gate: you have not created or edited any file this run. The files in the project are the unmodified STARTER - a placeholder dodge-and-collect toy - NOT the game the user asked for. Implement the declared game spec now: edit the starter modules (src/player.js, src/enemies.js, src/hud.js, src/theme.js, src/main.js) with str_replace/create so the player, opponents, controls, win and lose conditions match the brief. Then validate_game_scene, playtest_game, and call done.',
+              },
+            ],
+            details,
+          };
+        }
         const missing: string[] = [];
         if (getValidateGameSceneCount !== undefined && getValidateGameSceneCount() === 0) {
           missing.push(
