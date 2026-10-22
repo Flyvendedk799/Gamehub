@@ -25,6 +25,7 @@ import {
   rangeToLineSpan,
   renderOutline,
 } from './symbol-extractor.js';
+import { filesReferencing } from './unresolved-imports.js';
 
 /**
  * Result shape for write-class callbacks (`strReplace`, `insert`). The optional
@@ -1060,6 +1061,20 @@ export function makeTextEditorTool(
             }
           }
           if (!exists) throw new Error(`Path not found: ${path}`);
+          // Refuse BEFORE deleting: a delete cannot be undone inside a run, and a file the game
+          // still loads (index.html's <script src>, another module's import) turns into a boot
+          // crash for the WHOLE game. A live run deleted all eight src/ modules in one go.
+          const loadedBy = filesReferencing(
+            [...projectTextFiles(fs)].map(([filePath, content]) => ({ path: filePath, content })),
+            path,
+          );
+          if (loadedBy.length > 0) {
+            throw new Error(
+              `Refusing to delete ${path} — it is still loaded by ${loadedBy.join(', ')}. ` +
+                `Deleting it would stop the whole game from loading. If you are replacing it, rewrite it with command "create" (create overwrites). ` +
+                `Only delete a file after nothing imports or <script>-loads it any more (remove those references first).`,
+            );
+          }
           await fs.delete(path);
           lastMutationByPath.delete(path);
           lastViewByPath.delete(path);
