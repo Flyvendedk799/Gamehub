@@ -62,6 +62,7 @@ import {
 import type { TSchema } from '@sinclair/typebox';
 import { resolveCachePolicy } from './cache-policy.js';
 import { buildTransformContext } from './context-prune.js';
+import { applyEditRequest } from './edit-pipeline.js';
 import type { EditorSession } from './editor/session.js';
 import { type ContextMessage, pruneContextAtomic } from './engine/context.js';
 import { remapProviderError } from './errors.js';
@@ -156,6 +157,7 @@ import {
   makeValidateMotionCompositionTool,
 } from './tools/validate-motion-composition.js';
 import { makeViewSkillRuleTool } from './tools/view-skill-rule.js';
+import { extractUserRequest, isResumeRequest } from './user-request.js';
 
 /** Local mirror of the assistant message shape that pi-agent-core emits (via
  *  pi-ai). Declared here so this file does not take a direct dependency on
@@ -1480,6 +1482,13 @@ export async function generateViaAgent(
         isGameMode && deps.fs
           ? () => isUnmodifiedStarter((path) => deps.fs?.view(path)?.content ?? null)
           : undefined,
+        // A change request must change the GAME: edits to the page shell do not count.
+        isGameMode && input.editMode === true && !isResumeRequest(extractUserRequest(input.prompt))
+          ? () =>
+              gameCodeWriteCount === 0
+                ? `This is a change request ("${extractUserRequest(input.prompt).slice(0, 300)}") on an existing game, but no game code (src/**) has been edited this run - the page shell (index.html) does not count. Find the code that implements what the user described, change it, then validate and call done.`
+                : null
+          : undefined,
       ) as unknown as AgentTool<TSchema, unknown>,
     );
     // gameplan §A5 — validate_game_scene needs both fs (to read the bundle)
@@ -1988,6 +1997,8 @@ export async function generateViaAgent(
   // otherwise burn the whole 200 calls (~30 minutes) before the run could end.
   let maxToolCalls = input.agentBudget?.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
   const POST_DRAFT_TOOL_BUDGET = 60;
+  // After the host applies a change request, the loop only verifies it.
+  const EDIT_VERIFY_TOOL_BUDGET = 40;
   const maxWallClockMs = input.agentBudget?.maxWallClockMs ?? adaptiveDefault;
   let budgetReason: 'tool_calls' | 'wall_clock' | null = null;
   let toolCallCount = 0;
@@ -2013,6 +2024,8 @@ export async function generateViaAgent(
   let pendingWallClockAbort = false;
   let doneAccepted = false;
   let successfulWriteCount = 0;
+  // Successful edits to the GAME's own code (src/**): the page shell and assets do not count.
+  let gameCodeWriteCount = 0;
   let turnsAfterDone = 0;
   let readOnlyStreak = 0;
   let readOnlyNudges = 0;
@@ -2165,6 +2178,10 @@ export async function generateViaAgent(
       ].includes(toolName);
       const isReadOnlyCall = !isWriteCall && !isNeutralCall;
       if (isWriteCall) successfulWriteCount += 1;
+      if (isWriteCall && toolName === 'str_replace_based_edit_tool') {
+        const editedPath = String((inFlight?.args as { path?: unknown } | undefined)?.path ?? '');
+        if (editedPath.startsWith('src/')) gameCodeWriteCount += 1;
+      }
       if (isReadOnlyCall) {
         readOnlyStreak += 1;
         // Before the FIRST write the model is orienting on the seeded starter; if it is still
@@ -2933,6 +2950,37 @@ Latest request: ${input.prompt}`
         written: repair.written,
         remaining: repair.remaining.length,
       });
+      // A change request on an existing game: apply it in two plain completions (pick the file,
+      // rewrite it) instead of letting the loop try to find and patch the right code. In a live
+      // follow-up the loop made 115 editor calls, 12 failed and the one that landed changed the
+      // page shell, so the user's request was never applied.
+      const request = extractUserRequest(input.prompt);
+      if (
+        stage === 'preflight' &&
+        input.editMode === true &&
+        !isResumeRequest(request) &&
+        unmodifiedStarterEngine((path) => fsForRepair.view(path)?.content ?? null) === null
+      ) {
+        try {
+          const edit = await applyEditRequest({
+            request,
+            listFiles: () => fsForRepair.textFiles?.() ?? [],
+            write: async (path, content) => {
+              await fsForRepair.create(path, content);
+            },
+            generate: (system, user, reasoning) => completeWithAntigravity(system, user, reasoning),
+          });
+          successfulWriteCount += edit.files.length;
+          gameCodeWriteCount += edit.files.length;
+          maxToolCalls = Math.min(maxToolCalls, toolCallCount + EDIT_VERIFY_TOOL_BUDGET);
+          note = `
+
+[system-note] The host has ALREADY applied the user's requested change (edited ${edit.files.join(', ')}): "${request.slice(0, 300)}". Do NOT redo or rewrite it. Verify with validate_game_scene and a quick playtest that it behaves EXACTLY as requested; fix only what is wrong with small patch / str_replace edits; then call done.`;
+          log.info('[generate] step=edit_pipeline', { ...ctx, files: edit.files, why: edit.why });
+        } catch (editErr) {
+          log.warn('[generate] step=edit_pipeline.failed', { ...ctx, error: String(editErr) });
+        }
+      }
     } catch (err) {
       log.warn('[generate] step=import_repair.failed', { ...ctx, stage, error: String(err) });
     }

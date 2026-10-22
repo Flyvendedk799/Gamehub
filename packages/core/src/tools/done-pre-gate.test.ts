@@ -179,3 +179,38 @@ describe('done — unresolved ES imports', () => {
     expect(text).toContain('src/theme.js does not export it');
   });
 });
+
+describe('done - change request must change the game', () => {
+  const make = (gate: (() => string | null) | undefined) =>
+    makeDoneTool(
+      fakeFs(),
+      undefined,
+      undefined,
+      'game',
+      undefined,
+      'make the strike follow the mouse',
+      () => 1,
+      () => 1,
+      undefined,
+      undefined,
+      gate,
+    );
+
+  it('refuses done, quoting the request, while no game code has been edited', async () => {
+    const tool = make(
+      () => 'change request: no game code (src/**) edited - index.html does not count',
+    );
+    const res = await tool.execute('id-1', { path: 'index.html' });
+    const text = res.content[0]?.type === 'text' ? res.content[0].text : '';
+    expect(res.details.status).toBe('has_errors');
+    expect(text).toContain('index.html does not count');
+  });
+
+  it('does not gate once the game code was edited, or when no gate is supplied', async () => {
+    for (const gate of [() => null, undefined]) {
+      const res = await make(gate).execute('id-1', { path: 'index.html' });
+      const text = res.content[0]?.type === 'text' ? res.content[0].text : '';
+      expect(text).not.toContain('does not count');
+    }
+  });
+});

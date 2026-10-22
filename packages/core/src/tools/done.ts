@@ -837,6 +837,8 @@ export function makeDoneTool(
   getGameSpec?: GetDoneGameSpecFn,
   /** True while the tree is still the seeded starter. Absent = do not gate. */
   isStarterUnmodified?: () => boolean,
+  /** Non-null while a change request has not touched the game's code: the reason to refuse. */
+  getEditGate?: () => string | null,
 ): AgentTool<typeof DoneParams, DoneDetails> {
   // Per-tool-instance state. `makeDoneTool` is called once per `Agent`
   // construction (see generateViaAgent), so these counters are naturally
@@ -910,6 +912,26 @@ export function makeDoneTool(
               {
                 type: 'text',
                 text: 'has_errors\n- pre_done_gate: you have not changed the starter game. The files in the project are the unmodified STARTER - a placeholder dodge-and-collect toy - NOT the game the user asked for. Implement the declared game spec now: edit the starter modules (src/player.js, src/enemies.js, src/hud.js, src/theme.js, src/main.js) with str_replace/create so the player, opponents, controls, win and lose conditions match the brief. Then validate_game_scene, playtest_game, and call done.',
+              },
+            ],
+            details,
+          };
+        }
+        const editGate = getEditGate?.() ?? null;
+        if (editGate !== null) {
+          const details: DoneDetails = {
+            status: 'has_errors',
+            path,
+            errors: [{ message: editGate, source: 'pre_done_gate' }],
+            ...(params.summary !== undefined ? { summary: params.summary } : {}),
+          };
+          logger.warn('[done] step=pre_done_gate.no_game_code_edit', {});
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `has_errors
+- pre_done_gate: ${editGate}`,
               },
             ],
             details,
