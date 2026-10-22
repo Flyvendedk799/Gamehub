@@ -273,3 +273,34 @@ describe('streamAntigravity', () => {
     expect(result.errorMessage).toMatch(/No Antigravity subscription/);
   });
 });
+
+describe('streamAntigravity forced tool use', () => {
+  it('adds the tool-only protocol to the system prompt only when asked and tools exist', async () => {
+    const bodies: Array<Record<string, any>> = [];
+    const fetchImpl = (async (_u: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return sseResponse([{ response: { candidates: [{ content: { parts: [{ text: 'x' }] } }] } }]);
+    }) as unknown as typeof fetch;
+    const tool = {
+      name: 'write',
+      description: 'w',
+      parameters: { type: 'object', properties: {} } as never,
+    };
+    const msgs = [{ role: 'user' as const, content: 'hi', timestamp: 0 }];
+    const base = { messages: msgs, systemPrompt: 'SYS' };
+    await streamAntigravity(
+      model,
+      { ...base, tools: [tool] },
+      { apiKey: 't', fetchImpl, toolChoice: 'any' },
+    ).result();
+    await streamAntigravity(model, { ...base, tools: [tool] }, { apiKey: 't', fetchImpl }).result();
+    await streamAntigravity(model, base, { apiKey: 't', fetchImpl, toolChoice: 'any' }).result();
+    const sys = (i: number) => bodies[i]?.['request'].systemInstruction?.parts?.[0]?.text as string;
+    expect(sys(0)).toContain('SYS');
+    expect(sys(0)).toContain('MUST be one or more tool calls');
+    expect(sys(1)).toBe('SYS');
+    expect(sys(2)).toBe('SYS');
+    // The endpoint ignores toolConfig, so none is sent.
+    expect(bodies[0]?.['request'].toolConfig).toBeUndefined();
+  });
+});

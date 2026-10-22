@@ -1787,6 +1787,9 @@ export async function generateViaAgent(
         ...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
         ...(options?.signal !== undefined ? { signal: options.signal } : {}),
         maxTokens: options?.maxTokens ?? 65_536,
+        // Every turn must be a tool call (done is a tool). A turn of prose is how a plan
+        // written as text ended the whole build before a single file was written.
+        toolChoice: 'any',
       });
     }
     return piStream(model, context, lowered);
@@ -2166,7 +2169,9 @@ export async function generateViaAgent(
         turnsAfterDone += 1;
         // Turn 1 is the one that called `done`; turn 2 is the closing summary. If the model
         // is STILL calling tools after that, it is not going to stop on its own.
-        if (turnsAfterDone >= 2) {
+        // A forced-tool provider cannot send a prose closing turn (every turn must call a
+        // tool), so for it the turn that called `done` is the last one.
+        if (turnsAfterDone >= (piModel.api === ANTIGRAVITY_API ? 1 : 2)) {
           log.info('[generate] step=stop_after_done', { ...ctx, toolCallCount });
           agent.abort();
           return;

@@ -196,11 +196,26 @@ function thinkingLevelFor(reasoning: string | undefined): 'low' | 'medium' | 'hi
  * return no text at all, so the visible-output budget is topped up to cover the thinking.
  */
 const THINKING_HEADROOM_TOKENS = 8_192;
+
+/** Appended to the system prompt when every turn must be a tool call. */
+const TOOL_ONLY_PROTOCOL =
+  '## Response protocol (mandatory)\n' +
+  'Every response you give MUST be one or more tool calls. Never end a turn with prose, a plan, ' +
+  'or a summary instead of a tool call: prose with no tool call ends the whole run immediately. ' +
+  'Put any commentary inside the tool call itself. To finish, call the `done` tool.';
 const MAX_OUTPUT_TOKENS = 65_536;
 
 export type AntigravityStreamOptions = Pick<StreamOptions, 'apiKey' | 'signal' | 'maxTokens'> & {
   /** Caller's effort hint; only honoured on models whose effort is a request setting. */
   reasoning?: string;
+  /**
+   * 'any' makes the model answer with a function call instead of prose. Without it Gemini
+   * often ends a turn with a plan written as text, which the agent loop reads as "finished".
+   * Cloud Code accepts `toolConfig.functionCallingConfig` but IGNORES it (verified against a
+   * live login: mode ANY still returned prose), so this is enforced in the system prompt,
+   * which does work.
+   */
+  toolChoice?: 'any' | 'auto';
   /** Override for tests. */
   fetchImpl?: typeof fetch;
   /** Override for tests (backoff sleep). */
@@ -254,9 +269,14 @@ export function streamAntigravity(
         email: null,
         projectId: projectId ?? null,
       });
+      const forceTools =
+        options.toolChoice === 'any' && context.tools !== undefined && context.tools.length > 0;
+      const systemInstruction = forceTools
+        ? `${context.systemPrompt ?? ''}${context.systemPrompt ? '\n\n' : ''}${TOOL_ONLY_PROTOCOL}`
+        : context.systemPrompt;
       const body = toCodeAssistRequest(model.id, toAntigravityContents(context.messages), {
         ...(projectId ? { projectId } : {}),
-        ...(context.systemPrompt ? { systemInstruction: context.systemPrompt } : {}),
+        ...(systemInstruction ? { systemInstruction } : {}),
         ...(context.tools && context.tools.length > 0
           ? {
               tools: context.tools.map((t) => ({
