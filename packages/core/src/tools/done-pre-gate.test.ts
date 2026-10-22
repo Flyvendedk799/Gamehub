@@ -126,7 +126,7 @@ describe('done — unmodified-starter gate', () => {
       () => 1,
       () => 1,
       undefined,
-      () => 0, // zero successful writes
+      () => true, // tree is still the seeded starter
     );
     const res = await tool.execute('id-1', { path: 'index.html' });
     const text = res.content[0]?.type === 'text' ? res.content[0].text : '';
@@ -134,8 +134,8 @@ describe('done — unmodified-starter gate', () => {
     expect(text).toContain('unmodified STARTER');
   });
 
-  it('does not gate when the run wrote something, or when no write counter is supplied', async () => {
-    for (const getWrites of [() => 3, undefined]) {
+  it('does not gate when the starter was changed, or when no check is supplied', async () => {
+    for (const starterUnmodified of [() => false, undefined]) {
       const tool = makeDoneTool(
         fakeFs(),
         undefined,
@@ -146,7 +146,7 @@ describe('done — unmodified-starter gate', () => {
         () => 1,
         () => 1,
         undefined,
-        getWrites,
+        starterUnmodified,
       );
       const res = await tool.execute('id-1', { path: 'index.html' });
       const text = res.content[0]?.type === 'text' ? res.content[0].text : '';

@@ -815,6 +815,25 @@ export const PREMIUM_STARTER_FILES: Record<StarterEngine, StarterFiles> = {
   three: THREE_FILES,
 };
 
+/**
+ * True when every seeded `src/` module of some engine's starter is still byte-for-byte what
+ * was seeded - i.e. nothing of the user's game has been written yet. `index.html` is ignored:
+ * the host edits it on seed (engine CDN, title), so it says nothing about the agent's work.
+ * `read` returns a file's current content or null.
+ */
+export function isUnmodifiedStarter(read: (path: string) => string | null): boolean {
+  return (Object.keys(PREMIUM_STARTER_FILES) as StarterEngine[]).some((engine) => {
+    const srcPaths = Object.keys(PREMIUM_STARTER_FILES[engine]).filter((p) => p.startsWith('src/'));
+    return (
+      srcPaths.length > 0 &&
+      srcPaths.every((p) => {
+        const now = read(p);
+        return now !== null && now === PREMIUM_STARTER_FILES[engine][p];
+      })
+    );
+  });
+}
+
 /** The path the premium starter is seeded at — the agent's entry module. */
 export const PREMIUM_STARTER_PATH = 'src/main.js';
 

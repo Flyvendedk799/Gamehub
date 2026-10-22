@@ -273,6 +273,7 @@ vi.mock('@mariozechner/pi-ai', () => ({
 }));
 
 import { generateViaAgent } from './agent.js';
+import { PREMIUM_STARTER_FILES } from './premium-starters';
 
 const MODEL: ModelRef = { provider: 'anthropic', modelId: 'claude-sonnet-4-6' };
 
@@ -900,7 +901,18 @@ describe('generateViaAgent() — per-run safety budget', () => {
       assistantText: RESPONSE_WITH_ARTIFACT,
       events: reads(14) as never,
     };
-    await generateViaAgent({ prompt: 'p', history: [], model: MODEL, apiKey: 'sk-test' });
+    // The tree is still the seeded starter, so the nudge names it.
+    const starter = PREMIUM_STARTER_FILES.three;
+    const fs = {
+      view: (path: string) => {
+        const content = starter[path];
+        return content === undefined ? null : { content, numLines: content.split('\n').length };
+      },
+    };
+    await generateViaAgent(
+      { prompt: 'p', history: [], model: MODEL, apiKey: 'sk-test' },
+      { fs: fs as never },
+    );
     const nudges = agentCalls[0]?.steers.filter((m) => m.content.includes('only read or checked'));
     // Before the first write the threshold is lower (6): nudges at 6 and 12 reads.
     expect(nudges).toHaveLength(2);

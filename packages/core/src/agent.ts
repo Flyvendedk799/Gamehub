@@ -74,6 +74,7 @@ import type {
 import { reasoningForModel } from './index.js';
 import { type CoreLogger, NOOP_LOGGER } from './logger.js';
 import { createNarrationDetector } from './narration-detector.js';
+import { isUnmodifiedStarter } from './premium-starters.js';
 import { composeSystemPrompt } from './prompts/index.js';
 import { nextSpeedAction } from './speed-schedule.js';
 import { makeAddControllerSupportTool } from './tools/add-controller-support.js';
@@ -1471,9 +1472,11 @@ export async function generateViaAgent(
         // invariant floor (fail-state / restart / on-hit feedback) actually
         // BLOCKS `done` for completable genres instead of staying inert.
         deps.gameMode?.getSpec,
-        // Only a FRESH build (no prior turns) must have written something; repair and
-        // continuation rounds legitimately start from files an earlier round wrote.
-        isGameMode && input.history.length === 0 ? () => successfulWriteCount : undefined,
+        // Judged on the TREE, not on history: a build whose first segment only planned
+        // continues as a second segment WITH history, and must still not ship the seeded toy.
+        isGameMode && deps.fs
+          ? () => isUnmodifiedStarter((path) => deps.fs?.view(path)?.content ?? null)
+          : undefined,
       ) as unknown as AgentTool<TSchema, unknown>,
     );
     // gameplan §A5 — validate_game_scene needs both fs (to read the bundle)
@@ -1957,6 +1960,8 @@ export async function generateViaAgent(
   let readOnlyStreak = 0;
   let readOnlyNudges = 0;
   const READ_ONLY_NUDGE_EVERY = 14;
+  const starterUntouched = (): boolean =>
+    deps.fs ? isUnmodifiedStarter((path) => deps.fs?.view(path)?.content ?? null) : false;
   let stuckSteerEmitted = false;
   let stagnationSteerEmitted = false;
   const stagnationDetector = new StagnationDetector(3);
@@ -2114,7 +2119,7 @@ export async function generateViaAgent(
           agent.steer({
             role: 'user',
             content: `[system-reminder] ${
-              successfulWriteCount === 0
+              successfulWriteCount === 0 && starterUntouched()
                 ? 'You have not written a single file. What is in the project right now is the unmodified STARTER - a placeholder dodge toy that is NOT the game the user asked for. It will not become their game by being verified. Edit the starter modules to implement the brief (player, opponents, controls, win/lose).'
                 : ''
             } Your last ${readOnlyStreak} tool calls only read or checked files - nothing was changed. Re-reading will not tell you anything new. Decide now: make the edit you intend (create/str_replace), or, if the game already runs and meets the brief, call \`done\`. Do not list, view, or verify again before acting.`,
