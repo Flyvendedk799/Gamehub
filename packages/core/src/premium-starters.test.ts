@@ -214,3 +214,22 @@ describe('the scaffold is modular, not one file', () => {
     });
   }
 });
+
+describe('isUnmodifiedStarter', () => {
+  it('is true for the pristine seed of an engine, false once a src module changes', async () => {
+    const { PREMIUM_STARTER_FILES, isUnmodifiedStarter } = await import('./premium-starters');
+    const tree: Record<string, string> = { ...PREMIUM_STARTER_FILES.three };
+    const read = (p: string) => tree[p] ?? null;
+    expect(isUnmodifiedStarter(read)).toBe(true);
+    // index.html is edited by the host on seed - it must not matter.
+    tree['index.html'] = '<html>changed</html>';
+    expect(isUnmodifiedStarter(read)).toBe(true);
+    tree['src/player.js'] = '// the sword fighter';
+    expect(isUnmodifiedStarter(read)).toBe(false);
+  });
+
+  it('is false for an empty tree', async () => {
+    const { isUnmodifiedStarter } = await import('./premium-starters');
+    expect(isUnmodifiedStarter(() => null)).toBe(false);
+  });
+});

@@ -37,6 +37,7 @@ export {
   PREMIUM_STARTER_ENGINE_PATH,
   PREMIUM_STARTER_FILES,
   PREMIUM_STARTER_PATH,
+  isUnmodifiedStarter,
   starterPathsFor,
 } from './premium-starters.js';
 export type { StarterEngine, StarterFiles } from './premium-starters.js';
