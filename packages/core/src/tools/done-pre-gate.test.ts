@@ -154,3 +154,28 @@ describe('done — unmodified-starter gate', () => {
     }
   });
 });
+
+describe('done — unresolved ES imports', () => {
+  it('rejects with a precise message naming the importer, the target and the missing exports', async () => {
+    const files = [
+      { path: 'src/engine/core.js', content: "import { FOG, GROUND } from '../theme.js';" },
+      { path: 'src/theme.js', content: 'export const THEME = {};' },
+    ];
+    const fs = { ...fakeFs(), textFiles: () => files };
+    const tool = makeDoneTool(
+      fs,
+      async () => [],
+      undefined,
+      'game',
+      undefined,
+      'a sword fighting game',
+      () => 1,
+      () => 1,
+    );
+    const res = await tool.execute('id-1', { path: 'index.html' });
+    const text = res.content[0]?.type === 'text' ? res.content[0].text : '';
+    expect(res.details.status).toBe('has_errors');
+    expect(text).toContain('src/engine/core.js imports FOG, GROUND');
+    expect(text).toContain('src/theme.js does not export it');
+  });
+});

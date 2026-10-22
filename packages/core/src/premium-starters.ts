@@ -531,7 +531,12 @@ const THREE_FILES: StarterFiles = {
   'src/engine/core.js': `// src/engine/core.js — THE ENGINE. main.js already runs on it; extend it rather than
 // hand-rolling a second renderer/loop. Renderer + lighting rig + frame loop + sfx.
 import * as THREE from 'three';
-import { FOG, GROUND, SKY } from '../theme.js';
+// A namespace import cannot fail at link time: a rewritten theme.js that drops (or renames) these
+// exports must not stop the whole game from loading, so each colour has a built-in fallback.
+import * as theme from '../theme.js';
+const SKY = theme.SKY ?? 0x0f1320;
+const FOG = theme.FOG ?? SKY;
+const GROUND = theme.GROUND ?? 0x232c46;
 
 /** A real sky + fog + lighting rig, never a black void. */
 export function createStage(canvasId) {
