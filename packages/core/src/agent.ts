@@ -2810,6 +2810,75 @@ export async function generateViaAgent(
     }
   }
 
+  // Antigravity/Gemini leaves projects half-converted (gameplay modules rewritten, wiring modules
+  // still the placeholder starter) or calling APIs that do not exist, so nothing can load or the
+  // first keypress throws. The open loop did not fix that in ~100-200 turns even with precise
+  // errors; one loop-free repair call does. It runs BEFORE the loop (so a resume / Fix-it on an
+  // already-broken project is corrected in seconds, not after another 30 minutes) and again after
+  // it. Cheap when nothing is broken (no model call); non-fatal by design.
+  async function repairBrokenProject(stage: 'preflight' | 'final'): Promise<void> {
+    if (
+      piModel.api !== ANTIGRAVITY_API ||
+      !isGameMode ||
+      deps.fs?.textFiles === undefined ||
+      input.signal?.aborted === true
+    ) {
+      return;
+    }
+    try {
+      const fsForRepair = deps.fs;
+      const original = input.history.find((m) => m.role === 'user')?.content;
+      const brief =
+        typeof original === 'string' && original.length > 0 && original !== input.prompt
+          ? `${original}
+
+Latest request: ${input.prompt}`
+          : input.prompt;
+      const repair = await repairUnresolvedImports({
+        brief,
+        spec: await deps.gameMode?.getSpec?.(),
+        listFiles: () => fsForRepair.textFiles?.() ?? [],
+        write: async (path, content) => {
+          await fsForRepair.create(path, content);
+        },
+        generate: async (system, user) => {
+          const apiKey = (await input.getApiKey?.()) ?? input.apiKey;
+          const repairStream = streamAntigravity(
+            piModel as never,
+            {
+              systemPrompt: system,
+              messages: [{ role: 'user', content: user, timestamp: Date.now() }],
+            },
+            {
+              apiKey,
+              ...(input.signal !== undefined ? { signal: input.signal } : {}),
+              maxTokens: 60_000,
+              reasoning: 'low',
+            },
+          );
+          const done = await repairStream.result();
+          if (done.stopReason === 'error' || done.stopReason === 'aborted') {
+            throw new Error(done.errorMessage ?? 'repair completion failed');
+          }
+          return done.content
+            .filter((c) => c.type === 'text')
+            .map((c) => (c as { text: string }).text)
+            .join('');
+        },
+      });
+      log.info('[generate] step=import_repair', {
+        ...ctx,
+        stage,
+        attempts: repair.attempts,
+        written: repair.written,
+        remaining: repair.remaining.length,
+      });
+    } catch (err) {
+      log.warn('[generate] step=import_repair.failed', { ...ctx, stage, error: String(err) });
+    }
+  }
+  await repairBrokenProject('preflight');
+
   log.info('[generate] step=send_request', ctx);
   const sendStart = Date.now();
   // First-turn-only retry, further guarded by a side-effect check. Multi-turn
@@ -2958,67 +3027,7 @@ export async function generateViaAgent(
   }
   clearTimeout(budgetTimer);
 
-  // Antigravity/Gemini often ends a build with a half-converted project: the gameplay modules
-  // rewritten, the wiring modules still the placeholder starter, so nothing can load. The open
-  // loop did not fix that in ~100 turns even with a precise error; one loop-free repair call
-  // does. Non-fatal by design - a failed repair leaves the project exactly as the run left it.
-  if (
-    piModel.api === ANTIGRAVITY_API &&
-    isGameMode &&
-    deps.fs?.textFiles !== undefined &&
-    input.signal?.aborted !== true
-  ) {
-    try {
-      const fsForRepair = deps.fs;
-      const original = input.history.find((m) => m.role === 'user')?.content;
-      const brief =
-        typeof original === 'string' && original.length > 0 && original !== input.prompt
-          ? `${original}
-
-Latest request: ${input.prompt}`
-          : input.prompt;
-      const repair = await repairUnresolvedImports({
-        brief,
-        spec: await deps.gameMode?.getSpec?.(),
-        listFiles: () => fsForRepair.textFiles?.() ?? [],
-        write: async (path, content) => {
-          await fsForRepair.create(path, content);
-        },
-        generate: async (system, user) => {
-          const apiKey = (await input.getApiKey?.()) ?? input.apiKey;
-          const repairStream = streamAntigravity(
-            piModel as never,
-            {
-              systemPrompt: system,
-              messages: [{ role: 'user', content: user, timestamp: Date.now() }],
-            },
-            {
-              apiKey,
-              ...(input.signal !== undefined ? { signal: input.signal } : {}),
-              maxTokens: 60_000,
-              reasoning: 'low',
-            },
-          );
-          const done = await repairStream.result();
-          if (done.stopReason === 'error' || done.stopReason === 'aborted') {
-            throw new Error(done.errorMessage ?? 'repair completion failed');
-          }
-          return done.content
-            .filter((c) => c.type === 'text')
-            .map((c) => (c as { text: string }).text)
-            .join('');
-        },
-      });
-      log.info('[generate] step=import_repair', {
-        ...ctx,
-        attempts: repair.attempts,
-        written: repair.written,
-        remaining: repair.remaining.length,
-      });
-    } catch (err) {
-      log.warn('[generate] step=import_repair.failed', { ...ctx, error: String(err) });
-    }
-  }
+  await repairBrokenProject('final');
 
   // Page contract, all providers: the engine looks the canvas up by id, so a run that renamed the
   // page's <canvas> ships a game that dies at boot ("Cannot read properties of null"). Restoring
