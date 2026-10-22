@@ -1618,6 +1618,7 @@ export async function generateViaAgent(
   // starter is untouched and the model has only been reading, refuse further reads/checks so the
   // only productive move left is to write.
   const READ_BLOCK_AFTER = 8;
+  let draftAfterEngine = false;
   const BLOCKABLE_TOOLS = new Set([
     'list_files',
     'get_playtest_playbook',
@@ -1641,7 +1642,21 @@ export async function generateViaAgent(
                 'Refused: the project is still the UNMODIFIED STARTER and you have only read or checked files so far - reading more cannot help. Write the game now: call str_replace_based_edit_tool with command "create" and the COMPLETE contents for src/player.js (the fighter), src/enemies.js (the opponents), src/hud.js, src/theme.js and src/main.js. create overwrites the existing file. Reads and checks are allowed again after your first successful write.',
               );
             }
-            return tool.execute(...args);
+            const result = await tool.execute(...args);
+            // The starter is only seeded once the engine is chosen, so that is the moment the whole
+            // game can be drafted from it. Do it INSIDE this tool call: the model's next turn then
+            // starts from a finished first draft instead of reading placeholder files.
+            if (tool.name === 'choose_engine' && !draftAfterEngine) {
+              draftAfterEngine = true;
+              const note = await repairBrokenProject('after_engine');
+              if (note.length > 0) {
+                return {
+                  ...result,
+                  content: [...result.content, { type: 'text' as const, text: note.trim() }],
+                } as typeof result;
+              }
+            }
+            return result;
           }) as typeof tool.execute,
         }))
       : baseTools;
@@ -2848,15 +2863,19 @@ export async function generateViaAgent(
       .map((c) => (c as { text: string }).text)
       .join('');
   };
-  async function repairBrokenProject(stage: 'preflight' | 'final'): Promise<void> {
+  async function repairBrokenProject(
+    stage: 'preflight' | 'after_engine' | 'final',
+  ): Promise<string> {
     if (
       piModel.api !== ANTIGRAVITY_API ||
       !isGameMode ||
       deps.fs?.textFiles === undefined ||
       input.signal?.aborted === true
     ) {
-      return;
+      return '';
     }
+    // The note the caller shows the model when a first draft was written (else '').
+    let note = '';
     try {
       const fsForRepair = deps.fs;
       const original = input.history.find((m) => m.role === 'user')?.content;
@@ -2871,7 +2890,7 @@ Latest request: ${input.prompt}`
       const starterEngine = unmodifiedStarterEngine(
         (path) => fsForRepair.view(path)?.content ?? null,
       );
-      if (stage === 'preflight' && starterEngine !== null) {
+      if ((stage === 'preflight' || stage === 'after_engine') && starterEngine !== null) {
         try {
           const draft = await draftGameFromStarter({
             engine: starterEngine,
@@ -2884,7 +2903,7 @@ Latest request: ${input.prompt}`
             generate: (system, user) => completeWithAntigravity(system, user, 'medium'),
           });
           successfulWriteCount += draft.written.length;
-          draftNote = `
+          note = `
 
 [system-note] The host has ALREADY written a complete first draft of this game from the brief (${draft.written.join(', ')}). Do NOT rewrite it from scratch and do not re-read every file. Run validate_game_scene, then playtest_game, fix real problems with small patch / str_replace edits, then call done.`;
           log.info('[generate] step=starter_draft', { ...ctx, written: draft.written });
@@ -2911,8 +2930,9 @@ Latest request: ${input.prompt}`
     } catch (err) {
       log.warn('[generate] step=import_repair.failed', { ...ctx, stage, error: String(err) });
     }
+    return note;
   }
-  await repairBrokenProject('preflight');
+  draftNote = await repairBrokenProject('preflight');
 
   log.info('[generate] step=send_request', ctx);
   const sendStart = Date.now();
