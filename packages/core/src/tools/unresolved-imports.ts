@@ -118,3 +118,34 @@ export function describeUnresolvedImport(p: UnresolvedImport): string {
     `or change the import in ${p.from}. One unresolved import stops the WHOLE game from loading.`
   );
 }
+
+/**
+ * Files that load `target` — by an ES import / dynamic import / `export … from`, or by an HTML
+ * `<script src>` / `<link href>`. Used to refuse deleting a module the game still loads: deleting
+ * one is not recoverable inside a run, and a single dangling reference stops the WHOLE game.
+ */
+export function filesReferencing(files: ProjectFile[], target: string): string[] {
+  const referrers: string[] = [];
+  for (const file of files) {
+    if (file.path === target) continue;
+    const isHtml = /\.html?$/i.test(file.path);
+    if (!isHtml && !/\.(m?js|cjs|jsx|tsx?)$/i.test(file.path)) continue;
+    const text = isHtml ? file.content : stripComments(file.content);
+    for (const m of text.matchAll(/['"]([^'"\s]+\.(?:m?js|cjs|jsx|tsx?|css|json))['"]/g)) {
+      const token = m[1] ?? '';
+      let resolved: string | null = null;
+      if (token.startsWith('./') || token.startsWith('../')) {
+        resolved = resolveRelative(file.path, token);
+      } else if (token.startsWith('/')) {
+        resolved = token.replace(/^\/+/, '');
+      } else if (isHtml && !/^[a-z][a-z0-9+.-]*:/i.test(token)) {
+        resolved = resolveRelative(file.path, token);
+      }
+      if (resolved === target) {
+        referrers.push(file.path);
+        break;
+      }
+    }
+  }
+  return referrers;
+}

@@ -50,17 +50,6 @@ describe('str_replace_based_edit_tool delete', () => {
     expect(textOf(result)).toMatch(/Deleted src\/enemies\.js/);
   });
 
-  it('warns when another file still references the deleted module', async () => {
-    const fs = makeFs({
-      'src/main.js': "import { e } from './enemies.js';\nrun(e);",
-      'src/enemies.js': 'export const e = 1;',
-    });
-    const tool = makeTextEditorTool(fs);
-    const result = await tool.execute('1', { command: 'delete', path: 'src/enemies.js' });
-    expect(textOf(result)).toMatch(/src\/main\.js/);
-    expect(textOf(result)).toMatch(/still reference/);
-  });
-
   it('refuses to delete the page entry', async () => {
     const fs = makeFs({ 'index.html': '<canvas></canvas>' });
     const tool = makeTextEditorTool(fs);
