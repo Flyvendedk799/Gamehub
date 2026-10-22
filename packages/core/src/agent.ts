@@ -100,6 +100,7 @@ import {
   makeDeclarePlaytestContractTool,
 } from './tools/declare-playtest-contract.js';
 import { makeDeclareTweakSchemaTool } from './tools/declare-tweak-schema.js';
+import { findMissingDomIds, restoreCanvasId } from './tools/dom-ids.js';
 import {
   type DoneRuntimeVerifier,
   makeDoneTool,
@@ -3016,6 +3017,28 @@ Latest request: ${input.prompt}`
       });
     } catch (err) {
       log.warn('[generate] step=import_repair.failed', { ...ctx, error: String(err) });
+    }
+  }
+
+  // Page contract, all providers: the engine looks the canvas up by id, so a run that renamed the
+  // page's <canvas> ships a game that dies at boot ("Cannot read properties of null"). Restoring
+  // the id is deterministic and needs no model, so do it whenever it is unambiguous.
+  if (isGameMode && deps.fs?.textFiles !== undefined && input.signal?.aborted !== true) {
+    try {
+      let files = deps.fs.textFiles();
+      for (const id of new Set(
+        findMissingDomIds(files)
+          .filter((m) => m.via === 'createStage')
+          .map((m) => m.id),
+      )) {
+        const fixed = restoreCanvasId(files, id);
+        if (fixed === null) continue;
+        await deps.fs.create('index.html', fixed);
+        files = deps.fs.textFiles();
+        log.info('[generate] step=page_contract.canvas_id_restored', { ...ctx, id });
+      }
+    } catch (err) {
+      log.warn('[generate] step=page_contract.failed', { ...ctx, error: String(err) });
     }
   }
 

@@ -38,6 +38,7 @@ import {
   evaluateCompletabilityFloor,
   isCompletableSpec,
 } from './assert-game-invariants.js';
+import { describeMissingDomId, findMissingDomIds } from './dom-ids.js';
 import { HEURISTIC_ADVISORY_SOURCES, runHeuristics } from './done-heuristics.js';
 import type { EditBudget } from './edit-budget.js';
 import type { TextEditorFsCallbacks } from './text-editor.js';
@@ -95,10 +96,17 @@ const DoneParams = Type.Object({
  */
 function unresolvedImportErrors(fs: TextEditorFsCallbacks): DoneError[] {
   const files = fs.textFiles?.() ?? [];
-  return findUnresolvedImports(files).map((p) => ({
-    source: 'imports',
-    message: describeUnresolvedImport(p),
-  }));
+  return [
+    ...findUnresolvedImports(files).map((p) => ({
+      source: 'imports',
+      message: describeUnresolvedImport(p),
+    })),
+    // Same family: an id the code looks up (the page canvas!) that no element defines.
+    ...findMissingDomIds(files).map((m) => ({
+      source: 'dom-ids',
+      message: describeMissingDomId(m, files),
+    })),
+  ];
 }
 
 export interface DoneError {
