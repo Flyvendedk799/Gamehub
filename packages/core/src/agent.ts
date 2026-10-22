@@ -1471,6 +1471,9 @@ export async function generateViaAgent(
         // invariant floor (fail-state / restart / on-hit feedback) actually
         // BLOCKS `done` for completable genres instead of staying inert.
         deps.gameMode?.getSpec,
+        // Only a FRESH build (no prior turns) must have written something; repair and
+        // continuation rounds legitimately start from files an earlier round wrote.
+        isGameMode && input.history.length === 0 ? () => successfulWriteCount : undefined,
       ) as unknown as AgentTool<TSchema, unknown>,
     );
     // gameplan §A5 — validate_game_scene needs both fs (to read the bundle)
@@ -1949,6 +1952,7 @@ export async function generateViaAgent(
   // signal and waiting for turn_end could let the loop balloon further.
   let pendingWallClockAbort = false;
   let doneAccepted = false;
+  let successfulWriteCount = 0;
   let turnsAfterDone = 0;
   let readOnlyStreak = 0;
   let readOnlyNudges = 0;
@@ -2098,14 +2102,22 @@ export async function generateViaAgent(
         'done',
       ].includes(toolName);
       const isReadOnlyCall = !isWriteCall && !isNeutralCall;
+      if (isWriteCall) successfulWriteCount += 1;
       if (isReadOnlyCall) {
         readOnlyStreak += 1;
-        if (readOnlyStreak >= READ_ONLY_NUDGE_EVERY * (readOnlyNudges + 1) && readOnlyNudges < 3) {
+        // Before the FIRST write the model is orienting on the seeded starter; if it is still
+        // only reading after a handful of calls it has mistaken the starter for its own work.
+        const nudgeEvery = successfulWriteCount === 0 ? 6 : READ_ONLY_NUDGE_EVERY;
+        if (readOnlyStreak >= nudgeEvery * (readOnlyNudges + 1) && readOnlyNudges < 3) {
           readOnlyNudges += 1;
           log.warn('[generate] step=read_only_steer', { ...ctx, readOnlyStreak });
           agent.steer({
             role: 'user',
-            content: `[system-reminder] Your last ${readOnlyStreak} tool calls only read or checked files - nothing was changed. Re-reading will not tell you anything new. Decide now: make the edit you intend (create/str_replace), or, if the game already runs and meets the brief, call \`done\`. Do not list, view, or verify again before acting.`,
+            content: `[system-reminder] ${
+              successfulWriteCount === 0
+                ? 'You have not written a single file. What is in the project right now is the unmodified STARTER - a placeholder dodge toy that is NOT the game the user asked for. It will not become their game by being verified. Edit the starter modules to implement the brief (player, opponents, controls, win/lose).'
+                : ''
+            } Your last ${readOnlyStreak} tool calls only read or checked files - nothing was changed. Re-reading will not tell you anything new. Decide now: make the edit you intend (create/str_replace), or, if the game already runs and meets the brief, call \`done\`. Do not list, view, or verify again before acting.`,
             timestamp: Date.now(),
           });
         }

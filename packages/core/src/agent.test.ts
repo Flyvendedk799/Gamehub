@@ -902,7 +902,9 @@ describe('generateViaAgent() — per-run safety budget', () => {
     };
     await generateViaAgent({ prompt: 'p', history: [], model: MODEL, apiKey: 'sk-test' });
     const nudges = agentCalls[0]?.steers.filter((m) => m.content.includes('only read or checked'));
-    expect(nudges).toHaveLength(1);
+    // Before the first write the threshold is lower (6): nudges at 6 and 12 reads.
+    expect(nudges).toHaveLength(2);
+    expect(nudges?.[0]?.content).toContain('unmodified STARTER');
   });
 
   it('stops the run after an accepted done when the model keeps calling tools', async () => {
