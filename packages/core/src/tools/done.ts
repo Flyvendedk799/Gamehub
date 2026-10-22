@@ -41,6 +41,7 @@ import {
 import { HEURISTIC_ADVISORY_SOURCES, runHeuristics } from './done-heuristics.js';
 import type { EditBudget } from './edit-budget.js';
 import type { TextEditorFsCallbacks } from './text-editor.js';
+import { describeUnresolvedImport, findUnresolvedImports } from './unresolved-imports.js';
 
 /** may9 Phase 8b follow-up #28 — host-supplied callback returning the
  *  parent snapshot's `length(artifact_source)` (or null when no parent
@@ -87,6 +88,18 @@ const DoneParams = Type.Object({
   summary: Type.Optional(Type.String()),
   path: Type.Optional(Type.String()),
 });
+
+/**
+ * Statically-detected broken ES imports, phrased as fixes. The browser's own message for the same
+ * fault hides both files behind a data: URL, which cost a live build dozens of turns.
+ */
+function unresolvedImportErrors(fs: TextEditorFsCallbacks): DoneError[] {
+  const files = fs.textFiles?.() ?? [];
+  return findUnresolvedImports(files).map((p) => ({
+    source: 'imports',
+    message: describeUnresolvedImport(p),
+  }));
+}
 
 export interface DoneError {
   message: string;
@@ -656,6 +669,7 @@ export async function runArtifactChecks(
       // Rewrite cryptic document.write console errors into either a clear syntax
       // error (fix it) or a benign advisory (ignore it) — never an engine swap.
       errors.push(...runtimeErrors.map(clarifyDocumentWriteError));
+      errors.push(...unresolvedImportErrors(fs));
     } catch (err) {
       errors.push({
         message: `Runtime verifier failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -1021,6 +1035,7 @@ export function makeDoneTool(
         try {
           const runtimeErrors = await runtimeVerify(file.content);
           errors.push(...runtimeErrors);
+          errors.push(...unresolvedImportErrors(fs));
         } catch (err) {
           errors.push({
             message: `Runtime verifier failed: ${err instanceof Error ? err.message : String(err)}`,
