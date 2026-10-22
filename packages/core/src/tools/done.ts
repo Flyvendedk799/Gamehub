@@ -38,11 +38,10 @@ import {
   evaluateCompletabilityFloor,
   isCompletableSpec,
 } from './assert-game-invariants.js';
-import { describeMissingDomId, findMissingDomIds } from './dom-ids.js';
 import { HEURISTIC_ADVISORY_SOURCES, runHeuristics } from './done-heuristics.js';
 import type { EditBudget } from './edit-budget.js';
+import { projectProblems } from './project-checks.js';
 import type { TextEditorFsCallbacks } from './text-editor.js';
-import { describeUnresolvedImport, findUnresolvedImports } from './unresolved-imports.js';
 
 /** may9 Phase 8b follow-up #28 — host-supplied callback returning the
  *  parent snapshot's `length(artifact_source)` (or null when no parent
@@ -95,18 +94,12 @@ const DoneParams = Type.Object({
  * fault hides both files behind a data: URL, which cost a live build dozens of turns.
  */
 function unresolvedImportErrors(fs: TextEditorFsCallbacks): DoneError[] {
-  const files = fs.textFiles?.() ?? [];
-  return [
-    ...findUnresolvedImports(files).map((p) => ({
-      source: 'imports',
-      message: describeUnresolvedImport(p),
-    })),
-    // Same family: an id the code looks up (the page canvas!) that no element defines.
-    ...findMissingDomIds(files).map((m) => ({
-      source: 'dom-ids',
-      message: describeMissingDomId(m, files),
-    })),
-  ];
+  // Broken imports, ids the code looks up that no element defines (the page canvas!), and calls
+  // to runtime API members that do not exist: all stop the game at boot or on first input.
+  return projectProblems(fs.textFiles?.() ?? []).map((p) => ({
+    source: p.source,
+    message: p.message,
+  }));
 }
 
 export interface DoneError {

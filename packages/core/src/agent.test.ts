@@ -257,7 +257,9 @@ vi.mock('./skills/loader.js', async () => {
   };
 });
 
-vi.mock('@mariozechner/pi-ai', () => ({
+vi.mock('@mariozechner/pi-ai', async (importOriginal) => ({
+  // Keep the real event-stream helpers: the Antigravity adapter builds its stream with them.
+  ...(await importOriginal<typeof import('@mariozechner/pi-ai')>()),
   getModel: (provider: string, modelId: string) => ({
     id: modelId,
     name: modelId,
@@ -973,6 +975,72 @@ describe('generateViaAgent() — per-run safety budget', () => {
     }>;
     await expect(wrapped[0]?.execute('x', {})).rejects.toThrow(/UNMODIFIED STARTER/);
     expect(executed).toEqual([]);
+  });
+
+  it('repairs a project that is already broken BEFORE the agent loop starts (antigravity)', async () => {
+    const NL = String.fromCharCode(10);
+    const tree = new Map<string, string>([
+      ['index.html', '<canvas id="game"></canvas>'],
+      [
+        'src/player.js',
+        'export class Player { constructor() { this.hp = 100; this.stance = 1; } }',
+      ],
+      [
+        'src/main.js',
+        ["import { buildCraft } from './player.js';", 'buildCraft(); // placeholder wiring'].join(
+          NL,
+        ),
+      ],
+    ]);
+    const fix = [
+      '=== FILE: src/main.js ===',
+      "import { Player } from './player.js';",
+      'const player = new Player(); // real wiring for the duel',
+      '=== END FILE ===',
+    ].join(NL);
+    const frame = JSON.stringify({
+      response: { candidates: [{ content: { parts: [{ text: fix }] } }] },
+    });
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', async () => {
+      calls.push('fetch');
+      return new Response(`data: ${frame}${NL}${NL}`, { status: 200 });
+    });
+    const fs = {
+      view: (path: string) => {
+        const content = tree.get(path);
+        return content === undefined ? null : { content, numLines: content.split(NL).length };
+      },
+      textFiles: () => [...tree].map(([path, content]) => ({ path, content })),
+      create: async (path: string, content: string) => {
+        tree.set(path, content);
+        return { path };
+      },
+    };
+    scriptedAgent = { assistantText: RESPONSE_WITH_ARTIFACT };
+    try {
+      await generateViaAgent(
+        {
+          prompt: 'fix it',
+          history: [],
+          model: { provider: 'antigravity', modelId: 'gemini-3.8-flash-high' },
+          wire: 'antigravity-cloudcode',
+          apiKey: 'tok',
+        },
+        {
+          fs: fs as never,
+          gameMode: {
+            setEngine: () => {},
+            getCurrentEngine: () => 'three',
+            validate: () => ({ ok: true, engine: 'three', issues: [] }),
+          },
+        },
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(calls.length).toBeGreaterThan(0);
+    expect(tree.get('src/main.js')).toContain("import { Player } from './player.js'");
   });
 
   it('stops the run after an accepted done when the model keeps calling tools', async () => {

@@ -98,3 +98,26 @@ describe('repairUnresolvedImports', () => {
     expect(result.remaining.length).toBeGreaterThan(0);
   });
 });
+
+describe('repairUnresolvedImports also fixes calls to controls members that do not exist', () => {
+  it('replaces controls.active with the real API in one call', async () => {
+    const tree = new Map([
+      [
+        'src/main.js',
+        "const dx = window.__game.controls.active('right') ? 1 : 0; // wiring for the duel loop\nexport const x = dx;",
+      ],
+    ]);
+    const fixed = `=== FILE: src/main.js ===
+const dx = window.__game.controls.isDown('right') ? 1 : 0; // wiring for the duel loop
+export const x = dx;
+=== END FILE ===`;
+    const result = await repairUnresolvedImports({
+      brief: 'a sword fighting game',
+      listFiles: () => [...tree].map(([path, content]) => ({ path, content })),
+      write: (path, content) => void tree.set(path, content),
+      generate: async () => fixed,
+    });
+    expect(result.remaining).toEqual([]);
+    expect(tree.get('src/main.js')).toContain("controls.isDown('right')");
+  });
+});
