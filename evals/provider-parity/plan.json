@@ -1,0 +1,1319 @@
+{
+  "schemaVersion": 1,
+  "seed": "playerzero-parity-v1",
+  "status": "prepared_not_run",
+  "policy": {
+    "equalBudget": true,
+    "independentProjects": true,
+    "silentProviderFallback": false,
+    "includeFailures": true,
+    "paidRunsExecutedByPreparation": 0
+  },
+  "configuration": [
+    {
+      "providerPath": "codex",
+      "exactModelId": null,
+      "maxTokensPerRun": null,
+      "maxSpendUsd": null,
+      "reasoning": null,
+      "endpointLabel": null
+    },
+    {
+      "providerPath": "claude",
+      "exactModelId": null,
+      "maxTokensPerRun": null,
+      "maxSpendUsd": null,
+      "reasoning": null,
+      "endpointLabel": null
+    },
+    {
+      "providerPath": "gemini-antigravity",
+      "exactModelId": null,
+      "maxTokensPerRun": null,
+      "maxSpendUsd": null,
+      "reasoning": null,
+      "endpointLabel": null
+    }
+  ],
+  "evidenceRequired": [
+    "exactModelId",
+    "commit",
+    "artifactHash",
+    "boot",
+    "inputBehavior",
+    "editRegression",
+    "restore",
+    "publishedArtifactHash",
+    "publicationVerified",
+    "screenshots:title,play,failure-or-win",
+    "audioAudible",
+    "elapsedMs",
+    "costUsd",
+    "tokens",
+    "repairCount",
+    "failureCause",
+    "blindReview:fidelity,readability,feel,originality,replay"
+  ],
+  "cases": [
+    {
+      "id": "fishing--claude--3",
+      "fixture": "fishing",
+      "providerPath": "claude",
+      "repeat": 3,
+      "brief": "Make a cozy fishing game. Cast with click/space, time a shrinking zone to catch fish. Collect different fish. Soft ambient audio. Phaser 2D.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fishing--claude--3.json"
+    },
+    {
+      "id": "topdown-arcade--gemini-antigravity--2",
+      "fixture": "topdown-arcade",
+      "providerPath": "gemini-antigravity",
+      "repeat": 2,
+      "brief": "Build a top-down arcade shooter. The player moves in four cardinal directions with WASD (W is up the screen, S is down, A is left, D is right), aims and fires at enemies that spawn around the arena, and tries to survive as long as possible. Touching an enemy loses a life; losing all lives ends the game.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/topdown-arcade--gemini-antigravity--2.json"
+    },
+    {
+      "id": "rhythm--claude--3",
+      "fixture": "rhythm",
+      "providerPath": "claude",
+      "repeat": 3,
+      "brief": "Make a four-lane rhythm game. Notes scroll to a hit line; pressing the lane key on time scores. Use WebAudio / beatmap-synth so the chart is audible with NO external audio files. Expose score and combo.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/rhythm--claude--3.json"
+    },
+    {
+      "id": "fighting--gemini-antigravity--3",
+      "fixture": "fighting",
+      "providerPath": "gemini-antigravity",
+      "repeat": 3,
+      "brief": "Build a 2D one-on-one fighting game viewed from the side. Pressing D moves the player to the right (increasing x), A moves left (decreasing x), and the attack key (J) throws a punch that lowers the opponent's health when in range. Reducing the opponent's health to zero wins the round; losing all your own health loses it.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fighting--gemini-antigravity--3.json"
+    },
+    {
+      "id": "runner--gemini-antigravity--3",
+      "fixture": "runner",
+      "providerPath": "gemini-antigravity",
+      "repeat": 3,
+      "brief": "Make an endless runner. The player character runs forward automatically and the only control is jump (space) to clear obstacles and gaps. The run never stops while airborne. Hitting an obstacle ends the run; the score is the distance travelled.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/runner--gemini-antigravity--3.json"
+    },
+    {
+      "id": "ambient-garden--claude--1",
+      "fixture": "ambient-garden",
+      "providerPath": "claude",
+      "repeat": 1,
+      "brief": "You are the tide. Guide paper boats home by dragging currents. Soft ambient toy, no fail state. Declare a playtest contract that asserts progress rises when the pointer moves. Prefer canvas2d if Phaser/Three would be a fake.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/ambient-garden--claude--1.json"
+    },
+    {
+      "id": "visual-novel--claude--3",
+      "fixture": "visual-novel",
+      "providerPath": "claude",
+      "repeat": 3,
+      "brief": "Make a short visual novel with at least 3 dialogue lines and one branching choice that changes the ending. Click/Space advances text. Expose dialogueIndex and choiceCount on the debug snapshot.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/visual-novel--claude--3.json"
+    },
+    {
+      "id": "fps-arena--claude--1",
+      "fixture": "fps-arena",
+      "providerPath": "claude",
+      "repeat": 1,
+      "brief": "Make a first-person 3D arena shooter. Click to lock the pointer, WASD to move on the camera basis, mouse to look. Enemies spawn in waves. Use createFpsController. Include WebAudio hit SFX.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fps-arena--claude--1.json"
+    },
+    {
+      "id": "tower-defense--gemini-antigravity--2",
+      "fixture": "tower-defense",
+      "providerPath": "gemini-antigravity",
+      "repeat": 2,
+      "brief": "Make a top-down tower defense. Enemies walk a path toward a base. The player clicks to place towers that shoot enemies. Waves escalate with a NEW enemy type by wave 3. Include hit SFX via WebAudio.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/tower-defense--gemini-antigravity--2.json"
+    },
+    {
+      "id": "fishing--gemini-antigravity--3",
+      "fixture": "fishing",
+      "providerPath": "gemini-antigravity",
+      "repeat": 3,
+      "brief": "Make a cozy fishing game. Cast with click/space, time a shrinking zone to catch fish. Collect different fish. Soft ambient audio. Phaser 2D.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fishing--gemini-antigravity--3.json"
+    },
+    {
+      "id": "wordfall--claude--1",
+      "fixture": "wordfall",
+      "providerPath": "claude",
+      "repeat": 1,
+      "brief": "Make a wordfall game. Letters or words fall from the top; type them before they hit the ground. Score rises; speed escalates. Phaser 2D.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/wordfall--claude--1.json"
+    },
+    {
+      "id": "topdown-arcade--claude--2",
+      "fixture": "topdown-arcade",
+      "providerPath": "claude",
+      "repeat": 2,
+      "brief": "Build a top-down arcade shooter. The player moves in four cardinal directions with WASD (W is up the screen, S is down, A is left, D is right), aims and fires at enemies that spawn around the arena, and tries to survive as long as possible. Touching an enemy loses a life; losing all lives ends the game.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/topdown-arcade--claude--2.json"
+    },
+    {
+      "id": "platformer--gemini-antigravity--1",
+      "fixture": "platformer",
+      "providerPath": "gemini-antigravity",
+      "repeat": 1,
+      "brief": "Make a 2D side-scrolling platformer. The player runs and jumps with arrow keys and space, crosses a few platforms with gaps, and wins by touching a flag at the end of the level. Falling off the bottom loses.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/platformer--gemini-antigravity--1.json"
+    },
+    {
+      "id": "fighting--gemini-antigravity--2",
+      "fixture": "fighting",
+      "providerPath": "gemini-antigravity",
+      "repeat": 2,
+      "brief": "Build a 2D one-on-one fighting game viewed from the side. Pressing D moves the player to the right (increasing x), A moves left (decreasing x), and the attack key (J) throws a punch that lowers the opponent's health when in range. Reducing the opponent's health to zero wins the round; losing all your own health loses it.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fighting--gemini-antigravity--2.json"
+    },
+    {
+      "id": "rhythm--gemini-antigravity--2",
+      "fixture": "rhythm",
+      "providerPath": "gemini-antigravity",
+      "repeat": 2,
+      "brief": "Make a four-lane rhythm game. Notes scroll to a hit line; pressing the lane key on time scores. Use WebAudio / beatmap-synth so the chart is audible with NO external audio files. Expose score and combo.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/rhythm--gemini-antigravity--2.json"
+    },
+    {
+      "id": "ambient-garden--claude--3",
+      "fixture": "ambient-garden",
+      "providerPath": "claude",
+      "repeat": 3,
+      "brief": "You are the tide. Guide paper boats home by dragging currents. Soft ambient toy, no fail state. Declare a playtest contract that asserts progress rises when the pointer moves. Prefer canvas2d if Phaser/Three would be a fake.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/ambient-garden--claude--3.json"
+    },
+    {
+      "id": "visual-novel--codex--3",
+      "fixture": "visual-novel",
+      "providerPath": "codex",
+      "repeat": 3,
+      "brief": "Make a short visual novel with at least 3 dialogue lines and one branching choice that changes the ending. Click/Space advances text. Expose dialogueIndex and choiceCount on the debug snapshot.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/visual-novel--codex--3.json"
+    },
+    {
+      "id": "fps-arena--gemini-antigravity--2",
+      "fixture": "fps-arena",
+      "providerPath": "gemini-antigravity",
+      "repeat": 2,
+      "brief": "Make a first-person 3D arena shooter. Click to lock the pointer, WASD to move on the camera basis, mouse to look. Enemies spawn in waves. Use createFpsController. Include WebAudio hit SFX.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fps-arena--gemini-antigravity--2.json"
+    },
+    {
+      "id": "fps--gemini-antigravity--1",
+      "fixture": "fps",
+      "providerPath": "gemini-antigravity",
+      "repeat": 1,
+      "brief": "Create a simple 3D first-person shooter. Click to lock the pointer, look with the mouse, move with WASD relative to where the camera faces, and shoot waves of enemies that approach. The player wins by surviving all waves and loses if their health reaches zero.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fps--gemini-antigravity--1.json"
+    },
+    {
+      "id": "runner--gemini-antigravity--2",
+      "fixture": "runner",
+      "providerPath": "gemini-antigravity",
+      "repeat": 2,
+      "brief": "Make an endless runner. The player character runs forward automatically and the only control is jump (space) to clear obstacles and gaps. The run never stops while airborne. Hitting an obstacle ends the run; the score is the distance travelled.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/runner--gemini-antigravity--2.json"
+    },
+    {
+      "id": "wordfall--gemini-antigravity--1",
+      "fixture": "wordfall",
+      "providerPath": "gemini-antigravity",
+      "repeat": 1,
+      "brief": "Make a wordfall game. Letters or words fall from the top; type them before they hit the ground. Score rises; speed escalates. Phaser 2D.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/wordfall--gemini-antigravity--1.json"
+    },
+    {
+      "id": "platformer--claude--2",
+      "fixture": "platformer",
+      "providerPath": "claude",
+      "repeat": 2,
+      "brief": "Make a 2D side-scrolling platformer. The player runs and jumps with arrow keys and space, crosses a few platforms with gaps, and wins by touching a flag at the end of the level. Falling off the bottom loses.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/platformer--claude--2.json"
+    },
+    {
+      "id": "puzzle--codex--2",
+      "fixture": "puzzle",
+      "providerPath": "codex",
+      "repeat": 2,
+      "brief": "Make a match-3 puzzle game on a grid of colored tiles. Click one tile then an adjacent tile to swap them. Any line of three or more same-colored tiles clears, the score increases, and tiles above fall to fill the gaps. There is no fail state; the player aims for a high score.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/puzzle--codex--2.json"
+    },
+    {
+      "id": "wordfall--claude--2",
+      "fixture": "wordfall",
+      "providerPath": "claude",
+      "repeat": 2,
+      "brief": "Make a wordfall game. Letters or words fall from the top; type them before they hit the ground. Score rises; speed escalates. Phaser 2D.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/wordfall--claude--2.json"
+    },
+    {
+      "id": "wordfall--codex--3",
+      "fixture": "wordfall",
+      "providerPath": "codex",
+      "repeat": 3,
+      "brief": "Make a wordfall game. Letters or words fall from the top; type them before they hit the ground. Score rises; speed escalates. Phaser 2D.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/wordfall--codex--3.json"
+    },
+    {
+      "id": "puzzle--claude--1",
+      "fixture": "puzzle",
+      "providerPath": "claude",
+      "repeat": 1,
+      "brief": "Make a match-3 puzzle game on a grid of colored tiles. Click one tile then an adjacent tile to swap them. Any line of three or more same-colored tiles clears, the score increases, and tiles above fall to fill the gaps. There is no fail state; the player aims for a high score.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/puzzle--claude--1.json"
+    },
+    {
+      "id": "tower-defense--claude--2",
+      "fixture": "tower-defense",
+      "providerPath": "claude",
+      "repeat": 2,
+      "brief": "Make a top-down tower defense. Enemies walk a path toward a base. The player clicks to place towers that shoot enemies. Waves escalate with a NEW enemy type by wave 3. Include hit SFX via WebAudio.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/tower-defense--claude--2.json"
+    },
+    {
+      "id": "fishing--gemini-antigravity--2",
+      "fixture": "fishing",
+      "providerPath": "gemini-antigravity",
+      "repeat": 2,
+      "brief": "Make a cozy fishing game. Cast with click/space, time a shrinking zone to catch fish. Collect different fish. Soft ambient audio. Phaser 2D.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fishing--gemini-antigravity--2.json"
+    },
+    {
+      "id": "visual-novel--gemini-antigravity--2",
+      "fixture": "visual-novel",
+      "providerPath": "gemini-antigravity",
+      "repeat": 2,
+      "brief": "Make a short visual novel with at least 3 dialogue lines and one branching choice that changes the ending. Click/Space advances text. Expose dialogueIndex and choiceCount on the debug snapshot.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/visual-novel--gemini-antigravity--2.json"
+    },
+    {
+      "id": "tower-defense--gemini-antigravity--1",
+      "fixture": "tower-defense",
+      "providerPath": "gemini-antigravity",
+      "repeat": 1,
+      "brief": "Make a top-down tower defense. Enemies walk a path toward a base. The player clicks to place towers that shoot enemies. Waves escalate with a NEW enemy type by wave 3. Include hit SFX via WebAudio.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/tower-defense--gemini-antigravity--1.json"
+    },
+    {
+      "id": "platformer--codex--1",
+      "fixture": "platformer",
+      "providerPath": "codex",
+      "repeat": 1,
+      "brief": "Make a 2D side-scrolling platformer. The player runs and jumps with arrow keys and space, crosses a few platforms with gaps, and wins by touching a flag at the end of the level. Falling off the bottom loses.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/platformer--codex--1.json"
+    },
+    {
+      "id": "ambient-garden--codex--1",
+      "fixture": "ambient-garden",
+      "providerPath": "codex",
+      "repeat": 1,
+      "brief": "You are the tide. Guide paper boats home by dragging currents. Soft ambient toy, no fail state. Declare a playtest contract that asserts progress rises when the pointer moves. Prefer canvas2d if Phaser/Three would be a fake.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/ambient-garden--codex--1.json"
+    },
+    {
+      "id": "puzzle--gemini-antigravity--2",
+      "fixture": "puzzle",
+      "providerPath": "gemini-antigravity",
+      "repeat": 2,
+      "brief": "Make a match-3 puzzle game on a grid of colored tiles. Click one tile then an adjacent tile to swap them. Any line of three or more same-colored tiles clears, the score increases, and tiles above fall to fill the gaps. There is no fail state; the player aims for a high score.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/puzzle--gemini-antigravity--2.json"
+    },
+    {
+      "id": "tower-defense--claude--3",
+      "fixture": "tower-defense",
+      "providerPath": "claude",
+      "repeat": 3,
+      "brief": "Make a top-down tower defense. Enemies walk a path toward a base. The player clicks to place towers that shoot enemies. Waves escalate with a NEW enemy type by wave 3. Include hit SFX via WebAudio.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/tower-defense--claude--3.json"
+    },
+    {
+      "id": "fishing--claude--2",
+      "fixture": "fishing",
+      "providerPath": "claude",
+      "repeat": 2,
+      "brief": "Make a cozy fishing game. Cast with click/space, time a shrinking zone to catch fish. Collect different fish. Soft ambient audio. Phaser 2D.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fishing--claude--2.json"
+    },
+    {
+      "id": "fighting--claude--1",
+      "fixture": "fighting",
+      "providerPath": "claude",
+      "repeat": 1,
+      "brief": "Build a 2D one-on-one fighting game viewed from the side. Pressing D moves the player to the right (increasing x), A moves left (decreasing x), and the attack key (J) throws a punch that lowers the opponent's health when in range. Reducing the opponent's health to zero wins the round; losing all your own health loses it.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fighting--claude--1.json"
+    },
+    {
+      "id": "puzzle--claude--2",
+      "fixture": "puzzle",
+      "providerPath": "claude",
+      "repeat": 2,
+      "brief": "Make a match-3 puzzle game on a grid of colored tiles. Click one tile then an adjacent tile to swap them. Any line of three or more same-colored tiles clears, the score increases, and tiles above fall to fill the gaps. There is no fail state; the player aims for a high score.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/puzzle--claude--2.json"
+    },
+    {
+      "id": "runner--gemini-antigravity--1",
+      "fixture": "runner",
+      "providerPath": "gemini-antigravity",
+      "repeat": 1,
+      "brief": "Make an endless runner. The player character runs forward automatically and the only control is jump (space) to clear obstacles and gaps. The run never stops while airborne. Hitting an obstacle ends the run; the score is the distance travelled.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/runner--gemini-antigravity--1.json"
+    },
+    {
+      "id": "fps--codex--1",
+      "fixture": "fps",
+      "providerPath": "codex",
+      "repeat": 1,
+      "brief": "Create a simple 3D first-person shooter. Click to lock the pointer, look with the mouse, move with WASD relative to where the camera faces, and shoot waves of enemies that approach. The player wins by surviving all waves and loses if their health reaches zero.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fps--codex--1.json"
+    },
+    {
+      "id": "fishing--gemini-antigravity--1",
+      "fixture": "fishing",
+      "providerPath": "gemini-antigravity",
+      "repeat": 1,
+      "brief": "Make a cozy fishing game. Cast with click/space, time a shrinking zone to catch fish. Collect different fish. Soft ambient audio. Phaser 2D.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fishing--gemini-antigravity--1.json"
+    },
+    {
+      "id": "fighting--claude--2",
+      "fixture": "fighting",
+      "providerPath": "claude",
+      "repeat": 2,
+      "brief": "Build a 2D one-on-one fighting game viewed from the side. Pressing D moves the player to the right (increasing x), A moves left (decreasing x), and the attack key (J) throws a punch that lowers the opponent's health when in range. Reducing the opponent's health to zero wins the round; losing all your own health loses it.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fighting--claude--2.json"
+    },
+    {
+      "id": "fps--codex--3",
+      "fixture": "fps",
+      "providerPath": "codex",
+      "repeat": 3,
+      "brief": "Create a simple 3D first-person shooter. Click to lock the pointer, look with the mouse, move with WASD relative to where the camera faces, and shoot waves of enemies that approach. The player wins by surviving all waves and loses if their health reaches zero.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fps--codex--3.json"
+    },
+    {
+      "id": "rhythm--codex--2",
+      "fixture": "rhythm",
+      "providerPath": "codex",
+      "repeat": 2,
+      "brief": "Make a four-lane rhythm game. Notes scroll to a hit line; pressing the lane key on time scores. Use WebAudio / beatmap-synth so the chart is audible with NO external audio files. Expose score and combo.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/rhythm--codex--2.json"
+    },
+    {
+      "id": "kitchen--codex--2",
+      "fixture": "kitchen",
+      "providerPath": "codex",
+      "repeat": 2,
+      "brief": "Make a kitchen rush game. Orders appear as tickets; chop, cook, plate, and serve before the timer. Phaser 2D with juice on serve.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/kitchen--codex--2.json"
+    },
+    {
+      "id": "kitchen--claude--1",
+      "fixture": "kitchen",
+      "providerPath": "claude",
+      "repeat": 1,
+      "brief": "Make a kitchen rush game. Orders appear as tickets; chop, cook, plate, and serve before the timer. Phaser 2D with juice on serve.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/kitchen--claude--1.json"
+    },
+    {
+      "id": "fishing--codex--2",
+      "fixture": "fishing",
+      "providerPath": "codex",
+      "repeat": 2,
+      "brief": "Make a cozy fishing game. Cast with click/space, time a shrinking zone to catch fish. Collect different fish. Soft ambient audio. Phaser 2D.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fishing--codex--2.json"
+    },
+    {
+      "id": "ambient-garden--gemini-antigravity--1",
+      "fixture": "ambient-garden",
+      "providerPath": "gemini-antigravity",
+      "repeat": 1,
+      "brief": "You are the tide. Guide paper boats home by dragging currents. Soft ambient toy, no fail state. Declare a playtest contract that asserts progress rises when the pointer moves. Prefer canvas2d if Phaser/Three would be a fake.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/ambient-garden--gemini-antigravity--1.json"
+    },
+    {
+      "id": "fighting--codex--3",
+      "fixture": "fighting",
+      "providerPath": "codex",
+      "repeat": 3,
+      "brief": "Build a 2D one-on-one fighting game viewed from the side. Pressing D moves the player to the right (increasing x), A moves left (decreasing x), and the attack key (J) throws a punch that lowers the opponent's health when in range. Reducing the opponent's health to zero wins the round; losing all your own health loses it.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fighting--codex--3.json"
+    },
+    {
+      "id": "visual-novel--gemini-antigravity--3",
+      "fixture": "visual-novel",
+      "providerPath": "gemini-antigravity",
+      "repeat": 3,
+      "brief": "Make a short visual novel with at least 3 dialogue lines and one branching choice that changes the ending. Click/Space advances text. Expose dialogueIndex and choiceCount on the debug snapshot.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/visual-novel--gemini-antigravity--3.json"
+    },
+    {
+      "id": "tower-defense--codex--1",
+      "fixture": "tower-defense",
+      "providerPath": "codex",
+      "repeat": 1,
+      "brief": "Make a top-down tower defense. Enemies walk a path toward a base. The player clicks to place towers that shoot enemies. Waves escalate with a NEW enemy type by wave 3. Include hit SFX via WebAudio.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/tower-defense--codex--1.json"
+    },
+    {
+      "id": "tower-defense--gemini-antigravity--3",
+      "fixture": "tower-defense",
+      "providerPath": "gemini-antigravity",
+      "repeat": 3,
+      "brief": "Make a top-down tower defense. Enemies walk a path toward a base. The player clicks to place towers that shoot enemies. Waves escalate with a NEW enemy type by wave 3. Include hit SFX via WebAudio.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/tower-defense--gemini-antigravity--3.json"
+    },
+    {
+      "id": "fps-arena--claude--3",
+      "fixture": "fps-arena",
+      "providerPath": "claude",
+      "repeat": 3,
+      "brief": "Make a first-person 3D arena shooter. Click to lock the pointer, WASD to move on the camera basis, mouse to look. Enemies spawn in waves. Use createFpsController. Include WebAudio hit SFX.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fps-arena--claude--3.json"
+    },
+    {
+      "id": "wordfall--codex--2",
+      "fixture": "wordfall",
+      "providerPath": "codex",
+      "repeat": 2,
+      "brief": "Make a wordfall game. Letters or words fall from the top; type them before they hit the ground. Score rises; speed escalates. Phaser 2D.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/wordfall--codex--2.json"
+    },
+    {
+      "id": "visual-novel--codex--2",
+      "fixture": "visual-novel",
+      "providerPath": "codex",
+      "repeat": 2,
+      "brief": "Make a short visual novel with at least 3 dialogue lines and one branching choice that changes the ending. Click/Space advances text. Expose dialogueIndex and choiceCount on the debug snapshot.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/visual-novel--codex--2.json"
+    },
+    {
+      "id": "kitchen--claude--2",
+      "fixture": "kitchen",
+      "providerPath": "claude",
+      "repeat": 2,
+      "brief": "Make a kitchen rush game. Orders appear as tickets; chop, cook, plate, and serve before the timer. Phaser 2D with juice on serve.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/kitchen--claude--2.json"
+    },
+    {
+      "id": "rhythm--claude--2",
+      "fixture": "rhythm",
+      "providerPath": "claude",
+      "repeat": 2,
+      "brief": "Make a four-lane rhythm game. Notes scroll to a hit line; pressing the lane key on time scores. Use WebAudio / beatmap-synth so the chart is audible with NO external audio files. Expose score and combo.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/rhythm--claude--2.json"
+    },
+    {
+      "id": "fighting--codex--1",
+      "fixture": "fighting",
+      "providerPath": "codex",
+      "repeat": 1,
+      "brief": "Build a 2D one-on-one fighting game viewed from the side. Pressing D moves the player to the right (increasing x), A moves left (decreasing x), and the attack key (J) throws a punch that lowers the opponent's health when in range. Reducing the opponent's health to zero wins the round; losing all your own health loses it.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fighting--codex--1.json"
+    },
+    {
+      "id": "wordfall--claude--3",
+      "fixture": "wordfall",
+      "providerPath": "claude",
+      "repeat": 3,
+      "brief": "Make a wordfall game. Letters or words fall from the top; type them before they hit the ground. Score rises; speed escalates. Phaser 2D.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/wordfall--claude--3.json"
+    },
+    {
+      "id": "kitchen--gemini-antigravity--3",
+      "fixture": "kitchen",
+      "providerPath": "gemini-antigravity",
+      "repeat": 3,
+      "brief": "Make a kitchen rush game. Orders appear as tickets; chop, cook, plate, and serve before the timer. Phaser 2D with juice on serve.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/kitchen--gemini-antigravity--3.json"
+    },
+    {
+      "id": "runner--codex--3",
+      "fixture": "runner",
+      "providerPath": "codex",
+      "repeat": 3,
+      "brief": "Make an endless runner. The player character runs forward automatically and the only control is jump (space) to clear obstacles and gaps. The run never stops while airborne. Hitting an obstacle ends the run; the score is the distance travelled.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/runner--codex--3.json"
+    },
+    {
+      "id": "kitchen--codex--3",
+      "fixture": "kitchen",
+      "providerPath": "codex",
+      "repeat": 3,
+      "brief": "Make a kitchen rush game. Orders appear as tickets; chop, cook, plate, and serve before the timer. Phaser 2D with juice on serve.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/kitchen--codex--3.json"
+    },
+    {
+      "id": "topdown-arcade--gemini-antigravity--3",
+      "fixture": "topdown-arcade",
+      "providerPath": "gemini-antigravity",
+      "repeat": 3,
+      "brief": "Build a top-down arcade shooter. The player moves in four cardinal directions with WASD (W is up the screen, S is down, A is left, D is right), aims and fires at enemies that spawn around the arena, and tries to survive as long as possible. Touching an enemy loses a life; losing all lives ends the game.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/topdown-arcade--gemini-antigravity--3.json"
+    },
+    {
+      "id": "runner--claude--1",
+      "fixture": "runner",
+      "providerPath": "claude",
+      "repeat": 1,
+      "brief": "Make an endless runner. The player character runs forward automatically and the only control is jump (space) to clear obstacles and gaps. The run never stops while airborne. Hitting an obstacle ends the run; the score is the distance travelled.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/runner--claude--1.json"
+    },
+    {
+      "id": "rhythm--codex--3",
+      "fixture": "rhythm",
+      "providerPath": "codex",
+      "repeat": 3,
+      "brief": "Make a four-lane rhythm game. Notes scroll to a hit line; pressing the lane key on time scores. Use WebAudio / beatmap-synth so the chart is audible with NO external audio files. Expose score and combo.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/rhythm--codex--3.json"
+    },
+    {
+      "id": "visual-novel--gemini-antigravity--1",
+      "fixture": "visual-novel",
+      "providerPath": "gemini-antigravity",
+      "repeat": 1,
+      "brief": "Make a short visual novel with at least 3 dialogue lines and one branching choice that changes the ending. Click/Space advances text. Expose dialogueIndex and choiceCount on the debug snapshot.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/visual-novel--gemini-antigravity--1.json"
+    },
+    {
+      "id": "kitchen--gemini-antigravity--1",
+      "fixture": "kitchen",
+      "providerPath": "gemini-antigravity",
+      "repeat": 1,
+      "brief": "Make a kitchen rush game. Orders appear as tickets; chop, cook, plate, and serve before the timer. Phaser 2D with juice on serve.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/kitchen--gemini-antigravity--1.json"
+    },
+    {
+      "id": "tower-defense--claude--1",
+      "fixture": "tower-defense",
+      "providerPath": "claude",
+      "repeat": 1,
+      "brief": "Make a top-down tower defense. Enemies walk a path toward a base. The player clicks to place towers that shoot enemies. Waves escalate with a NEW enemy type by wave 3. Include hit SFX via WebAudio.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/tower-defense--claude--1.json"
+    },
+    {
+      "id": "runner--codex--1",
+      "fixture": "runner",
+      "providerPath": "codex",
+      "repeat": 1,
+      "brief": "Make an endless runner. The player character runs forward automatically and the only control is jump (space) to clear obstacles and gaps. The run never stops while airborne. Hitting an obstacle ends the run; the score is the distance travelled.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/runner--codex--1.json"
+    },
+    {
+      "id": "visual-novel--codex--1",
+      "fixture": "visual-novel",
+      "providerPath": "codex",
+      "repeat": 1,
+      "brief": "Make a short visual novel with at least 3 dialogue lines and one branching choice that changes the ending. Click/Space advances text. Expose dialogueIndex and choiceCount on the debug snapshot.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/visual-novel--codex--1.json"
+    },
+    {
+      "id": "kitchen--claude--3",
+      "fixture": "kitchen",
+      "providerPath": "claude",
+      "repeat": 3,
+      "brief": "Make a kitchen rush game. Orders appear as tickets; chop, cook, plate, and serve before the timer. Phaser 2D with juice on serve.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/kitchen--claude--3.json"
+    },
+    {
+      "id": "runner--claude--2",
+      "fixture": "runner",
+      "providerPath": "claude",
+      "repeat": 2,
+      "brief": "Make an endless runner. The player character runs forward automatically and the only control is jump (space) to clear obstacles and gaps. The run never stops while airborne. Hitting an obstacle ends the run; the score is the distance travelled.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/runner--claude--2.json"
+    },
+    {
+      "id": "kitchen--gemini-antigravity--2",
+      "fixture": "kitchen",
+      "providerPath": "gemini-antigravity",
+      "repeat": 2,
+      "brief": "Make a kitchen rush game. Orders appear as tickets; chop, cook, plate, and serve before the timer. Phaser 2D with juice on serve.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/kitchen--gemini-antigravity--2.json"
+    },
+    {
+      "id": "ambient-garden--gemini-antigravity--2",
+      "fixture": "ambient-garden",
+      "providerPath": "gemini-antigravity",
+      "repeat": 2,
+      "brief": "You are the tide. Guide paper boats home by dragging currents. Soft ambient toy, no fail state. Declare a playtest contract that asserts progress rises when the pointer moves. Prefer canvas2d if Phaser/Three would be a fake.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/ambient-garden--gemini-antigravity--2.json"
+    },
+    {
+      "id": "visual-novel--claude--2",
+      "fixture": "visual-novel",
+      "providerPath": "claude",
+      "repeat": 2,
+      "brief": "Make a short visual novel with at least 3 dialogue lines and one branching choice that changes the ending. Click/Space advances text. Expose dialogueIndex and choiceCount on the debug snapshot.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/visual-novel--claude--2.json"
+    },
+    {
+      "id": "fishing--codex--3",
+      "fixture": "fishing",
+      "providerPath": "codex",
+      "repeat": 3,
+      "brief": "Make a cozy fishing game. Cast with click/space, time a shrinking zone to catch fish. Collect different fish. Soft ambient audio. Phaser 2D.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fishing--codex--3.json"
+    },
+    {
+      "id": "platformer--codex--2",
+      "fixture": "platformer",
+      "providerPath": "codex",
+      "repeat": 2,
+      "brief": "Make a 2D side-scrolling platformer. The player runs and jumps with arrow keys and space, crosses a few platforms with gaps, and wins by touching a flag at the end of the level. Falling off the bottom loses.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/platformer--codex--2.json"
+    },
+    {
+      "id": "fps--claude--1",
+      "fixture": "fps",
+      "providerPath": "claude",
+      "repeat": 1,
+      "brief": "Create a simple 3D first-person shooter. Click to lock the pointer, look with the mouse, move with WASD relative to where the camera faces, and shoot waves of enemies that approach. The player wins by surviving all waves and loses if their health reaches zero.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fps--claude--1.json"
+    },
+    {
+      "id": "topdown-arcade--codex--1",
+      "fixture": "topdown-arcade",
+      "providerPath": "codex",
+      "repeat": 1,
+      "brief": "Build a top-down arcade shooter. The player moves in four cardinal directions with WASD (W is up the screen, S is down, A is left, D is right), aims and fires at enemies that spawn around the arena, and tries to survive as long as possible. Touching an enemy loses a life; losing all lives ends the game.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/topdown-arcade--codex--1.json"
+    },
+    {
+      "id": "platformer--gemini-antigravity--3",
+      "fixture": "platformer",
+      "providerPath": "gemini-antigravity",
+      "repeat": 3,
+      "brief": "Make a 2D side-scrolling platformer. The player runs and jumps with arrow keys and space, crosses a few platforms with gaps, and wins by touching a flag at the end of the level. Falling off the bottom loses.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/platformer--gemini-antigravity--3.json"
+    },
+    {
+      "id": "tower-defense--codex--2",
+      "fixture": "tower-defense",
+      "providerPath": "codex",
+      "repeat": 2,
+      "brief": "Make a top-down tower defense. Enemies walk a path toward a base. The player clicks to place towers that shoot enemies. Waves escalate with a NEW enemy type by wave 3. Include hit SFX via WebAudio.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/tower-defense--codex--2.json"
+    },
+    {
+      "id": "fighting--codex--2",
+      "fixture": "fighting",
+      "providerPath": "codex",
+      "repeat": 2,
+      "brief": "Build a 2D one-on-one fighting game viewed from the side. Pressing D moves the player to the right (increasing x), A moves left (decreasing x), and the attack key (J) throws a punch that lowers the opponent's health when in range. Reducing the opponent's health to zero wins the round; losing all your own health loses it.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fighting--codex--2.json"
+    },
+    {
+      "id": "puzzle--codex--3",
+      "fixture": "puzzle",
+      "providerPath": "codex",
+      "repeat": 3,
+      "brief": "Make a match-3 puzzle game on a grid of colored tiles. Click one tile then an adjacent tile to swap them. Any line of three or more same-colored tiles clears, the score increases, and tiles above fall to fill the gaps. There is no fail state; the player aims for a high score.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/puzzle--codex--3.json"
+    },
+    {
+      "id": "puzzle--codex--1",
+      "fixture": "puzzle",
+      "providerPath": "codex",
+      "repeat": 1,
+      "brief": "Make a match-3 puzzle game on a grid of colored tiles. Click one tile then an adjacent tile to swap them. Any line of three or more same-colored tiles clears, the score increases, and tiles above fall to fill the gaps. There is no fail state; the player aims for a high score.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/puzzle--codex--1.json"
+    },
+    {
+      "id": "runner--codex--2",
+      "fixture": "runner",
+      "providerPath": "codex",
+      "repeat": 2,
+      "brief": "Make an endless runner. The player character runs forward automatically and the only control is jump (space) to clear obstacles and gaps. The run never stops while airborne. Hitting an obstacle ends the run; the score is the distance travelled.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/runner--codex--2.json"
+    },
+    {
+      "id": "fps-arena--codex--1",
+      "fixture": "fps-arena",
+      "providerPath": "codex",
+      "repeat": 1,
+      "brief": "Make a first-person 3D arena shooter. Click to lock the pointer, WASD to move on the camera basis, mouse to look. Enemies spawn in waves. Use createFpsController. Include WebAudio hit SFX.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fps-arena--codex--1.json"
+    },
+    {
+      "id": "wordfall--codex--1",
+      "fixture": "wordfall",
+      "providerPath": "codex",
+      "repeat": 1,
+      "brief": "Make a wordfall game. Letters or words fall from the top; type them before they hit the ground. Score rises; speed escalates. Phaser 2D.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/wordfall--codex--1.json"
+    },
+    {
+      "id": "fishing--codex--1",
+      "fixture": "fishing",
+      "providerPath": "codex",
+      "repeat": 1,
+      "brief": "Make a cozy fishing game. Cast with click/space, time a shrinking zone to catch fish. Collect different fish. Soft ambient audio. Phaser 2D.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fishing--codex--1.json"
+    },
+    {
+      "id": "ambient-garden--gemini-antigravity--3",
+      "fixture": "ambient-garden",
+      "providerPath": "gemini-antigravity",
+      "repeat": 3,
+      "brief": "You are the tide. Guide paper boats home by dragging currents. Soft ambient toy, no fail state. Declare a playtest contract that asserts progress rises when the pointer moves. Prefer canvas2d if Phaser/Three would be a fake.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/ambient-garden--gemini-antigravity--3.json"
+    },
+    {
+      "id": "runner--claude--3",
+      "fixture": "runner",
+      "providerPath": "claude",
+      "repeat": 3,
+      "brief": "Make an endless runner. The player character runs forward automatically and the only control is jump (space) to clear obstacles and gaps. The run never stops while airborne. Hitting an obstacle ends the run; the score is the distance travelled.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/runner--claude--3.json"
+    },
+    {
+      "id": "fighting--claude--3",
+      "fixture": "fighting",
+      "providerPath": "claude",
+      "repeat": 3,
+      "brief": "Build a 2D one-on-one fighting game viewed from the side. Pressing D moves the player to the right (increasing x), A moves left (decreasing x), and the attack key (J) throws a punch that lowers the opponent's health when in range. Reducing the opponent's health to zero wins the round; losing all your own health loses it.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fighting--claude--3.json"
+    },
+    {
+      "id": "platformer--claude--3",
+      "fixture": "platformer",
+      "providerPath": "claude",
+      "repeat": 3,
+      "brief": "Make a 2D side-scrolling platformer. The player runs and jumps with arrow keys and space, crosses a few platforms with gaps, and wins by touching a flag at the end of the level. Falling off the bottom loses.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/platformer--claude--3.json"
+    },
+    {
+      "id": "topdown-arcade--claude--3",
+      "fixture": "topdown-arcade",
+      "providerPath": "claude",
+      "repeat": 3,
+      "brief": "Build a top-down arcade shooter. The player moves in four cardinal directions with WASD (W is up the screen, S is down, A is left, D is right), aims and fires at enemies that spawn around the arena, and tries to survive as long as possible. Touching an enemy loses a life; losing all lives ends the game.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/topdown-arcade--claude--3.json"
+    },
+    {
+      "id": "rhythm--gemini-antigravity--3",
+      "fixture": "rhythm",
+      "providerPath": "gemini-antigravity",
+      "repeat": 3,
+      "brief": "Make a four-lane rhythm game. Notes scroll to a hit line; pressing the lane key on time scores. Use WebAudio / beatmap-synth so the chart is audible with NO external audio files. Expose score and combo.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/rhythm--gemini-antigravity--3.json"
+    },
+    {
+      "id": "fps--claude--3",
+      "fixture": "fps",
+      "providerPath": "claude",
+      "repeat": 3,
+      "brief": "Create a simple 3D first-person shooter. Click to lock the pointer, look with the mouse, move with WASD relative to where the camera faces, and shoot waves of enemies that approach. The player wins by surviving all waves and loses if their health reaches zero.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fps--claude--3.json"
+    },
+    {
+      "id": "tower-defense--codex--3",
+      "fixture": "tower-defense",
+      "providerPath": "codex",
+      "repeat": 3,
+      "brief": "Make a top-down tower defense. Enemies walk a path toward a base. The player clicks to place towers that shoot enemies. Waves escalate with a NEW enemy type by wave 3. Include hit SFX via WebAudio.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/tower-defense--codex--3.json"
+    },
+    {
+      "id": "puzzle--gemini-antigravity--1",
+      "fixture": "puzzle",
+      "providerPath": "gemini-antigravity",
+      "repeat": 1,
+      "brief": "Make a match-3 puzzle game on a grid of colored tiles. Click one tile then an adjacent tile to swap them. Any line of three or more same-colored tiles clears, the score increases, and tiles above fall to fill the gaps. There is no fail state; the player aims for a high score.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/puzzle--gemini-antigravity--1.json"
+    },
+    {
+      "id": "fps--claude--2",
+      "fixture": "fps",
+      "providerPath": "claude",
+      "repeat": 2,
+      "brief": "Create a simple 3D first-person shooter. Click to lock the pointer, look with the mouse, move with WASD relative to where the camera faces, and shoot waves of enemies that approach. The player wins by surviving all waves and loses if their health reaches zero.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fps--claude--2.json"
+    },
+    {
+      "id": "platformer--claude--1",
+      "fixture": "platformer",
+      "providerPath": "claude",
+      "repeat": 1,
+      "brief": "Make a 2D side-scrolling platformer. The player runs and jumps with arrow keys and space, crosses a few platforms with gaps, and wins by touching a flag at the end of the level. Falling off the bottom loses.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/platformer--claude--1.json"
+    },
+    {
+      "id": "ambient-garden--claude--2",
+      "fixture": "ambient-garden",
+      "providerPath": "claude",
+      "repeat": 2,
+      "brief": "You are the tide. Guide paper boats home by dragging currents. Soft ambient toy, no fail state. Declare a playtest contract that asserts progress rises when the pointer moves. Prefer canvas2d if Phaser/Three would be a fake.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/ambient-garden--claude--2.json"
+    },
+    {
+      "id": "topdown-arcade--codex--2",
+      "fixture": "topdown-arcade",
+      "providerPath": "codex",
+      "repeat": 2,
+      "brief": "Build a top-down arcade shooter. The player moves in four cardinal directions with WASD (W is up the screen, S is down, A is left, D is right), aims and fires at enemies that spawn around the arena, and tries to survive as long as possible. Touching an enemy loses a life; losing all lives ends the game.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/topdown-arcade--codex--2.json"
+    },
+    {
+      "id": "puzzle--claude--3",
+      "fixture": "puzzle",
+      "providerPath": "claude",
+      "repeat": 3,
+      "brief": "Make a match-3 puzzle game on a grid of colored tiles. Click one tile then an adjacent tile to swap them. Any line of three or more same-colored tiles clears, the score increases, and tiles above fall to fill the gaps. There is no fail state; the player aims for a high score.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/puzzle--claude--3.json"
+    },
+    {
+      "id": "kitchen--codex--1",
+      "fixture": "kitchen",
+      "providerPath": "codex",
+      "repeat": 1,
+      "brief": "Make a kitchen rush game. Orders appear as tickets; chop, cook, plate, and serve before the timer. Phaser 2D with juice on serve.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/kitchen--codex--1.json"
+    },
+    {
+      "id": "topdown-arcade--gemini-antigravity--1",
+      "fixture": "topdown-arcade",
+      "providerPath": "gemini-antigravity",
+      "repeat": 1,
+      "brief": "Build a top-down arcade shooter. The player moves in four cardinal directions with WASD (W is up the screen, S is down, A is left, D is right), aims and fires at enemies that spawn around the arena, and tries to survive as long as possible. Touching an enemy loses a life; losing all lives ends the game.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/topdown-arcade--gemini-antigravity--1.json"
+    },
+    {
+      "id": "fps-arena--claude--2",
+      "fixture": "fps-arena",
+      "providerPath": "claude",
+      "repeat": 2,
+      "brief": "Make a first-person 3D arena shooter. Click to lock the pointer, WASD to move on the camera basis, mouse to look. Enemies spawn in waves. Use createFpsController. Include WebAudio hit SFX.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fps-arena--claude--2.json"
+    },
+    {
+      "id": "ambient-garden--codex--3",
+      "fixture": "ambient-garden",
+      "providerPath": "codex",
+      "repeat": 3,
+      "brief": "You are the tide. Guide paper boats home by dragging currents. Soft ambient toy, no fail state. Declare a playtest contract that asserts progress rises when the pointer moves. Prefer canvas2d if Phaser/Three would be a fake.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/ambient-garden--codex--3.json"
+    },
+    {
+      "id": "topdown-arcade--claude--1",
+      "fixture": "topdown-arcade",
+      "providerPath": "claude",
+      "repeat": 1,
+      "brief": "Build a top-down arcade shooter. The player moves in four cardinal directions with WASD (W is up the screen, S is down, A is left, D is right), aims and fires at enemies that spawn around the arena, and tries to survive as long as possible. Touching an enemy loses a life; losing all lives ends the game.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/topdown-arcade--claude--1.json"
+    },
+    {
+      "id": "ambient-garden--codex--2",
+      "fixture": "ambient-garden",
+      "providerPath": "codex",
+      "repeat": 2,
+      "brief": "You are the tide. Guide paper boats home by dragging currents. Soft ambient toy, no fail state. Declare a playtest contract that asserts progress rises when the pointer moves. Prefer canvas2d if Phaser/Three would be a fake.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/ambient-garden--codex--2.json"
+    },
+    {
+      "id": "puzzle--gemini-antigravity--3",
+      "fixture": "puzzle",
+      "providerPath": "gemini-antigravity",
+      "repeat": 3,
+      "brief": "Make a match-3 puzzle game on a grid of colored tiles. Click one tile then an adjacent tile to swap them. Any line of three or more same-colored tiles clears, the score increases, and tiles above fall to fill the gaps. There is no fail state; the player aims for a high score.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/puzzle--gemini-antigravity--3.json"
+    },
+    {
+      "id": "fps--gemini-antigravity--3",
+      "fixture": "fps",
+      "providerPath": "gemini-antigravity",
+      "repeat": 3,
+      "brief": "Create a simple 3D first-person shooter. Click to lock the pointer, look with the mouse, move with WASD relative to where the camera faces, and shoot waves of enemies that approach. The player wins by surviving all waves and loses if their health reaches zero.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fps--gemini-antigravity--3.json"
+    },
+    {
+      "id": "fps-arena--gemini-antigravity--3",
+      "fixture": "fps-arena",
+      "providerPath": "gemini-antigravity",
+      "repeat": 3,
+      "brief": "Make a first-person 3D arena shooter. Click to lock the pointer, WASD to move on the camera basis, mouse to look. Enemies spawn in waves. Use createFpsController. Include WebAudio hit SFX.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fps-arena--gemini-antigravity--3.json"
+    },
+    {
+      "id": "wordfall--gemini-antigravity--2",
+      "fixture": "wordfall",
+      "providerPath": "gemini-antigravity",
+      "repeat": 2,
+      "brief": "Make a wordfall game. Letters or words fall from the top; type them before they hit the ground. Score rises; speed escalates. Phaser 2D.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/wordfall--gemini-antigravity--2.json"
+    },
+    {
+      "id": "fps-arena--codex--3",
+      "fixture": "fps-arena",
+      "providerPath": "codex",
+      "repeat": 3,
+      "brief": "Make a first-person 3D arena shooter. Click to lock the pointer, WASD to move on the camera basis, mouse to look. Enemies spawn in waves. Use createFpsController. Include WebAudio hit SFX.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fps-arena--codex--3.json"
+    },
+    {
+      "id": "rhythm--codex--1",
+      "fixture": "rhythm",
+      "providerPath": "codex",
+      "repeat": 1,
+      "brief": "Make a four-lane rhythm game. Notes scroll to a hit line; pressing the lane key on time scores. Use WebAudio / beatmap-synth so the chart is audible with NO external audio files. Expose score and combo.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/rhythm--codex--1.json"
+    },
+    {
+      "id": "fps--gemini-antigravity--2",
+      "fixture": "fps",
+      "providerPath": "gemini-antigravity",
+      "repeat": 2,
+      "brief": "Create a simple 3D first-person shooter. Click to lock the pointer, look with the mouse, move with WASD relative to where the camera faces, and shoot waves of enemies that approach. The player wins by surviving all waves and loses if their health reaches zero.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fps--gemini-antigravity--2.json"
+    },
+    {
+      "id": "fighting--gemini-antigravity--1",
+      "fixture": "fighting",
+      "providerPath": "gemini-antigravity",
+      "repeat": 1,
+      "brief": "Build a 2D one-on-one fighting game viewed from the side. Pressing D moves the player to the right (increasing x), A moves left (decreasing x), and the attack key (J) throws a punch that lowers the opponent's health when in range. Reducing the opponent's health to zero wins the round; losing all your own health loses it.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fighting--gemini-antigravity--1.json"
+    },
+    {
+      "id": "platformer--codex--3",
+      "fixture": "platformer",
+      "providerPath": "codex",
+      "repeat": 3,
+      "brief": "Make a 2D side-scrolling platformer. The player runs and jumps with arrow keys and space, crosses a few platforms with gaps, and wins by touching a flag at the end of the level. Falling off the bottom loses.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/platformer--codex--3.json"
+    },
+    {
+      "id": "fps--codex--2",
+      "fixture": "fps",
+      "providerPath": "codex",
+      "repeat": 2,
+      "brief": "Create a simple 3D first-person shooter. Click to lock the pointer, look with the mouse, move with WASD relative to where the camera faces, and shoot waves of enemies that approach. The player wins by surviving all waves and loses if their health reaches zero.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fps--codex--2.json"
+    },
+    {
+      "id": "rhythm--claude--1",
+      "fixture": "rhythm",
+      "providerPath": "claude",
+      "repeat": 1,
+      "brief": "Make a four-lane rhythm game. Notes scroll to a hit line; pressing the lane key on time scores. Use WebAudio / beatmap-synth so the chart is audible with NO external audio files. Expose score and combo.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/rhythm--claude--1.json"
+    },
+    {
+      "id": "fishing--claude--1",
+      "fixture": "fishing",
+      "providerPath": "claude",
+      "repeat": 1,
+      "brief": "Make a cozy fishing game. Cast with click/space, time a shrinking zone to catch fish. Collect different fish. Soft ambient audio. Phaser 2D.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fishing--claude--1.json"
+    },
+    {
+      "id": "platformer--gemini-antigravity--2",
+      "fixture": "platformer",
+      "providerPath": "gemini-antigravity",
+      "repeat": 2,
+      "brief": "Make a 2D side-scrolling platformer. The player runs and jumps with arrow keys and space, crosses a few platforms with gaps, and wins by touching a flag at the end of the level. Falling off the bottom loses.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/platformer--gemini-antigravity--2.json"
+    },
+    {
+      "id": "fps-arena--gemini-antigravity--1",
+      "fixture": "fps-arena",
+      "providerPath": "gemini-antigravity",
+      "repeat": 1,
+      "brief": "Make a first-person 3D arena shooter. Click to lock the pointer, WASD to move on the camera basis, mouse to look. Enemies spawn in waves. Use createFpsController. Include WebAudio hit SFX.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fps-arena--gemini-antigravity--1.json"
+    },
+    {
+      "id": "rhythm--gemini-antigravity--1",
+      "fixture": "rhythm",
+      "providerPath": "gemini-antigravity",
+      "repeat": 1,
+      "brief": "Make a four-lane rhythm game. Notes scroll to a hit line; pressing the lane key on time scores. Use WebAudio / beatmap-synth so the chart is audible with NO external audio files. Expose score and combo.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/rhythm--gemini-antigravity--1.json"
+    },
+    {
+      "id": "fps-arena--codex--2",
+      "fixture": "fps-arena",
+      "providerPath": "codex",
+      "repeat": 2,
+      "brief": "Make a first-person 3D arena shooter. Click to lock the pointer, WASD to move on the camera basis, mouse to look. Enemies spawn in waves. Use createFpsController. Include WebAudio hit SFX.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/fps-arena--codex--2.json"
+    },
+    {
+      "id": "wordfall--gemini-antigravity--3",
+      "fixture": "wordfall",
+      "providerPath": "gemini-antigravity",
+      "repeat": 3,
+      "brief": "Make a wordfall game. Letters or words fall from the top; type them before they hit the ground. Score rises; speed escalates. Phaser 2D.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/wordfall--gemini-antigravity--3.json"
+    },
+    {
+      "id": "topdown-arcade--codex--3",
+      "fixture": "topdown-arcade",
+      "providerPath": "codex",
+      "repeat": 3,
+      "brief": "Build a top-down arcade shooter. The player moves in four cardinal directions with WASD (W is up the screen, S is down, A is left, D is right), aims and fires at enemies that spawn around the arena, and tries to survive as long as possible. Touching an enemy loses a life; losing all lives ends the game.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/topdown-arcade--codex--3.json"
+    },
+    {
+      "id": "visual-novel--claude--1",
+      "fixture": "visual-novel",
+      "providerPath": "claude",
+      "repeat": 1,
+      "brief": "Make a short visual novel with at least 3 dialogue lines and one branching choice that changes the ending. Click/Space advances text. Expose dialogueIndex and choiceCount on the debug snapshot.",
+      "edit": "Add a clearly visible pause/resume control. Preserve the core mechanic, controls, art direction and existing win/lose conditions.",
+      "recovery": "Restore the previous verified version, confirm it still plays, then return to the edited version.",
+      "evidenceFile": "results/visual-novel--claude--1.json"
+    }
+  ]
+}

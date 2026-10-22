@@ -182,9 +182,9 @@ describe('iframe bridge constants', () => {
     expect(TWEAKS_UPDATE_MESSAGE_TYPE).toBe('playforge:tweaks:update');
   });
 
-  it('resolves a concrete preview origin (never "*")', () => {
+  it('requires an opaque sandbox origin', () => {
     expect(PREVIEW_IFRAME_ORIGIN).not.toBe('*');
-    expect(PREVIEW_IFRAME_ORIGIN).toMatch(/^https?:\/\//);
+    expect(PREVIEW_IFRAME_ORIGIN).toBe('null');
   });
 });
 
@@ -316,7 +316,7 @@ describe('sendCloudSaveResult / sendCloudSaveReady', () => {
     sendCloudSaveResult(iframe, 'cs1', { level: 2 });
     expect(postMessage).toHaveBeenCalledWith(
       { type: CLOUD_SAVE_RESULT_MESSAGE_TYPE, requestId: 'cs1', value: { level: 2 } },
-      PREVIEW_IFRAME_ORIGIN,
+      '*',
     );
   });
 
@@ -325,17 +325,14 @@ describe('sendCloudSaveResult / sendCloudSaveReady', () => {
     sendCloudSaveResult(iframe, 'cs2', null);
     expect(postMessage).toHaveBeenCalledWith(
       { type: CLOUD_SAVE_RESULT_MESSAGE_TYPE, requestId: 'cs2', value: null },
-      PREVIEW_IFRAME_ORIGIN,
+      '*',
     );
   });
 
-  it('posts ready with the correct type + default target origin (never "*")', () => {
+  it('posts ready with the correct type + opaque target window', () => {
     const { iframe, postMessage } = mockIframe();
     sendCloudSaveReady(iframe);
-    expect(postMessage).toHaveBeenCalledWith(
-      { type: CLOUD_SAVE_READY_MESSAGE_TYPE },
-      PREVIEW_IFRAME_ORIGIN,
-    );
+    expect(postMessage).toHaveBeenCalledWith({ type: CLOUD_SAVE_READY_MESSAGE_TYPE }, '*');
   });
 
   it('honors an explicit target origin for the opaque play iframe', () => {

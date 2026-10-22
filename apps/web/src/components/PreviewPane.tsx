@@ -1,11 +1,10 @@
 'use client';
 
-import { getToken } from '@/lib/auth';
+import { createPreviewSession } from '@/lib/api';
 import { useCloudSaveRelay } from '@/lib/cloud-save-relay';
 import { deriveGenerationData } from '@/lib/generation-inspector-data';
 import {
   type ControlsManifest,
-  PREVIEW_IFRAME_ORIGIN,
   TWEAKS_UPDATE_MESSAGE_TYPE,
   isPreviewIframeOrigin,
   isRedundantManifest,
@@ -131,7 +130,7 @@ export function PreviewPane({
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reloadNonce resets watchdog lifecycle on manual reload
   useEffect(() => {
-    if (!previewUrl || hasError) {
+    if (!previewUrl) {
       watchdogRef.current?.stop();
       return;
     }
@@ -148,13 +147,12 @@ export function PreviewPane({
       },
     });
     watchdogRef.current = bridge;
-    bridge.start();
 
     return () => {
       bridge.stop();
       watchdogRef.current = null;
     };
-  }, [previewUrl, hasError, reloadNonce]);
+  }, [previewUrl, reloadNonce]);
 
   const reloadPreview = useCallback(() => {
     setReloadNonce((n) => n + 1);
@@ -193,25 +191,30 @@ export function PreviewPane({
     setView('preview');
   }, [previewUrl]);
 
-  // The owner-gated preview route accepts the session token via ?token= because
-  // an iframe/EventSource cannot set Authorization headers (#30). Same-origin
-  // play URLs (/v1/play/...) are public and must NOT carry a token.
-  const iframeSrc = useMemo(() => {
-    if (!previewUrl) return null;
-    try {
-      const u = new URL(previewUrl);
-      // Owner-gated preview routes accept the session token via ?token= (an
-      // iframe can't set Authorization headers, #30). Public play URLs must not.
-      if (previewUrl.includes('/preview')) {
-        const token = getToken();
-        if (token) u.searchParams.set('token', token);
-      }
-      // Manual reload: a changing query param re-fetches the iframe.
-      if (reloadNonce > 0) u.searchParams.set('_r', String(reloadNonce));
-      return u.toString();
-    } catch {
-      return previewUrl;
+  const [iframeSrc, setIframeSrc] = useState<string | null>(null);
+  const [showingPrevious, setShowingPrevious] = useState(false);
+  const [previewLoadError, setPreviewLoadError] = useState<string | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadNonce intentionally requests a fresh expiring preview ticket
+  useEffect(() => {
+    let cancelled = false;
+    setPreviewLoadError(null);
+    setIframeSrc(null);
+    if (previewUrl) {
+      void createPreviewSession(previewUrl)
+        .then((session) => {
+          if (!cancelled) {
+            setIframeSrc(session.url);
+            setShowingPrevious(session.showingPrevious);
+          }
+        })
+        .catch(() => {
+          if (!cancelled)
+            setPreviewLoadError('Could not open the secure preview. Reload to try again.');
+        });
     }
+    return () => {
+      cancelled = true;
+    };
   }, [previewUrl, reloadNonce]);
 
   // Validate inbound bridge messages: only trust the preview origin + a
@@ -220,15 +223,7 @@ export function PreviewPane({
   // origin" gap and gives a typed seam for future bridge acks.
   useEffect(() => {
     function onMessage(event: MessageEvent<unknown>) {
-      // Validate origin: accept trusted API origin, same-origin, or sandboxed null origin (#20)
-      if (
-        !isPreviewIframeOrigin(event.origin) &&
-        event.origin !== 'null' &&
-        typeof window !== 'undefined' &&
-        event.origin !== window.location.origin
-      ) {
-        return;
-      }
+      if (event.source !== iframeRef.current?.contentWindow || event.origin !== 'null') return;
       // Supervise preview runtime via watchdog
       watchdogRef.current?.handleMessage(event);
 
@@ -394,7 +389,7 @@ export function PreviewPane({
     // the API origin, so that is the only origin we will postMessage to.
     iframeRef.current?.contentWindow?.postMessage(
       { type: TWEAKS_UPDATE_MESSAGE_TYPE, tokens: values },
-      PREVIEW_IFRAME_ORIGIN,
+      '*',
     );
   }, []);
 
@@ -522,7 +517,7 @@ export function PreviewPane({
           )}
           {previewUrl && (
             <a
-              href={previewUrl}
+              href={iframeSrc ?? undefined}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex px-3 py-2.5 text-xs text-signal transition-colors hover:text-signal-bright md:px-0 md:py-0 md:text-[11px]"
@@ -537,22 +532,34 @@ export function PreviewPane({
       <div className="flex-1 relative overflow-hidden flex">
         {/* Preview iframe */}
         <div className="flex-1 relative overflow-hidden">
-          {iframeSrc && !hasError && (
-            // NOTE (#20): `allow-same-origin` is retained intentionally. The
-            // preview is served from a DIFFERENT origin (the API) than this app,
-            // so the iframe never shares the host's origin. Keeping
-            // allow-same-origin gives the iframe its real API origin, which is
-            // what lets the host postMessage with an EXPLICIT targetOrigin
-            // (PREVIEW_IFRAME_ORIGIN) instead of '*'. Dropping it would force an
-            // opaque origin and reintroduce a '*' broadcast for the tweak bridge.
-            // Residual: a same-origin preview can script its own (API) origin —
-            // mitigated server-side by the locked game CSP + owner-gated route.
+          {previewUrl && !iframeSrc && !previewLoadError && (
+            <output className="p-4 text-ink-3">Loading isolated preview…</output>
+          )}
+          {showingPrevious && !hasError && iframeSrc && (
+            <output className="absolute top-2 left-2 right-2 z-20 bg-ground p-3 text-ink">
+              Showing your last verified game. The latest draft is saved in History.
+            </output>
+          )}
+          {hasError && iframeSrc && (
+            <output className="absolute top-2 left-2 right-2 z-20 bg-ground p-3 text-ink">
+              The latest build stopped. Your previous preview is still available.
+            </output>
+          )}
+          {previewLoadError && (
+            <p role="alert" className="p-4 text-rose-400">
+              {previewLoadError}
+            </p>
+          )}
+          {iframeSrc && (
             <iframe
               ref={iframeRef}
               src={iframeSrc}
               title="Game preview"
-              onLoad={focusGame}
-              sandbox="allow-scripts allow-forms allow-same-origin allow-pointer-lock allow-downloads"
+              onLoad={() => {
+                focusGame();
+                watchdogRef.current?.start();
+              }}
+              sandbox="allow-scripts allow-pointer-lock"
               className="absolute inset-0 w-full h-full border-0"
             />
           )}
@@ -618,7 +625,7 @@ export function PreviewPane({
           )}
 
           {/* Controls tab — overlays the (still-running) game so rebinds apply live */}
-          {view === 'controls' && previewUrl && !hasError && (
+          {view === 'controls' && previewUrl && (
             <div className="absolute inset-0 z-10 bg-void">
               <ControlsPanel
                 manifest={controlsManifest}
@@ -646,7 +653,7 @@ export function PreviewPane({
           )}
 
           {/* Files tab — overlays the (still-running) game like Controls does */}
-          {view === 'files' && previewUrl && !hasError && (
+          {view === 'files' && previewUrl && (
             <div className="absolute inset-0 z-10 bg-void">
               <FilesPanel
                 projectId={projectId ?? ''}
@@ -659,7 +666,7 @@ export function PreviewPane({
           )}
 
           {/* S12 — Scene hierarchy tab (client-side model; wires to EditorSession later) */}
-          {view === 'scene' && previewUrl && !hasError && (
+          {view === 'scene' && previewUrl && (
             <div className="absolute inset-0 z-10 bg-void">
               <SceneHierarchyPanel />
             </div>
@@ -709,7 +716,7 @@ export function PreviewPane({
           )}
 
           {/* Error state */}
-          {hasError && (
+          {hasError && !iframeSrc && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-8">
               <div className="flex h-12 w-12 items-center justify-center border-[1.5px] border-fail font-mono text-lg text-fail">
                 ✗

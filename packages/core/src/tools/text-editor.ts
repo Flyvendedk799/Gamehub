@@ -1070,9 +1070,7 @@ export function makeTextEditorTool(
           );
           if (loadedBy.length > 0) {
             throw new Error(
-              `Refusing to delete ${path} — it is still loaded by ${loadedBy.join(', ')}. ` +
-                `Deleting it would stop the whole game from loading. If you are replacing it, rewrite it with command "create" (create overwrites). ` +
-                `Only delete a file after nothing imports or <script>-loads it any more (remove those references first).`,
+              `Refusing to delete ${path} — it is still loaded by ${loadedBy.join(', ')}. Deleting it would stop the whole game from loading. If you are replacing it, rewrite it with command "create" (create overwrites). Only delete a file after nothing imports or <script>-loads it any more (remove those references first).`,
             );
           }
           await fs.delete(path);

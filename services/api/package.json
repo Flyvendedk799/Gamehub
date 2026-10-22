@@ -15,6 +15,7 @@
   "dependencies": {
     "@fastify/websocket": "^11.2.0",
     "@flyvendedk799/ai-auth": "github:Flyvendedk799/ai-auth",
+    "@playforge/agent-core": "workspace:*",
     "@playforge/bus": "workspace:*",
     "@playforge/db": "workspace:*",
     "@playforge/exporters": "workspace:*",
@@ -30,6 +31,7 @@
   "devDependencies": {
     "@types/node": "^22.10.2",
     "@types/nodemailer": "^6.4.0",
+    "playwright": "^1.61.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

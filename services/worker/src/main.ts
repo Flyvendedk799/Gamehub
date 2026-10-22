@@ -28,7 +28,7 @@ import { createDb, schema } from '@playforge/db';
  *   BLOB_DIR            local blob-store root (default: .playforge-blobs)
  *   WORKER_CONCURRENCY  parallel jobs per instance (default: 2)
  */
-import { complete } from '@playforge/providers';
+import { CodexTokenStore, readCodexAuthFile } from '@playforge/providers';
 import type { AbortKind, GameSpec, ModelRef, WireApi } from '@playforge/shared';
 import { classifyAbortKind } from '@playforge/shared';
 import { LocalFsBlobStore, SnapshotStore } from '@playforge/storage';
@@ -48,6 +48,7 @@ import { enqueueRun } from './queue';
 import type { BrowserJobsPort, RunTokenUsage, WebEngine } from './run-generation';
 import { type PostgresJsLike, createSubscriptionTokenSource } from './subscription-token';
 import { RedisTelemetryBridge } from './telemetry';
+import { makeVisionCritic } from './vision-critic';
 
 function requireEnv(name: string): string {
   const val = process.env[name];
@@ -187,6 +188,7 @@ interface GenerateJobData {
   /** Wire + gateway headers for subscription credentials (Codex, Antigravity). */
   wire?: WireApi;
   httpHeaders?: Record<string, string>;
+  baseUrl?: string;
   model?: ModelRef;
   /** Resume a previously paused run — replaces prompt with buildContinuationPrompt. */
   continuation?: ContinuationPromptInput;
@@ -214,6 +216,14 @@ async function main() {
     client: (db as unknown as { $client: PostgresJsLike }).$client,
     // Must match the API's secret (it falls back to the platform key the same way).
     secret: process.env['API_KEY_ENCRYPTION_SECRET'] ?? platformApiKey,
+  });
+  const codexTokens = new CodexTokenStore({
+    filePath: `${blobDir}/codex-auth.json`,
+    refreshFn: async () => {
+      const auth = await readCodexAuthFile();
+      if (!auth) throw new Error('Codex subscription needs to reconnect');
+      return auth;
+    },
   });
   const bus = new RedisEventBus(redisUrl);
   const telemetryBridge = new RedisTelemetryBridge(redisUrl);
@@ -287,6 +297,7 @@ async function main() {
         apiKey: jobApiKey,
         wire,
         httpHeaders,
+        baseUrl,
         model: jobModel,
         continuation,
         maxTokens,
@@ -295,12 +306,15 @@ async function main() {
       const apiKey = jobApiKey ?? platformApiKey;
       // For a subscription job: resolve the CURRENT token every turn instead of trusting the
       // one captured at enqueue time (it can be an hour old by the time a turn runs).
-      const getFreshApiKey = subscriptionTokens.forJob({
-        userId: job.data.userId,
-        wire,
-        provider: (jobModel ?? { provider: modelProvider }).provider,
-        apiKey,
-      });
+      const getFreshApiKey =
+        wire === 'openai-codex-responses'
+          ? () => codexTokens.getValidAccessToken()
+          : subscriptionTokens.forJob({
+              userId: job.data.userId,
+              wire,
+              provider: (jobModel ?? { provider: modelProvider }).provider,
+              apiKey,
+            });
       const model: ModelRef = jobModel ?? { provider: modelProvider, modelId };
 
       console.log(`[worker] starting job ${job.id} run=${runId}${continuation ? ' (resume)' : ''}`);
@@ -353,6 +367,7 @@ async function main() {
             ...(getFreshApiKey !== undefined ? { getApiKey: getFreshApiKey } : {}),
             ...(wire !== undefined ? { wire } : {}),
             ...(httpHeaders !== undefined ? { httpHeaders } : {}),
+            ...(baseUrl !== undefined ? { baseUrl } : {}),
             ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
             ...(engine !== undefined ? { engine } : {}),
             ...(gameSpec !== undefined ? { gameSpec } : {}),
@@ -379,6 +394,7 @@ async function main() {
                 });
               } catch (err) {
                 settled.error = err;
+                throw err;
               }
             },
             ...(browserJobs !== undefined ? { browserJobs } : {}),
@@ -387,16 +403,16 @@ async function main() {
             // the worst case is two short image completions per run. A provider
             // that rejects image input throws here; run-generation catches it and
             // ships the run unchanged, which is why this needs no capability probe.
-            visionCritic: async ({ pngBase64, mimeType, prompt }) => {
-              const res = await complete(model, [{ role: 'user', content: prompt }], {
+            visionCritic: makeVisionCritic({
+              model,
+              options: {
                 apiKey,
                 ...(wire !== undefined ? { wire } : {}),
                 ...(httpHeaders !== undefined ? { httpHeaders } : {}),
-                maxTokens: 500,
-                userImages: [{ data: pngBase64, mimeType }],
-              });
-              return res.content;
-            },
+                ...(baseUrl !== undefined ? { baseUrl } : {}),
+              },
+              ...(getFreshApiKey ? { getApiKey: getFreshApiKey } : {}),
+            }),
             // #5.6 — persist the per-run quality telemetry row. numeric(juice_score)
             // is string-typed in drizzle, so the measured score is stringified.
             // onConflictDoUpdate so a resumed run's final ship overwrites the row.

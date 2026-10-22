@@ -35,19 +35,24 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const followLatest = useRef(true);
+  const [hasNewUpdates, setHasNewUpdates] = useState(false);
 
   // Auto-scroll to bottom when new events arrive
   // biome-ignore lint/correctness/useExhaustiveDependencies: events is the intended trigger — the effect must re-run on each new event to scroll to the bottom
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) {
+    if (el && followLatest.current) {
       el.scrollTop = el.scrollHeight;
+    } else if (el) {
+      setHasNewUpdates(true);
     }
   }, [events]);
 
   function handleSend() {
     const trimmed = input.trim();
     if (!trimmed || isStreaming) return;
+    followLatest.current = true;
     onSend(trimmed);
     setInput('');
   }
@@ -107,6 +112,11 @@ export function ChatPanel({
       {/* Event stream */}
       <div
         ref={scrollRef}
+        onScroll={(event) => {
+          const el = event.currentTarget;
+          followLatest.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+          if (followLatest.current) setHasNewUpdates(false);
+        }}
         className="flex-1 overflow-y-auto scrollbar-thin px-3 md:px-4 py-4 space-y-3"
       >
         {events.length === 0 && (
@@ -141,6 +151,20 @@ export function ChatPanel({
         )}
       </div>
 
+      {hasNewUpdates && (
+        <button
+          type="button"
+          className="py-2 text-sm text-signal"
+          onClick={() => {
+            followLatest.current = true;
+            setHasNewUpdates(false);
+            const el = scrollRef.current;
+            if (el) el.scrollTop = el.scrollHeight;
+          }}
+        >
+          New updates ↓
+        </button>
+      )}
       {/* Input */}
       <div className="flex-shrink-0 border-t border-hairline bg-ground p-3 md:p-4">
         <div className="flex gap-2 md:gap-3 items-end">
@@ -239,7 +263,26 @@ function EventRow({
     case 'run_complete':
       return (
         <div className="space-y-1.5">
-          <StatusChip label="Build complete — game ready" color="pass" />
+          <StatusChip
+            label={
+              event.quality?.status === 'verified'
+                ? 'Ready to play: checks passed'
+                : event.quality?.status === 'needs_fixes'
+                  ? 'Draft saved: needs fixes'
+                  : 'Draft saved: verification incomplete'
+            }
+            color={event.quality?.status === 'verified' ? 'pass' : 'signal'}
+          />
+          {event.quality?.status !== 'verified' && (
+            <p className="text-xs text-ink-3">
+              Your last verified version is preserved. This draft is saved in History.
+            </p>
+          )}
+          {event.quality?.issues.map((issue) => (
+            <p key={issue} className="text-xs text-ink-3">
+              {issue}
+            </p>
+          ))}
           {changedFiles && changedFiles.length > 0 && <ChangedFilesSummary paths={changedFiles} />}
         </div>
       );

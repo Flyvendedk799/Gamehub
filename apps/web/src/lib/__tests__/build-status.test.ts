@@ -9,6 +9,17 @@ const ev = (e: { type: SseEvent['type'] } & Record<string, unknown>): SseEvent =
   ({ runId: 'r1', timestamp: T, ...e }) as SseEvent;
 
 describe('deriveBuildStatus', () => {
+  it('keeps unverified completion a draft and distinguishes a paused run', () => {
+    expect(deriveBuildStatus([ev({ type: 'run_complete' })]).stage).toBe('draft');
+    expect(deriveBuildStatus([ev({ type: 'run_complete' })]).phaseIndex).toBe(2);
+    expect(deriveBuildStatus([ev({ type: 'run_paused' })]).stage).toBe('paused');
+    expect(
+      deriveBuildStatus([
+        ev({ type: 'run_complete', quality: { status: 'verified' } }),
+        ev({ type: 'user_message', text: 'Change the jump' }),
+      ]).stage,
+    ).toBe('analyzing');
+  });
   it('starts in Design and reports the first event time', () => {
     const s = deriveBuildStatus([ev({ type: 'agent_start' })]);
     expect(s.phase).toBe('Design');

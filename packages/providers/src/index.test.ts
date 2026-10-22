@@ -262,11 +262,11 @@ describe('complete', () => {
         api: 'openai-completions',
         provider: 'openrouter',
         baseUrl: 'https://openrouter.ai/api/v1',
-        reasoning: true,
+        reasoning: false,
         input: ['text'],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 131072,
-        maxTokens: 131072,
+        contextWindow: 32768,
+        maxTokens: 8192,
       });
       return {
         role: 'assistant',

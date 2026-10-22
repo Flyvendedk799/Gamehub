@@ -1,7 +1,5 @@
 'use client';
 
-import Link from 'next/link';
-import React from 'react';
 import { RoomCreationForm } from '../../../components/party/lobby/RoomCreationForm';
 
 export default function CreatePartyPage() {
@@ -10,9 +8,9 @@ export default function CreatePartyPage() {
       <div className="max-w-4xl mx-auto space-y-8">
         {/* Navigation Breadcrumb */}
         <div className="flex items-center gap-2 text-xs font-mono text-neutral-400">
-          <Link href="/party" className="hover:text-white transition-colors">
+          <a href="/party" className="hover:text-white transition-colors">
             ← Back to Party Directory
-          </Link>
+          </a>
         </div>
 
         {/* Header */}

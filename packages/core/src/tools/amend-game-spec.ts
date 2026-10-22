@@ -58,6 +58,15 @@ const AmendGameSpecParams = Type.Object({
       ),
     }),
   ),
+  creativeBrief: Type.Optional(
+    Type.Object({
+      hook: Type.String({ minLength: 3, maxLength: 500 }),
+      playerFantasy: Type.String({ minLength: 3, maxLength: 500 }),
+      visualDirection: Type.String({ minLength: 3, maxLength: 500 }),
+      feedback: Type.Array(Type.String(), { minItems: 1, maxItems: 8 }),
+      avoid: Type.Optional(Type.Array(Type.String(), { maxItems: 8 })),
+    }),
+  ),
   features: Type.Optional(Type.Record(Type.String(), FeatureRecord)),
   reason: Type.Optional(
     Type.String({

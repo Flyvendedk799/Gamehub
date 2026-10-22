@@ -49,9 +49,12 @@ const assertBrowserAlive: MainModule['assertBrowserAlive'] = (b) => mod.assertBr
 const runJob: MainModule['runJob'] = (b, d) => mod.runJob(b, d);
 const BrowserPool = (): MainModule['BrowserPool'] => mod.BrowserPool;
 
-afterAll(async () => {
-  if (browser !== undefined) await browser.close();
-});
+afterAll(
+  async () => {
+    if (browser !== undefined) await browser.close();
+  },
+  process.platform === 'win32' ? 90_000 : 10_000,
+);
 
 describe('isRequestAllowed (egress policy unit)', () => {
   it('allows the pinned engine CDN host + engine package paths only', () => {
@@ -800,40 +803,46 @@ describe('BrowserPool — relaunch + recycle (#33, fake browser)', () => {
 });
 
 describe('BrowserPool — real Chromium disconnect→relaunch (#33b)', () => {
-  it('a real browser crash is recovered and the next job still succeeds', async () => {
-    const Pool = BrowserPool();
-    const pool = new Pool(); // real chromium launcher
-    try {
-      const live1 = await pool.acquire();
-      expect(live1.isConnected()).toBe(true);
-      const r1 = await runJob(live1, {
-        kind: 'runtime-verify',
-        htmlContent:
-          '<!doctype html><body><script>window.__game={debug:{snapshot(){return{ok:true}}}};</script></body>',
-        bootTimeoutMs: 5_000,
-      });
-      expect('hasGameContract' in r1 && r1.hasGameContract).toBe(true);
-      expect(pool.relaunchCount).toBe(1);
+  it(
+    'a real browser crash is recovered and the next job still succeeds',
+    async () => {
+      const Pool = BrowserPool();
+      const pool = new Pool(); // real chromium launcher
+      try {
+        const live1 = await pool.acquire();
+        expect(live1.isConnected()).toBe(true);
+        const r1 = await runJob(live1, {
+          kind: 'runtime-verify',
+          htmlContent:
+            '<!doctype html><body><script>window.__game={debug:{snapshot(){return{ok:true}}}};</script></body>',
+          bootTimeoutMs: 5_000,
+        });
+        expect('hasGameContract' in r1 && r1.hasGameContract).toBe(true);
+        expect(pool.relaunchCount).toBe(1);
 
-      // Kill the browser out from under the pool — mimics a Chromium crash.
-      await live1.close();
-      expect(pool.isAlive).toBe(false);
+        // Kill the browser out from under the pool — mimics a Chromium crash.
+        await live1.close();
+        expect(pool.isAlive).toBe(false);
 
-      // The pool must transparently relaunch; the next job still succeeds.
-      const live2 = await pool.acquire();
-      expect(live2.isConnected()).toBe(true);
-      expect(pool.relaunchCount).toBe(2);
-      const r2 = await runJob(live2, {
-        kind: 'runtime-verify',
-        htmlContent:
-          '<!doctype html><body><script>window.__game={debug:{snapshot(){return{ok:true}}}};</script></body>',
-        bootTimeoutMs: 5_000,
-      });
-      expect('hasGameContract' in r2 && r2.hasGameContract).toBe(true);
-    } finally {
-      await pool.close();
-    }
-  }, 60_000);
+        // The pool must transparently relaunch; the next job still succeeds.
+        const live2 = await pool.acquire();
+        expect(live2.isConnected()).toBe(true);
+        expect(pool.relaunchCount).toBe(2);
+        const r2 = await runJob(live2, {
+          kind: 'runtime-verify',
+          htmlContent:
+            '<!doctype html><body><script>window.__game={debug:{snapshot(){return{ok:true}}}};</script></body>',
+          bootTimeoutMs: 5_000,
+        });
+        expect('hasGameContract' in r2 && r2.hasGameContract).toBe(true);
+      } finally {
+        await pool.close();
+      }
+      // Windows Chromium process teardown can take over a minute. This only
+      // extends the crash/relaunch test; production per-job deadlines stay fixed.
+    },
+    process.platform === 'win32' ? 180_000 : 60_000,
+  );
 });
 
 describe('withHardTimeout kill-switch (#33c)', () => {

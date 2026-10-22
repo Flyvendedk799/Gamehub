@@ -7,7 +7,7 @@
  * content-addressed `manifest.json` in object storage (see @playforge/storage),
  * so unchanged files dedupe across versions and **remix is a metadata-only copy**.
  */
-import type { GameSpec } from '@playforge/shared';
+import type { GameQuality, GameSpec } from '@playforge/shared';
 import {
   index,
   integer,
@@ -38,6 +38,7 @@ export const projects = pgTable(
     // HEAD pointer. Nullable + no FK constraint here to avoid a cycle with
     // snapshots (which references projects); enforced in application logic.
     currentSnapshotId: uuid('current_snapshot_id'),
+    lastVerifiedSnapshotId: uuid('last_verified_snapshot_id'),
     gameSpec: jsonb('game_spec').$type<GameSpec>(),
     visibility: projectVisibility('visibility').notNull().default('private'),
     remixOfProjectId: uuid('remix_of_project_id'),
@@ -73,6 +74,7 @@ export const snapshots = pgTable(
     filesManifestKey: text('files_manifest_key').notNull(),
     /** Content hash of the manifest (dedup + cache key). */
     filesHash: text('files_hash').notNull(),
+    quality: jsonb('quality').$type<GameQuality>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

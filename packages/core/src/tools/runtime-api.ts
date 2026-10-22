@@ -43,10 +43,5 @@ export function findUnknownControlsCalls(files: ProjectFile[]): UnknownControlsC
 }
 
 export function describeUnknownControlsCall(c: UnknownControlsCall): string {
-  return (
-    `${c.from} uses window.__game.controls.${c.member}, which does not exist and throws "is not a function" the first time it runs. ` +
-    `The controls runtime has ONLY: define({ actions: [{ id, label, keys }] }) once at startup, ` +
-    `isDown('actionId') -> true while the action's key is held, on('actionId', fn) -> fn() fires when it is pressed, and rebind(). ` +
-    `Read held input with window.__game.controls.isDown('<actionId>').`
-  );
+  return `${c.from} uses window.__game.controls.${c.member}, which does not exist and throws "is not a function" the first time it runs. The controls runtime has ONLY: define({ actions: [{ id, label, keys }] }) once at startup, isDown('actionId') -> true while the action's key is held, on('actionId', fn) -> fn() fires when it is pressed, and rebind(). Read held input with window.__game.controls.isDown('<actionId>').`;
 }

@@ -42,6 +42,35 @@ function makePorts() {
 }
 
 describe('enqueueRun', () => {
+  it('never announces completion when persistence fails', async () => {
+    const { bus, store } = makePorts();
+    const received: Array<{ type: string }> = [];
+    await bus.subscribe(runChannel('settle_failed'), (msg) =>
+      received.push(msg as { type: string }),
+    );
+    await expect(
+      enqueueRun(
+        {
+          runId: 'settle_failed',
+          projectId: 'proj_1',
+          prompt: 'red square',
+          model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+          apiKey: 'sk-test',
+        },
+        {
+          bus,
+          store,
+          generate: successAgent,
+          settle: async () => {
+            throw new Error('database unavailable');
+          },
+        },
+      ),
+    ).rejects.toThrow('database unavailable');
+    expect(received.map((event) => event.type)).not.toContain('run_complete');
+    expect(received.at(-1)?.type).toBe('run_error');
+  });
+
   it('publishes agent events then run_complete on success', async () => {
     const { bus, store } = makePorts();
     const runId = 'run_001';

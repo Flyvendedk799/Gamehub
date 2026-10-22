@@ -70,6 +70,7 @@ export function buildVisualCritiquePrompt(brief: string): string {
     '  - actors overlapping into an unreadable pile',
     '  - z-fighting, seams, or geometry visibly intersecting wrongly',
     '  - an empty or near-empty frame where the game should be',
+    '  - a visible mismatch with the requested world, subject, silhouette or creative brief',
     '',
     'Do NOT comment on: game design, difficulty, whether the idea is good, art',
     'style preference, or anything you cannot see in this single frame. If the',

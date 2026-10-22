@@ -805,7 +805,8 @@ export default function BuilderPage() {
                                 : 'border border-hairline text-ink-4'
                             }`}
                           >
-                            v{snap.seq + 1}
+                            v{snap.seq + 1} ·{' '}
+                            {snap.quality?.status === 'verified' ? 'Verified' : 'Draft'}
                           </span>
                           {snap.engine && (
                             <span className="font-mono text-[10px] tracking-[.08em] text-ink-4">
@@ -825,6 +826,15 @@ export default function BuilderPage() {
                           })}
                         </p>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPreviewUrl(`${BASE}/v1/snapshots/${snap.id}/preview/`);
+                        }}
+                        className="px-3 py-2 text-xs text-signal"
+                      >
+                        Preview
+                      </button>
                       <button
                         type="button"
                         onClick={() => {

@@ -11,7 +11,7 @@ const NL = String.fromCharCode(10);
 const starterTree = () => new Map<string, string>(Object.entries(PREMIUM_STARTER_FILES.three));
 
 function block(path: string, body: string): string {
-  return ['=== FILE: ' + path + ' ===', body, '=== END FILE ==='].join(NL);
+  return [`=== FILE: ${path} ===`, body, '=== END FILE ==='].join(NL);
 }
 
 const GOOD_MAIN =
@@ -78,8 +78,8 @@ describe('draftGameFromStarter', () => {
     const before = tree.get('src/engine/core.js');
     const reply = [
       block('src/main.js', GOOD_MAIN),
-      block('src/engine/core.js', GOOD_PLAYER + ' // attempt to replace the engine'),
-      block('index.html', '<html>nope</html> ' + 'x'.repeat(100)),
+      block('src/engine/core.js', `${GOOD_PLAYER} // attempt to replace the engine`),
+      block('index.html', `<html>nope</html> ${'x'.repeat(100)}`),
     ].join(NL);
     const result = await draftGameFromStarter({
       engine: 'three',

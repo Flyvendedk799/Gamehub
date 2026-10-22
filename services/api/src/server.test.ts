@@ -34,6 +34,7 @@ function makeApp(overrides?: {
   allowedCorsOrigins?: string;
   sseMaxStreamMs?: number;
   auth?: Authenticator;
+  publishVerifier?: ServerDeps['publishVerifier'];
   browserThumbnail?: {
     thumbnail(
       htmlContent: string,
@@ -50,6 +51,7 @@ function makeApp(overrides?: {
     ...(overrides?.snapshotRepo !== undefined ? { snapshotRepo: overrides.snapshotRepo } : {}),
     ...(overrides?.cloudSaveRepo !== undefined ? { cloudSaveRepo: overrides.cloudSaveRepo } : {}),
     ...(overrides?.publishRepo !== undefined ? { publishRepo: overrides.publishRepo } : {}),
+    ...(overrides?.publishVerifier ? { publishVerifier: overrides.publishVerifier } : {}),
     ...(overrides?.browserThumbnail !== undefined
       ? { browserThumbnail: overrides.browserThumbnail }
       : {}),
@@ -73,6 +75,43 @@ function makeApp(overrides?: {
 
 const AS_ALICE = { 'x-user-id': 'alice' };
 const AS_BOB = { 'x-user-id': 'bob' };
+const passingVerifier: NonNullable<ServerDeps['publishVerifier']> = {
+  runtimeVerify: async () => ({ hasGameContract: true, fatalErrors: [], renderedNonBlank: true }),
+  playtest: async (_html, steps) => ({
+    hasGameContract: true,
+    hasDebugContract: true,
+    baselineSnapshot: { score: 0 },
+    bootErrors: [],
+    steps: steps.map((step) => ({ step, snapshotAfter: { score: 1 }, errors: [] })),
+  }),
+};
+async function recordVerifiedSnapshot(
+  repo: InMemoryProjectRepo,
+  snapshots: InMemorySnapshotRepo,
+  projectId: string,
+  manifestKey: string,
+) {
+  const snapshot = await snapshots.append({
+    projectId,
+    type: 'initial',
+    engine: 'canvas2d',
+    filesManifestKey: manifestKey,
+    filesHash: manifestKey,
+    quality: {
+      schemaVersion: 1,
+      filesHash: manifestKey,
+      status: 'verified',
+      booted: true,
+      behaviorPassed: true,
+      issues: [],
+      verificationPlan: {
+        steps: [{ kind: 'key', code: 'Space', frames: 1 }],
+        predicates: [{ field: 'score', op: 'increased' }],
+      },
+    },
+  });
+  await repo.setCurrentSnapshot(projectId, snapshot.id, manifestKey);
+}
 
 describe('health', () => {
   it('returns ok without auth', async () => {
@@ -811,6 +850,7 @@ describe('publish + play routes', () => {
     repo: InstanceType<typeof InMemoryProjectRepo>,
     store: SnapshotStore,
     ownerId: string,
+    snapshotRepo: InMemorySnapshotRepo,
   ): Promise<{ id: string }> {
     const proj = await repo.create({ ownerId, name: 'My Game', engine: 'canvas2d' });
     const { manifestKey } = await store.write([
@@ -827,14 +867,15 @@ describe('publish + play routes', () => {
         ),
       },
     ]);
-    await repo.setCurrentSnapshot(proj.id, 'snap-1', manifestKey);
+    await recordVerifiedSnapshot(repo, snapshotRepo, proj.id, manifestKey);
     return proj;
   }
 
   it('publish captures a thumbnail in-process when there is no browserQueue (no-Redis path, #thumbnail)', async () => {
     const repo = new InMemoryProjectRepo();
     const store = new SnapshotStore(new InMemoryBlobStore());
-    const proj = await seedCanvas2dSnapshot(repo, store, 'alice');
+    const snapshotRepo = new InMemorySnapshotRepo();
+    const proj = await seedCanvas2dSnapshot(repo, store, 'alice', snapshotRepo);
     const publishRepo = new InMemoryPublishRepo();
 
     // The capture is fired AFTER the 200 reply (fire-and-forget); resolve when it
@@ -860,7 +901,14 @@ describe('publish + play routes', () => {
       },
     };
 
-    const app = makeApp({ repo, store, publishRepo, browserThumbnail });
+    const app = makeApp({
+      repo,
+      store,
+      snapshotRepo,
+      publishRepo,
+      browserThumbnail,
+      publishVerifier: passingVerifier,
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/v1/projects/${proj.id}/publish`,
@@ -878,7 +926,8 @@ describe('publish + play routes', () => {
   it('publish stays 200 and leaves thumbnailUrl null when in-process capture returns null (non-blocking)', async () => {
     const repo = new InMemoryProjectRepo();
     const store = new SnapshotStore(new InMemoryBlobStore());
-    const proj = await seedCanvas2dSnapshot(repo, store, 'alice');
+    const snapshotRepo = new InMemorySnapshotRepo();
+    const proj = await seedCanvas2dSnapshot(repo, store, 'alice', snapshotRepo);
     const publishRepo = new InMemoryPublishRepo();
 
     let resolveCalled!: () => void;
@@ -892,7 +941,14 @@ describe('publish + play routes', () => {
       },
     };
 
-    const app = makeApp({ repo, store, publishRepo, browserThumbnail });
+    const app = makeApp({
+      repo,
+      store,
+      snapshotRepo,
+      publishRepo,
+      browserThumbnail,
+      publishVerifier: passingVerifier,
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/v1/projects/${proj.id}/publish`,
@@ -3801,6 +3857,7 @@ describe('re-publishing after a failed publish (status recovery)', () => {
   async function seedPublishable(
     repo: InstanceType<typeof InMemoryProjectRepo>,
     store: SnapshotStore,
+    snapshotRepo: InMemorySnapshotRepo,
   ) {
     const proj = await repo.create({ ownerId: 'alice', name: 'My Game', engine: 'canvas2d' });
     const { manifestKey } = await store.write([
@@ -3813,7 +3870,7 @@ describe('re-publishing after a failed publish (status recovery)', () => {
         ),
       },
     ]);
-    await repo.setCurrentSnapshot(proj.id, 'snap-1', manifestKey);
+    await recordVerifiedSnapshot(repo, snapshotRepo, proj.id, manifestKey);
     return proj;
   }
 
@@ -3821,8 +3878,15 @@ describe('re-publishing after a failed publish (status recovery)', () => {
     const repo = new InMemoryProjectRepo();
     const store = new SnapshotStore(new InMemoryBlobStore());
     const publishRepo = new InMemoryPublishRepo();
-    const project = await seedPublishable(repo, store);
-    const app = makeApp({ repo, store, publishRepo });
+    const snapshotRepo = new InMemorySnapshotRepo();
+    const project = await seedPublishable(repo, store, snapshotRepo);
+    const app = makeApp({
+      repo,
+      store,
+      snapshotRepo,
+      publishRepo,
+      publishVerifier: passingVerifier,
+    });
 
     const first = await app.inject({
       method: 'POST',
@@ -3850,6 +3914,161 @@ describe('re-publishing after a failed publish (status recovery)', () => {
 
     // And the play route actually serves it again.
     const play = await app.inject({ method: 'GET', url: `/v1/play/${after?.publishSlug}` });
-    expect(play.statusCode).toBe(200);
+    expect(play.statusCode).toBe(302);
+    const isolated = new URL(String(play.headers.location));
+    const served = await app.inject({
+      method: 'GET',
+      url: isolated.pathname,
+      headers: { host: isolated.host },
+    });
+    expect(served.statusCode).toBe(200);
+    expect(served.headers['content-security-policy']).toContain('sandbox allow-scripts');
+  });
+});
+
+describe('verified publication and isolated preview capabilities', () => {
+  async function fixture(verifier?: ServerDeps['publishVerifier']) {
+    const repo = new InMemoryProjectRepo();
+    const snapshotRepo = new InMemorySnapshotRepo();
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const publishRepo = new InMemoryPublishRepo();
+    const project = await repo.create({ ownerId: 'alice', name: 'Isolation', engine: 'canvas2d' });
+    const { manifestKey } = await store.write([
+      {
+        path: 'index.html',
+        bytes: Buffer.from(
+          '<html><body><canvas></canvas><script>window.__game={debug:{}};</script></body></html>',
+        ),
+      },
+    ]);
+    await recordVerifiedSnapshot(repo, snapshotRepo, project.id, manifestKey);
+    const app = makeApp({
+      repo,
+      snapshotRepo,
+      store,
+      publishRepo,
+      ...(verifier ? { publishVerifier: verifier } : {}),
+    });
+    return { app, project, publishRepo, repo, snapshotRepo, store };
+  }
+
+  it.each(['absent', 'null', 'throw', 'failed'] as const)(
+    'preserves the public bundle when verification is %s',
+    async (mode) => {
+      const verifier =
+        mode === 'absent'
+          ? undefined
+          : {
+              ...passingVerifier,
+              runtimeVerify: async () => {
+                if (mode === 'throw') throw new Error('browser unavailable');
+                if (mode === 'null') return null;
+                return { hasGameContract: false, fatalErrors: ['crash'] };
+              },
+            };
+      const { app, project, publishRepo } = await fixture(verifier);
+      const old = await publishRepo.upsert({
+        projectId: project.id,
+        publishSlug: project.slug,
+        title: 'Working game',
+        bundleKey: 'working-bundle',
+      });
+      const res = await app.inject({
+        method: 'POST',
+        url: `/v1/projects/${project.id}/publish`,
+        headers: AS_ALICE,
+      });
+      expect(res.statusCode).toBe(mode === 'failed' ? 422 : 503);
+      expect(await publishRepo.getByProject(project.id)).toEqual(old);
+      await app.close();
+    },
+  );
+
+  it('keeps the verified preview by default while allowing an explicit draft preview and verified restore', async () => {
+    const { app, project, repo, snapshotRepo, store } = await fixture();
+    const head = await repo.get(project.id);
+    const verifiedId = head?.currentSnapshotId;
+    expect(verifiedId).toBeTruthy();
+    if (!head || !verifiedId) throw new Error('missing fixture');
+    head.lastVerifiedSnapshotId = verifiedId;
+    const { manifestKey } = await store.write([
+      { path: 'index.html', bytes: Buffer.from('<html><body>DRAFT MARKER</body></html>') },
+    ]);
+    const draft = await snapshotRepo.append({
+      projectId: project.id,
+      type: 'edit',
+      engine: 'canvas2d',
+      filesManifestKey: manifestKey,
+      filesHash: manifestKey,
+    });
+    await repo.setCurrentSnapshot(project.id, draft.id, manifestKey);
+    const preview = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${project.id}/preview-session`,
+      headers: AS_ALICE,
+    });
+    expect(preview.json().showingPrevious).toBe(true);
+    const url = new URL(preview.json().url);
+    const page = await app.inject({
+      method: 'GET',
+      url: url.pathname,
+      headers: { host: url.host },
+    });
+    expect(page.body).not.toContain('DRAFT MARKER');
+    const draftPreview = await app.inject({
+      method: 'POST',
+      url: `/v1/snapshots/${draft.id}/preview-session`,
+      headers: AS_ALICE,
+    });
+    const draftUrl = new URL(draftPreview.json().url);
+    const draftPage = await app.inject({
+      method: 'GET',
+      url: draftUrl.pathname,
+      headers: { host: draftUrl.host },
+    });
+    expect(draftPage.body).toContain('DRAFT MARKER');
+    await repo.setCurrentSnapshot(project.id, verifiedId, head.currentManifestKey ?? '');
+    const restored = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${project.id}/preview-session`,
+      headers: AS_ALICE,
+    });
+    expect(restored.json().showingPrevious).toBe(false);
+    await app.close();
+  });
+
+  it('binds tickets to owner, immutable manifest and project host; game hosts expose no API', async () => {
+    const { app, project } = await fixture();
+    const denied = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${project.id}/preview-session`,
+      headers: AS_BOB,
+    });
+    expect(denied.statusCode).toBe(404);
+    const issued = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${project.id}/preview-session`,
+      headers: AS_ALICE,
+    });
+    expect(issued.statusCode).toBe(200);
+    const url = new URL(issued.json().url);
+    expect(url.search).toBe('');
+    const wrongHost = await app.inject({ method: 'GET', url: url.pathname });
+    expect(wrongHost.statusCode).toBe(404);
+    const game = await app.inject({
+      method: 'GET',
+      url: url.pathname,
+      headers: { host: url.host },
+    });
+    expect(game.statusCode).toBe(200);
+    expect(game.headers['content-security-policy']).toContain('sandbox allow-scripts');
+    expect(game.headers['content-security-policy']).not.toContain('allow-same-origin');
+    const api = await app.inject({
+      method: 'GET',
+      url: '/v1/projects',
+      headers: { ...AS_ALICE, host: url.host },
+    });
+    expect(api.statusCode).toBe(404);
+    await app.close();
   });
 });

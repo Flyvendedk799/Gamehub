@@ -55,25 +55,26 @@ export function DesignInterview({
   const [state, setState] = useState<InterviewState | null>(null);
   const [typed, setTyped] = useState('');
 
-  // Draft questions for THIS prompt. Until they arrive there is nothing worth
-  // showing: the static layers are a fallback for when the model cannot answer,
-  // not a first screen to be replaced a second later — swapping the question
-  // out from under someone mid-read is worse than a moment of waiting.
-  //
-  // `startedRef` guards against React 18 double-invoking effects in dev, which
-  // would otherwise fire two model calls and let the slower one overwrite an
-  // interview already in progress.
-  const startedRef = useRef(false);
+  // Reuse the request across StrictMode effect subscriptions; each subscription
+  // has its own cancellation flag, so cleanup cannot strand the loading screen.
+  const requestRef = useRef<{ prompt: string; promise: ReturnType<typeof fetchInterviewPlan> }>();
   useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
     let cancelled = false;
-    void fetchInterviewPlan(prompt).then((plan) => {
-      if (cancelled) return;
+    let settled = false;
+    setState(null);
+    if (requestRef.current?.prompt !== prompt) {
+      requestRef.current = { prompt, promise: fetchInterviewPlan(prompt) };
+    }
+    const finish = (plan: Awaited<ReturnType<typeof fetchInterviewPlan>>) => {
+      if (cancelled || settled) return;
+      settled = true;
       setState(plan === null ? startInterview(prompt) : startInterviewFromPlan(prompt, plan));
-    });
+    };
+    const timeout = setTimeout(() => finish(null), 12_000);
+    void requestRef.current.promise.then(finish, () => finish(null));
     return () => {
       cancelled = true;
+      clearTimeout(timeout);
     };
   }, [prompt]);
 
@@ -85,6 +86,13 @@ export function DesignInterview({
         <div className="mt-8 border border-hairline bg-raised p-5">
           <p className="animate-pulse text-sm text-ink-4">Working out what to ask you…</p>
         </div>
+        <button
+          type="button"
+          onClick={() => onBuild(prompt)}
+          className="mt-6 mr-6 text-sm text-signal hover:underline"
+        >
+          Build it now
+        </button>
         <button
           type="button"
           onClick={onCancel}

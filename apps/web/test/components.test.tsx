@@ -171,8 +171,8 @@ describe('GenerationInspector', () => {
       />,
     );
 
-    expect(html).toContain('165,000');
-    expect(html).toContain('200,000');
+    expect(html).toContain((165000).toLocaleString());
+    expect(html).toContain((200000).toLocaleString());
     expect(html).toContain('80% Compaction');
     expect(html).toContain('Pruning Imminent (≥80%)');
     expect(html).toContain('data-testid="compaction-threshold-marker"');

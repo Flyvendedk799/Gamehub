@@ -1,3 +1,4 @@
+import type { GameQuality } from '@playforge/shared';
 // ─── Domain types ────────────────────────────────────────────────────────────
 
 export type Engine = 'phaser' | 'threejs' | 'vanilla';
@@ -53,6 +54,7 @@ export interface AgentEndEvent {
 
 export interface RunCompleteEvent {
   type: 'run_complete';
+  quality?: GameQuality | null;
   runId: string;
   snapshotPath: string;
   previewUrl: string;

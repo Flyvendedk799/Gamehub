@@ -245,7 +245,13 @@ describe('streamAntigravity', () => {
   });
 
   it('maps reasoning onto the tiered Flash thinking level and tops up the output budget', async () => {
-    const bodies: Array<Record<string, any>> = [];
+    const bodies: Array<{
+      request: {
+        generationConfig: { thinkingConfig?: { thinkingLevel?: string }; maxOutputTokens?: number };
+        systemInstruction?: { parts?: Array<{ text?: string }> };
+        toolConfig?: unknown;
+      };
+    }> = [];
     const fetchImpl = (async (_u: string, init: RequestInit) => {
       bodies.push(JSON.parse(String(init.body)));
       return sseResponse([{ response: { candidates: [{ content: { parts: [{ text: 'x' }] } }] } }]);
@@ -259,7 +265,7 @@ describe('streamAntigravity', () => {
       maxTokens: 3000,
     }).result();
     await streamAntigravity(model, ctx, { apiKey: 't', fetchImpl, reasoning: 'minimal' }).result();
-    expect(bodies[0]?.['request'].generationConfig.thinkingConfig.thinkingLevel).toBe('low');
+    expect(bodies[0]?.['request'].generationConfig.thinkingConfig?.thinkingLevel).toBe('low');
     // Thinking counts against maxOutputTokens, so a 3000-token reply gets headroom for it.
     expect(bodies[0]?.['request'].generationConfig.maxOutputTokens).toBe(3000 + 8192);
     // A model with no thinking-level setting is left alone (it would 400 on one).
@@ -276,7 +282,13 @@ describe('streamAntigravity', () => {
 
 describe('streamAntigravity forced tool use', () => {
   it('adds the tool-only protocol to the system prompt only when asked and tools exist', async () => {
-    const bodies: Array<Record<string, any>> = [];
+    const bodies: Array<{
+      request: {
+        generationConfig: { thinkingConfig?: { thinkingLevel?: string }; maxOutputTokens?: number };
+        systemInstruction?: { parts?: Array<{ text?: string }> };
+        toolConfig?: unknown;
+      };
+    }> = [];
     const fetchImpl = (async (_u: string, init: RequestInit) => {
       bodies.push(JSON.parse(String(init.body)));
       return sseResponse([{ response: { candidates: [{ content: { parts: [{ text: 'x' }] } }] } }]);

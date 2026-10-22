@@ -1,3 +1,4 @@
+import { GameQuality } from '@playforge/shared';
 /**
  * Chat-history → SSE-event hydration. Maps persisted chat rows back into the
  * `SseEvent` shapes the builder log renders, so a reloaded page reconstructs the
@@ -22,10 +23,11 @@ export function chatMessageToEvents(msg: ChatHistoryMessage): SseEvent[] {
     ];
   }
   if (msg.kind === 'artifact_delivered') {
-    const p = msg.payload as { runId?: string; previewUrl?: string } | null;
+    const p = msg.payload as { runId?: string; previewUrl?: string; quality?: unknown } | null;
     return [
       {
         type: 'run_complete',
+        quality: GameQuality.safeParse(p?.quality).success ? GameQuality.parse(p?.quality) : null,
         runId: p?.runId ?? '',
         snapshotPath: '',
         previewUrl: p?.previewUrl ?? '',

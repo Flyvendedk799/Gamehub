@@ -18,6 +18,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import websocketPlugin from '@fastify/websocket';
 import { antigravityAuthRoutes, claudeAuthRoutes } from '@flyvendedk799/ai-auth/fastify';
+import {
+  type PlaytestPredicate,
+  scorePlaytest,
+  traceFromPlaytestResult,
+} from '@playforge/agent-core';
 import type { EventBus } from '@playforge/bus';
 import { runChannel } from '@playforge/bus';
 import {
@@ -37,6 +42,7 @@ import {
   decodeJwtClaims,
   readCodexAuthFile,
 } from '@playforge/providers';
+import { VerificationPlan, isVerifiedGame } from '@playforge/shared';
 import {
   BRAND_NAME,
   type ModelRef,
@@ -62,6 +68,7 @@ import {
   sql as drizzleSql,
 } from 'drizzle-orm';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import type { BrowserJobsPort } from '../../worker/src/run-generation';
 import {
   type AccountProvider,
   type AccountRepo,
@@ -76,16 +83,18 @@ import { listAntigravityModels } from './ai-auth';
 import { decryptApiKey, encryptApiKey, last4OfApiKey } from './api-key-crypto';
 import type { AuthedUser, Authenticator } from './auth';
 import { generateSessionToken, hashPassword, sessionExpiresAt, verifyPassword } from './auth';
+import type { PlaytestResult, PlaytestStep } from './browser-queue';
 import type { BrowserJobQueue, RuntimeVerifyResult, ThumbnailResult } from './browser-queue';
 import type { ChatRepo } from './chat-repo';
 import type { CloudSaveRepo } from './cloud-save-repo';
 import type { CreditPurchaseProvider } from './credit-purchase';
 import { type EmailPort, buildPasswordResetEmail } from './email';
+import { projectGameOrigin, readPreviewTicket, signPreviewTicket } from './game-origin';
 import type { HubRepo } from './hub-repo';
 import type { JamRepo } from './jam-repo';
 import { registerJamRoutes } from './jam-routes';
 import { RoomManager, registerPartyRoutes, registerPartyWebSocket } from './party';
-import type { PublishRepo } from './publish-repo';
+import type { PublishRepo, PublishUpsertInput } from './publish-repo';
 import type { Engine, ProjectRepo, Visibility } from './repo';
 import type { Run, RunRepo } from './run-repo';
 import type { SnapshotRepo } from './snapshot-repo';
@@ -189,6 +198,7 @@ export function gameContentCsp(
   // permitting a cross-origin base-tag hijack of relative URLs.
   if (mode === 'preview-multifile') {
     return [
+      'sandbox allow-scripts allow-pointer-lock',
       "default-src 'none'",
       "script-src 'self' 'unsafe-inline' data: blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com https://cdn.skypack.dev",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
@@ -204,6 +214,7 @@ export function gameContentCsp(
   }
 
   return [
+    'sandbox allow-scripts allow-pointer-lock',
     "default-src 'none'",
     "script-src 'unsafe-inline' data: blob:",
     "style-src 'unsafe-inline' https://fonts.googleapis.com",
@@ -316,6 +327,7 @@ export type EnqueueFn = (input: {
   wire?: WireApi;
   /** Extra HTTP headers for the model call (e.g. chatgpt-account-id for Codex). */
   httpHeaders?: Record<string, string>;
+  baseUrl?: string;
   /** Manifest key of the project's current snapshot — seeds the new generation with existing files. */
   parentManifestKey?: string;
   /** The project's chosen engine — when set, the agent skips choose_engine (iteration). */
@@ -363,6 +375,7 @@ export interface ServerDeps {
   embedText?: (text: string) => Promise<number[]>;
   /** Optional: browser-worker queue for thumbnail capture + runtime verification. */
   browserQueue?: BrowserJobQueue;
+  publishVerifier?: Pick<BrowserJobsPort, 'runtimeVerify' | 'playtest'>;
   /**
    * Optional: in-process thumbnail capture for the no-Redis deployment (where
    * there is no `browserQueue`). Used as a fallback so published games still get
@@ -429,6 +442,8 @@ export interface ServerDeps {
    * Configurable, never hardcoded. When unset, no CTA is injected into bundles.
    */
   appBaseUrl?: string;
+  gameBaseUrl?: string;
+  previewSigningSecret?: string;
   /** Optional: SSE keep-alive cadence (ms). Defaults to SSE_HEARTBEAT_MS. */
   sseHeartbeatMs?: number;
   /** Optional: hard cap on a single SSE stream (ms). Defaults to SSE_MAX_STREAM_MS. */
@@ -456,7 +471,7 @@ export interface ServerDeps {
   email?: EmailPort;
 }
 
-const ENGINES: Engine[] = ['three', 'phaser', 'canvas2d'];
+const ENGINES: Engine[] = ['three', 'phaser'];
 const VISIBILITIES: Visibility[] = ['private', 'unlisted', 'public'];
 const ACCOUNT_PROVIDERS: AccountProvider[] = [
   'platform',
@@ -680,7 +695,29 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // X-Forwarded-For), not the proxy socket — otherwise every per-IP control
   // (auth throttle, play-count dedup) sees one shared proxy IP and either
   // throttles all users together or can't distinguish them. (auth H2)
-  const app = Fastify({ logger: false, bodyLimit: 1_048_576, trustProxy: true });
+  const app = Fastify({
+    logger: false,
+    bodyLimit: 1_048_576,
+    trustProxy: true,
+    routerOptions: { maxParamLength: 4096 },
+  });
+  const gameBase = deps.gameBaseUrl ?? 'http://games.localhost:3191';
+  projectGameOrigin(gameBase, 'configuration-check');
+  if (deps.appBaseUrl && new URL(gameBase).hostname === new URL(deps.appBaseUrl).hostname)
+    throw new Error('Game and application origins must differ');
+  const previewSecret = deps.previewSigningSecret ?? randomBytes(32).toString('hex');
+  const gameDomain = new URL(gameBase).hostname;
+  app.addHook('onRequest', async (req, reply) => {
+    const host = (req.headers.host ?? '').split(':')[0] ?? '';
+    if (host === gameDomain || host.endsWith(`.${gameDomain}`)) {
+      if (
+        req.method !== 'GET' ||
+        !/^\/(game-preview\/[^/?]+|v1\/play\/[^/?]+)(?:\?.*)?$/.test(req.url)
+      ) {
+        return reply.code(404).send({ error: 'not_found' });
+      }
+    }
+  });
   const corsAllowlist = parseOriginAllowlist(deps.allowedCorsOrigins);
   const hasExplicitCorsAllowlist =
     deps.allowedCorsOrigins !== undefined && deps.allowedCorsOrigins.trim().length > 0;
@@ -1102,6 +1139,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         apiKey?: string;
         wire?: WireApi;
         httpHeaders?: Record<string, string>;
+        baseUrl?: string;
         /** True ONLY when the run draws on PLATFORM-funded compute (the platform
          *  provider, incl. a subscription that fell back to platform). A BYOK key
          *  or a connected subscription funds its own compute, so platform credits
@@ -2565,6 +2603,106 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     });
   });
 
+  // Session credentials stay on the control plane. The game gets only an
+  // expiring capability for one immutable manifest, on its own project origin.
+  app.post('/v1/:kind/:id/preview-session', async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    const { kind, id } = req.params as { kind: string; id: string };
+    if (kind !== 'projects' && kind !== 'runs' && kind !== 'snapshots')
+      return reply.code(404).send();
+    const run = kind === 'runs' ? await deps.runRepo.get(id) : null;
+    const requestedSnapshot =
+      kind === 'snapshots' && deps.snapshotRepo ? await deps.snapshotRepo.getById(id) : null;
+    const project = await deps.repo.get(
+      kind === 'snapshots'
+        ? (requestedSnapshot?.projectId ?? '')
+        : kind === 'runs'
+          ? (run?.projectId ?? '')
+          : id,
+    );
+    if (!project || project.ownerId !== user.userId || (run && run.userId !== user.userId))
+      return reply.code(404).send();
+    const current =
+      project.currentSnapshotId && deps.snapshotRepo
+        ? await deps.snapshotRepo.getById(project.currentSnapshotId)
+        : null;
+    const previous =
+      project.lastVerifiedSnapshotId && deps.snapshotRepo
+        ? await deps.snapshotRepo.getById(project.lastVerifiedSnapshotId)
+        : null;
+    const verified =
+      current && isVerifiedGame(current.quality, current.filesHash)
+        ? current
+        : previous && isVerifiedGame(previous.quality, previous.filesHash)
+          ? previous
+          : null;
+    const runSnapshot =
+      run?.snapshotManifestKey && deps.snapshotRepo
+        ? (await deps.snapshotRepo.listByProject(project.id)).find(
+            (snapshot) => snapshot.filesManifestKey === run.snapshotManifestKey,
+          )
+        : null;
+    const displayedSnapshot =
+      kind === 'snapshots'
+        ? requestedSnapshot
+        : kind === 'runs'
+          ? runSnapshot
+          : (verified ?? current);
+    const manifestKey =
+      kind === 'runs'
+        ? run?.snapshotManifestKey
+        : (displayedSnapshot?.filesManifestKey ?? project.currentManifestKey);
+    if (!manifestKey) return reply.code(409).send({ error: 'no_snapshot' });
+    const expiresAt = Date.now() + 5 * 60_000;
+    const token = signPreviewTicket(
+      {
+        projectId: project.id,
+        manifestKey,
+        engine: resolvePlayEngine(displayedSnapshot?.engine ?? project.engine, null),
+        expiresAt,
+      },
+      previewSecret,
+    );
+    return reply.header('Cache-Control', 'no-store').send({
+      url: `${projectGameOrigin(gameBase, project.id)}/game-preview/${token}`,
+      expiresAt,
+      showingPrevious:
+        kind === 'projects' &&
+        displayedSnapshot != null &&
+        displayedSnapshot.id !== project.currentSnapshotId,
+    });
+  });
+
+  app.get('/game-preview/:ticket', async (req, reply) => {
+    const ticket = readPreviewTicket((req.params as { ticket: string }).ticket, previewSecret);
+    if (!ticket || !deps.store) return reply.code(404).send();
+    if (req.headers.host !== new URL(projectGameOrigin(gameBase, ticket.projectId)).host)
+      return reply.code(404).send();
+    const project = await deps.repo.get(ticket.projectId);
+    if (!project) return reply.code(404).send();
+    const manifest = await deps.store.readManifest(ticket.manifestKey);
+    const files = await Promise.all(
+      Object.entries(manifest.files).map(async ([path, entry]) => {
+        const bytes = Buffer.from(await deps.store!.readFile(manifest, path));
+        return {
+          path,
+          content: /^(text\/|application\/json)/.test(entry.contentType)
+            ? bytes.toString('utf8')
+            : bytes,
+        };
+      }),
+    );
+    const html = await buildGameHtml({ files, engine: ticket.engine });
+    return reply
+      .header('Content-Type', 'text/html; charset=utf-8')
+      .header('Content-Security-Policy', gameContentCsp(deps.allowedFrameOrigins ?? '*'))
+      .header('Referrer-Policy', 'no-referrer')
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Cache-Control', 'no-store')
+      .send(injectControlsRuntime(html));
+  });
+
   // Serves files from a run's snapshot manifest so the iframe can load the game.
   // Route: GET /v1/runs/:id/preview/           → index.html
   //        GET /v1/runs/:id/preview/assets/...  → asset files
@@ -2958,112 +3096,113 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const description = gameSpec ? gameSpec.winCondition : undefined;
     const tags = gameSpec ? [gameSpec.genre] : undefined;
 
-    const publishedGame = await deps.publishRepo.upsert({
+    const sourceSnapshot =
+      project.currentSnapshotId && deps.snapshotRepo
+        ? await deps.snapshotRepo.getById(project.currentSnapshotId)
+        : null;
+    if (
+      !sourceSnapshot ||
+      sourceSnapshot.filesManifestKey !== project.currentManifestKey ||
+      !isVerifiedGame(sourceSnapshot.quality, sourceSnapshot.filesHash)
+    ) {
+      return reply.code(409).send({
+        error: 'game_not_verified',
+        message: 'This version is a draft. Run and pass gameplay verification before publishing.',
+      });
+    }
+    const plan = VerificationPlan.safeParse(sourceSnapshot.quality?.verificationPlan);
+    if ((!deps.browserQueue && !deps.publishVerifier) || !plan.success) {
+      return reply.code(503).send({
+        error: 'verification_pending',
+        message:
+          'Publishing is waiting for gameplay verification. Your existing public version is unchanged; retry when verification is available.',
+      });
+    }
+    const autoModFlags = autoMod(project.name, html);
+    if (autoModFlags.some((f) => f === 'phishing_language' || f === 'crypto_miner')) {
+      return reply.code(422).send({
+        error: 'moderation_required',
+        message: 'This candidate needs moderation review. Your public version is unchanged.',
+        flags: autoModFlags,
+      });
+    }
+    try {
+      const live = deps.publishVerifier
+        ? await deps.publishVerifier.runtimeVerify(html)
+        : deps.browserQueue
+          ? await deps.browserQueue.waitForResult<RuntimeVerifyResult>(
+              await deps.browserQueue.enqueueRuntimeVerify(html),
+              15_000,
+            )
+          : null;
+      if (!live) return reply.code(503).send({ error: 'verification_pending' });
+      const boot = evaluateBootCheck({
+        hasGameContract: live.hasGameContract,
+        fatalErrors: live.fatalErrors,
+        declaredEngine: engine,
+        detectedEngine,
+      });
+      if (!boot.ok || live.renderedNonBlank === false)
+        return reply.code(422).send({ error: 'boot_check_failed', errors: boot.errors });
+      const checks = [plan.data];
+      if (sourceSnapshot.quality?.editVerificationPlan)
+        checks.push(sourceSnapshot.quality.editVerificationPlan);
+      for (const check of checks) {
+        const play = deps.publishVerifier
+          ? await deps.publishVerifier.playtest(html, check.steps as PlaytestStep[])
+          : deps.browserQueue
+            ? await deps.browserQueue.waitForResult<PlaytestResult>(
+                await deps.browserQueue.enqueuePlaytest(html, check.steps as PlaytestStep[]),
+                30_000,
+              )
+            : null;
+        if (!play) return reply.code(503).send({ error: 'verification_pending' });
+        const score = scorePlaytest(
+          traceFromPlaytestResult(play),
+          check.predicates as PlaytestPredicate[],
+        );
+        if (
+          !play.hasGameContract ||
+          !play.hasDebugContract ||
+          play.bootErrors.length ||
+          play.steps.some((step) => step.errors.length > 0) ||
+          !score.pass
+        ) {
+          return reply.code(422).send({
+            error: 'gameplay_check_failed',
+            message:
+              'The exported game failed its gameplay checks. Your public version is unchanged.',
+          });
+        }
+      }
+    } catch (err) {
+      req.log.warn({ err }, 'Publish verification unavailable');
+      return reply.code(503).send({ error: 'verification_pending' });
+    }
+    const latest = await deps.repo.get(project.id);
+    if (latest?.currentManifestKey !== project.currentManifestKey)
+      return reply.code(409).send({ error: 'snapshot_changed' });
+    const existingPublication = await deps.publishRepo.getByProject(project.id);
+    if (existingPublication?.status === 'removed_by_mod')
+      return reply.code(403).send({ error: 'moderation_required' });
+
+    const candidate: PublishUpsertInput = {
       projectId: project.id,
       publishSlug: project.slug,
       title: project.name,
       bundleKey,
+      status: 'live',
       // Pin the published snapshot so remix forks this immutable version, not the
       // project's live HEAD (#14). currentSnapshotId is the HEAD at publish time.
       ...(project.currentSnapshotId !== null ? { snapshotId: project.currentSnapshotId } : {}),
       ...(gameSpec !== undefined ? { gameSpec } : {}),
       ...(description !== undefined ? { description } : {}),
       ...(tags !== undefined ? { tags } : {}),
-    });
-
-    // Auto-moderation: scan title + bundle for flagged patterns.
-    const autoModFlags = autoMod(project.name, html);
-    if (autoModFlags.length > 0) {
-      console.warn(
-        `[publish:automod] game ${publishedGame.publishSlug} flagged: ${autoModFlags.join(', ')}`,
-      );
-      void deps.hubRepo
-        ?.addReport({
-          targetType: 'published_game',
-          targetId: publishedGame.id,
-          reason: `auto-mod: ${autoModFlags.join(', ')}`,
-        })
-        .catch(() => {});
-
-      // GATE on high-confidence flags (#19): phishing / crypto-mining content must
-      // NOT go live automatically — hold it as 'unpublished' (pending review) and
-      // return 202 instead of a live URL. (The locked CSP on the served bundle is
-      // the real runtime enforcement boundary; this is the pre-publish gate.)
-      const HIGH_CONFIDENCE = new Set(['phishing_language', 'crypto_miner']);
-      if (autoModFlags.some((f) => HIGH_CONFIDENCE.has(f))) {
-        await deps.publishRepo.setStatus(publishedGame.id, 'unpublished');
-        return reply.code(202).send({
-          status: 'pending_review',
-          message:
-            'Your game was flagged by automated moderation and is pending review before it goes live.',
-          flags: autoModFlags,
-        });
-      }
-    }
-
-    // Smoke-test gate (blocking): verify the game boots in a headless browser
-    // before marking it live. If the game fails to boot, mark it unpublished and
-    // return a 422 so the user knows to fix the generation.
-    if (deps.browserQueue) {
-      try {
-        const verifyJobId = await deps.browserQueue.enqueueRuntimeVerify(html);
-        const verifyResult = await deps.browserQueue.waitForResult<RuntimeVerifyResult>(
-          verifyJobId,
-          15_000,
-        );
-        if (verifyResult && !verifyResult.hasGameContract) {
-          await deps.publishRepo.setStatus(publishedGame.id, 'unpublished');
-          return reply.code(422).send({
-            error: 'smoke_test_failed',
-            message: 'The game did not boot correctly in our verification environment.',
-            fatalErrors: verifyResult.fatalErrors,
-          });
-        }
-        // S14 — re-run evaluateBootCheck with live smoke evidence (audio when present).
-        if (verifyResult) {
-          const liveBoot = evaluateBootCheck({
-            hasGameContract: verifyResult.hasGameContract,
-            fatalErrors: verifyResult.fatalErrors,
-            declaredEngine: engine,
-            detectedEngine,
-            ...(typeof verifyResult.audioPlays === 'number'
-              ? { audioPlays: verifyResult.audioPlays }
-              : {}),
-          });
-          if (!liveBoot.ok) {
-            await deps.publishRepo.setStatus(publishedGame.id, 'unpublished');
-            return reply.code(422).send({
-              error: 'boot_check_failed',
-              message: liveBoot.errors.join('; '),
-              errors: liveBoot.errors,
-            });
-          }
-        }
-        if (verifyResult?.fatalErrors.length) {
-          console.warn(
-            `[publish:smoke] ${publishedGame.publishSlug} has fatal errors:`,
-            verifyResult.fatalErrors,
-          );
-        }
-      } catch (err) {
-        // Smoke-test infrastructure error — don't block publish, just log.
-        console.warn(`[publish:smoke] verification skipped for ${publishedGame.publishSlug}:`, err);
-      }
-    }
-
-    // Every gate passed — this game is live.
-    //
-    // MUST be explicit. `upsert` updates the bundle, title and spec of an
-    // existing row but deliberately leaves `status` alone, and every gate above
-    // parks a failure at 'unpublished'. So once a publish had failed once, the
-    // row stayed 'unpublished' forever: a later, fully-passing publish returned
-    // a 200 with a slug and a play URL while `/v1/play/:slug` went on 404-ing,
-    // with no way for the owner to recover. A publish that survives the gates
-    // must say so.
-    //
-    // Placed AFTER the moderation and smoke gates, all of which return early, so
-    // this can never resurrect a game they held or rejected.
-    await deps.publishRepo.setStatus(publishedGame.id, 'live');
+    };
+    const publishedGame = deps.publishRepo.promote
+      ? await deps.publishRepo.promote(candidate, sourceSnapshot.id)
+      : await deps.publishRepo.upsert(candidate);
+    if (!publishedGame) return reply.code(409).send({ error: 'snapshot_or_publication_changed' });
 
     // Async: thumbnail capture (best-effort, non-blocking). Prefer the dedicated
     // browser-worker queue (Redis deploys); fall back to in-process Chromium so a
@@ -3294,6 +3433,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(404).send({ error: 'not_found' });
     }
 
+    const playOrigin = projectGameOrigin(gameBase, published.projectId);
+    if (req.headers.host !== new URL(playOrigin).host) {
+      return reply.redirect(`${playOrigin}/v1/play/${encodeURIComponent(slug)}`);
+    }
+
     // Fire-and-forget play count increment, throttled per client (#35a) so a
     // reload loop can't inflate the count. The throttle key doubles as a
     // salted-IP session hash for the trending play_events row (#3.3).
@@ -3325,7 +3469,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       .header('X-Frame-Options', frameAncestors === '*' ? 'ALLOWALL' : 'SAMEORIGIN')
       .header('Referrer-Policy', 'no-referrer')
       .header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()')
-      .header('Cache-Control', 'public, max-age=31536000, immutable')
+      .header('Cache-Control', 'no-cache')
       .send(html);
   });
 
@@ -3416,7 +3560,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       }
       return reply
         .header('Content-Type', ct)
-        .header('Cache-Control', 'public, max-age=31536000, immutable')
+        .header('Cache-Control', 'no-cache')
         .header('X-Content-Type-Options', 'nosniff')
         .send(buf);
     } catch {

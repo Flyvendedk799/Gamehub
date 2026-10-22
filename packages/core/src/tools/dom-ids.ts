@@ -83,11 +83,7 @@ export function describeMissingDomId(m: MissingDomId, files: ProjectFile[]): str
     canvases.length > 0
       ? ` index.html has ${canvases.slice(0, 2).join(' and ')} instead.`
       : ' index.html has no <canvas> at all.';
-  return (
-    `${m.from} looks up #${m.id} (${m.via}), but no element with id="${m.id}" exists anywhere in the project.${hint} ` +
-    `Give the right element id="${m.id}" in index.html (keep the page's canvas as <canvas id="${m.id}">), or change the lookup. ` +
-    `The lookup returns null and the game crashes at boot.`
-  );
+  return `${m.from} looks up #${m.id} (${m.via}), but no element with id="${m.id}" exists anywhere in the project.${hint} Give the right element id="${m.id}" in index.html (keep the page's canvas as <canvas id="${m.id}">), or change the lookup. The lookup returns null and the game crashes at boot.`;
 }
 
 /**

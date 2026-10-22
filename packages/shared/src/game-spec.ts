@@ -180,7 +180,18 @@ export const GameCapabilitiesPatch = z.object({
 });
 export type GameCapabilitiesPatch = z.infer<typeof GameCapabilitiesPatch>;
 
+export const CreativeBrief = z.object({
+  schemaVersion: z.literal(1).default(1),
+  hook: z.string().min(3).max(500),
+  playerFantasy: z.string().min(3).max(500),
+  visualDirection: z.string().min(3).max(500),
+  feedback: z.array(z.string().min(3).max(200)).min(1).max(8),
+  avoid: z.array(z.string().min(1).max(200)).max(8).default([]),
+});
+export type CreativeBrief = z.infer<typeof CreativeBrief>;
+
 export const GameSpec = z.object({
+  creativeBrief: CreativeBrief.optional(),
   schemaVersion: z.literal(GAME_SPEC_SCHEMA_VERSION).default(GAME_SPEC_SCHEMA_VERSION),
   genre: GameGenre,
   /** Composable capabilities — the primary genre-agnostic description (Phase 1). */
@@ -216,6 +227,7 @@ export type GameSpec = z.infer<typeof GameSpec>;
  *  merge — the agent must restate the full feature spec when amending
  *  it, so partial-update bugs can't quietly drop invariants). */
 export const GameSpecPatch = z.object({
+  creativeBrief: CreativeBrief.optional(),
   genre: GameGenre.optional(),
   capabilities: GameCapabilitiesPatch.optional(),
   dimensions: GameDimensions.optional(),
@@ -260,6 +272,7 @@ export function applyGameSpecPatch(prior: GameSpec, patch: GameSpecPatch): GameS
       : prior.capabilities;
   const merged: GameSpec = {
     ...prior,
+    ...(patch.creativeBrief !== undefined ? { creativeBrief: patch.creativeBrief } : {}),
     ...(patch.genre !== undefined ? { genre: patch.genre } : {}),
     ...(mergedCapabilities !== undefined ? { capabilities: mergedCapabilities } : {}),
     ...(patch.dimensions !== undefined ? { dimensions: patch.dimensions } : {}),

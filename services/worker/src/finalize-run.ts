@@ -25,6 +25,7 @@
  *                   retry of an already-completed run short-circuits.
  */
 import { type Db, schema } from '@playforge/db';
+import { isVerifiedGame } from '@playforge/shared';
 import { eq, sql } from 'drizzle-orm';
 import type { EnqueueResult } from './queue';
 
@@ -172,6 +173,7 @@ export async function finalizeRun(db: Db, args: FinalizeRunArgs): Promise<Finali
             ...(result.tweakSchema != null ? { tweakSchema: result.tweakSchema } : {}),
             filesManifestKey: manifestKey,
             filesHash: result.snapshot.filesHash,
+            ...(result.quality ? { quality: result.quality } : {}),
           })
           .returning({ id: schema.snapshots.id });
         snapshotId = snapshotRow?.id ?? null;
@@ -209,6 +211,9 @@ export async function finalizeRun(db: Db, args: FinalizeRunArgs): Promise<Finali
         currentManifestKey: manifestKey,
         updatedAt: new Date(),
         ...(snapshotId !== null ? { currentSnapshotId: snapshotId } : {}),
+        ...(snapshotId !== null && isVerifiedGame(result.quality, result.snapshot.filesHash)
+          ? { lastVerifiedSnapshotId: snapshotId }
+          : {}),
         ...(result.engine !== null ? { engine: result.engine } : {}),
       })
       .where(eq(schema.projects.id, projectId));
@@ -221,6 +226,7 @@ export async function finalizeRun(db: Db, args: FinalizeRunArgs): Promise<Finali
         previewUrl: `/v1/runs/${runId}/preview/`,
         engine: result.engine,
         snapshotId,
+        quality: result.quality ?? null,
       },
     });
 

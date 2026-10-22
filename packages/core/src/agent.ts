@@ -43,8 +43,10 @@ import {
   errorCodeForUpstreamType,
   filterActive,
   formatSkillsForPrompt,
+  inferReasoning,
   looksLikeClaudeOAuthToken,
   parseUpstreamErrorMessage,
+  resolveModelProfile,
   shouldForceClaudeCodeIdentity,
   streamAntigravity,
   withBackoff,
@@ -516,19 +518,12 @@ export function buildPiModel(
     api: apiForWire(effectiveWire),
     provider: model.provider,
     baseUrl: canonicalBase,
-    reasoning: true,
-    input: ['text'],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 400000,
-    // 196608 = 3 × 65536 (matches MAX_OUTPUT_TOKENS in index.ts). pi-ai's
-    // anthropic adapter sends `max_tokens = model.maxTokens / 3` when no
-    // per-call override is supplied (see node_modules/.../anthropic.js
-    // buildParams), so to land an effective per-turn cap of 65536 we
-    // pre-multiply by 3 here. Without this, the agent path got 64000/3 ≈
-    // 21333 and a single fat `text_editor.str_replace` would truncate
-    // mid-tool-input — which is exactly the failure mode that motivated
-    // this fix (see the 2026-04-26 generate.ok log with output=32000).
-    maxTokens: 196608,
+    ...resolveModelProfile(
+      model.provider,
+      model.modelId,
+      effectiveWire,
+      inferReasoning(effectiveWire, model.modelId, canonicalBase),
+    ),
   };
   if (httpHeaders !== undefined) out.headers = httpHeaders;
 
@@ -1827,7 +1822,7 @@ export async function generateViaAgent(
       sessionId: options?.sessionId,
       maxRetryDelayMs: options?.maxRetryDelayMs,
       metadata: options?.metadata,
-      maxTokens: options?.maxTokens ?? 65_536,
+      maxTokens: Math.min(options?.maxTokens ?? 65_536, model.maxTokens),
     };
     if (isAnthropic) {
       if (forceTools) {
@@ -1846,10 +1841,11 @@ export async function generateViaAgent(
       return streamAntigravity(model as never, context, {
         ...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
         ...(options?.signal !== undefined ? { signal: options.signal } : {}),
-        maxTokens: options?.maxTokens ?? 65_536,
+        maxTokens: Math.min(options?.maxTokens ?? 65_536, model.maxTokens),
         // Every turn must be a tool call (done is a tool). A turn of prose is how a plan
         // written as text ended the whole build before a single file was written.
         toolChoice: 'any',
+        ...(options?.reasoning !== undefined ? { reasoning: options.reasoning } : {}),
       });
     }
     return piStream(model, context, lowered);

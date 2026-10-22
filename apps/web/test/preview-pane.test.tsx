@@ -211,10 +211,9 @@ describe('PreviewPane & Event Adapter Integration', () => {
         />,
       );
 
-      // Strict sandbox isolation: allow-scripts allow-forms allow-same-origin allow-pointer-lock allow-downloads
-      expect(html).toContain(
-        'sandbox="allow-scripts allow-forms allow-same-origin allow-pointer-lock allow-downloads"',
-      );
+      // SSR cannot expose a game until an authenticated preview ticket is issued.
+      expect(html).not.toContain('<iframe');
+      expect(html).not.toContain('allow-same-origin');
 
       // Contains generation progress stepper landmarks
       expect(html).toContain('aria-label="Game Generation Progress"');

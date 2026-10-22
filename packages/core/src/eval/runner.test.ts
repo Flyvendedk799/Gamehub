@@ -32,6 +32,7 @@ const FPS_FIXTURE: EvalFixture = EvalFixture.parse({
 });
 
 const PASSING_OBS: RunObservation = {
+  audioAudible: true,
   engine: 'three',
   genre: 'fps',
   inputTokens: 1_000_000,
@@ -82,10 +83,10 @@ describe('evaluateFixture — file + audio assertions', () => {
     expect(r.failures.join(' ')).toContain("'index.html' is missing");
   });
 
-  it('FAILS when requiredAudio=true and no audio calls recorded', () => {
+  it('FAILS when tool calls exist but audible playback is unconfirmed', () => {
     const r = evaluateFixture(FPS_FIXTURE, {
       ...PASSING_OBS,
-      toolCounts: { ...PASSING_OBS.toolCounts, generate_audio_asset: 0 },
+      audioAudible: false,
     });
     expect(r.pass).toBe(false);
     expect(r.failures.join(' ')).toContain('requiredAudio');

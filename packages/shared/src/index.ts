@@ -529,6 +529,7 @@ export {
   GameGenre,
   GameInputKind,
   GamePerspective,
+  CreativeBrief,
   GameSpec,
   GameSpecPatch,
   applyGameSpecPatch,
@@ -847,3 +848,5 @@ export type {
   SocialOutroMetrics,
   SocialOutroSummary,
 } from './social-outro';
+
+export * from './game-quality';

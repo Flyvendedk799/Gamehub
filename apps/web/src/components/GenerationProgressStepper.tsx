@@ -2,15 +2,8 @@
 
 import React from 'react';
 
-export type GenerationPhase =
-  | 'analyzing'
-  | 'planning'
-  | 'writing_code'
-  | 'verifying'
-  | 'repairing'
-  | 'bundling'
-  | 'completed'
-  | 'failed';
+import type { BuildStage } from '@/lib/build-status';
+export type GenerationPhase = BuildStage;
 
 export interface GenerationProgressStepperProps {
   currentPhase: GenerationPhase;
@@ -73,6 +66,13 @@ export function GenerationProgressStepper({
       aria-label="Game Generation Progress"
       className={`w-full bg-chrome/90 border border-hairline rounded p-3 backdrop-blur ${className}`}
     >
+      {(currentPhase === 'draft' || currentPhase === 'paused') && (
+        <p className="text-sm text-ink-2 mb-2">
+          {currentPhase === 'paused'
+            ? 'Paused — resume when ready'
+            : 'Draft saved — gameplay verification incomplete'}
+        </p>
+      )}
       {/* Screen reader live region */}
       <div aria-live="polite" aria-atomic="true" className="sr-only">
         {activeAnnouncement}

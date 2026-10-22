@@ -1,3 +1,5 @@
+import { resolveModelProfile } from './model-profile';
+export { resolveModelProfile } from './model-profile';
 /**
  * Wrappers around @mariozechner/pi-ai that fill capability gaps documented
  * in docs/research/05-pi-ai-boundary.md. App code MUST go through this
@@ -337,7 +339,18 @@ export async function complete(
     }> & { result: () => Promise<PiAssistantMessage> };
   };
 
-  let piModel = pi.getModel(model.provider, effectiveModelId);
+  const registeredModel = pi.getModel(model.provider, effectiveModelId);
+  let piModel = opts.wire
+    ? {
+        ...registeredModel,
+        ...synthesizeWireModel(
+          registeredModel?.provider ?? model.provider,
+          effectiveModelId,
+          opts.wire,
+          opts.baseUrl ?? registeredModel?.baseUrl,
+        ),
+      }
+    : registeredModel;
   if (!piModel) {
     if (opts.wire !== undefined) {
       piModel = synthesizeWireModel(model.provider, effectiveModelId, opts.wire, opts.baseUrl);
@@ -351,6 +364,17 @@ export async function complete(
     }
   }
 
+  piModel = {
+    ...piModel,
+    ...resolveModelProfile(
+      model.provider,
+      effectiveModelId,
+      opts.wire,
+      inferReasoning(opts.wire, effectiveModelId, opts.baseUrl),
+    ),
+  };
+  if (opts.baseUrl !== undefined) piModel.baseUrl = opts.baseUrl;
+  const outputLimit = Math.min(opts.maxTokens ?? 8192, piModel.maxTokens ?? 8192);
   const piContext = toPiContext(messages, piModel, opts);
 
   // Antigravity (Google subscription) is not a pi-ai wire: it has its own Cloud Code stream.
@@ -362,7 +386,7 @@ export async function complete(
     const agyStream = streamAntigravity(agyModel as never, piContext as never, {
       apiKey,
       ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
-      ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
+      maxTokens: outputLimit,
       ...(opts.reasoning !== undefined ? { reasoning: opts.reasoning } : {}),
     });
     for await (const event of agyStream) {
@@ -413,7 +437,7 @@ export async function complete(
   };
   if (opts.baseUrl !== undefined) piOpts.baseUrl = opts.baseUrl;
   if (opts.signal !== undefined) piOpts.signal = opts.signal;
-  if (opts.maxTokens !== undefined) piOpts.maxTokens = opts.maxTokens;
+  piOpts.maxTokens = outputLimit;
   if (opts.reasoning !== undefined) piOpts.reasoning = opts.reasoning;
   if (opts.httpHeaders !== undefined) piOpts.headers = { ...opts.httpHeaders };
 

@@ -77,7 +77,33 @@ export function currentRunEvents(events: ReadonlyArray<SseEvent>): ReadonlyArray
   return events.slice(last + 1);
 }
 
+export type BuildStage =
+  | 'analyzing'
+  | 'planning'
+  | 'writing_code'
+  | 'verifying'
+  | 'repairing'
+  | 'bundling'
+  | 'completed'
+  | 'failed'
+  | 'paused'
+  | 'draft';
+
+const TOOL_STAGES: Record<string, BuildStage> = {
+  declare_game_spec: 'planning',
+  declare_playtest_contract: 'planning',
+  str_replace_based_edit_tool: 'writing_code',
+  write_file: 'writing_code',
+  patch_file_reflexion: 'repairing',
+  verify_artifact: 'verifying',
+  playtest_game: 'verifying',
+  runtime_verify: 'verifying',
+  validate_game_scene: 'verifying',
+  assert_game_invariants: 'verifying',
+};
+
 export interface BuildStatus {
+  stage: BuildStage;
   /** 0=Design, 1=Build, 2=Test, 3=Ready. */
   phaseIndex: number;
   phase: string;
@@ -111,8 +137,10 @@ export function deriveBuildStatus(allEvents: ReadonlyArray<SseEvent>): BuildStat
   // tracker at Ready and anchor the timer to the project's first-ever event.
   const events = currentRunEvents(allEvents);
   let phaseIndex = 0;
+  let stage: BuildStage = 'analyzing';
   let step = '';
   let startedAt: number | null = null;
+  let readiness = '';
   let lastType = '';
   const activities: Activity[] = [];
 
@@ -120,10 +148,27 @@ export function deriveBuildStatus(allEvents: ReadonlyArray<SseEvent>): BuildStat
     const t = Date.parse(e.timestamp);
     if (startedAt === null && Number.isFinite(t)) startedAt = t;
     lastType = e.type;
+    if (e.type === 'tool_use') stage = TOOL_STAGES[e.toolName] ?? stage;
+    if (e.type === 'agent_end') stage = 'verifying';
+    if (e.type === 'run_paused') {
+      stage = 'paused';
+      readiness = 'Paused: ready to resume';
+    }
+    if (e.type === 'run_error') {
+      stage = 'failed';
+      readiness = 'Build stopped';
+    }
 
     // Phase advance — monotonic (Math.max), driven by milestone events.
     if (e.type === 'run_complete') {
-      phaseIndex = 3;
+      stage = e.quality?.status === 'verified' ? 'completed' : 'draft';
+      phaseIndex = stage === 'completed' ? 3 : 2;
+      readiness =
+        e.quality?.status === 'verified'
+          ? 'Ready to play'
+          : e.quality?.status === 'needs_fixes'
+            ? 'Draft saved: needs fixes'
+            : 'Draft saved: verification incomplete';
     } else if (e.type === 'agent_end') {
       // Agent done → the server now boots + repairs the game (Test phase).
       phaseIndex = Math.max(phaseIndex, 2);
@@ -165,12 +210,13 @@ export function deriveBuildStatus(allEvents: ReadonlyArray<SseEvent>): BuildStat
   }
 
   return {
+    stage,
     phaseIndex,
-    phase: BUILD_PHASES[phaseIndex] ?? 'Build',
-    currentStep: step,
+    phase: readiness || BUILD_PHASES[phaseIndex] || 'Build',
+    currentStep: readiness || step,
     steps: collapseSteps(activities),
     startedAt,
-    done: phaseIndex >= 3,
+    done: lastType === 'run_complete',
   };
 }
 

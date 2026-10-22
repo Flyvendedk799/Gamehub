@@ -1,3 +1,5 @@
+# Match Biome on every platform; binary files retain binary handling.
+* text=auto eol=lf
 # Shell scripts are consumed by Linux containers — never let a Windows checkout
 # rewrite them to CRLF (a CRLF shebang fails with "no such file or directory").
 *.sh text eol=lf

@@ -2,6 +2,7 @@
 
 import { DesignInterview, needsInterview } from '@/components/DesignInterview';
 import { BrandMark, Wordmark } from '@/components/Logo';
+import { PlayableExamples } from '@/components/PlayableExamples';
 import ProjectCard from '@/components/ProjectCard';
 import { createProject, generateGame, listProjects } from '@/lib/api';
 import { isAuthenticated } from '@/lib/auth';
@@ -184,10 +185,9 @@ export default function HomePage() {
           <div className="flex gap-2 font-mono text-[11px] tracking-[.1em]">
             {(
               [
-                ['auto', 'AUTO'],
-                ['phaser', 'PHASER 2D'],
-                ['threejs', 'THREE.JS 3D'],
-                ['vanilla', 'CANVAS 2D'],
+                ['auto', 'Choose for me'],
+                ['phaser', '2D game'],
+                ['threejs', '3D game'],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -207,7 +207,7 @@ export default function HomePage() {
           </div>
           <div className="flex items-center gap-4">
             <span className="hidden font-mono text-[11px] tracking-[.08em] text-ink-4 sm:inline">
-              ⌘ ENTER
+              Ctrl / ⌘ + Enter
             </span>
             <button
               type="submit"
@@ -281,6 +281,7 @@ export default function HomePage() {
 
           <div className="mt-11">{promptForm}</div>
           <div className="mt-5">{ideaGrid}</div>
+          <PlayableExamples />
 
           {/* Recent projects */}
           {hasRecent && recent && (
@@ -316,8 +317,8 @@ export default function HomePage() {
               you describe
             </h1>
             <p className="mx-auto mt-6 max-w-md text-lg leading-relaxed text-ink-3">
-              Describe the game you want. PlayerZero writes the code, builds it, and hands you
-              something you can play instantly.
+              Describe the game you want. PlayerZero writes the code, builds it, and hands you a
+              playable draft you can test, refine, and share.
             </p>
           </div>
 
@@ -327,10 +328,12 @@ export default function HomePage() {
             {ideaGrid}
           </div>
 
+          <PlayableExamples />
+
           {/* Footer */}
           <div className="mt-16 flex items-center gap-4">
             <p className="font-mono text-[11px] tracking-[.08em] text-ink-4">
-              PLAYERZERO — PHASE 0 · DEV BUILD
+              PLAYERZERO — MAKE SOMETHING PLAYABLE
             </p>
           </div>
         </div>

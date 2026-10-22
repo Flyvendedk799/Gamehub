@@ -95,7 +95,9 @@ export default function SettingsPage() {
         if (cancelled) return;
         setAgyModels(m);
         // A saved id this login no longer offers would 404; fall back to one it does.
-        setModelId((current) => (m.some((x) => x.id === current) ? current : (m[0]?.id ?? current)));
+        setModelId((current) =>
+          m.some((x) => x.id === current) ? current : (m[0]?.id ?? current),
+        );
       })
       .catch(() => {
         if (!cancelled) setAgyModels([]);
@@ -713,8 +715,8 @@ function CodexConnect({
       <p className="border border-live/40 bg-live/5 px-3 py-2 text-xs leading-relaxed text-live">
         <span className="font-semibold">Local development only.</span> The credential is harvested
         from the codex CLI login on the machine running the API, and refreshing re-reads that same
-        local login. On a deployed server there is nothing to read, so connecting will fail — use
-        an API key instead.
+        local login. On a deployed server there is nothing to read, so connecting will fail — use an
+        API key instead.
       </p>
       <div className="flex flex-wrap gap-2">
         {!connected && (

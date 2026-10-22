@@ -69,6 +69,8 @@ services:
       # you rotate the platform key. Always set it explicitly.
       API_KEY_ENCRYPTION_SECRET: ${API_KEY_ENCRYPTION_SECRET:?set API_KEY_ENCRYPTION_SECRET in deploy/.env}
       APP_BASE_URL: https://${DOMAIN}
+      GAME_BASE_URL: ${GAME_BASE_URL:?set isolated HTTPS game origin}
+      PREVIEW_SIGNING_SECRET: ${PREVIEW_SIGNING_SECRET:?set a stable random secret of at least 32 characters}
       CORS_ORIGINS: https://${DOMAIN}
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
       # PER-USER cap, not global. The global ceiling is WORKER_CONCURRENCY below.

@@ -49,6 +49,8 @@ export interface RuntimeVerifyObservation {
 }
 
 export interface RunObservation {
+  /** Explicit listening/recorded-output evidence, never inferred from tool calls. */
+  audioAudible?: boolean;
   /** The agent's chosen engine for this run, or null if no choose_engine
    *  call was recorded. */
   engine: string | null;
@@ -131,8 +133,8 @@ export function evaluateFixture(
   const audioCalls =
     get(observation.toolCounts, 'generate_audio_asset') +
     get(observation.toolCounts, 'generate_audio');
-  if (a.requiredAudio && audioCalls === 0) {
-    failures.push('requiredAudio: no generate_audio_asset calls recorded');
+  if (a.requiredAudio && observation.audioAudible !== true) {
+    failures.push('requiredAudio: audible playback has not been confirmed');
   }
 
   if (observation.inputTokens > a.maxInputTokens) {

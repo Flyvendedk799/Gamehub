@@ -9,7 +9,11 @@ import { InMemoryEventBus, RedisEventBus, runChannel, safeParseStreamData } from
 class FakeRedis {
   disconnected = false;
   readonly added: Array<{ channel: string; data: string }> = [];
-  multi(): { xadd: (...a: string[]) => unknown; expire: (...a: unknown[]) => unknown; exec: () => Promise<unknown[]> } {
+  multi(): {
+    xadd: (...a: string[]) => unknown;
+    expire: (...a: unknown[]) => unknown;
+    exec: () => Promise<unknown[]>;
+  } {
     let pending: { channel: string; data: string } | null = null;
     const chain = {
       xadd: (channel: string, ...rest: string[]) => {

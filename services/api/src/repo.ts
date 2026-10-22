@@ -14,6 +14,7 @@ export interface Project {
   engine: Engine | null;
   visibility: Visibility;
   currentSnapshotId: string | null;
+  lastVerifiedSnapshotId?: string | null;
   /** Manifest key of the most recent completed build — used to seed the next generation. */
   currentManifestKey: string | null;
   /** Gameplay thumbnail (a `/v1/blobs/:key` URL) captured after the latest build,

@@ -1,3 +1,4 @@
+import type { GameQuality } from '@playforge/shared';
 import type { InterviewPlan } from '@playforge/shared/design-interview';
 import type { SocialOutroSummary } from '@playforge/shared/social-outro';
 import { getToken } from './auth';
@@ -451,6 +452,7 @@ export async function getCreatorGames(
 // ─── Version timeline ────────────────────────────────────────────────────────
 
 export interface SnapshotEntry {
+  quality?: GameQuality | null;
   id: string;
   seq: number;
   type: 'initial' | 'edit' | 'fork' | 'remix' | 'revert';
@@ -1013,4 +1015,19 @@ export async function searchHub(
   const params = new URLSearchParams({ q });
   if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
   return apiFetch<{ results: HubGame[] }>(`/v1/hub/search?${params.toString()}`);
+}
+
+export async function createPreviewSession(
+  previewUrl: string,
+): Promise<{ url: string; showingPrevious: boolean }> {
+  const path = new URL(previewUrl, BASE).pathname;
+  const match = /^\/v1\/(projects|runs|snapshots)\/([^/]+)\/preview\/?$/.exec(path);
+  if (!match) throw new Error('Invalid preview URL');
+  const response = await apiFetch<{ url: string; showingPrevious: boolean }>(
+    `/v1/${match[1]}/${match[2]}/preview-session`,
+    {
+      method: 'POST',
+    },
+  );
+  return response;
 }

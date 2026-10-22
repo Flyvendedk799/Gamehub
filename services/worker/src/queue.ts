@@ -55,6 +55,7 @@ export interface EnqueueInput {
   wire?: import('@playforge/shared').WireApi;
   /** Extra HTTP headers for the model call (e.g. chatgpt-account-id for Codex). */
   httpHeaders?: Record<string, string>;
+  baseUrl?: string;
   engine?: WebEngine;
   /** Manifest key of the previous snapshot to seed the working tree for iteration. */
   parentManifestKey?: string;
@@ -121,9 +122,7 @@ export interface QueuePorts {
    * as `run_complete` arrives, so a frame published ahead of the HEAD advance
    * serves the previous iteration.
    *
-   * MUST NOT throw — enqueueRun's error path would turn a successful build into
-   * a `run_error`. Callers swallow persistence failures here and re-surface them
-   * after enqueueRun resolves, exactly as before.
+   * MUST throw on persistence failure: a terminal success requires durable state.
    */
   settle?: (result: EnqueueResult) => Promise<void>;
 }
@@ -222,6 +221,7 @@ export async function enqueueRun(input: EnqueueInput, ports: QueuePorts): Promis
         provider: input.model.provider,
         ...(input.wire !== undefined ? { wire: input.wire } : {}),
         ...(input.httpHeaders !== undefined ? { httpHeaders: input.httpHeaders } : {}),
+        ...(input.baseUrl !== undefined ? { baseUrl: input.baseUrl } : {}),
         ...(input.engine !== undefined ? { engine: input.engine } : {}),
         ...(input.gameSpec !== undefined ? { spec: input.gameSpec } : {}),
         ...(initialFiles !== undefined ? { initialFiles } : {}),
@@ -306,7 +306,7 @@ export async function enqueueRun(input: EnqueueInput, ports: QueuePorts): Promis
     // Settle first, announce second — the browser treats `run_complete` as
     // "HEAD is the new build" and reloads the preview off it immediately.
     await ports.settle?.(result);
-    await recorder.control({ type: 'run_complete' });
+    await recorder.control({ type: 'run_complete', quality: result.quality ?? null });
     return result;
   } catch (err) {
     await recorder.control({ type: 'run_error', error: String(err) });

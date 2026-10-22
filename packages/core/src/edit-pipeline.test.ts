@@ -3,7 +3,7 @@ import { applyEditRequest, outlineOf, parseLocateReply } from './edit-pipeline';
 
 const NL = String.fromCharCode(10);
 const block = (path: string, body: string) =>
-  ['=== FILE: ' + path + ' ===', body, '=== END FILE ==='].join(NL);
+  [`=== FILE: ${path} ===`, body, '=== END FILE ==='].join(NL);
 
 const FX = [
   '// effects',
@@ -12,15 +12,12 @@ const FX = [
   '  mesh.rotation.z = rotY; // BUG: ignores aim',
   '  return mesh;',
   '}',
-  ...Array.from(
-    { length: 30 },
-    (_, i) => '// padding line number ' + i + ' to keep the file realistic',
-  ),
+  ...Array.from({ length: 30 }, (_, i) => `// padding line number ${i} to keep the file realistic`),
 ].join(NL);
 const MAIN = [
   "import { spawnSlashArc } from './fx.js';",
   'function attack() { spawnSlashArc(fx, player.position, player.rotation.y); }',
-  ...Array.from({ length: 30 }, (_, i) => '// main padding ' + i),
+  ...Array.from({ length: 30 }, (_, i) => `// main padding ${i}`),
 ].join(NL);
 
 function harness(replies: string[]) {

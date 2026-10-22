@@ -722,7 +722,7 @@ describe('runGeneration browser-jobs wiring (#1.4 — out-of-process runtimeVeri
     expect(runtimeVerifyWasWired).toBe(true);
     // Booted twice now: once by the agent's done gate, once by the loop's boot
     // check (which no longer skips spec-less games).
-    expect(browserJobs.calls.verify).toHaveLength(2);
+    expect(browserJobs.calls.verify).toHaveLength(3);
     // The throwing boot surfaces as errors → done would report status='has_errors'.
     expect(runtimeErrors.length).toBeGreaterThan(0);
     expect(runtimeErrors.some((e) => e.message.includes('boot blew up'))).toBe(true);
@@ -1067,7 +1067,7 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     expect(promptsSeen[1]).toContain('playerPos.x');
     expect(promptsSeen[1]!.toLowerCase()).not.toContain('try again');
     // Two playtest verdicts gathered (one per attempt).
-    expect(browserJobs.playtestCalls).toBe(2);
+    expect(browserJobs.playtestCalls).toBe(3);
   });
 
   it('a BLANK-render runtime verdict (renderedNonBlank=false) triggers a repair round (premium non-blank gate)', async () => {
@@ -1880,7 +1880,7 @@ describe('visual critique (BUILD_SPEED §3 — one frame, twice, never a loop)',
 
     // Two vision calls: one at the first passing playtest, one after the repair.
     expect(critiques).toBe(2);
-    expect(browserJobs.screenshots).toBe(2);
+    expect(browserJobs.screenshots).toBe(4); // Two critiques plus final title/play evidence.
     // Exactly one repair round, and it carried the finding.
     expect(result.repairRounds).toBe(1);
     expect(prompts).toHaveLength(2);
@@ -1966,7 +1966,7 @@ describe('visual critique (BUILD_SPEED §3 — one frame, twice, never a loop)',
     expect(result.repairRounds).toBe(0);
   });
 
-  it('is inert when no vision critic is wired (the pre-§3 behaviour, unchanged)', async () => {
+  it('records visual evidence without spending a critique call when no critic is wired', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());
     const browserJobs = seeingBrowserJobs();
 
@@ -1979,7 +1979,8 @@ describe('visual critique (BUILD_SPEED §3 — one frame, twice, never a loop)',
       { store, generate: buildingAgent(), browserJobs },
     );
 
-    expect(browserJobs.screenshots).toBe(0);
+    expect(browserJobs.screenshots).toBe(2);
+    expect(result.quality?.visualEvidence?.map((frame) => frame.moment)).toEqual(['title', 'play']);
     expect(result.repairRounds).toBe(0);
   });
 
@@ -2298,7 +2299,7 @@ describe('visual critique — reserved round + settled frame', () => {
       },
     );
 
-    expect(settleFlags).toEqual([true]);
+    expect(settleFlags).toEqual([true, false, true]); // Critique, final title, final play.
   });
 
   it('acts on findings even after the repair ceiling is spent — exactly one extra round', async () => {

@@ -2,7 +2,7 @@
   "name": "playforge",
   "version": "0.0.0",
   "private": true,
-  "description": "Cloud-native AI game builder — describe a game in natural language, get a real playable web game, publish and remix in a community hub. (Working codename: Playforge.)",
+  "description": "Cloud-native AI game builder \u2014 describe a game in natural language, get a real playable web game, publish and remix in a community hub. (Working codename: Playforge.)",
   "license": "UNLICENSED",
   "type": "module",
   "engines": {
@@ -21,7 +21,8 @@
     "playforge-mcp": "tsx packages/core/src/mcp-server.ts",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "benchmark:prepare": "pnpm --filter @playforge/agent-core exec tsx scripts/provider-benchmark.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",

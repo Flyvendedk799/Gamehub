@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { GameSpec } from '@playforge/shared';
+import type { GameQuality, GameSpec } from '@playforge/shared';
 
 export type SnapshotEngine = 'three' | 'phaser' | 'canvas2d';
 
@@ -15,6 +15,7 @@ export interface SnapshotEntry {
   tweakSchema: Record<string, unknown> | null;
   filesManifestKey: string;
   filesHash: string;
+  quality?: GameQuality | null;
   createdAt: string;
 }
 
@@ -35,6 +36,7 @@ export interface AppendSnapshotInput {
   tweakSchema?: Record<string, unknown> | null;
   filesManifestKey: string;
   filesHash: string;
+  quality?: GameQuality | null;
 }
 
 export interface SnapshotRepo {
@@ -83,6 +85,7 @@ export class InMemorySnapshotRepo implements SnapshotRepo {
       tweakSchema: input.tweakSchema ?? null,
       filesManifestKey: input.filesManifestKey,
       filesHash: input.filesHash,
+      quality: input.quality ?? null,
       createdAt: new Date().toISOString(),
     };
     list.push(entry);

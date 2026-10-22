@@ -5,6 +5,7 @@ import type {
 } from '@/components/GenerationInspector';
 import type { GenerationPhase } from '@/components/GenerationProgressStepper';
 import type { ToolInvocationItem } from '@/components/ToolInvocationFeed';
+import { currentRunEvents, deriveBuildStatus } from './build-status';
 import type { SseEvent } from './types';
 
 export interface GenerationDerivedData {
@@ -23,7 +24,8 @@ export function deriveGenerationData(
   hasError = false,
   errorMessage?: string,
 ): GenerationDerivedData {
-  let phase: GenerationPhase = isBuilding ? 'analyzing' : 'completed';
+  let phase: GenerationPhase = deriveBuildStatus(events).stage;
+  if (!isBuilding && events.length === 0) phase = 'draft';
   if (hasError) phase = 'failed';
 
   let reflexionTurn = 1;
@@ -41,7 +43,7 @@ export function deriveGenerationData(
   let latestCacheReadTokens: number | undefined;
   let latestModelLimit: number | undefined;
 
-  for (const event of events) {
+  for (const event of currentRunEvents(events)) {
     if (event.type === 'token_usage') {
       hasUsage = true;
       if (typeof event.inputTokens === 'number') latestInputTokens = event.inputTokens;
@@ -56,28 +58,8 @@ export function deriveGenerationData(
     }
 
     if (event.type === 'tool_use') {
-      const toolName = event.toolName.toLowerCase();
-      if (
-        toolName.includes('patch') ||
-        toolName.includes('repair') ||
-        toolName.includes('reflexion')
-      ) {
-        phase = 'repairing';
+      if (event.toolName === 'patch_file_reflexion') {
         reflexionTurn = Math.min(maxReflexionTurns, reflexionTurn + 1);
-      } else if (
-        toolName.includes('verify') ||
-        toolName.includes('test') ||
-        toolName.includes('ast')
-      ) {
-        phase = 'verifying';
-      } else if (
-        toolName.includes('write') ||
-        toolName.includes('create') ||
-        toolName.includes('edit')
-      ) {
-        phase = 'writing_code';
-      } else if (toolName.includes('spec') || toolName.includes('plan')) {
-        phase = 'planning';
       }
 
       const id = `${event.toolName}-${event.timestamp}`;
@@ -115,10 +97,6 @@ export function deriveGenerationData(
       const current = thinkingByTurn.get(currentTurnIndex) ?? { thinking: '' };
       current.thinking += event.delta;
       thinkingByTurn.set(currentTurnIndex, current);
-    }
-
-    if (event.type === 'run_complete') {
-      phase = 'completed';
     }
 
     if (event.type === 'run_error') {

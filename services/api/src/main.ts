@@ -39,6 +39,8 @@ import {
 import { finalizeRun } from '../../worker/src/finalize-run';
 import { enqueueRun } from '../../worker/src/queue';
 import type { RunQualityMetrics } from '../../worker/src/run-generation';
+import { createSubscriptionTokenSource } from '../../worker/src/subscription-token';
+import { makeVisionCritic } from '../../worker/src/vision-critic';
 import { DrizzleAccountRepo } from './account-repo';
 import { type PostgresJsLike, createAiAuthStores, ensureAiAuthSchema } from './ai-auth';
 import { SessionAuthenticator } from './auth';
@@ -152,6 +154,16 @@ async function main() {
     }
   }
   // Public app base URL for the exported game's "Remix this" CTA (#3.2). Configurable.
+  const gameBaseUrl = process.env['GAME_BASE_URL'];
+  const previewSigningSecret = process.env['PREVIEW_SIGNING_SECRET'];
+  if (
+    process.env['NODE_ENV'] === 'production' &&
+    (!gameBaseUrl || !previewSigningSecret || previewSigningSecret.length < 32)
+  ) {
+    throw new Error(
+      'Production requires GAME_BASE_URL and a PREVIEW_SIGNING_SECRET of at least 32 characters',
+    );
+  }
   const appBaseUrl = process.env['APP_BASE_URL'];
 
   // Phase 6.1 — credit purchase. Flag/env-gated: enabled by default in dev with
@@ -183,6 +195,10 @@ async function main() {
   const pgClient = (db as unknown as { $client: PostgresJsLike }).$client;
   await ensureAiAuthSchema(pgClient);
   const aiAuth = createAiAuthStores({ client: pgClient, secret: apiKeyEncryptionSecret });
+  const subscriptionTokens = createSubscriptionTokenSource({
+    client: pgClient,
+    secret: apiKeyEncryptionSecret,
+  });
   const claudeSubscriptionModel = process.env['CLAUDE_SUBSCRIPTION_MODEL'] ?? 'claude-sonnet-4-6';
   const antigravitySubscriptionModel =
     process.env['ANTIGRAVITY_SUBSCRIPTION_MODEL'] ?? ANTIGRAVITY_DEFAULT_MODEL;
@@ -293,6 +309,7 @@ async function main() {
     apiKey,
     wire,
     httpHeaders,
+    baseUrl,
   }) => {
     if (queue) {
       try {
@@ -307,6 +324,7 @@ async function main() {
             ...(apiKey !== undefined ? { apiKey } : {}),
             ...(wire !== undefined ? { wire } : {}),
             ...(httpHeaders !== undefined ? { httpHeaders } : {}),
+            ...(baseUrl !== undefined ? { baseUrl } : {}),
             ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
             ...(engine !== undefined ? { engine } : {}),
             ...(gameSpec !== undefined ? { gameSpec } : {}),
@@ -364,15 +382,28 @@ async function main() {
     await runRepo.updateStatus(runId, 'running').catch((err: unknown) => {
       console.error(`[run:${runId}] could not mark running:`, err);
     });
+    const effectiveModel = model ?? platformModel;
+    const effectiveApiKey = apiKey ?? platformApiKey;
+    const getFreshApiKey =
+      wire === 'openai-codex-responses'
+        ? () => codexAuthStore.getValidAccessToken()
+        : subscriptionTokens.forJob({
+            userId,
+            wire,
+            provider: effectiveModel.provider,
+            apiKey: effectiveApiKey,
+          });
     void enqueueRun(
       {
         runId,
         projectId,
         prompt,
         model: model ?? platformModel,
-        apiKey: apiKey ?? platformApiKey,
+        apiKey: effectiveApiKey,
+        ...(getFreshApiKey ? { getApiKey: getFreshApiKey } : {}),
         ...(wire !== undefined ? { wire } : {}),
         ...(httpHeaders !== undefined ? { httpHeaders } : {}),
+        ...(baseUrl !== undefined ? { baseUrl } : {}),
         ...(parentManifestKey !== undefined ? { parentManifestKey } : {}),
         ...(engine !== undefined ? { engine } : {}),
         ...(gameSpec !== undefined ? { gameSpec } : {}),
@@ -383,13 +414,22 @@ async function main() {
         bus,
         store,
         recordRunQuality,
+        visionCritic: makeVisionCritic({
+          model: effectiveModel,
+          options: {
+            apiKey: effectiveApiKey,
+            ...(wire !== undefined ? { wire } : {}),
+            ...(baseUrl !== undefined ? { baseUrl } : {}),
+            ...(httpHeaders !== undefined ? { httpHeaders } : {}),
+          },
+          ...(getFreshApiKey ? { getApiKey: getFreshApiKey } : {}),
+        }),
         // Settle the run BEFORE its terminal frame is published (see
         // QueuePorts.settle). The builder repoints the preview iframe at
         // `/v1/projects/:id/preview/` (HEAD) the moment `run_complete` arrives,
         // so finalizeRun — which advances that HEAD — has to have committed
         // first or the reload serves the PREVIOUS iteration's files.
-        // MUST NOT throw: a persistence failure would otherwise turn a
-        // successful build into a run_error. It's logged, exactly as before.
+        // Persistence failure must prevent a terminal success frame.
         settle: async (settleResult) => {
           try {
             settledOutcome = await finalizeRun(db, {
@@ -406,6 +446,7 @@ async function main() {
             // mark failed (the artifact exists); surface loudly so it can be
             // repaired.
             console.error(`[run:${runId}] post-completion persistence failed:`, err);
+            throw err;
           }
         },
         // Real runtime-verify + playtest gates in-process (Chromium permitting).
@@ -517,10 +558,14 @@ async function main() {
     ...(browserQueue !== undefined ? { browserQueue } : {}),
     // No-Redis deploys have no browserQueue; reuse the in-process Chromium pool
     // to capture a publish-time thumbnail so social/Hub cards aren't blank.
-    ...(inProcessBrowserJobs !== undefined ? { browserThumbnail: inProcessBrowserJobs } : {}),
+    ...(inProcessBrowserJobs !== undefined
+      ? { browserThumbnail: inProcessBrowserJobs, publishVerifier: inProcessBrowserJobs }
+      : {}),
     ...(maxRunTokens !== undefined ? { maxRunTokens } : {}),
     ...(queue !== undefined ? { generateQueue: queue } : {}),
     ...(appBaseUrl !== undefined ? { appBaseUrl } : {}),
+    ...(gameBaseUrl !== undefined ? { gameBaseUrl } : {}),
+    ...(previewSigningSecret !== undefined ? { previewSigningSecret } : {}),
     ...(corsOrigins !== undefined ? { allowedCorsOrigins: corsOrigins } : {}),
     ...(creditProvider !== undefined ? { creditProvider } : {}),
     ...(email !== undefined ? { email } : {}),

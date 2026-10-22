@@ -32,6 +32,7 @@ export interface PublishUpsertInput {
   title: string;
   bundleKey: string;
   snapshotId?: string;
+  status?: 'live';
   description?: string;
   tags?: string[];
   /** The declared GameSpec — genre is persisted for `?genre=` filtering. */
@@ -39,6 +40,8 @@ export interface PublishUpsertInput {
 }
 
 export interface PublishRepo {
+  /** Atomically compare the project HEAD and promote a verified candidate. */
+  promote?(input: PublishUpsertInput, expectedSnapshotId: string): Promise<PublishedGame | null>;
   upsert(input: PublishUpsertInput): Promise<PublishedGame>;
   getBySlug(slug: string): Promise<PublishedGame | null>;
   getByProject(projectId: string): Promise<PublishedGame | null>;
@@ -91,6 +94,7 @@ export class InMemoryPublishRepo implements PublishRepo {
         ...(input.tags !== undefined ? { tags: input.tags } : {}),
         ...(input.gameSpec !== undefined ? { genre: genreOf(input.gameSpec) } : {}),
         updatedAt: now,
+        ...(input.status ? { status: input.status } : {}),
       };
       this.byId.set(existing.id, updated);
       return updated;
@@ -146,14 +150,43 @@ export class DrizzlePublishRepo implements PublishRepo {
   constructor(private readonly db: Db) {}
 
   async upsert(input: PublishUpsertInput): Promise<PublishedGame> {
-    const existing = await this.db.query.publishedGames.findFirst({
+    return this.writeCandidate(this.db, input);
+  }
+
+  async promote(
+    input: PublishUpsertInput,
+    expectedSnapshotId: string,
+  ): Promise<PublishedGame | null> {
+    return this.db.transaction(async (tx) => {
+      const [project] = await tx
+        .select()
+        .from(schema.projects)
+        .where(eq(schema.projects.id, input.projectId))
+        .for('update');
+      if (!project || project.currentSnapshotId !== expectedSnapshotId) return null;
+      const [published] = await tx
+        .select()
+        .from(schema.publishedGames)
+        .where(eq(schema.publishedGames.projectId, input.projectId))
+        .for('update');
+      if (published?.status === 'removed_by_mod') return null;
+      return this.writeCandidate(tx, input);
+    });
+  }
+
+  private async writeCandidate(
+    db: Pick<Db, 'query' | 'update' | 'insert'>,
+    input: PublishUpsertInput,
+  ): Promise<PublishedGame> {
+    const existing = await db.query.publishedGames.findFirst({
       where: eq(schema.publishedGames.projectId, input.projectId),
     });
     if (existing) {
-      const [row] = await this.db
+      const [row] = await db
         .update(schema.publishedGames)
         .set({
           bundleKey: input.bundleKey,
+          ...(input.status ? { status: input.status } : {}),
           title: input.title,
           updatedAt: new Date(),
           ...(input.snapshotId !== undefined ? { snapshotId: input.snapshotId } : {}),
@@ -167,7 +200,7 @@ export class DrizzlePublishRepo implements PublishRepo {
       return rowToPublishedGame(row);
     }
     const id = randomUUID();
-    const [row] = await this.db
+    const [row] = await db
       .insert(schema.publishedGames)
       .values({
         id,

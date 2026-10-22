@@ -56,6 +56,7 @@ import {
 // browser/Vite-only vendor assets (?raw) that have no business in the
 // game-gen worker and won't resolve under its tsconfig.
 import { GAME_ENGINE_ADAPTERS } from '@playforge/runtime/engines';
+import { type GameQuality, VerificationPlan, assessGame } from '@playforge/shared';
 import {
   computeImpliedCost,
   inferTweakSchema,
@@ -107,6 +108,7 @@ export interface GenerationRequest {
   wire?: import('@playforge/shared').WireApi;
   /** Extra HTTP headers for the model call (e.g. chatgpt-account-id for Codex). */
   httpHeaders?: Record<string, string>;
+  baseUrl?: string;
   /** Optional pre-pick; when omitted the agent calls choose_engine itself. */
   engine?: WebEngine;
   /** Prior game spec (iteration) — seeds run state so the agent amends it via
@@ -331,6 +333,7 @@ export interface GenerationResult {
   engine: WebEngine | null;
   spec: GameSpec | null;
   snapshot: WriteResult;
+  quality?: GameQuality;
   fileCount: number;
   /** File listing at run end — used to build continuation fsState. */
   fsState: Array<{ path: string; bytes: number }>;
@@ -780,6 +783,7 @@ export async function runGeneration(
   // `observation.runtimeVerify` field; a capture pipeline reads
   // `GenerationResult.runtimeVerify` and writes it into evals/recordings.
   let lastRuntimeVerify: EvalRuntimeVerify | undefined;
+  let lastEditVerified: boolean | undefined;
   const runtimeVerify: GenerateViaAgentDeps['runtimeVerify'] | undefined =
     browserJobs === undefined
       ? undefined
@@ -889,6 +893,11 @@ export async function runGeneration(
     ...(runtimeVerify !== undefined ? { runtimeVerify } : {}),
     gameMode: {
       setEngine: (engine) => {
+        if (engine === 'canvas2d' && req.engine !== 'canvas2d') {
+          throw new Error(
+            'New cloud games support Phaser 2D or Three.js 3D. Choose phaser or three; Canvas2D is retained only for existing projects.',
+          );
+        }
         // Accept every supported engine incl. canvas2d (v2 P8) — the old guard
         // silently dropped canvas2d, persisting engine: null.
         if (engine === 'three' || engine === 'phaser' || engine === 'canvas2d') {
@@ -954,6 +963,7 @@ export async function runGeneration(
     ...(req.getApiKey !== undefined ? { getApiKey: req.getApiKey } : {}),
     ...(req.wire !== undefined ? { wire: req.wire } : {}),
     ...(req.httpHeaders !== undefined ? { httpHeaders: req.httpHeaders } : {}),
+    ...(req.baseUrl !== undefined ? { baseUrl: req.baseUrl } : {}),
     history,
     artifactType: 'game',
     // A run seeded from a parent snapshot IS an edit, even on turn 0 before any
@@ -995,6 +1005,8 @@ export async function runGeneration(
     // shipped 'no_verdict' — so a game that never booted (window.__game absent)
     // went out as if it were fine (the racing booted=0 case). Now a boot failure
     // always produces a verdict → the repair loop gets a round to fix it.
+    lastRuntimeVerify = undefined;
+    lastEditVerified = undefined;
     const rvVerdict = await browserJobs.runtimeVerify(verifyHtml);
     if (rvVerdict !== null) {
       // Keep the eval observation current with this attempt's boot result so
@@ -1039,7 +1051,8 @@ export async function runGeneration(
     // fall back to the agent-authored contract so creativity is still verified
     // against its own declared input→state behaviour instead of shipping
     // unverified. Boot + juice stay external regardless.
-    const plan = selectGamePlaytestPlan(spec) ?? state.contract;
+    const genrePlan = selectGamePlaytestPlan(spec);
+    const plan = genrePlan?.predicates.length ? genrePlan : state.contract;
     const hasPredicates = plan !== null && plan.predicates.length > 0;
 
     // Plan step 7 — booted cleanly, but the genre has no playbook predicates AND no
@@ -1062,6 +1075,21 @@ export async function runGeneration(
       if (!wantsVerdict) return null; // static toy / no declared gameplay → honest no_verdict
       const floor = buildInteractivityFloorPlan();
       const floorPlay = await browserJobs.playtest(verifyHtml, floor.steps);
+      if (
+        floorPlay &&
+        (floorPlay.bootErrors.length || floorPlay.steps.some((step) => step.errors.length))
+      ) {
+        return buildRepairVerdict(
+          {
+            trace: null,
+            fatalErrors: [
+              ...floorPlay.bootErrors,
+              ...floorPlay.steps.flatMap((step) => [...step.errors]),
+            ],
+          },
+          [],
+        );
+      }
       if (floorPlay !== null && floorPlay.hasDebugContract === false) {
         return buildRepairVerdict(
           {
@@ -1115,6 +1143,14 @@ export async function runGeneration(
 
     const playVerdict =
       hasPredicates && plan !== null ? await browserJobs.playtest(verifyHtml, plan.steps) : null;
+    if (playVerdict) {
+      fatalErrors.push(
+        ...playVerdict.bootErrors,
+        ...playVerdict.steps.flatMap((step) => [...step.errors]),
+      );
+      if (!playVerdict.hasGameContract)
+        fatalErrors.push('Gameplay verification lost the game contract.');
+    }
     // v3.1 (P9 refinement) — a playbook with predicates can ONLY earn a verdict if
     // the game exposed a live debug contract (window.__game.debug.snapshot()).
     // Without it the snapshot is empty, predicates evaluate against nothing, and a
@@ -1139,13 +1175,20 @@ export async function runGeneration(
     // at a generic "something is wrong".
     const editIntent = state.editIntent;
     if (editIntent?.plan != null && editIntent.plan.predicates.length > 0) {
+      lastEditVerified = false;
       const intentResult = await browserJobs.playtest(verifyHtml, editIntent.plan.steps);
       if (intentResult !== null) {
         const intentScore = scorePlaytest(
           traceFromPlaytestResult(intentResult),
           editIntent.plan.predicates,
         );
-        if (!intentScore.pass) {
+        lastEditVerified =
+          intentScore.pass &&
+          intentResult.hasGameContract &&
+          intentResult.hasDebugContract &&
+          intentResult.bootErrors.length === 0 &&
+          intentResult.steps.every((step) => step.errors.length === 0);
+        if (!lastEditVerified) {
           const failures = intentScore.results
             .filter((r) => !r.pass)
             .map((r) => `  - ${r.reason}`)
@@ -1229,7 +1272,9 @@ export async function runGeneration(
       const raw = await visionCritic?.({
         pngBase64: frame.pngBase64,
         mimeType: 'image/png',
-        prompt: buildVisualCritiquePrompt(req.prompt),
+        prompt: buildVisualCritiquePrompt(
+          `${req.prompt}\nCreative brief: ${JSON.stringify(state.spec?.creativeBrief ?? null)}`,
+        ),
       });
       if (raw === null || raw === undefined || raw.trim().length === 0) return null;
       const critique = parseVisualCritique(raw);
@@ -1477,7 +1522,21 @@ export async function runGeneration(
     if (fixed !== f.content) tree.create(f.path, fixed);
   }
 
+  // Cleanup/normalization can change the bytes after the repair loop. Verify the
+  // final tree, not an earlier attempt, before attaching an assessment.
+  const finalVerdict = await observeVerdict();
   const snapshot = await tree.persist(ports.store);
+  const quality = assessGame({
+    filesHash: snapshot.filesHash,
+    booted: lastRuntimeVerify?.booted === true,
+    behaviorPassed:
+      finalVerdict?.pass === true && finalVerdict.score !== null && lastEditVerified !== false,
+    issues: [
+      ...(finalVerdict?.fatalErrors ?? []),
+      ...(finalVerdict?.score?.results.filter((r) => !r.pass).map((r) => r.reason) ?? []),
+    ],
+    forceAccepted: signal.snapshot().doneForceAccepted,
+  });
 
   // ── Live-tuning schema (#tuning) ──────────────────────────────────────────
   // Read the shipped tree's GAME_TUNING block and derive the tweak schema the
@@ -1489,6 +1548,39 @@ export async function runGeneration(
   //
   // Best-effort by construction: a missing or malformed block yields null and
   // the panel simply doesn't offer sliders. It must never fail a run.
+  const genrePlan = state.spec ? selectGamePlaytestPlan(state.spec) : null;
+  const verificationPlan = VerificationPlan.safeParse(
+    genrePlan?.predicates.length ? genrePlan : state.contract,
+  );
+  if (verificationPlan.success) quality.verificationPlan = verificationPlan.data;
+  else if (quality.status === 'verified') quality.status = 'unverified';
+  if (state.editIntent?.plan) {
+    const editPlan = VerificationPlan.safeParse(state.editIntent.plan);
+    if (editPlan.success) quality.editVerificationPlan = editPlan.data;
+    else if (quality.status === 'verified') quality.status = 'unverified';
+  }
+  quality.provider = { provider: req.model.provider, modelId: req.model.modelId };
+  if (browserJobs?.screenshot && lastRuntimeVerify?.booted) {
+    const finalEntry = tree.view('index.html');
+    if (finalEntry) {
+      quality.visualEvidence = [];
+      for (const moment of ['title', 'play'] as const) {
+        try {
+          const frame = await browserJobs.screenshot(await inlineForVerify(finalEntry.content), {
+            playSettle: moment === 'play',
+          });
+          if (frame)
+            quality.visualEvidence.push({
+              moment,
+              blobKey: await ports.store.putBlob(Buffer.from(frame.pngBase64, 'base64')),
+            });
+        } catch {
+          /* Missing visual evidence stays missing; it cannot invent a pass. */
+        }
+      }
+    }
+  }
+
   const tweakSchema = (() => {
     try {
       for (const f of tree.toTextFiles()) {
@@ -1739,6 +1831,7 @@ export async function runGeneration(
     engine: state.engine,
     spec: state.spec,
     snapshot,
+    quality,
     fileCount: tree.size,
     fsState,
     repairRounds,

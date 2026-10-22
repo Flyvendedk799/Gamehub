@@ -66,6 +66,7 @@ function rowToProject(row: typeof schema.projects.$inferSelect): Project {
     engine: (row.engine ?? null) as Engine | null,
     visibility: row.visibility as Visibility,
     currentSnapshotId: row.currentSnapshotId ?? null,
+    lastVerifiedSnapshotId: row.lastVerifiedSnapshotId ?? null,
     currentManifestKey: row.currentManifestKey ?? null,
     thumbnailUrl: row.thumbnailUrl ?? null,
     remixOfProjectId: row.remixOfProjectId ?? null,
@@ -394,6 +395,7 @@ function rowToSnapshotEntry(row: typeof schema.snapshots.$inferSelect): Snapshot
     tweakSchema: (row.tweakSchema ?? null) as Record<string, unknown> | null,
     filesManifestKey: row.filesManifestKey,
     filesHash: row.filesHash,
+    quality: row.quality,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -453,6 +455,7 @@ export class DrizzleSnapshotRepo implements SnapshotRepo {
               ...(input.tweakSchema != null ? { tweakSchema: input.tweakSchema } : {}),
               filesManifestKey: input.filesManifestKey,
               filesHash: input.filesHash,
+              quality: input.quality ?? null,
             })
             .returning();
           if (inserted) return inserted;

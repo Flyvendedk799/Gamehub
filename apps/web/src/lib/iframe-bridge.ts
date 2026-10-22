@@ -7,26 +7,24 @@
  * `@playforge/runtime`, so the literal is mirrored here and kept in lockstep
  * by hand — if it changes there, change it here.
  *
- * Security (#20): the host MUST post tweak updates with an explicit
- * `targetOrigin` (the API/preview origin), never `'*'`, and MUST validate the
- * `origin` + shape of any inbound message before trusting it.
+ * Incoming messages require both the expected contentWindow (checked by the
+ * caller) and the opaque origin "null", plus schema validation. Outgoing messages
+ * target that exact iframe window with '*', as opaque origins cannot be named.
+ * Never send account credentials through this bridge.
  */
-
-import { API_ORIGIN } from './config';
 
 /** Mirrors runtime `TWEAKS_UPDATE_MESSAGE_TYPE`. */
 export const TWEAKS_UPDATE_MESSAGE_TYPE = 'playforge:tweaks:update' as const;
 
 /**
- * The origin the preview/play iframes are served from. Preview and play are
- * served by the API, so its origin is the only origin we will postMessage to or
- * accept inbound bridge messages from.
+ * Sandboxed game documents have an opaque origin, serialized as "null".
+ * Origin alone is insufficient: callers must also validate event.source.
  */
-export const PREVIEW_IFRAME_ORIGIN: string = API_ORIGIN;
+export const PREVIEW_IFRAME_ORIGIN = 'null';
 
 /** True when an inbound message event's origin is the trusted preview origin. */
 export function isPreviewIframeOrigin(origin: string): boolean {
-  return origin === PREVIEW_IFRAME_ORIGIN;
+  return origin === 'null';
 }
 
 /** Shape of an inbound tweak-bridge ack/message we are willing to trust. */
@@ -109,7 +107,7 @@ export function sendControlsRebind(
       bindings,
       ...(defaults !== undefined ? { defaults } : {}),
     },
-    PREVIEW_IFRAME_ORIGIN,
+    '*',
   );
 }
 
@@ -153,10 +151,7 @@ export function isRedundantManifest(
 
 /** Host → game: ask the game to re-post its current control manifest. */
 export function sendControlsRequest(iframe: HTMLIFrameElement | null): void {
-  iframe?.contentWindow?.postMessage(
-    { type: CONTROLS_REQUEST_MESSAGE_TYPE },
-    PREVIEW_IFRAME_ORIGIN,
-  );
+  iframe?.contentWindow?.postMessage({ type: CONTROLS_REQUEST_MESSAGE_TYPE }, '*');
 }
 
 /** Mirrors shared `GAMEPAD_STATUS_MESSAGE_TYPE` — game → host controller state. */
@@ -286,16 +281,14 @@ export function parseCloudSaveMessage(event: MessageEvent<unknown>): CloudSaveMe
  * Host → game: reply to a `get` op with the fetched value (or `null` when no
  * value is stored / the relay failed).
  *
- * `targetOrigin` is explicit and defaults to the trusted preview origin — never
- * `'*'` (#20). The opaque-origin public play iframe is unreachable with a
- * concrete origin, so the relay passes `'*'` for that frame only (the payload is
- * the game's own save data — no secret — and the shim ignores message origin).
+ * Both preview and public game frames are opaque. Address only the supplied
+ * contentWindow with '*'; return only this game's save data, never credentials.
  */
 export function sendCloudSaveResult(
   iframe: HTMLIFrameElement | null,
   requestId: string,
   value: unknown,
-  targetOrigin: string = PREVIEW_IFRAME_ORIGIN,
+  targetOrigin = '*',
 ): void {
   iframe?.contentWindow?.postMessage(
     { type: CLOUD_SAVE_RESULT_MESSAGE_TYPE, requestId, value },
@@ -305,14 +298,9 @@ export function sendCloudSaveResult(
 
 /**
  * Host → game: signal that a relay-capable (logged-in) host is present so the
- * shim flips its `hosted` flag. `targetOrigin` defaults to the preview origin
- * (#20); the relay passes `'*'` for the opaque play iframe only (see
- * `sendCloudSaveResult`).
+ * shim flips its `hosted` flag. The opaque frame is addressed via its exact window.
  */
-export function sendCloudSaveReady(
-  iframe: HTMLIFrameElement | null,
-  targetOrigin: string = PREVIEW_IFRAME_ORIGIN,
-): void {
+export function sendCloudSaveReady(iframe: HTMLIFrameElement | null, targetOrigin = '*'): void {
   iframe?.contentWindow?.postMessage({ type: CLOUD_SAVE_READY_MESSAGE_TYPE }, targetOrigin);
 }
 

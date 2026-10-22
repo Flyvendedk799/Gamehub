@@ -101,6 +101,11 @@ function parseObservation(raw: unknown): RunObservation {
     correctionCount: requireNumber(raw, 'correctionCount'),
   };
   // Phase 5.3 — optional output-quality verdict.
+  if (raw['audioAudible'] !== undefined) {
+    if (typeof raw['audioAudible'] !== 'boolean')
+      throw new Error('observation.audioAudible must be boolean');
+    base.audioAudible = raw['audioAudible'];
+  }
   if (raw['runtimeVerify'] !== undefined && raw['runtimeVerify'] !== null) {
     base.runtimeVerify = parseRuntimeVerify(raw['runtimeVerify']);
   }
