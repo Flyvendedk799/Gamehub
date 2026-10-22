@@ -363,6 +363,7 @@ export async function complete(
       apiKey,
       ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
       ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
+      ...(opts.reasoning !== undefined ? { reasoning: opts.reasoning } : {}),
     });
     for await (const event of agyStream) {
       if (event.type === 'text_delta' && opts.onTextDelta) opts.onTextDelta(event.delta);

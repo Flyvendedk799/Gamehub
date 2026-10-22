@@ -244,6 +244,28 @@ describe('streamAntigravity', () => {
     expect(calls).toBe(1);
   });
 
+  it('maps reasoning onto the tiered Flash thinking level and tops up the output budget', async () => {
+    const bodies: Array<Record<string, any>> = [];
+    const fetchImpl = (async (_u: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return sseResponse([{ response: { candidates: [{ content: { parts: [{ text: 'x' }] } }] } }]);
+    }) as unknown as typeof fetch;
+    const ctx = { messages: [{ role: 'user' as const, content: 'hi', timestamp: 0 }] };
+    const flash = { ...(model as object), id: 'gemini-3.8-flash-high' } as never;
+    await streamAntigravity(flash, ctx, {
+      apiKey: 't',
+      fetchImpl,
+      reasoning: 'minimal',
+      maxTokens: 3000,
+    }).result();
+    await streamAntigravity(model, ctx, { apiKey: 't', fetchImpl, reasoning: 'minimal' }).result();
+    expect(bodies[0]?.['request'].generationConfig.thinkingConfig.thinkingLevel).toBe('low');
+    // Thinking counts against maxOutputTokens, so a 3000-token reply gets headroom for it.
+    expect(bodies[0]?.['request'].generationConfig.maxOutputTokens).toBe(3000 + 8192);
+    // A model with no thinking-level setting is left alone (it would 400 on one).
+    expect(bodies[1]?.['request'].generationConfig.thinkingConfig).toBeUndefined();
+  });
+
   it('errors clearly with no token', async () => {
     const s = streamAntigravity(model, { messages: [] }, {});
     const result = await s.result();
