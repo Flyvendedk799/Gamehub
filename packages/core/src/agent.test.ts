@@ -1117,6 +1117,67 @@ describe('generateViaAgent() — per-run safety budget', () => {
     expect(prompt).toContain('ALREADY written a complete first draft');
   });
 
+  it('after a host draft, the loop gets a small budget: a model that keeps re-reading is stopped early', async () => {
+    const NL = String.fromCharCode(10);
+    const tree = new Map<string, string>(Object.entries(PREMIUM_STARTER_FILES.three));
+    tree.set('index.html', '<canvas id="game"></canvas>');
+    const reply = [
+      '=== FILE: src/main.js ===',
+      "import { createStage } from './engine/core.js'; // the real duel bootstrap for the sword game",
+      '=== END FILE ===',
+    ].join(NL);
+    const frame = JSON.stringify({
+      response: { candidates: [{ content: { parts: [{ text: reply }] } }] },
+    });
+    vi.stubGlobal('fetch', async () => new Response(`data: ${frame}${NL}${NL}`, { status: 200 }));
+    const fs = {
+      view: (path: string) => {
+        const content = tree.get(path);
+        return content === undefined ? null : { content, numLines: content.split(NL).length };
+      },
+      textFiles: () => [...tree].map(([path, content]) => ({ path, content })),
+      create: async (path: string, content: string) => {
+        tree.set(path, content);
+        return { path };
+      },
+    };
+    // 80 tool calls: far under the 200 default, far over the post-draft allowance.
+    const calls = Array.from({ length: 80 }, (_, i) => ({
+      type: 'tool_execution_start',
+      toolCallId: `t${i}`,
+      toolName: 'list_files',
+      args: {},
+    }));
+    scriptedAgent = {
+      assistantText: RESPONSE_WITH_ARTIFACT,
+      stopReason: 'aborted',
+      events: [...calls, { type: 'turn_end', message: {} as never, toolResults: [] }] as never,
+    };
+    let result: Awaited<ReturnType<typeof generateViaAgent>>;
+    try {
+      result = await generateViaAgent(
+        {
+          prompt: 'a sword fighting game',
+          history: [],
+          model: { provider: 'antigravity', modelId: 'gemini-3.8-flash-high' },
+          wire: 'antigravity-cloudcode',
+          apiKey: 'tok',
+        },
+        {
+          fs: fs as never,
+          gameMode: {
+            setEngine: () => {},
+            getCurrentEngine: () => 'three',
+            validate: () => ({ ok: true, engine: 'three', issues: [] }),
+          },
+        },
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(result.stoppedAtToolBudget).toBe(true);
+  });
+
   it('repairs a project that is already broken BEFORE the agent loop starts (antigravity)', async () => {
     const NL = String.fromCharCode(10);
     const tree = new Map<string, string>([

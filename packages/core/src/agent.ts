@@ -1983,7 +1983,11 @@ export async function generateViaAgent(
   const adaptiveDefault = reasoningOn
     ? DEFAULT_MAX_WALL_CLOCK_MS_WITH_REASONING
     : DEFAULT_MAX_WALL_CLOCK_MS_NO_REASONING;
-  const maxToolCalls = input.agentBudget?.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
+  // `let`: once the host has drafted the game, the loop only verifies and polishes, so its budget
+  // is cut (see POST_DRAFT_TOOL_BUDGET). A model that keeps re-reading a finished draft would
+  // otherwise burn the whole 200 calls (~30 minutes) before the run could end.
+  let maxToolCalls = input.agentBudget?.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
+  const POST_DRAFT_TOOL_BUDGET = 60;
   const maxWallClockMs = input.agentBudget?.maxWallClockMs ?? adaptiveDefault;
   let budgetReason: 'tool_calls' | 'wall_clock' | null = null;
   let toolCallCount = 0;
@@ -2903,6 +2907,8 @@ Latest request: ${input.prompt}`
             generate: (system, user) => completeWithAntigravity(system, user, 'medium'),
           });
           successfulWriteCount += draft.written.length;
+          // The game exists: verify / polish gets a small, fixed allowance from here.
+          maxToolCalls = Math.min(maxToolCalls, toolCallCount + POST_DRAFT_TOOL_BUDGET);
           note = `
 
 [system-note] The host has ALREADY written a complete first draft of this game from the brief (${draft.written.join(', ')}). Do NOT rewrite it from scratch and do not re-read every file. Run validate_game_scene, then playtest_game, fix real problems with small patch / str_replace edits, then call done.`;
