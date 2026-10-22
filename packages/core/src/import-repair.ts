@@ -11,12 +11,8 @@
  *
  * Everything model- and filesystem-facing is injected so this is unit-testable.
  */
-import {
-  type ProjectFile,
-  type UnresolvedImport,
-  describeUnresolvedImport,
-  findUnresolvedImports,
-} from './tools/unresolved-imports.js';
+import { sourceFixableProblems } from './tools/project-checks.js';
+import type { ProjectFile } from './tools/unresolved-imports.js';
 
 const FILE_RE = /^=== FILE: (\S+) ===\r?\n([\s\S]*?)\r?\n=== END FILE ===/gm;
 
@@ -53,6 +49,7 @@ export function buildRepairSystemPrompt(): string {
     'Fix it so EVERY import resolves and the game runs as the brief describes:',
     '- Read the rewritten modules to learn their real exports (classes, functions, constants) and use exactly those.',
     '- Rewrite the leftover modules (typically src/main.js, src/hud.js, src/waves.js, src/fx.js) so they wire up and drive the REAL game: build the real player and the real opponents, handle the real controls, run the real win/lose flow. Delete every trace of the placeholder (craft, rocks, falling objects).',
+    '- The page provides ONE input API: window.__game.controls has ONLY define({ actions: [{ id, label, keys }] }), isDown(actionId) (true while held), on(actionId, fn) (fires on press) and rebind(). There is NO controls.active / controls.get / controls.pressed - read held input with window.__game.controls.isDown(actionId).',
     '- Keep src/main.js a thin bootstrap that owns the Title -> Play -> Over flow; keep its window.__game.controls.define(...) and window.__game.debug.track({...}) calls (expose score, playerPos and the opponent health as plain numbers).',
     '- Do NOT shrink or simplify the rewritten gameplay modules; only change them if an export is genuinely missing.',
     '- If a module imports a name from a file that should provide it, add the export there OR change the import — whichever keeps the game complete.',
@@ -68,7 +65,7 @@ export function buildRepairSystemPrompt(): string {
 export function buildRepairUserPrompt(opts: {
   brief: string;
   spec?: unknown;
-  problems: UnresolvedImport[];
+  problems: string[];
   files: ProjectFile[];
 }): string | null {
   const parts: string[] = [];
@@ -77,7 +74,7 @@ export function buildRepairUserPrompt(opts: {
     parts.push(`DECLARED GAME SPEC:\n${JSON.stringify(opts.spec, null, 2)}`);
   }
   parts.push(
-    `UNRESOLVED IMPORTS (${opts.problems.length}):\n${opts.problems.map((p) => `- ${describeUnresolvedImport(p)}`).join('\n')}`,
+    `PROBLEMS TO FIX (${opts.problems.length}):\n${opts.problems.map((p) => `- ${p}`).join('\n')}`,
   );
   parts.push('CURRENT FILES:');
   for (const f of opts.files) parts.push(`--- ${f.path}\n${f.content}`);
@@ -101,7 +98,7 @@ export interface RepairOptions {
 export interface RepairResult {
   attempts: number;
   written: string[];
-  remaining: UnresolvedImport[];
+  remaining: string[];
 }
 
 function srcFiles(files: ProjectFile[]): ProjectFile[] {
@@ -117,7 +114,8 @@ export async function repairUnresolvedImports(opts: RepairOptions): Promise<Repa
   const maxAttempts = opts.maxAttempts ?? 2;
   const written: string[] = [];
   let attempts = 0;
-  let problems = findUnresolvedImports(srcFiles(opts.listFiles()));
+  const detect = (files: ProjectFile[]) => sourceFixableProblems(files).map((p) => p.message);
+  let problems = detect(opts.listFiles());
   while (problems.length > 0 && attempts < maxAttempts) {
     attempts += 1;
     const files = srcFiles(opts.listFiles());
@@ -142,7 +140,7 @@ export async function repairUnresolvedImports(opts: RepairOptions): Promise<Repa
     // not replace a project that at least had the gameplay modules intact.
     const merged = new Map(files.map((f) => [f.path, f.content]));
     for (const f of fixes) merged.set(f.path, f.content);
-    const after = findUnresolvedImports([...merged].map(([path, content]) => ({ path, content })));
+    const after = detect([...merged].map(([path, content]) => ({ path, content })));
     if (after.length >= problems.length) continue;
     for (const f of fixes) {
       await opts.write(f.path, f.content);
