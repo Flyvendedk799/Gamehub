@@ -135,6 +135,10 @@ services:
       DATABASE_URL: postgres://playforge:${POSTGRES_PASSWORD}@db:5432/playforge
       REDIS_URL: redis://redis:6379
       PLATFORM_API_KEY: ${PLATFORM_API_KEY}
+      # Same secret as the API: the worker decrypts users' Claude Code / Antigravity logins to
+      # fetch a fresh token every turn. Unset, it falls back to PLATFORM_API_KEY and cannot read
+      # them (the run then fails with a 401 once the token captured at enqueue time expires).
+      API_KEY_ENCRYPTION_SECRET: ${API_KEY_ENCRYPTION_SECRET:?set API_KEY_ENCRYPTION_SECRET in deploy/.env}
       # MUST be set explicitly: worker/src/main.ts defaults to openai/o4-mini,
       # NOT the API's anthropic/claude defaults. Omitting these would send an
       # Anthropic key to OpenAI on every platform-funded run.

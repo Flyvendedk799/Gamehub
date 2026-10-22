@@ -101,6 +101,8 @@ export interface GenerationRequest {
   prompt: string;
   model: ModelRef;
   apiKey: string;
+  /** Resolves the CURRENT subscription token each turn (see subscription-token.ts). */
+  getApiKey?: () => Promise<string>;
   /** Wire-format override (e.g. 'openai-codex-responses' for a Codex subscription). */
   wire?: import('@playforge/shared').WireApi;
   /** Extra HTTP headers for the model call (e.g. chatgpt-account-id for Codex). */
@@ -949,6 +951,7 @@ export async function runGeneration(
     prompt,
     model: req.model,
     apiKey: req.apiKey,
+    ...(req.getApiKey !== undefined ? { getApiKey: req.getApiKey } : {}),
     ...(req.wire !== undefined ? { wire: req.wire } : {}),
     ...(req.httpHeaders !== undefined ? { httpHeaders: req.httpHeaders } : {}),
     history,
