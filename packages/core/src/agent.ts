@@ -158,6 +158,7 @@ import {
 } from './tools/validate-motion-composition.js';
 import { makeViewSkillRuleTool } from './tools/view-skill-rule.js';
 import { extractUserRequest, isResumeRequest } from './user-request.js';
+import { describeVariation, pickVariation } from './variation.js';
 
 /** Local mirror of the assistant message shape that pi-agent-core emits (via
  *  pi-ai). Declared here so this file does not take a direct dependency on
@@ -2916,6 +2917,9 @@ Latest request: ${input.prompt}`
           const draft = await draftGameFromStarter({
             engine: starterEngine,
             brief,
+            // Each project rolls its own camera / style / setting / lighting / palette / twist, so
+            // the same prompt does not produce the same game twice.
+            direction: describeVariation(pickVariation(starterEngine), starterEngine),
             spec: await deps.gameMode?.getSpec?.(),
             read: (path) => fsForRepair.view(path)?.content ?? null,
             write: async (path, content) => {

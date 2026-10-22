@@ -138,3 +138,20 @@ describe('draftGameFromStarter retry', () => {
     expect(writes).toHaveLength(2);
   });
 });
+
+describe('draft prompt carries the design direction', () => {
+  it('includes the binding direction and tells the model the stage is a placeholder', () => {
+    const tree = starterTree();
+    const user = buildDraftUserPrompt({
+      brief: 'a sword fighting game',
+      spec: undefined,
+      engine: 'three',
+      direction: 'DESIGN DIRECTION (mandatory - test): CAMERA - side-on',
+      read: (p) => tree.get(p) ?? null,
+    });
+    expect(user).toContain('CAMERA - side-on');
+    const sys = buildDraftSystemPrompt();
+    expect(sys).toContain('STAGE is a placeholder');
+    expect(sys).toContain('hemi, sun, ground');
+  });
+});
