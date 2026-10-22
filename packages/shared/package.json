@@ -14,7 +14,8 @@
     "./controls-gamepad": "./src/controls-gamepad.ts",
     "./runtime-beacon": "./src/runtime-beacon.ts",
     "./design-interview": "./src/design-interview.ts",
-    "./party": "./src/party.ts"
+    "./party": "./src/party.ts",
+    "./game-quality": "./src/game-quality.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

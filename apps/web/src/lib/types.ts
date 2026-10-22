@@ -1,4 +1,4 @@
-import type { GameQuality } from '@playforge/shared';
+import type { GameQuality } from '@playforge/shared/game-quality';
 // ─── Domain types ────────────────────────────────────────────────────────────
 
 export type Engine = 'phaser' | 'threejs' | 'vanilla';

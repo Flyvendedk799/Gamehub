@@ -1,4 +1,4 @@
-import type { GameQuality } from '@playforge/shared';
+import type { GameQuality } from '@playforge/shared/game-quality';
 import type { InterviewPlan } from '@playforge/shared/design-interview';
 import type { SocialOutroSummary } from '@playforge/shared/social-outro';
 import { getToken } from './auth';

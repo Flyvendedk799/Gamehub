@@ -1,4 +1,4 @@
-import { GameQuality } from '@playforge/shared';
+import { GameQuality } from '@playforge/shared/game-quality';
 /**
  * Chat-history → SSE-event hydration. Maps persisted chat rows back into the
  * `SseEvent` shapes the builder log renders, so a reloaded page reconstructs the
