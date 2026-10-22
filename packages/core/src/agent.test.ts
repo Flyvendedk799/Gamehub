@@ -919,6 +919,62 @@ describe('generateViaAgent() — per-run safety budget', () => {
     expect(nudges?.[0]?.content).toContain('unmodified STARTER');
   });
 
+  it('refuses further reads on an untouched starter once the model has only been reading (antigravity)', async () => {
+    const starter = PREMIUM_STARTER_FILES.three;
+    const fs = {
+      view: (path: string) => {
+        const content = starter[path];
+        return content === undefined ? null : { content, numLines: content.split('\n').length };
+      },
+    };
+    const executed: string[] = [];
+    const listFiles = {
+      name: 'list_files',
+      label: 'list',
+      description: 'd',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => {
+        executed.push('list_files');
+        return { content: [{ type: 'text', text: 'ok' }], details: {} };
+      },
+    };
+    const reads = Array.from({ length: 8 }, (_, i) => [
+      { type: 'tool_execution_start', toolCallId: `r${i}`, toolName: 'list_files', args: {} },
+      {
+        type: 'tool_execution_end',
+        toolCallId: `r${i}`,
+        toolName: 'list_files',
+        result: 'x',
+        isError: false,
+      },
+    ]).flat();
+    scriptedAgent = { assistantText: RESPONSE_WITH_ARTIFACT, events: reads as never };
+    await generateViaAgent(
+      {
+        prompt: 'a sword game',
+        history: [],
+        model: { provider: 'antigravity', modelId: 'gemini-3.8-flash-high' },
+        wire: 'antigravity-cloudcode',
+        apiKey: 'tok',
+      },
+      {
+        fs: fs as never,
+        tools: [listFiles as never],
+        gameMode: {
+          setEngine: () => {},
+          getCurrentEngine: () => 'three',
+          validate: () => ({ ok: true, engine: 'three', issues: [] }),
+        },
+      },
+    );
+    const wrapped = (agentCalls[0]?.options.initialState?.tools ?? []) as Array<{
+      name: string;
+      execute: (id: string, params: unknown) => Promise<unknown>;
+    }>;
+    await expect(wrapped[0]?.execute('x', {})).rejects.toThrow(/UNMODIFIED STARTER/);
+    expect(executed).toEqual([]);
+  });
+
   it('stops the run after an accepted done when the model keeps calling tools', async () => {
     scriptedAgent = {
       assistantText: RESPONSE_WITH_ARTIFACT,
