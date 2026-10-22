@@ -202,7 +202,11 @@ const TOOL_ONLY_PROTOCOL =
   '## Response protocol (mandatory)\n' +
   'Every response you give MUST be one or more tool calls. Never end a turn with prose, a plan, ' +
   'or a summary instead of a tool call: prose with no tool call ends the whole run immediately. ' +
-  'Put any commentary inside the tool call itself. To finish, call the `done` tool.';
+  'Put any commentary inside the tool call itself. To finish, call the `done` tool.\n' +
+  'When the project holds starter or placeholder files, REPLACE them: call the editor tool with ' +
+  'command "create" and the complete new file contents (create overwrites an existing file). ' +
+  'Prefer one whole-file create per module over many small str_replace edits, and never re-read ' +
+  'a file you have already read or just wrote.';
 const MAX_OUTPUT_TOKENS = 65_536;
 
 export type AntigravityStreamOptions = Pick<StreamOptions, 'apiKey' | 'signal' | 'maxTokens'> & {

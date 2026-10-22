@@ -1609,7 +1609,39 @@ export async function generateViaAgent(
       >,
     );
   }
-  const tools = deps.tools ?? defaultTools;
+  const baseTools = deps.tools ?? defaultTools;
+  // Antigravity/Gemini fills unlimited turns with reading and re-verifying a project it has not
+  // started building (two live runs shipped the untouched starter after ~200 calls). While the
+  // starter is untouched and the model has only been reading, refuse further reads/checks so the
+  // only productive move left is to write.
+  const READ_BLOCK_AFTER = 8;
+  const BLOCKABLE_TOOLS = new Set([
+    'list_files',
+    'get_playtest_playbook',
+    'verify_artifact',
+    'validate_game_scene',
+    'assert_game_invariants',
+    'playtest_game',
+  ]);
+  const tools =
+    piModel.api === ANTIGRAVITY_API && isGameMode && deps.fs
+      ? baseTools.map((tool) => ({
+          ...tool,
+          execute: (async (...args: Parameters<typeof tool.execute>) => {
+            const params = args[1] as { command?: unknown } | undefined;
+            const isRead =
+              BLOCKABLE_TOOLS.has(tool.name) ||
+              (tool.name === 'str_replace_based_edit_tool' &&
+                (params?.command === 'view' || params?.command === 'find'));
+            if (isRead && readOnlyStreak >= READ_BLOCK_AFTER && starterUntouched()) {
+              throw new Error(
+                'Refused: the project is still the UNMODIFIED STARTER and you have only read or checked files so far - reading more cannot help. Write the game now: call str_replace_based_edit_tool with command "create" and the COMPLETE contents for src/player.js (the fighter), src/enemies.js (the opponents), src/hud.js, src/theme.js and src/main.js. create overwrites the existing file. Reads and checks are allowed again after your first successful write.',
+              );
+            }
+            return tool.execute(...args);
+          }) as typeof tool.execute,
+        }))
+      : baseTools;
   const encourageToolUse = deps.encourageToolUse ?? tools.length > 0;
   // Pattern selection: defaults to JSX-via-Babel-standalone (the
   // historical and richer-tooling-supported path). `/vanilla` slash
