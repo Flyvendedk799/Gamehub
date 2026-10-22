@@ -38,6 +38,7 @@ export function buildDraftSystemPrompt(): string {
     '- The canvas is <canvas id="game"> and already exists; src/engine/core.js (READ-ONLY, shown below) provides createStage, runLoop, sfx and the exports the starter imports. Import only what it really exports.',
     '',
     'Hard rules:',
+    '- The starter STAGE is a placeholder, not a look to keep: createStage() returns { renderer, scene, camera, canvas, hemi, sun, ground } - a dark-blue void, a flat grey ground plane, one hemisphere + sun rig, fog and a camera at (0, 7, 12). Recolour, move or remove those (scene.remove(stage.ground)), set scene.background / scene.fog, and drive stage.camera yourself every frame to match the DESIGN DIRECTION below. A game whose arena, camera and lighting still look like the starter has FAILED.',
     '- Keep the module structure: src/main.js stays a thin bootstrap that wires the others and owns the Title -> Play -> Over screen flow; gameplay lives in the other modules.',
     '- Every import must resolve: each name imported by one file must be exported by the file it imports from. Keep file names; you may add new src/*.js modules.',
     '- Do NOT rewrite src/engine/core.js and do not output index.html.',
@@ -59,6 +60,8 @@ export function buildDraftUserPrompt(opts: {
   brief: string;
   spec: unknown;
   engine: StarterEngine;
+  /** Binding art / camera / setting direction (see variation.ts). */
+  direction?: string | undefined;
   read: (path: string) => string | null;
 }): string {
   const parts: string[] = [];
@@ -69,6 +72,7 @@ export function buildDraftUserPrompt(opts: {
       `DECLARED GAME SPEC (the design already agreed):\n${JSON.stringify(opts.spec, null, 2)}`,
     );
   }
+  if (opts.direction) parts.push(opts.direction);
   parts.push('STARTER FILES (current contents):');
   for (const path of Object.keys(PREMIUM_STARTER_FILES[opts.engine])) {
     if (!path.startsWith('src/')) continue;
@@ -85,6 +89,8 @@ export interface DraftOptions {
   engine: StarterEngine;
   brief: string;
   spec?: unknown;
+  /** Binding design direction, rolled per project. */
+  direction?: string;
   read: (path: string) => string | null;
   write: (path: string, content: string) => Promise<void> | void;
   /** One plain completion: (system, user) -> the model's reply text. */
@@ -107,6 +113,7 @@ export async function draftGameFromStarter(opts: DraftOptions): Promise<DraftRes
     brief: opts.brief,
     spec: opts.spec,
     engine: opts.engine,
+    direction: opts.direction,
     read: opts.read,
   });
   let lastNote = '';

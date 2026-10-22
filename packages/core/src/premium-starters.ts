@@ -561,7 +561,8 @@ export function createStage(canvasId) {
   resize();
   window.addEventListener('resize', resize);
 
-  scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x202830, 0.95));
+  const hemi = new THREE.HemisphereLight(0xbfd4ff, 0x202830, 0.95);
+  scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xffe9b0, 1.5);
   sun.position.set(6, 14, 8); sun.castShadow = true; scene.add(sun);
 
@@ -572,7 +573,9 @@ export function createStage(canvasId) {
   ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
 
   window.addEventListener('beforeunload', () => renderer.dispose());
-  return { renderer, scene, camera, canvas };
+  // hemi / sun / ground are PLACEHOLDERS: a game recolours, moves or removes them (scene.remove)
+  // to build its own sky, lighting and floor.
+  return { renderer, scene, camera, canvas, hemi, sun, ground };
 }
 
 /** Per-frame loop. dt is seconds, clamped so a background tab can't teleport the world. */
