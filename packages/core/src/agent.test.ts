@@ -979,6 +979,88 @@ describe('generateViaAgent() — per-run safety budget', () => {
     expect(executed).toEqual([]);
   });
 
+  it('drafts the game inside choose_engine, the moment the starter is seeded (antigravity)', async () => {
+    const NL = String.fromCharCode(10);
+    // A run starts with an EMPTY project; the starter only appears once the engine is chosen.
+    const tree = new Map<string, string>([['index.html', '<canvas id="game"></canvas>']]);
+    const reply = [
+      '=== FILE: src/main.js ===',
+      "import { createStage } from './engine/core.js'; // the real duel bootstrap for the sword game",
+      "import { Player } from './player.js';",
+      '=== END FILE ===',
+      '=== FILE: src/player.js ===',
+      'export class Player { constructor() { this.hp = 100; this.stance = "mid"; this.stamina = 100; } }',
+      '=== END FILE ===',
+    ].join(NL);
+    const frame = JSON.stringify({
+      response: { candidates: [{ content: { parts: [{ text: reply }] } }] },
+    });
+    let fetches = 0;
+    vi.stubGlobal('fetch', async () => {
+      fetches += 1;
+      return new Response(`data: ${frame}${NL}${NL}`, { status: 200 });
+    });
+    const fs = {
+      view: (path: string) => {
+        const content = tree.get(path);
+        return content === undefined ? null : { content, numLines: content.split(NL).length };
+      },
+      textFiles: () => [...tree].map(([path, content]) => ({ path, content })),
+      create: async (path: string, content: string) => {
+        tree.set(path, content);
+        return { path };
+      },
+    };
+    const chooseEngine = {
+      name: 'choose_engine',
+      label: 'engine',
+      description: 'd',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => {
+        for (const [path, content] of Object.entries(PREMIUM_STARTER_FILES.three)) {
+          tree.set(path, content);
+        }
+        return { content: [{ type: 'text', text: 'Engine pinned: three.' }], details: {} };
+      },
+    };
+    scriptedAgent = { assistantText: RESPONSE_WITH_ARTIFACT };
+    let result: { content: Array<{ text: string }> } | undefined;
+    try {
+      await generateViaAgent(
+        {
+          prompt: 'a sword fighting game',
+          history: [],
+          model: { provider: 'antigravity', modelId: 'gemini-3.8-flash-high' },
+          wire: 'antigravity-cloudcode',
+          apiKey: 'tok',
+        },
+        {
+          fs: fs as never,
+          tools: [chooseEngine as never],
+          gameMode: {
+            setEngine: () => {},
+            getCurrentEngine: () => 'three',
+            validate: () => ({ ok: true, engine: 'three', issues: [] }),
+          },
+        },
+      );
+      // Preflight saw an empty project: nothing to draft from yet.
+      expect(fetches).toBe(0);
+      const wrapped = (agentCalls[0]?.options.initialState?.tools ?? []) as Array<{
+        name: string;
+        execute: (id: string, params: unknown) => Promise<unknown>;
+      }>;
+      result = (await wrapped[0]?.execute('x', {})) as typeof result;
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(fetches).toBeGreaterThan(0);
+    expect(tree.get('src/player.js')).toContain('class Player');
+    const texts = (result?.content ?? []).map((c) => c.text).join(NL);
+    expect(texts).toContain('Engine pinned: three.');
+    expect(texts).toContain('ALREADY written a complete first draft');
+  });
+
   it('drafts the whole game from the brief BEFORE the loop when the project is still the starter (antigravity)', async () => {
     const NL = String.fromCharCode(10);
     const tree = new Map<string, string>(Object.entries(PREMIUM_STARTER_FILES.three));
