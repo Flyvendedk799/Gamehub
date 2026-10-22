@@ -145,7 +145,13 @@ const PLAYTEST_TOOL_DESCRIPTION =
   'is responsible for setting `window.__game.debug = { snapshot: () => ({…}) }` ' +
   'somewhere in the boot script — the bootstrap default returns null, in which ' +
   'case this tool reports `no_debug_contract` and you must wire one up before ' +
-  'the next call.';
+  'the next call. ' +
+  // Every step is an object with a `kind` discriminator. Models that read the playbook JSON
+  // (which carries `assert`/`label` fields) otherwise copy its shape and fail validation.
+  'EVERY step needs a `kind`: key {kind:"key",code:"KeyD",frames:12} | wait {kind:"wait",frames:6} | ' +
+  'mouseMove {kind:"mouseMove",x:0.5,y:0.5} | mouseDown {kind:"mouseDown",button:0} | mouseUp {kind:"mouseUp",button:0}. ' +
+  'Example: {"steps":[{"kind":"key","code":"KeyD","frames":12},{"kind":"wait","frames":6},{"kind":"key","code":"KeyJ","frames":4}]}. ' +
+  'Playbook `assert`/`label` fields are for YOU to evaluate against the returned snapshots — do not put them in steps.';
 
 export function makePlaytestGameTool(
   fs: TextEditorFsCallbacks,

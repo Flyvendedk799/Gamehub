@@ -2081,16 +2081,23 @@ export async function generateViaAgent(
       const editorCommand = String(
         (inFlight?.args as { command?: unknown } | undefined)?.command ?? '',
       );
-      const isReadOnlyCall =
-        (toolName === 'str_replace_based_edit_tool' &&
-          ['view', 'find', 'view_range'].includes(editorCommand)) ||
-        [
-          'list_files',
-          'get_playtest_playbook',
-          'verify_artifact',
-          'validate_game_scene',
-          'assert_game_invariants',
-        ].includes(toolName);
+      // Progress = a SUCCESSFUL write. A rejected edit (bad command, failed validation) changed
+      // nothing, so it must not reset the streak. Planning tools are neutral either way.
+      const isWriteCall =
+        evEnd.isError !== true &&
+        ((toolName === 'str_replace_based_edit_tool' &&
+          ['create', 'str_replace', 'insert', 'patch', 'delete'].includes(editorCommand)) ||
+          toolName.startsWith('generate_') ||
+          toolName === 'import_skill');
+      const isNeutralCall = [
+        'set_todos',
+        'declare_game_spec',
+        'choose_engine',
+        'declare_edit_intent',
+        'ask_user',
+        'done',
+      ].includes(toolName);
+      const isReadOnlyCall = !isWriteCall && !isNeutralCall;
       if (isReadOnlyCall) {
         readOnlyStreak += 1;
         if (readOnlyStreak >= READ_ONLY_NUDGE_EVERY * (readOnlyNudges + 1) && readOnlyNudges < 3) {
@@ -2102,7 +2109,7 @@ export async function generateViaAgent(
             timestamp: Date.now(),
           });
         }
-      } else if (toolName !== 'done') {
+      } else if (isWriteCall) {
         readOnlyStreak = 0;
         readOnlyNudges = 0;
       }

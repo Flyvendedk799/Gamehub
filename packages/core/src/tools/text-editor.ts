@@ -643,6 +643,7 @@ export function makeTextEditorTool(
     label: 'Text editor',
     description:
       'Read and edit files in the current design via view/find/create/str_replace/insert/patch/delete commands. ' +
+      'The `command` field must be EXACTLY one of those seven words; `view_range` is a parameter of `view`, never a command. ' +
       'Paths are relative to the project root (e.g. "index.html", "assets/sprite.png"). ' +
       'Use create for new files; str_replace requires an exact match of old_str; ' +
       'view returns file content or directory listing. ' +
