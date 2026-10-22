@@ -827,16 +827,27 @@ export const PREMIUM_STARTER_FILES: Record<StarterEngine, StarterFiles> = {
  * `read` returns a file's current content or null.
  */
 export function isUnmodifiedStarter(read: (path: string) => string | null): boolean {
-  return (Object.keys(PREMIUM_STARTER_FILES) as StarterEngine[]).some((engine) => {
-    const srcPaths = Object.keys(PREMIUM_STARTER_FILES[engine]).filter((p) => p.startsWith('src/'));
-    return (
-      srcPaths.length > 0 &&
-      srcPaths.every((p) => {
-        const now = read(p);
-        return now !== null && now === PREMIUM_STARTER_FILES[engine][p];
-      })
-    );
-  });
+  return unmodifiedStarterEngine(read) !== null;
+}
+
+/** The engine whose starter the tree still matches exactly, or null once any module changed. */
+export function unmodifiedStarterEngine(
+  read: (path: string) => string | null,
+): StarterEngine | null {
+  const engines = Object.keys(PREMIUM_STARTER_FILES) as StarterEngine[];
+  return (
+    engines.find((engine) => {
+      const files = PREMIUM_STARTER_FILES[engine];
+      const srcPaths = Object.keys(files).filter((p) => p.startsWith('src/'));
+      return (
+        srcPaths.length > 0 &&
+        srcPaths.every((p) => {
+          const now = read(p);
+          return now !== null && now === files[p];
+        })
+      );
+    }) ?? null
+  );
 }
 
 /** The path the premium starter is seeded at — the agent's entry module. */

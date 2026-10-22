@@ -9,7 +9,7 @@
  *
  * Coverage:
  * - wall_clock budget fires → no throw, message includes "Paused after"
- * - tool_calls budget fires → checkpoint (no throw), message includes "Paused after N steps"
+ * - tool_calls budget fires → finishes (no throw, not paused), message includes "Stopped after N steps"
  * - user signal abort (no budget) → throws (non-budget abort)
  */
 
@@ -235,8 +235,9 @@ describe('generateViaAgent — graceful wall_clock checkpoint', () => {
       apiKey: 'sk-test',
       agentBudget: { maxToolCalls: 0, maxWallClockMs: 60_000 },
     });
-    expect(result.interrupted).toBe(true);
-    expect(result.message).toMatch(/Paused after \d+ steps/);
+    expect(result.interrupted).toBe(false);
+    expect(result.stoppedAtToolBudget).toBe(true);
+    expect(result.message).toMatch(/Stopped after \d+ steps/);
   });
 
   it('throws on non-budget user-signal abort (no graceful checkpoint)', async () => {
