@@ -511,6 +511,12 @@ export interface GenerateOutput {
    */
   interrupted: boolean;
   /**
+   * True when the run ended because it used its whole tool-call budget (not a pause the user
+   * needs to resume). The project is shipped as it stands; callers skip further repair rounds,
+   * which would only spend another full budget.
+   */
+  stoppedAtToolBudget?: boolean;
+  /**
    * Non-fatal issues surfaced during this generate call (e.g. builtin skill
    * loader failed). Callers MUST forward these to the UI — this is the
    * "no silent fallbacks" escape hatch for best-effort substeps.

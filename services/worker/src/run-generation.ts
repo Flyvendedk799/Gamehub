@@ -1357,7 +1357,7 @@ export async function runGeneration(
   };
 
   for (;;) {
-    const budgetExhausted = aborted || output.interrupted;
+    const budgetExhausted = aborted || output.interrupted || output.stoppedAtToolBudget === true;
     if (await runAstReflexionRound(budgetExhausted)) continue;
 
     const verdict = await observeVerdict();

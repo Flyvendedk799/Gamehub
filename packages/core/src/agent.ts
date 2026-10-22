@@ -75,9 +75,10 @@ import type {
 import { reasoningForModel } from './index.js';
 import { type CoreLogger, NOOP_LOGGER } from './logger.js';
 import { createNarrationDetector } from './narration-detector.js';
-import { isUnmodifiedStarter } from './premium-starters.js';
+import { isUnmodifiedStarter, unmodifiedStarterEngine } from './premium-starters.js';
 import { composeSystemPrompt } from './prompts/index.js';
 import { nextSpeedAction } from './speed-schedule.js';
+import { draftGameFromStarter } from './starter-draft.js';
 import { makeAddControllerSupportTool } from './tools/add-controller-support.js';
 import { type GetGameSpecFn, makeAmendGameSpecTool } from './tools/amend-game-spec.js';
 import { makeAskUserTool } from './tools/ask-user.js';
@@ -2816,6 +2817,37 @@ export async function generateViaAgent(
   // errors; one loop-free repair call does. It runs BEFORE the loop (so a resume / Fix-it on an
   // already-broken project is corrected in seconds, not after another 30 minutes) and again after
   // it. Cheap when nothing is broken (no model call); non-fatal by design.
+  // Appended to the user message when the host drafted the game before the loop started.
+  let draftNote = '';
+  /** One plain Antigravity completion (system, user) -> text. Used by the draft and the repair. */
+  const completeWithAntigravity = async (
+    system: string,
+    user: string,
+    reasoning: string,
+  ): Promise<string> => {
+    const apiKey = (await input.getApiKey?.()) ?? input.apiKey;
+    const completion = streamAntigravity(
+      piModel as never,
+      {
+        systemPrompt: system,
+        messages: [{ role: 'user', content: user, timestamp: Date.now() }],
+      },
+      {
+        apiKey,
+        ...(input.signal !== undefined ? { signal: input.signal } : {}),
+        maxTokens: 60_000,
+        reasoning,
+      },
+    );
+    const done = await completion.result();
+    if (done.stopReason === 'error' || done.stopReason === 'aborted') {
+      throw new Error(done.errorMessage ?? 'completion failed');
+    }
+    return done.content
+      .filter((c) => c.type === 'text')
+      .map((c) => (c as { text: string }).text)
+      .join('');
+  };
   async function repairBrokenProject(stage: 'preflight' | 'final'): Promise<void> {
     if (
       piModel.api !== ANTIGRAVITY_API ||
@@ -2834,6 +2866,32 @@ export async function generateViaAgent(
 
 Latest request: ${input.prompt}`
           : input.prompt;
+      // Draft first: a project that is still the untouched starter gets the whole game written in
+      // one completion, so the agent loop starts from something that loads and plays.
+      const starterEngine = unmodifiedStarterEngine(
+        (path) => fsForRepair.view(path)?.content ?? null,
+      );
+      if (stage === 'preflight' && starterEngine !== null) {
+        try {
+          const draft = await draftGameFromStarter({
+            engine: starterEngine,
+            brief,
+            spec: await deps.gameMode?.getSpec?.(),
+            read: (path) => fsForRepair.view(path)?.content ?? null,
+            write: async (path, content) => {
+              await fsForRepair.create(path, content);
+            },
+            generate: (system, user) => completeWithAntigravity(system, user, 'medium'),
+          });
+          successfulWriteCount += draft.written.length;
+          draftNote = `
+
+[system-note] The host has ALREADY written a complete first draft of this game from the brief (${draft.written.join(', ')}). Do NOT rewrite it from scratch and do not re-read every file. Run validate_game_scene, then playtest_game, fix real problems with small patch / str_replace edits, then call done.`;
+          log.info('[generate] step=starter_draft', { ...ctx, written: draft.written });
+        } catch (draftErr) {
+          log.warn('[generate] step=starter_draft.failed', { ...ctx, error: String(draftErr) });
+        }
+      }
       const repair = await repairUnresolvedImports({
         brief,
         spec: await deps.gameMode?.getSpec?.(),
@@ -2841,30 +2899,7 @@ Latest request: ${input.prompt}`
         write: async (path, content) => {
           await fsForRepair.create(path, content);
         },
-        generate: async (system, user) => {
-          const apiKey = (await input.getApiKey?.()) ?? input.apiKey;
-          const repairStream = streamAntigravity(
-            piModel as never,
-            {
-              systemPrompt: system,
-              messages: [{ role: 'user', content: user, timestamp: Date.now() }],
-            },
-            {
-              apiKey,
-              ...(input.signal !== undefined ? { signal: input.signal } : {}),
-              maxTokens: 60_000,
-              reasoning: 'low',
-            },
-          );
-          const done = await repairStream.result();
-          if (done.stopReason === 'error' || done.stopReason === 'aborted') {
-            throw new Error(done.errorMessage ?? 'repair completion failed');
-          }
-          return done.content
-            .filter((c) => c.type === 'text')
-            .map((c) => (c as { text: string }).text)
-            .join('');
-        },
+        generate: (system, user) => completeWithAntigravity(system, user, 'low'),
       });
       log.info('[generate] step=import_repair', {
         ...ctx,
@@ -2902,7 +2937,7 @@ Latest request: ${input.prompt}`
   const sendOnce = async (): Promise<void> => {
     const preLen = agent.state.messages.length;
     try {
-      await agent.prompt(userContent);
+      await agent.prompt(draftNote ? `${userContent}${draftNote}` : userContent);
       await agent.waitForIdle();
     } catch (err) {
       if (agent.state.messages.length > preLen) {
@@ -3188,9 +3223,13 @@ Latest request: ${input.prompt}`
     budgetReason === 'tool_calls'
       ? `${toolCallCount} steps`
       : `${Math.round(maxWallClockMs / 1000)}s of work`;
-  const message = isWallClockCheckpoint
-    ? `${baseMessage}${baseMessage.length > 0 ? '\n\n' : ''}— Paused after ${pausedAfter} to keep this turn responsive. The artifact above is what landed; type **continue** (or any follow-up) to pick up where I left off. —`
-    : baseMessage;
+  const separator = baseMessage.length > 0 ? '\n\n' : '';
+  const message =
+    isWallClockCheckpoint && budgetReason === 'tool_calls'
+      ? `${baseMessage}${separator}— Stopped after ${pausedAfter}. The project above is what landed; send a follow-up message to keep refining it. —`
+      : isWallClockCheckpoint
+        ? `${baseMessage}${baseMessage.length > 0 ? '\n\n' : ''}— Paused after ${pausedAfter} to keep this turn responsive. The artifact above is what landed; type **continue** (or any follow-up) to pick up where I left off. —`
+        : baseMessage;
   const output: GenerateOutput = {
     message,
     artifacts: collected.artifacts,
@@ -3199,7 +3238,12 @@ Latest request: ${input.prompt}`
     cachedInputTokens: aggregated.cacheRead,
     cacheCreationInputTokens: aggregated.cacheWrite,
     costUsd: aggregated.costUsd,
-    interrupted: isWallClockCheckpoint,
+    // A tool-budget stop is a FINISH, not a pause: the project ships as it stands and the user is
+    // not asked to press continue (the run used to end "paused" every time the model could not
+    // close out, so every run needed a manual nudge). Wall-clock and safe-boundary pauses still
+    // pause.
+    interrupted: isWallClockCheckpoint && budgetReason !== 'tool_calls',
+    ...(budgetReason === 'tool_calls' ? { stoppedAtToolBudget: true } : {}),
     ...(runNarrationsTotal > 0 ? { narrationsTotal: runNarrationsTotal } : {}),
   };
   return skillResult.warnings.length > 0
