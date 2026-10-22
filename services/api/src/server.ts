@@ -17,6 +17,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import websocketPlugin from '@fastify/websocket';
+import { antigravityAuthRoutes, claudeAuthRoutes } from '@flyvendedk799/ai-auth/fastify';
 import type { EventBus } from '@playforge/bus';
 import { runChannel } from '@playforge/bus';
 import {
@@ -36,7 +37,6 @@ import {
   decodeJwtClaims,
   readCodexAuthFile,
 } from '@playforge/providers';
-import { antigravityAuthRoutes, claudeAuthRoutes } from '@flyvendedk799/ai-auth/fastify';
 import {
   BRAND_NAME,
   type ModelRef,
@@ -1572,7 +1572,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   app.get('/v1/auth/antigravity/models', async (req, reply) => {
     const user = await requireUser(req, reply);
     if (!user) return;
-    if (!deps.antigravityAccounts) return reply.code(503).send({ error: 'antigravity_unavailable' });
+    if (!deps.antigravityAccounts)
+      return reply.code(503).send({ error: 'antigravity_unavailable' });
     const status = await deps.antigravityAccounts.status(user.userId);
     if (!status.connected) return reply.send({ models: [] });
     try {
@@ -2128,6 +2129,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       deps.interviewModel.provider === credentialModel.provider
     ) {
       candidates.push(deps.interviewModel);
+    }
+    // Antigravity: the interview is four short questions, so run it on the Flash tier's
+    // lowest-effort setting (same wire model, far less thinking) before the user's own pick.
+    if (
+      credentialModel.provider === ANTIGRAVITY_PROVIDER &&
+      /^gemini-3\.8-flash/.test(credentialModel.modelId)
+    ) {
+      candidates.unshift({ provider: ANTIGRAVITY_PROVIDER, modelId: 'gemini-3.8-flash-low' });
     }
     if (!candidates.some((candidate) => sameModel(candidate, credentialModel))) {
       candidates.push(credentialModel);

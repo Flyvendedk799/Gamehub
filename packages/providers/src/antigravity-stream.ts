@@ -174,7 +174,33 @@ function emptyMessage(model: Model<string>): AssistantMessage {
   };
 }
 
+/** pi-ai reasoning levels -> Cloud Code's three thinking tiers. */
+function thinkingLevelFor(reasoning: string | undefined): 'low' | 'medium' | 'high' | undefined {
+  switch (reasoning) {
+    case 'minimal':
+    case 'low':
+      return 'low';
+    case 'medium':
+      return 'medium';
+    case 'high':
+    case 'xhigh':
+      return 'high';
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Gemini counts its hidden thinking tokens against `maxOutputTokens`. A caller asking for a
+ * short reply (the design interview: 3000) would otherwise spend the whole budget thinking and
+ * return no text at all, so the visible-output budget is topped up to cover the thinking.
+ */
+const THINKING_HEADROOM_TOKENS = 8_192;
+const MAX_OUTPUT_TOKENS = 65_536;
+
 export type AntigravityStreamOptions = Pick<StreamOptions, 'apiKey' | 'signal' | 'maxTokens'> & {
+  /** Caller's effort hint; only honoured on models whose effort is a request setting. */
+  reasoning?: string;
   /** Override for tests. */
   fetchImpl?: typeof fetch;
   /** Override for tests (backoff sleep). */
@@ -242,10 +268,17 @@ export function streamAntigravity(
           : {}),
       });
       // Game files are large; do not inherit the endpoint's small default output cap.
+      const tier = thinkingLevelFor(options.reasoning);
+      const existing = body.request.generationConfig;
       Object.assign(body.request, {
         generationConfig: {
-          ...body.request.generationConfig,
-          maxOutputTokens: Math.min(options.maxTokens ?? 65_536, 65_536),
+          ...existing,
+          // Only a model that already carries a thinking level (the tiered Flash) accepts one.
+          ...(tier && existing?.thinkingConfig ? { thinkingConfig: { thinkingLevel: tier } } : {}),
+          maxOutputTokens: Math.min(
+            (options.maxTokens ?? MAX_OUTPUT_TOKENS) + THINKING_HEADROOM_TOKENS,
+            MAX_OUTPUT_TOKENS,
+          ),
         },
       });
 
