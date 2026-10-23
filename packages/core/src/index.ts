@@ -527,6 +527,9 @@ export interface GenerateOutput {
    * which would only spend another full budget.
    */
   stoppedAtToolBudget?: boolean;
+  /** The host's own plain-language account of a change it applied (fast-edit path). The caller
+   *  keeps it as the chat message even when later verification rounds produce their own text. */
+  hostSummary?: string;
   /**
    * Non-fatal issues surfaced during this generate call (e.g. builtin skill
    * loader failed). Callers MUST forward these to the UI — this is the

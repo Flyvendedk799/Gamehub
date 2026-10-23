@@ -109,3 +109,52 @@ describe('applyEditRequest', () => {
     await expect(applyEditRequest(h.options)).rejects.toThrow(/which file/);
   });
 });
+
+describe('applyEditRequest with SEARCH/REPLACE hunks', () => {
+  const hunkReply = (search: string, replace: string) =>
+    [
+      '=== SUMMARY ===',
+      '- Slashes now follow where you aim.',
+      '=== END SUMMARY ===',
+      '=== EDIT: src/fx.js ===',
+      '<<<<<<< SEARCH',
+      search,
+      '=======',
+      replace,
+      '>>>>>>> REPLACE',
+      '=== END EDIT ===',
+    ].join(NL);
+
+  it('applies a hunk, leaves every other line alone, and returns the player-facing summary', async () => {
+    const h = harness([
+      LOCATE,
+      hunkReply(
+        '  mesh.rotation.z = rotY; // BUG: ignores aim',
+        '  mesh.rotation.y = rotY; // follows the aim angle',
+      ),
+    ]);
+    const result = await applyEditRequest(h.options);
+    expect(result.files).toEqual(['src/fx.js']);
+    expect(h.tree.get('src/fx.js')).toBe(GOOD_FX);
+    expect(result.summary).toBe('- Slashes now follow where you aim.');
+  });
+
+  it('asks for hunks first, and for whole files only after a hunk fails to apply', async () => {
+    const h = harness([
+      LOCATE,
+      hunkReply('  mesh.rotation.q = rotY; // not in the file', '  x'),
+      block('src/fx.js', GOOD_FX),
+    ]);
+    const system: string[] = [];
+    const generate = h.options.generate;
+    h.options.generate = async (s: string, u: string) => {
+      system.push(s);
+      return generate(s, u);
+    };
+    const result = await applyEditRequest(h.options);
+    expect(result.files).toEqual(['src/fx.js']);
+    expect(system[1]).toContain('SEARCH/REPLACE');
+    expect(system[2]).not.toContain('Change only what is needed, using SEARCH/REPLACE');
+    expect(h.prompts[2]).toContain('not in the file');
+  });
+});

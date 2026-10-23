@@ -1207,9 +1207,9 @@ describe('generateViaAgent() — per-run safety budget', () => {
         return { path };
       },
     };
-    // 80 reads would have exhausted the old 60-call allowance (run a985c47a lost its repair
-    // rounds this way). Reads are free up to a bound, so the run is NOT cut.
-    const calls = Array.from({ length: 80 }, (_, i) => ({
+    // 50 reads would have exhausted the 36-call post-draft allowance (run a985c47a lost its
+    // repair rounds this way). Reads are free up to a bound (24 more), so the run is NOT cut.
+    const calls = Array.from({ length: 50 }, (_, i) => ({
       type: 'tool_execution_start',
       toolCallId: `t${i}`,
       toolName: 'list_files',

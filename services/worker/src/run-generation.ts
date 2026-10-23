@@ -709,6 +709,20 @@ export async function runGeneration(
     signal.observe(event);
     ports.onEvent?.(event);
   };
+  // Plain-language progress for the chat. The host's own steps (verify in a browser, re-drive a
+  // flaky check, look at a frame, repair) emit no agent events, so without this the chat sits
+  // silent for minutes between "sent" and "done".
+  const say = (message: string): void => {
+    ports.onEvent?.({
+      type: 'message_update',
+      assistantMessageEvent: {
+        type: 'text_delta',
+        delta: `${message}
+
+`,
+      },
+    } as unknown as AgentEvent);
+  };
 
   // Only offer bitmap generation when the credential can actually produce a
   // bitmap. Offering it regardless meant the agent spent turns requesting art it
@@ -961,6 +975,8 @@ export async function runGeneration(
   // shipped).
   const REPAIR_AFTER_FAST_EDIT_CALLS = 40;
   const REPAIR_AFTER_FAST_EDIT_MS = 4 * 60_000;
+  const REPAIR_ROUND_CALLS = 80;
+  const REPAIR_ROUND_MS = 8 * 60_000;
 
   // Assemble a GenerateInput for a round: same model/key/budget/engine/signal
   // every time, only the user `prompt` and prior `history` change so a repair
@@ -983,12 +999,20 @@ export async function runGeneration(
     // below; the agent loop only runs if that verification fails. A breakage report still needs
     // the agent (it must reproduce before it fixes), so it opts out.
     ...(isIteration && editRequest.kind === 'change' ? { fastEdit: true } : {}),
+    // A repair round is a focused fix of one named failure, never a rebuild. After a host edit it
+    // is small; after a first build it still gets far less than the build did (live repair rounds
+    // were spending the whole 20-minute allowance).
     agentBudget:
-      history.length > 0 && isIteration && editRequest.kind === 'change'
-        ? {
-            maxToolCalls: Math.min(maxToolCalls, REPAIR_AFTER_FAST_EDIT_CALLS),
-            maxWallClockMs: Math.min(maxWallClockMs, REPAIR_AFTER_FAST_EDIT_MS),
-          }
+      history.length > 0
+        ? isIteration && editRequest.kind === 'change'
+          ? {
+              maxToolCalls: Math.min(maxToolCalls, REPAIR_AFTER_FAST_EDIT_CALLS),
+              maxWallClockMs: Math.min(maxWallClockMs, REPAIR_AFTER_FAST_EDIT_MS),
+            }
+          : {
+              maxToolCalls: Math.min(maxToolCalls, REPAIR_ROUND_CALLS),
+              maxWallClockMs: Math.min(maxWallClockMs, REPAIR_ROUND_MS),
+            }
         : { maxToolCalls, maxWallClockMs },
     // WS-D — pause the agent at the next safe boundary once it has asked a
     // question (the existing continuation seam: agent.ts aborts cleanly when
@@ -1005,10 +1029,15 @@ export async function runGeneration(
   // Returns null when no deterministic verdict is obtainable (no port, no
   // game artifact, no spec, or no playbook predicates for the genre) — the
   // loop then ships the attempt as-is.
+  let verifyPasses = 0;
   const observeVerdict = async (): Promise<RepairVerdict | null> => {
     if (browserJobs === undefined) return null;
     const entry = tree.view('index.html');
     if (entry === null) return null;
+    verifyPasses += 1;
+    if (verifyPasses === 1)
+      say('Testing the game in a real browser: boot, controls and a play-through…');
+    else if (verifyPasses === 2) say('Re-testing after the fix…');
 
     // Inline the WHOLE project into one self-contained HTML before booting it in
     // the browser-worker — exactly like `done`'s gate (inlineForVerify). Passing
@@ -1181,6 +1210,9 @@ export async function runGeneration(
         console.log(
           `[run-generation] play check failed cleanly (attempt ${attempt}/${MAX_PLAY_ATTEMPTS}) — re-driving before it can start a repair`,
         );
+        say(
+          'One play check did not pass. Running it again to rule out a fluke (opponents are random)…',
+        );
         const again = await browserJobs.playtest(html, steps);
         if (again === null) break;
         result = again;
@@ -1282,6 +1314,9 @@ ${unreadableNote}`
   let nextPrompt =
     editRequest.kind === 'breakage' ? buildBreakageDiagnosisPrompt(typedRequest) : req.prompt;
   let output: GenerateOutput = await generate(buildInput(nextPrompt, history), deps);
+  // The host's plain-language account of the change it applied. Later repair rounds write their
+  // own (internal) text; the chat keeps this one.
+  const hostSummary = output.hostSummary;
   let repairRounds = 0;
   let shipReason: ShipReason = 'no_verdict';
   // Phase 5.6 — retain the deterministic verdict for the SHIPPED attempt so the
@@ -1323,6 +1358,7 @@ ${unreadableNote}`
     const entry = tree.view('index.html');
     if (entry === null) return null;
     visionCalls += 1;
+    say('Taking a look at a frame of the running game…');
     try {
       const frame = await browserJobs?.screenshot?.(await inlineForVerify(entry.content), {
         playSettle: true,
@@ -1466,6 +1502,15 @@ ${unreadableNote}`
   // The tree as the host's edit left it, when it booted cleanly: what we fall back to if the
   // repair rounds that follow do not make it pass.
   let hostEditTree: Array<{ path: string; content: string }> | null = null;
+  // Identity of the tree the last verdict was observed on. Re-driving a browser check on
+  // byte-identical files can only add noise: run b3319147 shipped on a passing verdict, then the
+  // final re-check of the same files failed once and stamped the snapshot `needs_fixes`.
+  const treeKey = (): string =>
+    tree
+      .toTextFiles()
+      .map((f) => `${f.path} ${f.content}`)
+      .join('');
+  let verdictTreeKey: string | null = null;
   const fastEditRun = isIteration && editRequest.kind === 'change';
   for (;;) {
     // A repair that runs out of wall clock on a follow-up ships what it has. It does not pause:
@@ -1478,6 +1523,7 @@ ${unreadableNote}`
 
     const verdict = await observeVerdict();
     shippedVerdict = verdict;
+    verdictTreeKey = treeKey();
     if (fastEditRun && repairRounds === 0 && verdict !== null && verdict.fatalErrors.length === 0) {
       hostEditTree = tree.toTextFiles().map((f) => ({ path: f.path, content: f.content }));
     }
@@ -1544,6 +1590,9 @@ ${unreadableNote}`
     );
     nextPrompt = action.instruction;
     repairRounds += 1;
+    say(
+      `A check failed in the browser, so I am fixing it (attempt ${repairRounds} of ${maxRepairRounds})…`,
+    );
     output = await generate(buildInput(nextPrompt, history), deps);
   }
 
@@ -1607,11 +1656,17 @@ ${unreadableNote}`
     console.log(
       '[run-generation] repairs after the host edit did not pass — shipping the host edit as it booted',
     );
+    say(
+      'The extra fixes did not help, so I am keeping your change exactly as it first booted cleanly.',
+    );
   }
 
   // Cleanup/normalization can change the bytes after the repair loop. Verify the
   // final tree, not an earlier attempt, before attaching an assessment.
-  const finalVerdict = await observeVerdict();
+  const finalVerdict =
+    shippedVerdict !== null && verdictTreeKey !== null && treeKey() === verdictTreeKey
+      ? shippedVerdict
+      : await observeVerdict();
   const snapshot = await tree.persist(ports.store);
   const quality = assessGame({
     filesHash: snapshot.filesHash,
@@ -1913,6 +1968,7 @@ ${unreadableNote}`
     }
   }
 
+  if (hostSummary !== undefined) output = { ...output, message: hostSummary };
   return {
     output,
     engine: state.engine,

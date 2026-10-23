@@ -2017,7 +2017,7 @@ export async function generateViaAgent(
   // is cut (see POST_DRAFT_TOOL_BUDGET). A model that keeps re-reading a finished draft would
   // otherwise burn the whole 200 calls (~30 minutes) before the run could end.
   let maxToolCalls = input.agentBudget?.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
-  const POST_DRAFT_TOOL_BUDGET = 60;
+  const POST_DRAFT_TOOL_BUDGET = 36;
   // Once a reduced post-draft / edit-verify cap is in force, reading the project (list, view,
   // find) does not eat into it, up to a bounded allowance. See call-budget.ts.
   let cappedBudgetGrantsInspection = false;
@@ -2923,7 +2923,7 @@ export async function generateViaAgent(
   // Appended to the user message when the host drafted the game before the loop started.
   let draftNote = '';
   // Set when the host's loop-free edit landed; lets `fastEdit` skip the agent loop.
-  let hostEdit: { files: string[]; why: string; polish: boolean } | null = null;
+  let hostEdit: { files: string[]; why: string; polish: boolean; summary?: string } | null = null;
   /** One plain Antigravity completion (system, user) -> text. Used by the draft and the repair. */
   const completeWithAntigravity = async (
     system: string,
@@ -3044,7 +3044,26 @@ Latest request: ${input.prompt}`
       ) {
         try {
           const polish = isOpenEndedPolishRequest(request);
+          // The host edit takes a minute or two and emits no agent events; say what it is doing
+          // so the chat is not silent.
+          const say = (message: string): void => {
+            deps.onEvent?.({
+              type: 'message_update',
+              assistantMessageEvent: {
+                type: 'text_delta',
+                delta: `${message}
+
+`,
+              },
+            } as unknown as AgentEvent);
+          };
+          say(
+            polish
+              ? 'Reading through the game to decide which upgrades will be the most visible…'
+              : 'Reading through the game to find where this change belongs…',
+          );
           const edit = await applyEditRequest({
+            progress: say,
             request: polish ? buildPolishRequest(request) : request,
             listFiles: () => fsForRepair.textFiles?.() ?? [],
             write: async (path, content) => {
@@ -3063,7 +3082,12 @@ Latest request: ${input.prompt}`
               ? ' This was a general polish request, so there is no single value to assert: call declare_edit_intent with checks: [] rather than inventing a field, and in your closing summary list ONLY visual or feel changes that are really in the code (view them first) — never claim an effect you did not see.'
               : ''
           }`;
-          hostEdit = { files: edit.files, why: edit.why, polish };
+          hostEdit = {
+            files: edit.files,
+            why: edit.why,
+            polish,
+            ...(edit.summary !== undefined ? { summary: edit.summary } : {}),
+          };
           log.info('[generate] step=edit_pipeline', { ...ctx, files: edit.files, why: edit.why });
         } catch (editErr) {
           log.warn('[generate] step=edit_pipeline.failed', { ...ctx, error: String(editErr) });
@@ -3082,11 +3106,18 @@ Latest request: ${input.prompt}`
   if (input.fastEdit === true && hostEdit !== null && deps.fs !== undefined) {
     clearTimeout(budgetTimer);
     const entry = deps.fs.view('index.html');
-    const edited: { files: string[]; why: string; polish: boolean } = hostEdit;
+    const edited: { files: string[]; why: string; polish: boolean; summary?: string } = hostEdit;
     log.info('[generate] step=fast_edit.return', { ...ctx, files: edited.files });
     const what = edited.why.length > 0 ? ` ${edited.why.replace(/\.?$/, '.')}` : '';
+    const message =
+      edited.summary !== undefined
+        ? `${edited.polish ? 'Here is what I upgraded' : 'Here is what changed'}:
+
+${edited.summary}`
+        : `${edited.polish ? 'Polished the game' : 'Applied your change'} (${edited.files.join(', ')}).${what}`;
     return {
-      message: `${edited.polish ? 'Polished the game' : 'Applied your change'} (${edited.files.join(', ')}).${what}`,
+      message,
+      ...(edited.summary !== undefined ? { hostSummary: message } : {}),
       artifacts:
         entry !== null && entry.content.trim().length > 0
           ? [createArtifact(entry.content, 0, input.artifactType)]

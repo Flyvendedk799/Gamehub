@@ -1064,7 +1064,28 @@ async function captureGameFrame(
  * `PLAY_SETTLE_FRAMES` and, above that, the job hard timeout. Best-effort
  * throughout: a game that ignores all of it simply gets its first frame back.
  */
-async function drivePlaySettle(page: Page): Promise<void> {
+/** True when the running game reports a game-over / victory state, by its own debug snapshot. */
+async function isGameOverNow(page: Page): Promise<boolean> {
+  return page
+    .evaluate(() => {
+      try {
+        const w = window as unknown as {
+          __game?: { debug?: { snapshot?: () => Record<string, unknown> } };
+        };
+        const snap = w.__game?.debug?.snapshot?.();
+        if (snap === undefined || snap === null) return false;
+        const phase = String(snap['state'] ?? snap['screen'] ?? snap['phase'] ?? '').toLowerCase();
+        if (/over|defeat|lost|dead|victory|won|gameover|win/.test(phase)) return true;
+        const hp = snap['playerHp'] ?? snap['hp'] ?? snap['health'];
+        return typeof hp === 'number' && hp <= 0;
+      } catch {
+        return false;
+      }
+    })
+    .catch(() => false);
+}
+
+async function drivePlaySettle(page: Page, onHalfway?: () => Promise<void>): Promise<void> {
   // Role / difficulty / class pickers gate play behind a number key far more
   // often than they gate it behind Space, and `dispatchStartInput` only sends
   // Space + Enter + click. Cheap to cover, and a game that ignores digits is
@@ -1073,10 +1094,15 @@ async function drivePlaySettle(page: Page): Promise<void> {
     await page.keyboard.press(code).catch(() => {});
   }
   const half = Math.floor(PLAY_SETTLE_FRAMES / 2);
+  let first = true;
   for (const code of ['KeyD', 'ArrowRight']) {
     await page.keyboard.down(code).catch(() => {});
     await tickFrames(page, half).catch(() => {});
     await page.keyboard.up(code).catch(() => {});
+    if (first) {
+      first = false;
+      await onHalfway?.().catch(() => {});
+    }
   }
   await tickFrames(page, JUICE_FRAME_WINDOW).catch(() => {});
 }
@@ -1176,8 +1202,23 @@ export async function runThumbnail(
 
       // Opt-in settle: play the game for a moment before looking at it.
       if (data.playSettle === true) {
-        await drivePlaySettle(page);
+        // An aggressive opponent can end the game before the settle finishes (run b3319147: the
+        // frame was a DEFEATED screen, and the critique spent a repair round on it). Keep a frame
+        // from partway through, and use it when the game is over by the end.
+        let midPlay: { bytes: Buffer; width: number; height: number } | null = null;
+        await drivePlaySettle(page, async () => {
+          await flushCompositor();
+          midPlay = await captureGameFrame(page, vp);
+        });
         await flushCompositor();
+        if (midPlay !== null && (await isGameOverNow(page))) {
+          const kept: { bytes: Buffer; width: number; height: number } = midPlay;
+          return {
+            pngBase64: kept.bytes.toString('base64'),
+            width: kept.width,
+            height: kept.height,
+          };
+        }
       }
     }
 

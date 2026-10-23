@@ -14,6 +14,7 @@
  *
  * Everything model- and filesystem-facing is injected so this is unit-testable.
  */
+import { applyHunks, parseEditBlocks, parseSummary } from './edit-blocks.js';
 import { isRepairablePath, parseFileBlocks } from './import-repair.js';
 import { projectProblems } from './tools/project-checks.js';
 import type { ProjectFile } from './tools/unresolved-imports.js';
@@ -76,20 +77,41 @@ export function parseLocateReply(reply: string, known: Set<string>): string[] {
   }
 }
 
-export function buildEditSystemPrompt(): string {
+export type EditMode = 'diff' | 'full';
+
+export function buildEditSystemPrompt(mode: EditMode = 'full'): string {
   return [
     "You make ONE change to a working web game, exactly as the user describes it. You are given the user's request and the COMPLETE current contents of the file(s) to change.",
     '',
     'Rules:',
     '- Do EXACTLY what was asked - the behaviour, the direction, the value, the look the user named - and nothing else. Do not refactor, rename, restyle or "improve" anything the user did not mention.',
     '- First reason about where in the code the behaviour lives and what is actually wrong or missing (quote the relevant lines to yourself), then change it. If the request names a direction, key, mouse behaviour, number or colour, the result must demonstrably follow it.',
-    '- Return each changed file COMPLETE and otherwise byte-for-byte identical - never abbreviate with "...", never drop code you did not mean to change.',
+    mode === 'diff'
+      ? '- Change only what is needed, using SEARCH/REPLACE hunks (format below). Copy each SEARCH EXACTLY from the file shown above, with enough surrounding lines that it matches once, and keep every hunk small. Use a FILE block with the complete contents only for a brand-new file, or when most of an existing file changes.'
+      : '- Return each changed file COMPLETE and otherwise byte-for-byte identical - never abbreviate with "...", never drop code you did not mean to change.',
     '- Keep every existing export and import working; do not rename exports other files use.',
     "- A complaint about which way something FACES, aims or points is about what happens every frame, not at spawn. Find the per-frame code that sets rotation / facing / flip / aim and make THAT follow the target or the movement; changing only an initial value is not a fix when the update loop never maintains it (the first live attempt set the spawn yaw and left the loop alone, so the character still turned the wrong way as soon as play started). In Three.js a mesh's front is its local +Z axis, so `rotation.y = Math.atan2(dx, dz)` turns it toward the vector (dx, dz); Phaser uses `flipX` / `setRotation` the same way. Check the model's own front against the camera before deciding which sign is right.",
     '- The page provides ONE input API: window.__game.controls has ONLY define({ actions }), isDown(actionId), on(actionId, fn), rebind(). There is NO controls.active/get/pressed.',
     '- Mouse position is available through your own mousemove listener; convert it to world space with the camera when the request is about aiming.',
+    '- Write the SUMMARY for the PLAYER: 2 to 4 short bullets in plain language about what they will notice when they play. No file names, no function names, no code terms.',
     '',
-    'Output format - after your reasoning, ONLY the changed files:',
+    'Output format - after your reasoning, ONLY these blocks:',
+    '=== SUMMARY ===',
+    '- <what the player will notice>',
+    '=== END SUMMARY ===',
+    ...(mode === 'diff'
+      ? [
+          '=== EDIT: src/player.js ===',
+          '<<<<<<< SEARCH',
+          '<exact existing lines>',
+          '=======',
+          '<replacement lines>',
+          '>>>>>>> REPLACE',
+          '(more hunks for the same file may follow; each is applied in order)',
+          '=== END EDIT ===',
+          '(and, only for a new file or a near-total rewrite:)',
+        ]
+      : []),
     '=== FILE: src/player.js ===',
     '<complete file contents>',
     '=== END FILE ===',
@@ -132,11 +154,15 @@ export interface EditOptions {
   write: (path: string, content: string) => Promise<void> | void;
   /** One plain completion: (system, user, reasoning) -> the model's reply text. */
   generate: (system: string, user: string, reasoning: string) => Promise<string>;
+  /** Plain-language progress for the chat, so the minutes this takes are not silent. */
+  progress?: (message: string) => void;
 }
 
 export interface EditResult {
   files: string[];
   why: string;
+  /** Plain-language summary of what the player will notice, when the model wrote one. */
+  summary?: string;
 }
 
 /**
@@ -159,11 +185,16 @@ export async function applyEditRequest(opts: EditOptions): Promise<EditResult> {
   const located = parseLocateReply(locateReply, known);
   const why = /"why"\s*:\s*"([^"]*)"/.exec(locateReply)?.[1] ?? '';
   if (located.length === 0) throw new Error('could not tell which file the request is about');
+  opts.progress?.(
+    `Found where this lives (${located.join(', ')}). Rewriting ${located.length === 1 ? 'it' : 'them'} now…`,
+  );
 
   const baseline = projectProblems(all).length;
   let problems: string[] | undefined;
   // 2) rewrite them; one retry that shows the model exactly what its attempt broke.
   for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0)
+      opts.progress?.('The first rewrite broke something, so I am redoing it more carefully…');
     const targets = located
       .map((p) => sources.find((f) => f.path === p))
       .filter(Boolean) as ProjectFile[];
@@ -176,12 +207,38 @@ export async function applyEditRequest(opts: EditOptions): Promise<EditResult> {
       ...(problems !== undefined ? { problems } : {}),
     });
     if (user === null) throw new Error('project too large to edit in one step');
-    const reply = await opts.generate(buildEditSystemPrompt(), user, 'medium');
+    // First try the cheap form (hunks: only the changed lines are written). If it does not
+    // apply, fall back to whole files, which cost more but cannot fail to match.
+    const mode: EditMode = attempt === 0 ? 'diff' : 'full';
+    const reply = await opts.generate(buildEditSystemPrompt(mode), user, 'medium');
     const changes = parseFileBlocks(reply).filter(
       (f) => isRepairablePath(f.path) && known.has(f.path),
     );
+    const hunkProblems: string[] = [];
+    for (const block of parseEditBlocks(reply)) {
+      if (!isRepairablePath(block.path) || !known.has(block.path)) continue;
+      const base =
+        changes.find((c) => c.path === block.path)?.content ??
+        sources.find((f) => f.path === block.path)?.content ??
+        '';
+      const applied = applyHunks(base, block.hunks);
+      if (applied.errors.length > 0) {
+        hunkProblems.push(...applied.errors.map((e) => `${block.path}: ${e}`));
+        continue;
+      }
+      const existing = changes.findIndex((c) => c.path === block.path);
+      if (existing >= 0) changes[existing] = { path: block.path, content: applied.content };
+      else changes.push({ path: block.path, content: applied.content });
+    }
+    if (hunkProblems.length > 0) {
+      problems = [
+        ...hunkProblems,
+        'Some SEARCH text did not match the file. Return the changed files COMPLETE this time.',
+      ];
+      continue;
+    }
     if (changes.length === 0) {
-      problems = ['your reply contained no complete changed file in the required format'];
+      problems = ['your reply contained no EDIT or FILE block in the required format'];
       continue;
     }
     // Refuse a rewrite that gutted a file (truncated / abbreviated output).
@@ -210,7 +267,8 @@ export async function applyEditRequest(opts: EditOptions): Promise<EditResult> {
       continue;
     }
     for (const c of changed) await opts.write(c.path, c.content);
-    return { files: changed.map((c) => c.path), why };
+    const summary = parseSummary(reply);
+    return { files: changed.map((c) => c.path), why, ...(summary !== null ? { summary } : {}) };
   }
   throw new Error(`no acceptable edit after retry: ${(problems ?? []).join('; ').slice(0, 200)}`);
 }

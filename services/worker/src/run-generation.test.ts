@@ -720,9 +720,10 @@ describe('runGeneration browser-jobs wiring (#1.4 — out-of-process runtimeVeri
     );
 
     expect(runtimeVerifyWasWired).toBe(true);
-    // Booted twice now: once by the agent's done gate, once by the loop's boot
-    // check (which no longer skips spec-less games).
-    expect(browserJobs.calls.verify).toHaveLength(3);
+    // Booted by the agent's done gate and by the loop's boot check (which no longer skips
+    // spec-less games). The final pass reuses the loop's verdict on byte-identical files rather
+    // than re-driving the browser, so there is no third boot.
+    expect(browserJobs.calls.verify).toHaveLength(2);
     // The throwing boot surfaces as errors → done would report status='has_errors'.
     expect(runtimeErrors.length).toBeGreaterThan(0);
     expect(runtimeErrors.some((e) => e.message.includes('boot blew up'))).toBe(true);
@@ -1072,8 +1073,9 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     expect(promptsSeen[0]).toBe('topdown game');
     expect(promptsSeen[1]).toContain('playerPos.x');
     expect(promptsSeen[1]!.toLowerCase()).not.toContain('try again');
-    // Three drives of the failing check, then one for the repaired build.
-    expect(browserJobs.playtestCalls).toBe(5);
+    // Three drives of the failing check, then one for the repaired build (the final pass reuses
+    // that verdict, since the files did not change).
+    expect(browserJobs.playtestCalls).toBe(4);
   });
 
   it('a play check that fails once and then passes is a flake: it ships without a repair round', async () => {

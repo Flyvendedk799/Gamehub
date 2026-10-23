@@ -13,7 +13,7 @@
  */
 
 /** Extra calls a read-only tool may make without eating into the post-draft budget. */
-export const FREE_INSPECTION_CALLS = 40;
+export const FREE_INSPECTION_CALLS = 24;
 
 /** Warn the agent this many calls before the cap so it can finish instead of being cut. */
 export const WRAP_UP_WARNING_CALLS = 8;

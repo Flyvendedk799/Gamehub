@@ -132,6 +132,24 @@ function lastLine(s: string): string {
   return last.length > 110 ? `${last.slice(0, 110)}…` : last;
 }
 
+/**
+ * The host's own progress messages (the fast edit path and the server-side verification) arrive as
+ * plain text, with no tool events around them, so the phase tracker would sit on Design for the
+ * minutes they take. Map their wording to the phase they belong to. Unknown text maps to null.
+ */
+export function phaseOfProgressMessage(content: string): number | null {
+  const text = content.trim();
+  if (/^(Found where this lives|The first rewrite broke)/.test(text)) return 1;
+  if (
+    /^(Testing the game|Re-testing|One play check|Taking a look|A check failed|The extra fixes)/.test(
+      text,
+    )
+  ) {
+    return 2;
+  }
+  return null;
+}
+
 export function deriveBuildStatus(allEvents: ReadonlyArray<SseEvent>): BuildStatus {
   // Only this run's events — an earlier run's terminal would otherwise pin the
   // tracker at Ready and anchor the timer to the project's first-ever event.
@@ -196,6 +214,8 @@ export function deriveBuildStatus(allEvents: ReadonlyArray<SseEvent>): BuildStat
       }
     } else if (e.type === 'message_update' && e.content.trim()) {
       step = lastLine(e.content);
+      const progressPhase = phaseOfProgressMessage(e.content);
+      if (progressPhase !== null) phaseIndex = Math.max(phaseIndex, progressPhase);
     } else if (e.type === 'assistant_text' && e.text.trim()) {
       step = lastLine(e.text);
     } else if (e.type === 'user_message') {
