@@ -1040,8 +1040,14 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
 
   it('a FAILING playtest triggers exactly one repair round, then a fixed playtest ships', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());
-    // Round 0 inverted (fails) → repair; round 1 passes → ship.
-    const browserJobs = queuedBrowserJobs([invertedPlaytest(), passingPlaytest()]);
+    // Round 0 fails on all three drives of the check (so it is not a flake) → repair; round 1
+    // passes → ship.
+    const browserJobs = queuedBrowserJobs([
+      invertedPlaytest(),
+      invertedPlaytest(),
+      invertedPlaytest(),
+      passingPlaytest(),
+    ]);
     const promptsSeen: string[] = [];
     const agent: GenerateFn = async (input, deps) => {
       promptsSeen.push(input.prompt);
@@ -1066,8 +1072,33 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     expect(promptsSeen[0]).toBe('topdown game');
     expect(promptsSeen[1]).toContain('playerPos.x');
     expect(promptsSeen[1]!.toLowerCase()).not.toContain('try again');
-    // Two playtest verdicts gathered (one per attempt).
-    expect(browserJobs.playtestCalls).toBe(3);
+    // Three drives of the failing check, then one for the repaired build.
+    expect(browserJobs.playtestCalls).toBe(5);
+  });
+
+  it('a play check that fails once and then passes is a flake: it ships without a repair round', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = queuedBrowserJobs([invertedPlaytest(), passingPlaytest()]);
+    const promptsSeen: string[] = [];
+    const agent: GenerateFn = async (input, deps) => {
+      promptsSeen.push(input.prompt);
+      await deps.gameMode?.setSpec?.(TOPDOWN_SPEC);
+      await deps.fs?.create('index.html', RED_SQUARE);
+      return emptyOutput('built');
+    };
+
+    const result = await runGeneration(
+      {
+        prompt: 'topdown game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: agent, browserJobs },
+    );
+
+    expect(result.repairRounds).toBe(0);
+    expect(result.shipReason).toBe('passed');
+    expect(promptsSeen).toHaveLength(1);
   });
 
   it('a BLANK-render runtime verdict (renderedNonBlank=false) triggers a repair round (premium non-blank gate)', async () => {

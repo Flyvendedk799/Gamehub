@@ -953,6 +953,13 @@ export async function runGeneration(
   // pass/fail. The actual playtest/boot stays out-of-process via `browserJobs`;
   // the gen worker never executes untrusted game code.
   const maxRepairRounds = resolveMaxRepairRounds(ports.maxRepairRounds);
+  // Total drives of one genre play check before a clean failure is believed.
+  const MAX_PLAY_ATTEMPTS = 3;
+  // A repair after a host edit is a small fix, not a rebuild: bounded hard so a degraded model
+  // cannot spend 20 minutes and a whole snapshot on it (run 8db3aa61: 22 minutes, paused, nothing
+  // shipped).
+  const REPAIR_AFTER_FAST_EDIT_CALLS = 40;
+  const REPAIR_AFTER_FAST_EDIT_MS = 4 * 60_000;
 
   // Assemble a GenerateInput for a round: same model/key/budget/engine/signal
   // every time, only the user `prompt` and prior `history` change so a repair
@@ -975,7 +982,13 @@ export async function runGeneration(
     // below; the agent loop only runs if that verification fails. A breakage report still needs
     // the agent (it must reproduce before it fixes), so it opts out.
     ...(isIteration && editRequest.kind === 'change' ? { fastEdit: true } : {}),
-    agentBudget: { maxToolCalls, maxWallClockMs },
+    agentBudget:
+      history.length > 0 && isIteration && editRequest.kind === 'change'
+        ? {
+            maxToolCalls: Math.min(maxToolCalls, REPAIR_AFTER_FAST_EDIT_CALLS),
+            maxWallClockMs: Math.min(maxWallClockMs, REPAIR_AFTER_FAST_EDIT_MS),
+          }
+        : { maxToolCalls, maxWallClockMs },
     // WS-D — pause the agent at the next safe boundary once it has asked a
     // question (the existing continuation seam: agent.ts aborts cleanly when
     // this returns non-null, yielding output.interrupted=true). 'model_requested'
@@ -1146,8 +1159,37 @@ export async function runGeneration(
       return null;
     }
 
+    // A play check against a live opponent is stochastic: the AI parries, dodges or whiffs, and the
+    // same build passes one run and fails the next (run 8db3aa61 failed "opponent HP decreased"
+    // on a build whose combat code was unchanged, then spent 22 minutes "repairing" it). Re-drive
+    // a check that FAILED CLEANLY (no errors, contract present) up to twice before it is allowed
+    // to start a repair; a real error never retries.
+    const playUntilStable = async (
+      html: string,
+      steps: Parameters<typeof browserJobs.playtest>[1],
+      predicates: Parameters<typeof scorePlaytest>[1],
+    ) => {
+      let result = await browserJobs.playtest(html, steps);
+      for (let attempt = 1; attempt < MAX_PLAY_ATTEMPTS && result !== null; attempt++) {
+        const clean =
+          result.bootErrors.length === 0 &&
+          result.steps.every((step) => step.errors.length === 0) &&
+          result.hasGameContract &&
+          result.hasDebugContract !== false;
+        if (!clean || scorePlaytest(traceFromPlaytestResult(result), predicates).pass) break;
+        console.log(
+          `[run-generation] play check failed cleanly (attempt ${attempt}/${MAX_PLAY_ATTEMPTS}) — re-driving before it can start a repair`,
+        );
+        const again = await browserJobs.playtest(html, steps);
+        if (again === null) break;
+        result = again;
+      }
+      return result;
+    };
     const playVerdict =
-      hasPredicates && plan !== null ? await browserJobs.playtest(verifyHtml, plan.steps) : null;
+      hasPredicates && plan !== null
+        ? await playUntilStable(verifyHtml, plan.steps, plan.predicates)
+        : null;
     if (playVerdict) {
       fatalErrors.push(
         ...playVerdict.bootErrors,
@@ -1416,12 +1458,24 @@ ${unreadableNote}`
     return true;
   };
 
+  // The tree as the host's edit left it, when it booted cleanly: what we fall back to if the
+  // repair rounds that follow do not make it pass.
+  let hostEditTree: Array<{ path: string; content: string }> | null = null;
+  const fastEditRun = isIteration && editRequest.kind === 'change';
   for (;;) {
+    // A repair that runs out of wall clock on a follow-up ships what it has. It does not pause:
+    // a paused run leaves the user with no new version and a "type continue" prompt.
+    if (fastEditRun && repairRounds > 0 && output.interrupted && pendingQuestion === null) {
+      output = { ...output, interrupted: false, stoppedAtToolBudget: true };
+    }
     const budgetExhausted = aborted || output.interrupted || output.stoppedAtToolBudget === true;
     if (await runAstReflexionRound(budgetExhausted)) continue;
 
     const verdict = await observeVerdict();
     shippedVerdict = verdict;
+    if (fastEditRun && repairRounds === 0 && verdict !== null && verdict.fatalErrors.length === 0) {
+      hostEditTree = tree.toTextFiles().map((f) => ({ path: f.path, content: f.content }));
+    }
     if (verdict === null) {
       // No deterministic verdict (no port / no spec / no predicates / no
       // artifact). Nothing to gate on — but a booted game can still be LOOKED at
@@ -1532,6 +1586,22 @@ ${unreadableNote}`
     if (!f.path.endsWith('.html')) continue;
     const fixed = normalizeEngineCdnUrls(f.content);
     if (fixed !== f.content) tree.create(f.path, fixed);
+  }
+
+  // Repairs that did not end in a pass are more likely to have damaged a game that booted cleanly
+  // than to have fixed it. When the host's edit booted without errors and the repair rounds that
+  // followed still did not pass, ship the host's edit.
+  if (
+    hostEditTree !== null &&
+    repairRounds > 0 &&
+    (shipReason === 'budget_exhausted' || shipReason === 'repair_exhausted')
+  ) {
+    const keep = new Set(hostEditTree.map((f) => f.path));
+    for (const f of tree.toTextFiles()) if (!keep.has(f.path)) tree.delete(f.path);
+    for (const f of hostEditTree) tree.create(f.path, f.content);
+    console.log(
+      '[run-generation] repairs after the host edit did not pass — shipping the host edit as it booted',
+    );
   }
 
   // Cleanup/normalization can change the bytes after the repair loop. Verify the

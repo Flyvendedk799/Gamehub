@@ -12,6 +12,7 @@
 
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import { type Static, Type } from '@sinclair/typebox';
+import { commentSwallowRefusal } from '../comment-swallow.js';
 import { REDACTED_PATH_SENTINEL, REDACTION_POISON_KEY } from '../context-prune.js';
 import type { CameraGuard } from './camera-pin.js';
 import { modulesOrphanedByRewrite } from './done-heuristics.js';
@@ -990,6 +991,14 @@ export function makeTextEditorTool(
           const cameraRefusal = cameraGuard?.check(oldStr, newStr) ?? null;
           if (cameraRefusal !== null) {
             throw new Error(cameraRefusal);
+          }
+          const swallowRefusal = commentSwallowRefusal(
+            fs.view(path)?.content ?? '',
+            oldStr,
+            newStr,
+          );
+          if (swallowRefusal !== null) {
+            throw new Error(swallowRefusal);
           }
           // Improver1 §8 — per-target retry budget. Refuse the 4th
           // attempt on the same content target after 3 prior failures
