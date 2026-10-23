@@ -703,13 +703,26 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
   const gameBase = deps.gameBaseUrl ?? 'http://games.localhost:3191';
   projectGameOrigin(gameBase, 'configuration-check');
-  if (deps.appBaseUrl && new URL(gameBase).hostname === new URL(deps.appBaseUrl).hostname)
-    throw new Error('Game and application origins must differ');
   const previewSecret = deps.previewSigningSecret ?? randomBytes(32).toString('hex');
   const gameDomain = new URL(gameBase).hostname;
+  // The game base MAY share the app's hostname ("one-level mode": projects live
+  // at `p-<hash>.app.example` instead of `p-<hash>.games.app.example`). That is
+  // the only shape a free Cloudflare Universal SSL cert covers — a wildcard
+  // matches exactly one label. Every project still gets its own origin, and the
+  // app's session cookie is host-only, so it never reaches the game hosts. In
+  // this mode the bare app hostname is NOT a game host: application routes keep
+  // serving there, and only `p-<hash>` subdomains are treated as game origins.
+  const gameBaseSharesAppHost =
+    deps.appBaseUrl !== undefined && new URL(deps.appBaseUrl).hostname === gameDomain;
+  const isGameHost = (host: string): boolean => {
+    if (host === gameDomain) return !gameBaseSharesAppHost;
+    if (!host.endsWith(`.${gameDomain}`)) return false;
+    if (!gameBaseSharesAppHost) return true;
+    return /^p-[0-9a-f]{32}$/.test(host.slice(0, -(gameDomain.length + 1)));
+  };
   app.addHook('onRequest', async (req, reply) => {
     const host = (req.headers.host ?? '').split(':')[0] ?? '';
-    if (host === gameDomain || host.endsWith(`.${gameDomain}`)) {
+    if (isGameHost(host)) {
       if (
         req.method !== 'GET' ||
         !/^\/(game-preview\/[^/?]+|v1\/play\/[^/?]+)(?:\?.*)?$/.test(req.url)

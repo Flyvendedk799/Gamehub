@@ -4072,3 +4072,86 @@ describe('verified publication and isolated preview capabilities', () => {
     await app.close();
   });
 });
+
+describe('game origin host routing', () => {
+  const base = () => ({
+    repo: new InMemoryProjectRepo(),
+    auth: new HeaderAuthenticator(),
+    bus: new InMemoryEventBus(),
+    runRepo: new InMemoryRunRepo(),
+    enqueue: async () => {},
+  });
+
+  it('serves app routes on the app host when the game base shares it (one-level mode)', async () => {
+    const app = buildServer({
+      ...base(),
+      appBaseUrl: 'https://playerzero.test',
+      gameBaseUrl: 'https://playerzero.test',
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/health',
+      headers: { host: 'playerzero.test' },
+    });
+    expect(res.statusCode).toBe(200);
+    const unrelated = await app.inject({
+      method: 'GET',
+      url: '/health',
+      headers: { host: 'www.playerzero.test' },
+    });
+    expect(unrelated.statusCode).toBe(200);
+  });
+
+  it('blocks app routes on per-project game hosts in one-level mode', async () => {
+    const app = buildServer({
+      ...base(),
+      appBaseUrl: 'https://playerzero.test',
+      gameBaseUrl: 'https://playerzero.test',
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/health',
+      headers: { host: `p-${'a'.repeat(32)}.playerzero.test` },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('issues one-level per-project preview origins', async () => {
+    const repo = new InMemoryProjectRepo();
+    const app = buildServer({
+      ...base(),
+      repo,
+      appBaseUrl: 'https://playerzero.test',
+      gameBaseUrl: 'https://playerzero.test',
+    });
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/projects',
+      headers: { ...AS_ALICE, host: 'playerzero.test' },
+      payload: { prompt: 'a game' },
+    });
+    expect(created.statusCode).toBeLessThan(300);
+    const id: string = created.json().id;
+    const session = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${id}/preview-session`,
+      headers: { ...AS_ALICE, host: 'playerzero.test' },
+    });
+    // No snapshot yet → 409, but the route must not be shadowed by the host guard.
+    expect(session.statusCode).not.toBe(404);
+  });
+
+  it('still treats the whole game domain as a game host when it differs from the app', async () => {
+    const app = buildServer({
+      ...base(),
+      appBaseUrl: 'https://app.test',
+      gameBaseUrl: 'https://games.test',
+    });
+    for (const host of ['games.test', 'anything.games.test']) {
+      const res = await app.inject({ method: 'GET', url: '/health', headers: { host } });
+      expect(res.statusCode).toBe(404);
+    }
+    const ok = await app.inject({ method: 'GET', url: '/health', headers: { host: 'app.test' } });
+    expect(ok.statusCode).toBe(200);
+  });
+});
