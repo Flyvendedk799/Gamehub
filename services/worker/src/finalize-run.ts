@@ -28,6 +28,7 @@ import { type Db, schema } from '@playforge/db';
 import { isVerifiedGame } from '@playforge/shared';
 import { eq, sql } from 'drizzle-orm';
 import type { EnqueueResult } from './queue';
+import { chatRowsForCompletedRun } from './summary-text';
 
 export interface FinalizeRunArgs {
   runId: string;
@@ -217,18 +218,24 @@ export async function finalizeRun(db: Db, args: FinalizeRunArgs): Promise<Finali
         ...(result.engine !== null ? { engine: result.engine } : {}),
       })
       .where(eq(schema.projects.id, projectId));
-    await tx.insert(schema.chatMessages).values({
-      projectId,
-      seq: nextChatSeq,
-      kind: 'artifact_delivered',
-      payload: {
-        runId,
-        previewUrl: `/v1/runs/${runId}/preview/`,
-        engine: result.engine,
-        snapshotId,
-        quality: result.quality ?? null,
-      },
+    // The agent's reply first, then the delivery card, so a reloaded chat still reads as a
+    // conversation. Consecutive seqs, allocated under the project lock taken above.
+    const chatRows = chatRowsForCompletedRun({
+      runId,
+      message: result.output.message,
+      engine: result.engine,
+      snapshotId,
+      quality: result.quality,
+      files: result.changedFiles,
     });
+    await tx.insert(schema.chatMessages).values(
+      chatRows.map((row, offset) => ({
+        projectId,
+        seq: nextChatSeq + offset,
+        kind: row.kind,
+        payload: row.payload,
+      })),
+    );
 
     return manifestKey;
   });

@@ -169,3 +169,13 @@ describe('applyEditRequest with SEARCH/REPLACE hunks', () => {
     expect(h.prompts[2]).toContain('not in the file');
   });
 });
+
+describe('fileNames', () => {
+  it('reads like a sentence', async () => {
+    const { fileNames } = await import('./edit-pipeline');
+    expect(fileNames(['src/combat.js'])).toBe('combat.js');
+    expect(fileNames(['src/combat.js', 'src/duelist.js'])).toBe('combat.js and duelist.js');
+    expect(fileNames(['src/a.js', 'src/b.js', 'src/c.js'])).toBe('a.js, b.js and c.js');
+    expect(fileNames([])).toBe('the game');
+  });
+});

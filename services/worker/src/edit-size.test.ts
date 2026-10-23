@@ -75,3 +75,20 @@ describe('unifiedDiff / describeChange', () => {
     expect(big.length).toBeLessThan(700);
   });
 });
+
+describe('changedFilePaths', () => {
+  it('lists changed and new files, not untouched ones; every file for a first build', async () => {
+    const { changedFilePaths } = await import('./edit-size');
+    const before = new Map([
+      ['a.js', 'same'],
+      ['b.js', 'old'],
+    ]);
+    const after = [
+      { path: 'a.js', content: 'same' },
+      { path: 'b.js', content: 'new' },
+      { path: 'c.js', content: 'brand new' },
+    ];
+    expect(changedFilePaths(before, after)).toEqual(['b.js', 'c.js']);
+    expect(changedFilePaths(undefined, after)).toEqual(['a.js', 'b.js', 'c.js']);
+  });
+});

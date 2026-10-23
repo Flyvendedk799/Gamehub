@@ -72,7 +72,7 @@ import {
   wrapUpReminder,
 } from './call-budget.js';
 import { buildTransformContext } from './context-prune.js';
-import { applyEditRequest } from './edit-pipeline.js';
+import { applyEditRequest, fileNames } from './edit-pipeline.js';
 import { buildPolishRequest, isOpenEndedPolishRequest } from './edit-request.js';
 import type { EditorSession } from './editor/session.js';
 import { type ContextMessage, pruneContextAtomic } from './engine/context.js';
@@ -3101,27 +3101,20 @@ Latest request: ${input.prompt}`
           const polish = isOpenEndedPolishRequest(request);
           // The host edit takes a minute or two and emits no agent events; say what it is doing
           // so the chat is not silent.
-          const say = (message: string): void => {
-            deps.onEvent?.({
-              type: 'message_update',
-              assistantMessageEvent: {
-                type: 'text_delta',
-                delta: `${message}
-
-`,
-              },
-            } as unknown as AgentEvent);
+          const say = (label: string, phase: 'understand' | 'edit' = 'edit'): void => {
+            deps.onEvent?.({ type: 'progress', label, phase } as unknown as AgentEvent);
           };
           say(
             polish
-              ? 'Reading through the game to decide which upgrades will be the most visible…'
-              : 'Reading through the game to find where this change belongs…',
+              ? 'Reading through your game to find the best upgrades'
+              : 'Reading through your game',
+            'understand',
           );
           // A general request ("improve combat") gives the edit nothing to act on blind. Look at the
           // running game first, so the upgrades answer what is actually weak on screen.
           let seen: string | null = null;
           if (polish && deps.gameMode?.observeGame !== undefined) {
-            say('Looking at the game running first, so the upgrades fit what is on screen…');
+            say('Looking at the game running', 'understand');
             try {
               seen = await deps.gameMode.observeGame(request);
             } catch (observeErr) {
@@ -3178,13 +3171,12 @@ Latest request: ${input.prompt}`
     const entry = deps.fs.view('index.html');
     const edited: { files: string[]; why: string; polish: boolean; summary?: string } = hostEdit;
     log.info('[generate] step=fast_edit.return', { ...ctx, files: edited.files });
-    const what = edited.why.length > 0 ? ` ${edited.why.replace(/\.?$/, '.')}` : '';
+    // The summary is the model's own bullets, as written for the player; the chat adds its own
+    // framing, so no "Here is what changed:" header is baked into the text.
     const message =
       edited.summary !== undefined
-        ? `${edited.polish ? 'Here is what I upgraded' : 'Here is what changed'}:
-
-${edited.summary}`
-        : `${edited.polish ? 'Polished the game' : 'Applied your change'} (${edited.files.join(', ')}).${what}`;
+        ? edited.summary
+        : `${edited.polish ? 'Polished the game' : 'Updated the game'} (${fileNames(edited.files)}).`;
     return {
       message,
       hostSummary: message,

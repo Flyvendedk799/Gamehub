@@ -150,6 +150,14 @@ export function phaseOfProgressMessage(content: string): number | null {
   return null;
 }
 
+const PROGRESS_PHASE_INDEX = {
+  understand: 0,
+  edit: 1,
+  test: 2,
+  repair: 2,
+  preview: 2,
+} as const;
+
 export function deriveBuildStatus(allEvents: ReadonlyArray<SseEvent>): BuildStatus {
   // Only this run's events — an earlier run's terminal would otherwise pin the
   // tracker at Ready and anchor the timer to the project's first-ever event.
@@ -214,6 +222,10 @@ export function deriveBuildStatus(allEvents: ReadonlyArray<SseEvent>): BuildStat
       } else if (step.length === 0) {
         step = e.label ?? e.toolName;
       }
+    } else if (e.type === 'progress') {
+      // The host's own structured steps: the same line the chat shows.
+      step = e.label;
+      if (e.phase !== undefined) phaseIndex = Math.max(phaseIndex, PROGRESS_PHASE_INDEX[e.phase]);
     } else if (e.type === 'message_update' && e.content.trim()) {
       step = lastLine(e.content);
       const progressPhase = phaseOfProgressMessage(e.content);

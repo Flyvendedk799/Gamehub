@@ -77,6 +77,13 @@ export function parseLocateReply(reply: string, known: Set<string>): string[] {
   }
 }
 
+/** "combat.js", "combat.js and duelist.js", "combat.js, duelist.js and hud.js". */
+export function fileNames(paths: readonly string[]): string {
+  const names = paths.map((p) => p.split('/').pop() ?? p);
+  if (names.length <= 1) return names[0] ?? 'the game';
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
 export type EditMode = 'diff' | 'full';
 
 export function buildEditSystemPrompt(mode: EditMode = 'full'): string {
@@ -187,9 +194,7 @@ export async function applyEditRequest(opts: EditOptions): Promise<EditResult> {
   const located = parseLocateReply(locateReply, known);
   const why = /"why"\s*:\s*"([^"]*)"/.exec(locateReply)?.[1] ?? '';
   if (located.length === 0) throw new Error('could not tell which file the request is about');
-  opts.progress?.(
-    `Found where this lives (${located.join(', ')}). Rewriting ${located.length === 1 ? 'it' : 'them'} now…`,
-  );
+  opts.progress?.(`Editing ${fileNames(located)}`);
 
   const baseline = projectProblems(all).length;
   let problems: string[] | undefined;
@@ -197,7 +202,7 @@ export async function applyEditRequest(opts: EditOptions): Promise<EditResult> {
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt > 0) {
       opts.debug?.(`attempt ${attempt} discarded: ${(problems ?? []).join(' | ').slice(0, 500)}`);
-      opts.progress?.('The first rewrite broke something, so I am redoing it more carefully…');
+      opts.progress?.('Redoing the edit more carefully');
     }
     const targets = located
       .map((p) => sources.find((f) => f.path === p))

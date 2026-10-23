@@ -3,6 +3,7 @@
 import { BUILD_PHASES, deriveBuildStatus, formatElapsed } from '@/lib/build-status';
 import type { SseEvent } from '@/lib/types';
 import React, { useEffect, useMemo, useState } from 'react';
+import { Spinner as PillSpinner } from './chat/icons';
 
 /**
  * Live build status shown while a game generates — turns the dead "Building…"
@@ -58,24 +59,16 @@ export function BuildStatus({
   );
 
   if (compact) {
+    // One quiet pill in the corner: the game underneath stays playable and visible. The chat is
+    // where the step-by-step lives.
     return (
-      <div className="absolute inset-x-0 top-0 z-20 border-b border-live bg-ground/95 px-3.5 py-2.5 backdrop-blur">
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-3">
-            <span className="truncate text-[13px] text-ink">{status.currentStep}</span>
-            <span className="flex-shrink-0 font-mono text-[11px] uppercase tabular-nums tracking-[.14em] text-live">
-              BUILD · {formatElapsed(elapsed)}
-            </span>
-          </div>
-          <div className="h-0.5 bg-hairline">
-            <div
-              className="h-0.5 bg-live transition-all duration-700 ease-out"
-              style={{ width: `${pct}%` }}
-            />
-          </div>
-          {phaseRow}
-        </div>
-      </div>
+      <output className="pointer-events-none absolute top-3 right-3 z-20 flex max-w-[75%] items-center gap-2 rounded-full border border-hairline bg-ground/90 px-3 py-1.5 text-xs text-ink shadow-lg backdrop-blur">
+        <PillSpinner size={12} className="flex-shrink-0 text-live" />
+        <span className="truncate">{status.currentStep}</span>
+        <span className="flex-shrink-0 font-mono tabular-nums text-ink-4">
+          {formatElapsed(elapsed)}
+        </span>
+      </output>
     );
   }
 

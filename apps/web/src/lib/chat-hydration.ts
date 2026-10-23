@@ -35,6 +35,23 @@ export function chatMessageToEvents(msg: ChatHistoryMessage): SseEvent[] {
       },
     ];
   }
+  // The agent's reply to a finished run: what it did, in its own words.
+  if (msg.kind === 'assistant_text') {
+    const p = msg.payload as { runId?: string; text?: string; files?: unknown } | null;
+    if (typeof p?.text !== 'string' || p.text.trim().length === 0) return [];
+    const files = Array.isArray(p.files)
+      ? p.files.filter((f): f is string => typeof f === 'string')
+      : undefined;
+    return [
+      {
+        type: 'summary',
+        runId: p.runId ?? '',
+        text: p.text,
+        timestamp: msg.createdAt,
+        ...(files !== undefined ? { files } : {}),
+      },
+    ];
+  }
   // A failed run leaves this row so the error (and its Fix-it) survives a reload.
   if (msg.kind === 'error') {
     const p = msg.payload as { runId?: string; error?: string } | null;
@@ -84,6 +101,7 @@ export function hydrateHistoryEvents(
     if (
       streamRunId &&
       (msg.kind === 'artifact_delivered' ||
+        msg.kind === 'assistant_text' ||
         msg.kind === 'continuation_pending' ||
         msg.kind === 'error') &&
       (msg.payload as { runId?: string } | null)?.runId === streamRunId

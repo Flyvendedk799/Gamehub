@@ -75,10 +75,11 @@ import type { SnapshotStore, WriteResult } from '@playforge/storage';
 // the worker) — reuses the proven single-file game bundler for the verify gate.
 import { buildGameHtml } from '../../../packages/exporters/src/index';
 import { canOfferImageGeneration, makeAssetGenerator } from './asset-generator';
-import { SMALL_EDIT_LINES, countChangedLines, describeChange } from './edit-size';
+import { SMALL_EDIT_LINES, changedFilePaths, countChangedLines, describeChange } from './edit-size';
 import { createRunSignalAggregator } from './run-signal';
 import { analyzeSkillUsage } from './skill-usage-grep.js';
 import { buildSpecialistJobPlan } from './specialist-jobs.js';
+import { cleanSummary } from './summary-text';
 import { assertGeneratedJavaScriptSyntax } from './syntax-check';
 import { formatReflexionPayload, verifyGeneratedAst } from './verify/ast';
 import { WorkingTree } from './working-tree';
@@ -348,6 +349,8 @@ export interface GenerationPorts {
 
 export interface GenerationResult {
   output: GenerateOutput;
+  /** Files this run changed (every file for a first build), for the chat's summary. */
+  changedFiles?: string[];
   engine: WebEngine | null;
   spec: GameSpec | null;
   snapshot: WriteResult;
@@ -733,16 +736,19 @@ export async function runGeneration(
   // Plain-language progress for the chat. The host's own steps (verify in a browser, re-drive a
   // flaky check, look at a frame, repair) emit no agent events, so without this the chat sits
   // silent for minutes between "sent" and "done".
-  const say = (message: string): void => {
+  const say = (
+    label: string,
+    phase?: 'understand' | 'edit' | 'test' | 'repair' | 'preview',
+  ): void => {
     ports.onEvent?.({
-      type: 'message_update',
-      assistantMessageEvent: {
-        type: 'text_delta',
-        delta: `${message}
-
-`,
-      },
+      type: 'progress',
+      label,
+      ...(phase !== undefined ? { phase } : {}),
     } as unknown as AgentEvent);
+  };
+  /** The closing account of the run, as its own event so the chat can show it as the reply. */
+  const announceSummary = (text: string, files: string[]): void => {
+    ports.onEvent?.({ type: 'summary', text, files } as unknown as AgentEvent);
   };
 
   // Only offer bitmap generation when the credential can actually produce a
@@ -1094,7 +1100,7 @@ export async function runGeneration(
       }
       const draft = await tree.persist(ports.store);
       await ports.publishDraft({ manifestKey: draft.manifestKey, filesHash: draft.filesHash });
-      say('Your updated game is in the preview now. I am still running the play checks on it…');
+      say('Preview updated', 'preview');
       ports.onEvent?.({ type: 'draft_ready' } as unknown as AgentEvent);
     } catch (err) {
       console.warn('[run-generation] draft publish failed (non-fatal):', err);
@@ -1105,9 +1111,8 @@ export async function runGeneration(
     const entry = tree.view('index.html');
     if (entry === null) return null;
     verifyPasses += 1;
-    if (verifyPasses === 1)
-      say('Testing the game in a real browser: boot, controls and a play-through…');
-    else if (verifyPasses === 2) say('Re-testing after the fix…');
+    if (verifyPasses === 1) say('Testing it in a real browser', 'test');
+    else if (verifyPasses === 2) say('Re-testing after the fix', 'test');
 
     // Inline the WHOLE project into one self-contained HTML before booting it in
     // the browser-worker — exactly like `done`'s gate (inlineForVerify). Passing
@@ -1290,9 +1295,7 @@ export async function runGeneration(
         console.log(
           `[run-generation] play check failed cleanly (attempt ${attempt}/${MAX_PLAY_ATTEMPTS}) — re-driving before it can start a repair`,
         );
-        say(
-          'One play check did not pass. Running it again to rule out a fluke (opponents are random)…',
-        );
+        say('Re-running a check that failed (opponents are random)', 'test');
         const again = await browserJobs.playtest(html, steps);
         if (again === null) break;
         result = again;
@@ -1452,7 +1455,7 @@ ${unreadableNote}`
     const entry = tree.view('index.html');
     if (entry === null) return null;
     visionCalls += 1;
-    say('Taking a look at a frame of the running game…');
+    say('Taking a look at the result', 'test');
     try {
       const frame = await browserJobs?.screenshot?.(await inlineForVerify(entry.content), {
         playSettle: true,
@@ -1700,9 +1703,7 @@ ${changeText}`;
       }
     }
     repairRounds += 1;
-    say(
-      `A check failed in the browser, so I am fixing it (attempt ${repairRounds} of ${maxRepairRounds})…`,
-    );
+    say(`Fixing a failed check (attempt ${repairRounds} of ${maxRepairRounds})`, 'repair');
     output = await generate(buildInput(nextPrompt, history), deps);
   }
 
@@ -1766,9 +1767,7 @@ ${changeText}`;
     console.log(
       '[run-generation] repairs after the host edit did not pass — shipping the host edit as it booted',
     );
-    say(
-      'The extra fixes did not help, so I am keeping your change exactly as it first booted cleanly.',
-    );
+    say('Keeping your change as it first booted', 'repair');
   }
 
   // Cleanup/normalization can change the bytes after the repair loop. Verify the
@@ -2085,14 +2084,18 @@ ${changeText}`;
     }
   }
 
-  if (hostSummary !== undefined) {
-    output = { ...output, message: hostSummary };
-    // The chat only shows streamed text. Without this the summary lived in the return value and
-    // the user saw progress lines, then "ready", and no account of what changed.
-    say(hostSummary);
+  if (hostSummary !== undefined) output = { ...output, message: hostSummary };
+  // The chat shows streamed events. Without this the summary lived in the return value and the
+  // user saw progress, then "ready", and no account of what changed. A run that paused for a
+  // question or a checkpoint has nothing to summarise yet.
+  const changedFiles = changedFilePaths(parentFiles, tree.toTextFiles());
+  if (output.interrupted !== true) {
+    const summary = cleanSummary(output.message);
+    if (summary !== null) announceSummary(summary, changedFiles);
   }
   return {
     output,
+    changedFiles,
     engine: state.engine,
     spec: state.spec,
     snapshot,

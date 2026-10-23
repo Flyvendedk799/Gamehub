@@ -122,8 +122,12 @@ describe('runGeneration (offline E2E)', () => {
     const bytes = await store.readFile(result.snapshot.manifest, 'index.html');
     expect(new TextDecoder().decode(bytes)).toContain('0xff0000');
 
-    // Stream fired start → end.
-    expect(events.map((e) => (e as { type: string }).type)).toEqual(['agent_start', 'agent_end']);
+    // Stream fired start → end, then the run's closing summary for the chat.
+    expect(events.map((e) => (e as { type: string }).type)).toEqual([
+      'agent_start',
+      'agent_end',
+      'summary',
+    ]);
 
     // Usage surfaced for the credit ledger.
     expect(result.output.inputTokens).toBe(1200);
@@ -1149,6 +1153,72 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
       );
       return { published, events };
     };
+
+    it('streams plain-language progress and the closing summary as structured events', async () => {
+      const store = new SnapshotStore(new InMemoryBlobStore());
+      const events: Array<{ type: string; label?: string; text?: string }> = [];
+      await runGeneration(
+        {
+          prompt: 'topdown game',
+          model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+          apiKey: 'sk-test',
+        },
+        {
+          store,
+          generate: async (_input, deps) => {
+            await deps.gameMode?.setSpec?.(TOPDOWN_SPEC);
+            await deps.fs?.create('index.html', RED_SQUARE);
+            return {
+              ...emptyOutput('- Strikes now chain into a combo.'),
+              message: '- Strikes now chain into a combo. — Stopped after 44 steps. Go on. —',
+              hostSummary: '- Strikes now chain into a combo.',
+            };
+          },
+          browserJobs: queuedBrowserJobs([passingPlaytest()]),
+          maxRepairRounds: 0,
+          onEvent: (e) =>
+            events.push(e as unknown as { type: string; label?: string; text?: string }),
+          publishDraft: async () => {},
+        },
+      );
+      const labels = events.filter((e) => e.type === 'progress').map((e) => e.label);
+      expect(labels).toContain('Testing it in a real browser');
+      expect(labels).toContain('Preview updated');
+      // No progress as chat text any more.
+      expect(events.some((e) => e.type === 'message_update')).toBe(false);
+      const summaries = events.filter((e) => e.type === 'summary');
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]).toMatchObject({
+        type: 'summary',
+        text: '- Strikes now chain into a combo.',
+      });
+      // A first build reports every file it created.
+      expect((summaries[0] as { files?: string[] }).files).toContain('index.html');
+      // The summary is the LAST thing said, after the draft and the checks.
+      expect(events.at(-1)?.type).toBe('summary');
+    });
+
+    it('does not summarise a run that paused', async () => {
+      const store = new SnapshotStore(new InMemoryBlobStore());
+      const events: Array<{ type: string; label?: string; text?: string }> = [];
+      await runGeneration(
+        {
+          prompt: 'topdown game',
+          model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+          apiKey: 'sk-test',
+        },
+        {
+          store,
+          generate: async (_input, deps) => {
+            await deps.fs?.create('index.html', RED_SQUARE);
+            return { ...emptyOutput('Paused for a question'), interrupted: true };
+          },
+          onEvent: (e) =>
+            events.push(e as unknown as { type: string; label?: string; text?: string }),
+        },
+      );
+      expect(events.some((e) => e.type === 'summary')).toBe(false);
+    });
 
     it('shows a booted draft once, and tells the chat and the web', async () => {
       const { published, events } = await run({ hostSummary: 'Here is what changed' });

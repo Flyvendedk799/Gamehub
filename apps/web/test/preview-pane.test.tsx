@@ -192,7 +192,7 @@ describe('PreviewPane & Event Adapter Integration', () => {
   });
 
   describe('PreviewPane rendering and sandbox isolation', () => {
-    it('renders iframe with strict sandbox flags and progress stepper when building', () => {
+    it('renders no iframe before a ticket, and shows ONE quiet status pill (not a stepper) when building', () => {
       const html = renderToString(
         <PreviewPane
           previewUrl="https://playforge.internal/preview/test-game"
@@ -215,9 +215,11 @@ describe('PreviewPane & Event Adapter Integration', () => {
       expect(html).not.toContain('<iframe');
       expect(html).not.toContain('allow-same-origin');
 
-      // Contains generation progress stepper landmarks
-      expect(html).toContain('aria-label="Game Generation Progress"');
-      expect(html).toContain('Writing Code');
+      // The build is shown as one small pill with the current step. The seven-phase stepper no
+      // longer sits over the running game; the chat carries the step-by-step.
+      expect(html).not.toContain('aria-label="Game Generation Progress"');
+      expect(html).toContain('<output');
+      expect(html).toContain('Writing main.js');
 
       // Contains toolbar tab buttons including inspector
       expect(html).toContain('preview');

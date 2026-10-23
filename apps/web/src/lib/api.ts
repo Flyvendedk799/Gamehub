@@ -503,6 +503,8 @@ export const SSE_NAMED_TYPES: ReadonlyArray<SseEvent['type']> = [
   'agent_end',
   'run_complete',
   'draft_ready',
+  'progress',
+  'summary',
   'run_error',
   'message_update',
   'text_delta',
@@ -567,7 +569,17 @@ export function parseSseFrames(data: string, runId: string): SseEvent[] {
     return normalizeAgentFrame(parsed as Record<string, unknown>, { runId });
   }
   const normalized = parseSseFrame(data);
-  return normalized ? [normalized] : [];
+  if (!normalized) return [];
+  // Frames relayed from the worker carry neither a run id nor a time. The chat orders and times
+  // its turns by both, so fill in whichever is missing.
+  const loose = normalized as { runId?: string; timestamp?: string };
+  return [
+    {
+      ...normalized,
+      runId: loose.runId ?? runId,
+      timestamp: loose.timestamp ?? new Date().toISOString(),
+    } as SseEvent,
+  ];
 }
 
 /**

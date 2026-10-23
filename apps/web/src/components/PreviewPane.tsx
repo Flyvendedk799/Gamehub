@@ -564,19 +564,10 @@ export function PreviewPane({
             />
           )}
 
-          {/* Iteration build status — progress stepper over the still-running game so
-              you keep playing the current version while the next one builds. */}
+          {/* Iteration build status: one small pill over the still-running game, so you keep
+              playing the current version while the next one builds. The chat carries the detail. */}
           {isBuilding && previewUrl && !hasError && view === 'preview' && (
-            <div className="absolute top-2 left-2 right-2 z-20 space-y-2 pointer-events-none">
-              <GenerationProgressStepper
-                currentPhase={derived.phase}
-                reflexionTurn={derived.reflexionTurn}
-                maxReflexionTurns={derived.maxReflexionTurns}
-                errorMessage={errorMessage}
-                className="pointer-events-auto shadow-lg backdrop-blur bg-surface/90"
-              />
-              <BuildStatus events={events} isBuilding={isBuilding} compact />
-            </div>
+            <BuildStatus events={events} isBuilding={isBuilding} compact />
           )}
 
           {/* Live crash/freeze banner — the running game's runtime beacon reported

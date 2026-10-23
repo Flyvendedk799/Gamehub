@@ -65,6 +65,31 @@ export interface RunCompleteEvent {
  * The new version has booted cleanly and is already HEAD: switch the preview to it now, while the
  * server is still running the play checks. Does not end the run (only run_complete does).
  */
+/** Which part of the work a progress step belongs to. */
+export type ProgressPhase = 'understand' | 'edit' | 'test' | 'repair' | 'preview';
+
+/**
+ * One plain-language step the agent is on ("Editing combat.js", "Testing it in a real browser").
+ * The chat shows these as a live checklist: the latest is in progress, earlier ones are done.
+ */
+export interface ProgressEvent {
+  type: 'progress';
+  runId: string;
+  timestamp: string;
+  label: string;
+  phase?: ProgressPhase;
+}
+
+/** The agent's closing account of the run, shown as its reply once the work is done. */
+export interface SummaryEvent {
+  type: 'summary';
+  runId: string;
+  timestamp: string;
+  text: string;
+  /** Files this run changed, when the worker reports them. */
+  files?: string[];
+}
+
 export interface DraftReadyEvent {
   type: 'draft_ready';
   runId: string;
@@ -217,6 +242,8 @@ export type SseEvent =
   | AgentEndEvent
   | RunCompleteEvent
   | DraftReadyEvent
+  | ProgressEvent
+  | SummaryEvent
   | RunErrorEvent
   | MessageUpdateEvent
   | UserMessageEvent

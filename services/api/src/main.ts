@@ -58,6 +58,7 @@ import { ConsoleEmailTransport, type EmailPort, SmtpEmailTransport } from './ema
 import { DrizzleHubRepo } from './hub-repo';
 import { type InProcessBrowserJobs, makeInProcessBrowserJobs } from './in-process-browser';
 import { DrizzlePublishRepo } from './publish-repo';
+import { withReplayTimestamp } from './replay-stamp';
 import { type EnqueueFn, buildServer, refundRunReservation } from './server';
 
 /**
@@ -542,11 +543,12 @@ async function main() {
     // so the log survives a refresh / API restart.
     loadRunEvents: async (runId: string) => {
       const rows = await db
-        .select({ event: schema.runEvents.event })
+        .select({ event: schema.runEvents.event, createdAt: schema.runEvents.createdAt })
         .from(schema.runEvents)
         .where(eq(schema.runEvents.runId, runId))
         .orderBy(asc(schema.runEvents.seq));
-      return rows.map((r) => r.event);
+      // Carry each frame's real time, so a reloaded chat times its turns correctly.
+      return rows.map((r) => withReplayTimestamp(r.event, r.createdAt));
     },
     authDb: db,
     accountRepo,

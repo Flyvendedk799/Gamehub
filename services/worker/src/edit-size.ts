@@ -124,3 +124,14 @@ export function describeChange(
   }
   return parts.join('\n\n');
 }
+
+/** Paths whose content differs from `before` (or that did not exist), in `after`'s order. For a
+ *  first build (`before` undefined) that is every file. */
+export function changedFilePaths(
+  before: ReadonlyMap<string, string> | undefined,
+  after: ReadonlyArray<{ path: string; content: string }>,
+): string[] {
+  return after
+    .filter((file) => before === undefined || before.get(file.path) !== file.content)
+    .map((file) => file.path);
+}
