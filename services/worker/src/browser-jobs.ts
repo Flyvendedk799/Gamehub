@@ -19,7 +19,7 @@ import type { RuntimeVerifyVerdict } from './run-generation';
 
 /** Synthetic-input step — structurally identical to the browser-worker union. */
 export type PlaytestStep =
-  | { kind: 'key'; code: string; frames?: number }
+  | { kind: 'key'; code: string; frames?: number; action?: string }
   | { kind: 'mouseMove'; x: number; y: number }
   | { kind: 'mouseDown'; button?: number }
   | { kind: 'mouseUp'; button?: number }

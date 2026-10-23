@@ -176,3 +176,37 @@ describe('selectGamePlaytestPlan: fighting shape', () => {
     expect(byGenre?.steps[0]).toMatchObject({ kind: 'key', code: 'KeyD' });
   });
 });
+
+describe('selectGamePlaytestPlan: action hints', () => {
+  it('tags the arena plan with the intent behind each key, for the worker to resolve', () => {
+    const plan = selectGamePlaytestPlan({ genre: 'fighting', dimensions: '3d' });
+    const keys = (plan?.steps ?? []).flatMap((s) => (s.kind === 'key' ? [s] : []));
+    expect(keys.filter((s) => s.action === 'forward').map((s) => s.code)).toEqual(['KeyW']);
+    expect(keys.filter((s) => s.action === 'attack').every((s) => s.code === 'KeyJ')).toBe(true);
+    expect(keys.filter((s) => s.action === 'heavy').every((s) => s.code === 'KeyK')).toBe(true);
+    // Every hinted step keeps a concrete fallback key for games that declare no controls.
+    for (const s of keys) expect(s.code).toMatch(/^(Key|Arrow)/);
+  });
+
+  it('leaves steps without a hint exactly as they were', () => {
+    const plan = selectGamePlaytestPlan('fighting');
+    for (const s of plan?.steps ?? []) {
+      if (s.kind === 'key') expect(s.action).toBeUndefined();
+    }
+  });
+});
+
+describe('selectGamePlaytestPlan: arena plan fits the browser job', () => {
+  it('has no wait steps and stays within the job budget', () => {
+    // The job has a hard 30 s ceiling and runs ~18 frames/s on the server. A `wait` over an
+    // unchanged snapshot extends itself by up to 180 frames, so a duel plan made of waits timed
+    // out every run (measured: 537 nominal frames, 30 s, mostly killed).
+    const steps = selectGamePlaytestPlan({ genre: 'fighting', dimensions: '3d' })?.steps ?? [];
+    expect(steps.some((s) => s.kind === 'wait')).toBe(false);
+    const frames = steps.reduce(
+      (n, s) => n + (s.kind === 'key' ? (s.frames ?? 15) : s.kind === 'wait' ? s.frames : 2),
+      0,
+    );
+    expect(frames).toBeLessThanOrEqual(300);
+  });
+});

@@ -592,6 +592,17 @@ describe('prompt-tailored interviews', () => {
     });
   });
 
+  describe('buildInterviewPlanPrompt: layers handed to the builder', () => {
+    it('tells the model that a brief which says "left to you" leaves those layers open', () => {
+      const instruction = buildInterviewPlanPrompt(
+        'A sword duel with parries and stamina. Left to you: the world, who you play, the twist.',
+      );
+      expect(instruction).toMatch(/left to you/i);
+      expect(instruction).toMatch(/OPEN: ask about them/);
+      expect(instruction).toContain('Left to you: the world, who you play, the twist.');
+    });
+  });
+
   describe('buildInterviewPlanPrompt', () => {
     it('carries the prompt and names every layer', () => {
       const instruction = buildInterviewPlanPrompt('an underwater roguelike');

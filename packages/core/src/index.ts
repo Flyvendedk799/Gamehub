@@ -217,6 +217,7 @@ export {
   listSupportedGenres,
   type FightingShape,
   type PlaybookStep,
+  type PlaytestAction,
   type PlaytestPlaybook,
 } from './playtest-playbooks.js';
 export {

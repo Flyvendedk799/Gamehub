@@ -166,6 +166,26 @@ describe('POST /v1/design/interview', () => {
     expect(complete).not.toHaveBeenCalled();
   });
 
+  it('drafts questions for a long, detailed brief instead of falling back to the static ones', async () => {
+    // Run a985c47a: a 2,189-character brief that spelled out the combat in detail and left the
+    // world, the cast, the loop and the twist to the builder. It was rejected for length, so the
+    // person got the generic questions. A long brief must reach the model like a short one.
+    respondWith(JSON.stringify(PLAN));
+    const brief = `Create a compact sword duel. ${'Timing, spacing and commitment decide every exchange. '.repeat(40)}Left to you: the world, who you play, the core loop and the twist.`;
+    expect(brief.length).toBeGreaterThan(2000);
+    const res = await makeApp().inject({
+      method: 'POST',
+      url: '/v1/design/interview',
+      headers: AS_ALICE,
+      payload: { prompt: brief },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { reason: string }).reason).toBe('ok');
+    const instruction = complete.mock.calls[0]?.[1]?.[0]?.content as string;
+    expect(instruction).toContain('Left to you: the world');
+  });
+
   it('rejects an empty or over-long prompt without calling the model', async () => {
     const app = makeApp();
     const empty = await app.inject({
@@ -180,7 +200,7 @@ describe('POST /v1/design/interview', () => {
       method: 'POST',
       url: '/v1/design/interview',
       headers: AS_ALICE,
-      payload: { prompt: 'x'.repeat(2001) },
+      payload: { prompt: 'x'.repeat(8001) },
     });
     expect(long.statusCode).toBe(400);
     expect(complete).not.toHaveBeenCalled();

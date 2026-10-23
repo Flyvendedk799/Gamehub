@@ -35,10 +35,19 @@ import type { PlaytestPredicate } from './eval/playtest-score.js';
  *  `playtest_game` tool's `Step` discriminated union. We re-encode here
  *  rather than importing the TypeBox schema so consumers (renderer,
  *  docs, future eval harness) don't pull TypeBox transitively. */
+/**
+ * What a key step is trying to do, independent of which key does it. The browser worker resolves
+ * it through the game's own controls manifest, so a playbook that names W for "forward" still
+ * presses the right key in a game that binds forward to I. `code` stays as the fallback.
+ */
+export type PlaytestAction = 'forward' | 'attack' | 'heavy';
+
 export interface PlaybookStep {
   kind: 'key' | 'mouse' | 'wait';
   /** For 'key': DOM KeyboardEvent.code. */
   code?: string;
+  /** For 'key': the intent behind `code`; resolved through the game's controls manifest. */
+  action?: PlaytestAction;
   /** For 'key' / 'mouse': how many RAF frames to hold. */
   frames?: number;
   /** For 'mouse': pointer-lock relative-delta. */
@@ -182,33 +191,40 @@ const FIGHTING_ARENA: PlaytestPlaybook = {
   genre: 'fighting',
   intent:
     'Arena duel: walk up to the opponent, then strike; opponent HP must be lower at the end than at the start.',
+  // SIZED FOR THE BROWSER JOB, which has a hard 30 s ceiling and runs about 18 frames a second on
+  // the server (software rendering). So: roughly 250 frames in total, and NO `wait` steps. A wait
+  // that sees an unchanged snapshot silently extends itself by up to 180 frames, and a duel's idle
+  // moments are exactly that; eight of them blew the ceiling and failed every run. Each strike is
+  // a key HOLD long enough to cover its own wind-up, which also keeps the clock moving.
   steps: [
-    { kind: 'wait', durationFrames: 20, assert: 'Let the round start.' },
-    { kind: 'key', code: 'KeyW', frames: 90, assert: 'Close the gap: hold forward (WASD).' },
-    { kind: 'key', code: 'KeyW', frames: 60, assert: 'Keep closing: forward again.' },
+    {
+      kind: 'key',
+      code: 'KeyW',
+      action: 'forward',
+      frames: 90,
+      assert: "Close the gap: hold forward (resolved through the game's controls when declared).",
+    },
     {
       kind: 'key',
       code: 'ArrowUp',
-      frames: 60,
-      assert: 'Forward on the arrow keys, in case the game binds those instead.',
+      frames: 40,
+      assert: 'Forward on the arrow keys, in case the game declares no controls and binds those.',
     },
-    { kind: 'key', code: 'KeyJ', frames: 5, assert: 'Light attack; wait out the wind-up below.' },
-    { kind: 'wait', durationFrames: 30, assert: 'The swing connects after its wind-up.' },
-    { kind: 'key', code: 'KeyJ', frames: 5, assert: 'Second light attack.' },
-    { kind: 'wait', durationFrames: 30, assert: 'The swing connects after its wind-up.' },
+    { kind: 'key', code: 'KeyJ', action: 'attack', frames: 14, assert: 'Light attack.' },
+    { kind: 'key', code: 'KeyJ', action: 'attack', frames: 14, assert: 'Light attack again.' },
     { kind: 'mouse', button: 0, assert: 'Click attack, in case attack is bound to the mouse.' },
-    { kind: 'wait', durationFrames: 30, assert: 'The swing connects after its wind-up.' },
-    { kind: 'key', code: 'KeyK', frames: 5, assert: 'Heavy attack.' },
-    { kind: 'wait', durationFrames: 40, assert: 'The heavy swing connects after its wind-up.' },
-    // An NPC that blocks or parries at random can absorb a few swings; keep striking so one
-    // unlucky exchange does not fail a game that works.
-    { kind: 'key', code: 'KeyJ', frames: 5, assert: 'Light attack again.' },
-    { kind: 'wait', durationFrames: 30, assert: 'The swing connects after its wind-up.' },
-    { kind: 'key', code: 'KeyK', frames: 5, assert: 'Heavy attack again.' },
+    { kind: 'key', code: 'KeyJ', action: 'attack', frames: 14, assert: 'Light attack again.' },
+    { kind: 'key', code: 'KeyK', action: 'heavy', frames: 22, assert: 'Heavy attack.' },
+    // An NPC that blocks or parries at random absorbs some swings; keep striking so one unlucky
+    // exchange does not fail a game that works.
+    { kind: 'key', code: 'KeyJ', action: 'attack', frames: 14, assert: 'Light attack again.' },
+    { kind: 'key', code: 'KeyK', action: 'heavy', frames: 22, assert: 'Heavy attack again.' },
     {
-      kind: 'wait',
-      durationFrames: 40,
-      assert: 'Opponent HP is LOWER than at the start of the run.',
+      kind: 'key',
+      code: 'KeyJ',
+      action: 'attack',
+      frames: 20,
+      assert: 'Final strike. Opponent HP is LOWER than at the start of the run.',
       predicates: [
         {
           field: 'opponentHp',
@@ -223,7 +239,7 @@ const FIGHTING_ARENA: PlaytestPlaybook = {
   watchFor: [
     'The opponent never approaches or reacts: an NPC that stands still is not a duel.',
     'Attack keys fire but the hitbox never reaches the opponent (reach shorter than the spacing the controls allow).',
-    'Strikes drain stamina to zero with no way to recover, so the second swing never starts.',
+    'Strikes drain stamina to zero with no way to recover, so the later swings never start.',
   ],
 };
 

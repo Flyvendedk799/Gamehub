@@ -41,6 +41,7 @@ import { Worker } from 'bullmq';
  *   WORKER_CONCURRENCY  parallel browser jobs (default: 2)
  */
 import { type Browser, type BrowserContext, type Page, type Route, chromium } from 'playwright';
+import { resolveControlKey } from './control-intents.js';
 
 function parseRedisUrl(url: string): { host: string; port: number } {
   try {
@@ -431,13 +432,15 @@ export type BrowserJobKind = 'runtime-verify' | 'playtest' | 'thumbnail';
  * frame count applies, and reads `window.__game.debug.snapshot()` before and
  * after every step so a caller can diff input → state.
  *
- * `key`      — hold `code` down for `frames` RAF frames, then release.
+ * `key`      — hold `code` down for `frames` RAF frames, then release. With an `action`
+ *              hint, `code` is replaced by the key the game's controls manifest binds to
+ *              that action (see control-intents.ts); `code` is the fallback.
  * `mouseMove`— move the pointer to a normalised (0..1) viewport coordinate.
  * `mouseDown`/`mouseUp` — press / release a mouse button (0=left,1=mid,2=right).
  * `wait`     — tick `frames` RAF frames with no input (let physics settle).
  */
 export type PlaytestStep =
-  | { kind: 'key'; code: string; frames?: number }
+  | { kind: 'key'; code: string; frames?: number; action?: string }
   | { kind: 'mouseMove'; x: number; y: number }
   | { kind: 'mouseDown'; button?: number }
   | { kind: 'mouseUp'; button?: number }
@@ -1305,6 +1308,22 @@ async function readSnapshot(page: Page): Promise<unknown> {
 }
 
 /**
+ * Read the controls manifest the game published via `window.__game.controls.define(...)`.
+ * Null when the game declares none, or the page cannot be read: the step then keeps its own key.
+ */
+async function readControlManifest(page: Page): Promise<unknown> {
+  try {
+    return await page.evaluate(() => {
+      const controls = (window as unknown as { __game?: { controls?: { manifest?: unknown } } })
+        .__game?.controls;
+      return controls?.manifest ?? null;
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Boot the game HTML in a hardened per-job context, wait for `window.__game`,
  * then dispatch each synthetic-input step — ticking RAF frames and reading
  * `window.__game.debug.snapshot()` before and after — and return the trace.
@@ -1338,6 +1357,8 @@ export async function runPlaytest(
 
   const stepResults: PlaytestStepResult[] = [];
   const bootErrors: string[] = [];
+  // The game's declared controls, read once and only if a step asks for an action.
+  let controlManifest: unknown = null;
 
   try {
     await page.setContent(data.htmlContent, {
@@ -1384,9 +1405,15 @@ export async function runPlaytest(
       switch (step.kind) {
         case 'key': {
           const frames = step.frames ?? 15;
-          await page.keyboard.down(step.code);
+          // Prefer the key the game itself declared for this intent over the playbook's guess.
+          let code = step.code;
+          if (step.action !== undefined) {
+            controlManifest ??= await readControlManifest(page);
+            code = resolveControlKey(controlManifest, step.action) ?? step.code;
+          }
+          await page.keyboard.down(code);
           await tickFrames(page, frames);
-          await page.keyboard.up(step.code);
+          await page.keyboard.up(code);
           break;
         }
         case 'mouseMove': {

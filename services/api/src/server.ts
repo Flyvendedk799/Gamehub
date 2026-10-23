@@ -2136,10 +2136,16 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (typeof body.prompt !== 'string' || body.prompt.trim() === '') {
       return reply.code(400).send({ error: 'prompt_required' });
     }
-    // Far below the build cap: this is a one-line idea, and the call is meant
-    // to be cheap. Anything longer has already answered these questions.
-    if (body.prompt.length > 2000) {
-      return reply.code(400).send({ error: 'prompt_too_long', max: 2000 });
+    // The same ceiling as the build route, because anything the build accepts is
+    // something this must be able to ask about. It used to be 2000 on the theory
+    // that a long prompt "has already answered these questions". It had not: a
+    // detailed brief spells out the mechanics and still hands the world, the
+    // cast, the loop and the twist to the builder. That prompt got a 400, the
+    // client fell back to the generic static questions, and the person was asked
+    // about a neon city for a sword duel. The call stays cheap regardless: output
+    // is capped at INTERVIEW_MAX_TOKENS and the route has one deadline.
+    if (body.prompt.length > 8000) {
+      return reply.code(400).send({ error: 'prompt_too_long', max: 8000 });
     }
     const prompt = body.prompt.trim();
 

@@ -7,7 +7,7 @@ import { Queue } from 'bullmq';
 /** One synthetic-input step in a playtest plan. Kept structurally identical to
  *  the browser-worker `PlaytestStep` union so the job payload round-trips. */
 export type PlaytestStep =
-  | { kind: 'key'; code: string; frames?: number }
+  | { kind: 'key'; code: string; frames?: number; action?: string }
   | { kind: 'mouseMove'; x: number; y: number }
   | { kind: 'mouseDown'; button?: number }
   | { kind: 'mouseUp'; button?: number }

@@ -17,6 +17,7 @@ import type { GameGenre } from '@playforge/shared';
 import type { FrameRef, PlaytestPredicate } from './eval/playtest-score.js';
 import {
   type PlaybookStep,
+  type PlaytestAction,
   type PlaytestPlaybook,
   getPlaytestPlaybook,
 } from './playtest-playbooks.js';
@@ -126,7 +127,7 @@ export function planPlaytest(html: string): PlaytestPlan {
  *  `BrowserJobsPort.playtest` steps; re-declared here so the planner has no
  *  dependency on the tools layer or the worker. */
 export type GamePlaytestStep =
-  | { kind: 'key'; code: string; frames?: number }
+  | { kind: 'key'; code: string; frames?: number; action?: PlaytestAction }
   | { kind: 'mouseMove'; x: number; y: number }
   | { kind: 'mouseDown'; button?: number }
   | { kind: 'mouseUp'; button?: number }
@@ -152,9 +153,12 @@ export interface GamePlaytestPlan {
 function projectPlaybookStep(step: PlaybookStep): GamePlaytestStep | null {
   if (step.kind === 'key') {
     if (step.code === undefined) return null;
-    return step.frames !== undefined
-      ? { kind: 'key', code: step.code, frames: step.frames }
-      : { kind: 'key', code: step.code };
+    return {
+      kind: 'key',
+      code: step.code,
+      ...(step.frames !== undefined ? { frames: step.frames } : {}),
+      ...(step.action !== undefined ? { action: step.action } : {}),
+    };
   }
   if (step.kind === 'wait') {
     // Playbook waits carry `durationFrames`; the worker step uses `frames`.
