@@ -1405,6 +1405,167 @@ describe('generateViaAgent() — per-run safety budget', () => {
     expect(prompt).toContain('the strike should follow the mouse');
   });
 
+  describe('fastDraft (first build)', () => {
+    const NL = String.fromCharCode(10);
+    const specDeclared = {
+      type: 'tool_execution_end',
+      toolCallId: 'spec1',
+      toolName: 'declare_game_spec',
+      isError: false,
+      result: { content: [] },
+    };
+    const run = async (opts: { fastDraft: boolean; events: unknown[] }) => {
+      const tree = new Map<string, string>(Object.entries(PREMIUM_STARTER_FILES.three));
+      tree.set('index.html', '<canvas id="game"></canvas>');
+      const reply = [
+        '=== FILE: src/main.js ===',
+        "import { createStage } from './engine/core.js'; // the real duel bootstrap for the sword game",
+        '=== END FILE ===',
+      ].join(NL);
+      const frame = JSON.stringify({
+        response: { candidates: [{ content: { parts: [{ text: reply }] } }] },
+      });
+      vi.stubGlobal('fetch', async () => new Response(`data: ${frame}${NL}${NL}`, { status: 200 }));
+      const fs = {
+        view: (path: string) => {
+          const content = tree.get(path);
+          return content === undefined ? null : { content, numLines: content.split(NL).length };
+        },
+        textFiles: () => [...tree].map(([path, content]) => ({ path, content })),
+        create: async (path: string, content: string) => {
+          tree.set(path, content);
+          return { path };
+        },
+      };
+      scriptedAgent = {
+        assistantText: RESPONSE_WITH_ARTIFACT,
+        events: opts.events as never,
+      };
+      const before = agentCalls.length;
+      try {
+        const result = await generateViaAgent(
+          {
+            prompt: 'a sword fighting game',
+            history: [],
+            ...(opts.fastDraft ? { fastDraft: true } : {}),
+            model: { provider: 'antigravity', modelId: 'gemini-3.8-flash-high' },
+            wire: 'antigravity-cloudcode',
+            apiKey: 'tok',
+          },
+          {
+            fs: fs as never,
+            gameMode: {
+              setEngine: () => {},
+              getCurrentEngine: () => 'three',
+              validate: () => ({ ok: true, engine: 'three', issues: [] }),
+              getSpec: () => ({ winCondition: 'Defeat the rival duelist' }) as never,
+            },
+          },
+        );
+        return { result, aborted: agentCalls.slice(before).some((c) => c.aborted) };
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    };
+
+    it('stops the loop once the host drafted the game and the spec is declared', async () => {
+      const { result, aborted } = await run({ fastDraft: true, events: [specDeclared] });
+      expect(aborted).toBe(true);
+      expect(result.message).toContain('What I chose');
+      expect(result.hostSummary).toContain('What I chose');
+      expect(result.interrupted).toBe(false);
+      expect(result.stoppedAtToolBudget).toBeUndefined();
+    });
+
+    it('keeps going when the spec has not been declared yet', async () => {
+      const { aborted } = await run({ fastDraft: true, events: [] });
+      expect(aborted).toBe(false);
+    });
+
+    it('does not stop a build that did not ask for the fast path', async () => {
+      const { aborted } = await run({ fastDraft: false, events: [specDeclared] });
+      expect(aborted).toBe(false);
+    });
+  });
+
+  it('applies a follow-up change request to the right file BEFORE the loop (antigravity edit mode)', async () => {
+    const NL = String.fromCharCode(10);
+    const FX = [
+      'export function spawnSlashArc(fx, pos, rotY) {',
+      '  const mesh = makeArc();',
+      '  mesh.rotation.z = rotY; // ignores the aim',
+      '  return mesh;',
+      '}',
+      ...Array.from(
+        { length: 30 },
+        (_, i) => `// padding line ${i} so the file is a realistic size`,
+      ),
+    ].join(NL);
+    const tree = new Map<string, string>([
+      ['index.html', '<canvas id="game"></canvas>'],
+      ['src/main.js', "import { spawnSlashArc } from './fx.js'; spawnSlashArc();"],
+      ['src/fx.js', FX],
+    ]);
+    const fixedFx = FX.replace('mesh.rotation.z = rotY;', 'mesh.rotation.y = rotY;');
+    const replies = [
+      '{"files": ["src/fx.js"], "why": "the arc is built in fx.js"}',
+      ['=== FILE: src/fx.js ===', fixedFx, '=== END FILE ==='].join(NL),
+    ];
+    let call = 0;
+    vi.stubGlobal('fetch', async () => {
+      const text = replies[Math.min(call++, replies.length - 1)] ?? '';
+      const frame = JSON.stringify({
+        response: { candidates: [{ content: { parts: [{ text }] } }] },
+      });
+      return new Response(`data: ${frame}${NL}${NL}`, { status: 200 });
+    });
+    const fs = {
+      view: (path: string) => {
+        const content = tree.get(path);
+        return content === undefined ? null : { content, numLines: content.split(NL).length };
+      },
+      textFiles: () => [...tree].map(([path, content]) => ({ path, content })),
+      create: async (path: string, content: string) => {
+        tree.set(path, content);
+        return { path };
+      },
+    };
+    scriptedAgent = { assistantText: RESPONSE_WITH_ARTIFACT };
+    try {
+      await generateViaAgent(
+        {
+          prompt: [
+            '[SYSTEM: you are EDITING]',
+            '',
+            '<prompt>',
+            'the strike should follow the mouse',
+            '</prompt>',
+          ].join(NL),
+          history: [],
+          editMode: true,
+          model: { provider: 'antigravity', modelId: 'gemini-3.8-flash-high' },
+          wire: 'antigravity-cloudcode',
+          apiKey: 'tok',
+        },
+        {
+          fs: fs as never,
+          gameMode: {
+            setEngine: () => {},
+            getCurrentEngine: () => 'three',
+            validate: () => ({ ok: true, engine: 'three', issues: [] }),
+          },
+        },
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(tree.get('src/fx.js')).toContain('mesh.rotation.y = rotY');
+    expect(tree.get('src/main.js')).toContain('spawnSlashArc');
+    const prompt = String((agentCalls[0]?.prompts[0] as { message: unknown }).message);
+    expect(prompt).toContain('ALREADY applied the user');
+    expect(prompt).toContain('the strike should follow the mouse');
+  });
+
   describe('fastEdit', () => {
     const NL = String.fromCharCode(10);
     const FX = [

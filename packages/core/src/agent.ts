@@ -2947,6 +2947,10 @@ export async function generateViaAgent(
   let draftNote = '';
   // Set when the host's loop-free edit landed; lets `fastEdit` skip the agent loop.
   let hostEdit: { files: string[]; why: string; polish: boolean; summary?: string } | null = null;
+  // What the host's own completions (draft, import repair, edit) spent. They run outside the agent
+  // loop, so nothing counted them: run 63a9a036 did a locate and a rewrite and was metered as
+  // 0 tokens and $0.
+  const hostUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0 };
   /** One plain Antigravity completion (system, user) -> text. Used by the draft and the repair. */
   const completeWithAntigravity = async (
     system: string,
@@ -2968,6 +2972,30 @@ export async function generateViaAgent(
       },
     );
     const done = await completion.result();
+    const used = (
+      done as {
+        usage?: {
+          input?: number;
+          output?: number;
+          cacheRead?: number;
+          cacheWrite?: number;
+          cost?: { total?: number };
+        };
+      }
+    ).usage;
+    if (used !== undefined) {
+      hostUsage.input += used.input ?? 0;
+      hostUsage.output += used.output ?? 0;
+      hostUsage.cacheRead += used.cacheRead ?? 0;
+      hostUsage.cacheWrite += used.cacheWrite ?? 0;
+      hostUsage.costUsd += used.cost?.total ?? 0;
+      // The caller meters tokens from turn_end events, so report this completion the same way.
+      deps.onEvent?.({
+        type: 'turn_end',
+        message: { role: 'assistant', content: [], usage: used },
+        toolResults: [],
+      } as unknown as AgentEvent);
+    }
     if (done.stopReason === 'error' || done.stopReason === 'aborted') {
       throw new Error(done.errorMessage ?? 'completion failed');
     }
@@ -3160,11 +3188,11 @@ ${edited.summary}`
         entry !== null && entry.content.trim().length > 0
           ? [createArtifact(entry.content, 0, input.artifactType)]
           : [],
-      inputTokens: 0,
-      outputTokens: 0,
-      cachedInputTokens: 0,
-      cacheCreationInputTokens: 0,
-      costUsd: 0,
+      inputTokens: hostUsage.input + hostUsage.cacheRead + hostUsage.cacheWrite,
+      outputTokens: hostUsage.output,
+      cachedInputTokens: hostUsage.cacheRead,
+      cacheCreationInputTokens: hostUsage.cacheWrite,
+      costUsd: hostUsage.costUsd,
       interrupted: false,
     };
   }
@@ -3507,11 +3535,13 @@ ${edited.summary}`
   const output: GenerateOutput = {
     message,
     artifacts: collected.artifacts,
-    inputTokens: aggregated.inputTotal,
-    outputTokens: aggregated.output,
-    cachedInputTokens: aggregated.cacheRead,
-    cacheCreationInputTokens: aggregated.cacheWrite,
-    costUsd: aggregated.costUsd,
+    // The agent loop's usage plus what the host's own completions spent.
+    inputTokens:
+      aggregated.inputTotal + hostUsage.input + hostUsage.cacheRead + hostUsage.cacheWrite,
+    outputTokens: aggregated.output + hostUsage.output,
+    cachedInputTokens: aggregated.cacheRead + hostUsage.cacheRead,
+    cacheCreationInputTokens: aggregated.cacheWrite + hostUsage.cacheWrite,
+    costUsd: aggregated.costUsd + hostUsage.costUsd,
     // A tool-budget stop is a FINISH, not a pause: the project ships as it stands and the user is
     // not asked to press continue (the run used to end "paused" every time the model could not
     // close out, so every run needed a manual nudge). Wall-clock and safe-boundary pauses still

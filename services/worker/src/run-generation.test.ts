@@ -2010,7 +2010,9 @@ describe('visual critique (BUILD_SPEED §3 — one frame, twice, never a loop)',
 
     // Two vision calls: one at the first passing playtest, one after the repair.
     expect(critiques).toBe(2);
-    expect(browserJobs.screenshots).toBe(4); // Two critiques plus final title/play evidence.
+    // Two critiques, plus the title shot. The play evidence reuses the second critique's frame:
+    // the files did not change after it, so booting the game again would give the same picture.
+    expect(browserJobs.screenshots).toBe(3);
     // Exactly one repair round, and it carried the finding.
     expect(result.repairRounds).toBe(1);
     expect(prompts).toHaveLength(2);
@@ -2071,6 +2073,61 @@ describe('visual critique (BUILD_SPEED §3 — one frame, twice, never a loop)',
       },
     );
     expect(offered).toBe(false);
+  });
+
+  describe('critique on a small, specific edit', () => {
+    const run = async (prompt: string, edit: (html: string) => string) => {
+      const store = new SnapshotStore(new InMemoryBlobStore());
+      const browserJobs = seeingBrowserJobs();
+      let critiques = 0;
+      await runGeneration(
+        {
+          prompt,
+          model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+          apiKey: 'sk-test',
+          initialFiles: new Map([['index.html', HTML]]),
+        },
+        {
+          store,
+          generate: async (_input, deps) => {
+            await deps.gameMode?.setSpec?.(SPEC);
+            await deps.fs?.create('index.html', edit(HTML));
+            return { ...emptyOutput('built it'), hostSummary: 'Here is what changed' };
+          },
+          browserJobs,
+          visionCritic: async () => {
+            critiques += 1;
+            return 'VERDICT: SHIP';
+          },
+        },
+      );
+      return { critiques, screenshots: browserJobs.screenshots };
+    };
+
+    it('skips the visual critique for a few-line fix, and still saves the two evidence frames', async () => {
+      const { critiques, screenshots } = await run('make the jump a bit lower', (h) =>
+        h.replace('</body>', '<!-- fixed --></body>'),
+      );
+      expect(critiques).toBe(0);
+      expect(screenshots).toBe(2);
+    });
+
+    it('still looks at the game for a polish request, however small the edit', async () => {
+      const { critiques } = await run('make it better', (h) =>
+        h.replace('</body>', '<!-- polished --></body>'),
+      );
+      expect(critiques).toBeGreaterThan(0);
+    });
+
+    it('still looks at the game after a large rewrite', async () => {
+      const { critiques } = await run('make the jump a bit lower', (h) =>
+        h.replace(
+          '</body>',
+          `${Array.from({ length: 80 }, (_, i) => `<!-- line ${i} -->`).join('\n')}</body>`,
+        ),
+      );
+      expect(critiques).toBeGreaterThan(0);
+    });
   });
 
   it('ships untouched when the frame reads finished — no repair, ONE call', async () => {
@@ -2484,7 +2541,8 @@ describe('visual critique — reserved round + settled frame', () => {
       },
     );
 
-    expect(settleFlags).toEqual([true, false, true]); // Critique, final title, final play.
+    // The critique's settled frame, then the title shot; the play evidence reuses the critique frame.
+    expect(settleFlags).toEqual([true, false]);
   });
 
   it('acts on findings even after the repair ceiling is spent — exactly one extra round', async () => {

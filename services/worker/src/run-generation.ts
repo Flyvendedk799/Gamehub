@@ -45,6 +45,7 @@ import {
   detectInteractivityResponse,
   extractUserRequest,
   generateViaAgent,
+  isOpenEndedPolishRequest,
   orphanedJsModulePaths,
   parseVisualCritique,
   recommendSkills,
@@ -74,6 +75,7 @@ import type { SnapshotStore, WriteResult } from '@playforge/storage';
 // the worker) — reuses the proven single-file game bundler for the verify gate.
 import { buildGameHtml } from '../../../packages/exporters/src/index';
 import { canOfferImageGeneration, makeAssetGenerator } from './asset-generator';
+import { SMALL_EDIT_LINES, countChangedLines } from './edit-size';
 import { createRunSignalAggregator } from './run-signal';
 import { analyzeSkillUsage } from './skill-usage-grep.js';
 import { buildSpecialistJobPlan } from './specialist-jobs.js';
@@ -593,6 +595,11 @@ export async function runGeneration(
   const generate = ports.generate ?? generateViaAgent;
   const validateScene = ports.validateScene ?? ENGINE_SCENE_VALIDATOR;
   const tree = new WorkingTree(req.initialFiles, req.initialBinaryFiles);
+  // The project as this run received it, to measure how much an edit changed.
+  const parentFiles: ReadonlyMap<string, string> | undefined =
+    req.initialFiles === undefined
+      ? undefined
+      : new Map(tree.toTextFiles().map((f) => [f.path, f.content] as const));
   // may9 Phase 8b — capture the parent entry-file (index.html) size NOW, before
   // the agent edits the tree, so the `done` tool's destructive-edit advisory can
   // compare the refined entry against the parent's and warn on a 40%+ unexplained
@@ -1423,8 +1430,22 @@ ${unreadableNote}`
 
   /** Capture a frame and critique it. Null when unavailable or it failed — a
    *  missing critique must never fail or block a run. */
+  // The play frame the critique captured, keyed by the files it was taken on. The final evidence
+  // reuses it when nothing changed since, instead of booting the game again for the same picture.
+  let lastPlayFrame = null as { key: string; pngBase64: string } | null;
+  /**
+   * A specific change that touched only a few lines cannot change how the game looks, so it does
+   * not earn the critique's ~40 seconds and vision call. A polish request, a first build and any
+   * sizeable rewrite still get one.
+   */
+  const critiqueNotWorthIt = (): boolean => {
+    if (!fastEditRun || parentFiles === undefined) return false;
+    if (isOpenEndedPolishRequest(typedRequest)) return false;
+    return countChangedLines(parentFiles, tree.toTextFiles()) <= SMALL_EDIT_LINES;
+  };
   const critiqueCurrentFrame = async (): Promise<VisualCritique | null> => {
     if (!canCritique || visionCalls >= MAX_VISUAL_CRITIQUES) return null;
+    if (critiqueNotWorthIt()) return null;
     // Only worth looking at a game that booted; a frame of a dead page tells us
     // nothing the boot gate has not already said far more precisely.
     if (lastRuntimeVerify?.booted !== true) return null;
@@ -1437,6 +1458,7 @@ ${unreadableNote}`
         playSettle: true,
       });
       if (frame === null || frame === undefined) return null;
+      lastPlayFrame = { key: treeKey(), pngBase64: frame.pngBase64 };
       const raw = await visionCritic?.({
         pngBase64: frame.pngBase64,
         mimeType: 'image/png',
@@ -1778,21 +1800,28 @@ ${unreadableNote}`
   if (browserJobs?.screenshot && lastRuntimeVerify?.booted) {
     const finalEntry = tree.view('index.html');
     if (finalEntry) {
-      quality.visualEvidence = [];
-      for (const moment of ['title', 'play'] as const) {
+      const evidenceHtml = await inlineForVerify(finalEntry.content);
+      // The critique already played the game and captured this exact frame; reuse it when the
+      // files are unchanged. The two shots are independent, so they run side by side.
+      const reusablePlay =
+        lastPlayFrame !== null && lastPlayFrame.key === treeKey() ? lastPlayFrame.pngBase64 : null;
+      const capture = async (moment: 'title' | 'play') => {
         try {
-          const frame = await browserJobs.screenshot(await inlineForVerify(finalEntry.content), {
-            playSettle: moment === 'play',
-          });
-          if (frame)
-            quality.visualEvidence.push({
-              moment,
-              blobKey: await ports.store.putBlob(Buffer.from(frame.pngBase64, 'base64')),
-            });
+          const png =
+            moment === 'play' && reusablePlay !== null
+              ? reusablePlay
+              : (await browserJobs.screenshot?.(evidenceHtml, { playSettle: moment === 'play' }))
+                  ?.pngBase64;
+          if (png === undefined) return null;
+          return { moment, blobKey: await ports.store.putBlob(Buffer.from(png, 'base64')) };
         } catch {
-          /* Missing visual evidence stays missing; it cannot invent a pass. */
+          return null; // Missing visual evidence stays missing; it cannot invent a pass.
         }
-      }
+      };
+      const shots = await Promise.all([capture('title'), capture('play')]);
+      quality.visualEvidence = shots.filter(
+        (shot): shot is { moment: 'title' | 'play'; blobKey: string } => shot !== null,
+      );
     }
   }
 
