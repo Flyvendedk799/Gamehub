@@ -11,7 +11,7 @@
  */
 
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
-import { Type } from '@sinclair/typebox';
+import { type Static, Type } from '@sinclair/typebox';
 import { REDACTED_PATH_SENTINEL, REDACTION_POISON_KEY } from '../context-prune.js';
 import type { CameraGuard } from './camera-pin.js';
 import { modulesOrphanedByRewrite } from './done-heuristics.js';
@@ -569,6 +569,19 @@ function throwStrReplaceAmbiguous(oldStr: string, fileContent: string, path: str
   throw new Error(`${head}\n\n${guidance}`);
 }
 
+const VIEW_ALIASES = new Set(['view_range', 'view-range', 'viewrange', 'read', 'open', 'cat']);
+
+/** Map the near-miss command names models actually send onto `view`. Anything else passes through. */
+export function normalizeEditorCommand(args: unknown): unknown {
+  if (typeof args !== 'object' || args === null) return args;
+  const rec = args as Record<string, unknown>;
+  const cmd = rec['command'];
+  if (typeof cmd === 'string' && VIEW_ALIASES.has(cmd.toLowerCase())) {
+    return { ...rec, command: 'view' };
+  }
+  return args;
+}
+
 export function makeTextEditorTool(
   fs: TextEditorFsCallbacks,
   editBudget?: EditBudget,
@@ -680,6 +693,9 @@ export function makeTextEditorTool(
       '(strip the four-space-padded line number and the two trailing spaces). Including the prefix is the #1 cause of ' +
       '"old_str not found" errors — the file on disk has no line numbers, only the view tool adds them.',
     parameters: TextEditorParams,
+    // Models keep sending `command: "view_range"` (the name of the argument, not a command).
+    // Schema validation rejected every one of them, and run af88707f lost about ten calls to it.
+    prepareArguments: (args) => normalizeEditorCommand(args) as Static<typeof TextEditorParams>,
     async execute(_toolCallId, params): Promise<AgentToolResult<TextEditorDetails>> {
       // Improver1 §1 — echo-proof intercept. When the model has
       // pasted the redaction placeholder back as args (the

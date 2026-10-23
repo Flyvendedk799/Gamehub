@@ -1754,3 +1754,21 @@ describe('text-editor batching guidance — BUILD_SPEED §4', () => {
     expect(tool.description).toMatch(/round trip/);
   });
 });
+
+describe('normalizeEditorCommand', () => {
+  it('maps view_range and friends onto view, and leaves real commands alone', async () => {
+    const { normalizeEditorCommand } = await import('./text-editor.js');
+    expect(
+      normalizeEditorCommand({ command: 'view_range', path: 'a.js', view_range: [1, 5] }),
+    ).toEqual({
+      command: 'view',
+      path: 'a.js',
+      view_range: [1, 5],
+    });
+    expect(normalizeEditorCommand({ command: 'str_replace', path: 'a.js' })).toEqual({
+      command: 'str_replace',
+      path: 'a.js',
+    });
+    expect(normalizeEditorCommand(null)).toBeNull();
+  });
+});

@@ -73,6 +73,7 @@ import {
 } from './call-budget.js';
 import { buildTransformContext } from './context-prune.js';
 import { applyEditRequest } from './edit-pipeline.js';
+import { buildPolishRequest, isOpenEndedPolishRequest } from './edit-request.js';
 import type { EditorSession } from './editor/session.js';
 import { type ContextMessage, pruneContextAtomic } from './engine/context.js';
 import { remapProviderError } from './errors.js';
@@ -2921,6 +2922,8 @@ export async function generateViaAgent(
   // it. Cheap when nothing is broken (no model call); non-fatal by design.
   // Appended to the user message when the host drafted the game before the loop started.
   let draftNote = '';
+  // Set when the host's loop-free edit landed; lets `fastEdit` skip the agent loop.
+  let hostEdit: { files: string[]; why: string; polish: boolean } | null = null;
   /** One plain Antigravity completion (system, user) -> text. Used by the draft and the repair. */
   const completeWithAntigravity = async (
     system: string,
@@ -3029,15 +3032,20 @@ Latest request: ${input.prompt}`
       // follow-up the loop made 115 editor calls, 12 failed and the one that landed changed the
       // page shell, so the user's request was never applied.
       const request = extractUserRequest(input.prompt);
+      // First turn only: a repair round re-enters generate() with the verifier's failure text as
+      // the prompt and the transcript as history. Run af88707f fed that text to the edit step as
+      // if the user had typed it, and the host rewrote main.js against "PLAYTEST REPAIR - ...".
       if (
         stage === 'preflight' &&
         input.editMode === true &&
+        input.history.length === 0 &&
         !isResumeRequest(request) &&
         unmodifiedStarterEngine((path) => fsForRepair.view(path)?.content ?? null) === null
       ) {
         try {
+          const polish = isOpenEndedPolishRequest(request);
           const edit = await applyEditRequest({
-            request,
+            request: polish ? buildPolishRequest(request) : request,
             listFiles: () => fsForRepair.textFiles?.() ?? [],
             write: async (path, content) => {
               await fsForRepair.create(path, content);
@@ -3050,7 +3058,12 @@ Latest request: ${input.prompt}`
           cappedBudgetGrantsInspection = true;
           note = `
 
-[system-note] The host has ALREADY applied the user's requested change (edited ${edit.files.join(', ')}): "${request.slice(0, 300)}". Do NOT redo or rewrite it. Verify with validate_game_scene and a quick playtest that it behaves EXACTLY as requested; fix only what is wrong with small patch / str_replace edits; then call done.`;
+[system-note] The host has ALREADY applied the user's requested change (edited ${edit.files.join(', ')}): "${request.slice(0, 300)}". Do NOT redo or rewrite it. Verify with validate_game_scene and a quick playtest that it behaves EXACTLY as requested; fix only what is wrong with small patch / str_replace edits; then call done.${
+            polish
+              ? ' This was a general polish request, so there is no single value to assert: call declare_edit_intent with checks: [] rather than inventing a field, and in your closing summary list ONLY visual or feel changes that are really in the code (view them first) — never claim an effect you did not see.'
+              : ''
+          }`;
+          hostEdit = { files: edit.files, why: edit.why, polish };
           log.info('[generate] step=edit_pipeline', { ...ctx, files: edit.files, why: edit.why });
         } catch (editErr) {
           log.warn('[generate] step=edit_pipeline.failed', { ...ctx, error: String(editErr) });
@@ -3062,6 +3075,30 @@ Latest request: ${input.prompt}`
     return note;
   }
   draftNote = await repairBrokenProject('preflight');
+
+  // Fast path: the host already made the change, and the caller verifies it in a real browser, so
+  // the agent loop (several minutes of re-reading files to arrive at the same verify) is skipped.
+  // The message is what lands in the repair history if verification fails and the loop has to run.
+  if (input.fastEdit === true && hostEdit !== null && deps.fs !== undefined) {
+    clearTimeout(budgetTimer);
+    const entry = deps.fs.view('index.html');
+    const edited: { files: string[]; why: string; polish: boolean } = hostEdit;
+    log.info('[generate] step=fast_edit.return', { ...ctx, files: edited.files });
+    const what = edited.why.length > 0 ? ` ${edited.why.replace(/\.?$/, '.')}` : '';
+    return {
+      message: `${edited.polish ? 'Polished the game' : 'Applied your change'} (${edited.files.join(', ')}).${what}`,
+      artifacts:
+        entry !== null && entry.content.trim().length > 0
+          ? [createArtifact(entry.content, 0, input.artifactType)]
+          : [],
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      costUsd: 0,
+      interrupted: false,
+    };
+  }
 
   log.info('[generate] step=send_request', ctx);
   const sendStart = Date.now();

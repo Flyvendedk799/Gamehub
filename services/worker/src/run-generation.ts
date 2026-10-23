@@ -971,6 +971,10 @@ export async function runGeneration(
     // repair round has appended to `history` — so the camera-swap guard (and
     // any other edit-only guard) engages on the actual edit turn.
     ...(req.initialFiles !== undefined ? { editMode: true } : {}),
+    // A change request lands through the host's loop-free edit and is verified in a real browser
+    // below; the agent loop only runs if that verification fails. A breakage report still needs
+    // the agent (it must reproduce before it fixes), so it opts out.
+    ...(isIteration && editRequest.kind === 'change' ? { fastEdit: true } : {}),
     agentBudget: { maxToolCalls, maxWallClockMs },
     // WS-D — pause the agent at the next safe boundary once it has asked a
     // question (the existing continuation seam: agent.ts aborts cleanly when

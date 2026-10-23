@@ -182,6 +182,8 @@ export {
   buildBreakageDiagnosisPrompt,
   type EditRequestKind,
   type EditRequestClassification,
+  buildPolishRequest,
+  isOpenEndedPolishRequest,
 } from './edit-request.js';
 export {
   classifyArtifactType,
@@ -381,6 +383,12 @@ export interface GenerateInput {
    *  they must protect. When omitted, edit-mode falls back to
    *  `history.length > 0` (the desktop/design behaviour). */
   editMode?: boolean | undefined;
+  /** Fast path for a change request on an existing game: when the host's loop-free edit
+   *  (locate file, rewrite it) lands, return immediately instead of starting the agent loop. The
+   *  caller verifies the result deterministically in a real browser and only re-enters the loop,
+   *  with the failure as the prompt, when that check fails. A follow-up that took 15 minutes in
+   *  the loop takes about one minute here. Ignored unless the host edit actually succeeded. */
+  fastEdit?: boolean | undefined;
   /** gameplan §A6 — engine pin for game-mode runs (set by the New-design
    *  dialog or carried from a prior snapshot). When omitted on a game run
    *  the agent calls `choose_engine` first. */

@@ -88,3 +88,26 @@ describe('buildBreakageDiagnosisPrompt', () => {
     expect(p).toMatch(/controls that never reach the scene/i);
   });
 });
+
+describe('open-ended polish requests', () => {
+  it('recognises general quality asks and nothing specific', async () => {
+    const { isOpenEndedPolishRequest, buildPolishRequest } = await import('./edit-request.js');
+    for (const p of [
+      'Polish the game and make it better',
+      'make it better',
+      'improve the game',
+      'make the game look better',
+    ]) {
+      expect(isOpenEndedPolishRequest(p), p).toBe(true);
+    }
+    for (const p of [
+      'make the jump lower',
+      'My character is facing wrong way',
+      'add a double jump and polish nothing else about the level layout please, I want longer platforms',
+      '',
+    ]) {
+      expect(isOpenEndedPolishRequest(p), p).toBe(false);
+    }
+    expect(buildPolishRequest('make it better')).toContain('SEE and FEEL');
+  });
+});

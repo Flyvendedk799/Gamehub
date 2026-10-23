@@ -152,3 +152,54 @@ export function buildBreakageDiagnosisPrompt(userRequest: string): string {
     '   evidence that it is fixed is the trace, not the diff.',
   ].join('\n');
 }
+
+/**
+ * Open-ended quality requests: "polish the game", "make it better", "improve it".
+ *
+ * They name no value and no behaviour, so the literal edit prompt ("do exactly what was asked and
+ * nothing else") had nothing to do, and run af88707f spent 15 minutes on invisible hit-detection
+ * tweaks while the user, who wanted to SEE a better game, felt it "did not do much". The gate was
+ * worse: with nothing to assert, the agent asserted that a `round` field it had just invented was
+ * greater than zero.
+ */
+const POLISH_PATTERNS: ReadonlyArray<RegExp> = [
+  /\bpolish(?:ed|ing)?\b/i,
+  /\bmake (?:it|the game|this)(?: a lot| much| way)? (?:better|nicer|prettier|cooler|more polished|more fun|feel better|look better)\b/i,
+  /\b(?:improve|enhance|upgrade|juice(?: up)?|spruce up)\s+(?:it|the game|this|everything|the (?:graphics|visuals|feel))\b/i,
+  /^\s*(?:improve|make it better|more polish|better)\s*[.!]?\s*$/i,
+];
+
+/** True for a request that asks for general quality rather than one named change. */
+export function isOpenEndedPolishRequest(prompt: string): boolean {
+  const text = typeof prompt === 'string' ? prompt.trim() : '';
+  if (text.length === 0 || text.length > 100) return false;
+  // A named change ("add a double jump", "make the platforms longer") is a change, whatever else
+  // the sentence says about polish.
+  if (
+    /\b(?:add|remove|delete|change|fix|longer|shorter|bigger|smaller|faster|slower|higher|lower)\b/i.test(
+      text,
+    )
+  ) {
+    return false;
+  }
+  return POLISH_PATTERNS.some((re) => re.test(text));
+}
+
+/**
+ * Turn a vague quality request into a concrete brief for the edit step: pick a few upgrades a
+ * player will SEE and FEEL, leave mechanics alone. Concrete beats "do exactly what was asked".
+ */
+export function buildPolishRequest(userRequest: string): string {
+  return [
+    `The user asked, in general terms: "${userRequest.trim()}"`,
+    '',
+    'That names no single change, so choose 3 to 5 upgrades a player will clearly SEE and FEEL in the first ten seconds of play, and make them. Pick the ones this game is missing, from:',
+    '- Impact feedback: hit flash or squash on the victim, impact sparks or particles, short screen shake and a brief hit-stop on a clean hit, a distinct effect on block / parry / miss.',
+    '- Motion: anticipation and follow-through on attacks, smooth easing instead of snapping, a readable idle and movement animation.',
+    '- Readability: HUD that shows health / stamina / state clearly, floating damage or combo numbers, a clear win / lose / restart screen.',
+    '- Atmosphere: lighting, fog or background depth, colour grading, a camera that follows the action.',
+    '- Audio: a short sound for each of attack, hit, block, win, lose.',
+    '',
+    'Do NOT change rules, controls, balance numbers or the genre, and do not rewrite working systems. Additive, visible changes only, in the files that already own that behaviour.',
+  ].join('\n');
+}
