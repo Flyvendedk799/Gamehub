@@ -42,3 +42,36 @@ describe('countChangedLines', () => {
     ).toBeGreaterThan(SMALL_EDIT_LINES);
   });
 });
+
+describe('unifiedDiff / describeChange', () => {
+  const OLD = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].join('\n');
+
+  it('shows only the changed lines with a little context', async () => {
+    const { unifiedDiff } = await import('./edit-size');
+    const diff = unifiedDiff(OLD, OLD.replace('d', 'D'));
+    expect(diff).toContain('-d');
+    expect(diff).toContain('+D');
+    expect(diff).toContain(' c');
+    expect(diff).not.toContain(' a');
+  });
+
+  it('describes each changed file, skips unchanged ones, and stays within its cap', async () => {
+    const { describeChange } = await import('./edit-size');
+    const before = new Map([
+      ['a.js', OLD],
+      ['b.js', 'same'],
+    ]);
+    const text = describeChange(before, [
+      { path: 'a.js', content: OLD.replace('d', 'D') },
+      { path: 'b.js', content: 'same' },
+    ]);
+    expect(text).toContain('--- a.js (+1 -1)');
+    expect(text).not.toContain('b.js');
+    const big = describeChange(
+      new Map([['m.js', 'x']]),
+      [{ path: 'm.js', content: Array.from({ length: 2000 }, (_, i) => `line ${i}`).join('\n') }],
+      500,
+    );
+    expect(big.length).toBeLessThan(700);
+  });
+});

@@ -1364,7 +1364,10 @@ export async function generateViaAgent(
     // passing because the game kept being a working game, so a request could be
     // ignored across many runs while every run reported success. Registered only
     // on an iteration: on a first build there is no prior behaviour to change.
-    if (deps.gameMode.isIteration === true) {
+    // First turn of an iteration only. A repair round is a continuation (history is not empty) and
+    // is told what failed; offering the tool there let a flailing agent declare a nonsense intent
+    // ("Fix combat playtest so opponent takes damage...") that then became the run's own failure.
+    if (deps.gameMode.isIteration === true && input.history.length === 0) {
       defaultTools.push(
         makeDeclareEditIntentTool(
           deps.gameMode.setEditIntent,
@@ -3130,6 +3133,7 @@ Latest request: ${input.prompt}`
           }
           const edit = await applyEditRequest({
             progress: say,
+            debug: (detail) => console.warn(`[edit-pipeline] ${detail}`),
             request: polish ? buildPolishRequest(request, seen) : request,
             listFiles: () => fsForRepair.textFiles?.() ?? [],
             write: async (path, content) => {

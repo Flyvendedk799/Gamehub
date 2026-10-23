@@ -53,6 +53,12 @@ describe('wrap-up warning', () => {
   });
 });
 
+describe('playbook lookups count as reading', () => {
+  it('so they cannot reset a streak of reads', () => {
+    expect(isInspectionCall('get_playtest_playbook', {})).toBe(true);
+  });
+});
+
 describe('stalled reading', () => {
   it('nudges once a streak of reads reaches the threshold, and not before', async () => {
     const { shouldNudgeStalledReading, STALLED_READING_CALLS, stalledReadingReminder } =

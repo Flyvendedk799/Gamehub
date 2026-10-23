@@ -156,6 +156,8 @@ export interface EditOptions {
   generate: (system: string, user: string, reasoning: string) => Promise<string>;
   /** Plain-language progress for the chat, so the minutes this takes are not silent. */
   progress?: (message: string) => void;
+  /** Technical detail for the server log: why an attempt was thrown away. */
+  debug?: (message: string) => void;
 }
 
 export interface EditResult {
@@ -193,8 +195,10 @@ export async function applyEditRequest(opts: EditOptions): Promise<EditResult> {
   let problems: string[] | undefined;
   // 2) rewrite them; one retry that shows the model exactly what its attempt broke.
   for (let attempt = 0; attempt < 2; attempt++) {
-    if (attempt > 0)
+    if (attempt > 0) {
+      opts.debug?.(`attempt ${attempt} discarded: ${(problems ?? []).join(' | ').slice(0, 500)}`);
       opts.progress?.('The first rewrite broke something, so I am redoing it more carefully…');
+    }
     const targets = located
       .map((p) => sources.find((f) => f.path === p))
       .filter(Boolean) as ProjectFile[];

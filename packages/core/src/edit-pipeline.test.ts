@@ -110,6 +110,17 @@ describe('applyEditRequest', () => {
   });
 });
 
+describe('applyEditRequest diagnostics', () => {
+  it('reports why the first attempt was thrown away, for the server log', async () => {
+    const h = harness([LOCATE, block('src/fx.js', '// shortened'), block('src/fx.js', GOOD_FX)]);
+    const seen: string[] = [];
+    await applyEditRequest({ ...h.options, debug: (m: string) => seen.push(m) });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toContain('attempt 1 discarded');
+    expect(seen[0]).toContain('much shorter than the original');
+  });
+});
+
 describe('applyEditRequest with SEARCH/REPLACE hunks', () => {
   const hunkReply = (search: string, replace: string) =>
     [

@@ -75,7 +75,7 @@ import type { SnapshotStore, WriteResult } from '@playforge/storage';
 // the worker) — reuses the proven single-file game bundler for the verify gate.
 import { buildGameHtml } from '../../../packages/exporters/src/index';
 import { canOfferImageGeneration, makeAssetGenerator } from './asset-generator';
-import { SMALL_EDIT_LINES, countChangedLines } from './edit-size';
+import { SMALL_EDIT_LINES, countChangedLines, describeChange } from './edit-size';
 import { createRunSignalAggregator } from './run-signal';
 import { analyzeSkillUsage } from './skill-usage-grep.js';
 import { buildSpecialistJobPlan } from './specialist-jobs.js';
@@ -1684,6 +1684,21 @@ ${unreadableNote}`
       { role: 'assistant', content: output.message },
     );
     nextPrompt = action.instruction;
+    // The first repair after a host edit knows something the generic failure text does not: this
+    // same check passed on the previous version, so the cause is in the lines the host just
+    // changed. Without that the agent rediscovers the code by reading (run 0d24103a: two minutes,
+    // no edits, and a nonsense edit intent that became the run's final failure).
+    if (fastEditRun && repairRounds === 0 && parentFiles !== undefined) {
+      const changeText = describeChange(parentFiles, tree.toTextFiles());
+      if (changeText.length > 0) {
+        nextPrompt = `${action.instruction}
+
+REGRESSION — this check PASSED on the previous version of the game. The only thing that changed is the edit below, made for the player's request: "${typedRequest.slice(0, 300)}". So the cause is in the changed lines: start there, with ONE targeted str_replace. Do not re-read whole files and do NOT call declare_edit_intent. If the check fails because the change legitimately altered timing (for example a longer attack windup), adjust the change so the same inputs still connect; do not weaken the check and do not delete the new behaviour.
+
+WHAT CHANGED (- before, + after):
+${changeText}`;
+      }
+    }
     repairRounds += 1;
     say(
       `A check failed in the browser, so I am fixing it (attempt ${repairRounds} of ${maxRepairRounds})…`,

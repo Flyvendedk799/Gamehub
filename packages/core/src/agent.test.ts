@@ -2607,6 +2607,40 @@ describe('generateViaAgent() — convergence-detector — Improver1 §7', () => 
   });
 });
 
+describe('declare_edit_intent registration', () => {
+  const toolNames = async (history: Array<{ role: 'user' | 'assistant'; content: string }>) => {
+    scriptedAgent = { assistantText: RESPONSE_WITH_ARTIFACT };
+    const before = agentCalls.length;
+    await generateViaAgent(
+      { prompt: 'make the combat better', history, model: MODEL, apiKey: 'sk-test' },
+      {
+        gameMode: {
+          setEngine: () => {},
+          getCurrentEngine: () => 'phaser',
+          validate: () => ({ ok: true, engine: 'phaser', issues: [] }),
+          isIteration: true,
+        },
+      },
+    );
+    const tools = (agentCalls[before]?.options.initialState?.tools ?? []) as Array<{
+      name?: string;
+    }>;
+    return new Set(tools.map((t) => t.name));
+  };
+
+  it('is offered on the first turn of an iteration', async () => {
+    expect((await toolNames([])).has('declare_edit_intent')).toBe(true);
+  });
+
+  it('is not offered in a repair round, so a flailing agent cannot gate the run on a nonsense intent', async () => {
+    const names = await toolNames([
+      { role: 'user', content: 'make the combat better' },
+      { role: 'assistant', content: 'done' },
+    ]);
+    expect(names.has('declare_edit_intent')).toBe(false);
+  });
+});
+
 describe('Phase-1.7 game-feel library registration', () => {
   /** Collect the registered tool names from the captured Agent init state. */
   function registeredToolNames(): Set<string> {

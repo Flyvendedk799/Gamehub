@@ -24,6 +24,8 @@ export function isInspectionCall(
   args: Record<string, unknown> | undefined,
 ): boolean {
   if (toolName === 'list_files' || toolName === 'set_todos') return true;
+  // Looking up the playbook again does not change anything either; it kept resetting the streak.
+  if (toolName === 'get_playtest_playbook') return true;
   if (toolName === 'str_replace_based_edit_tool') {
     const command = args?.['command'];
     return command === 'view' || command === 'find';

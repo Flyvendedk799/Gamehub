@@ -1175,6 +1175,44 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     });
   });
 
+  it('tells the first repair after a host edit exactly which lines changed, and that the check passed before', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = queuedBrowserJobs([
+      invertedPlaytest(),
+      invertedPlaytest(),
+      invertedPlaytest(),
+      passingPlaytest(),
+    ]);
+    const prompts: string[] = [];
+    const agent: GenerateFn = async (input, deps) => {
+      prompts.push(input.prompt);
+      await deps.gameMode?.setSpec?.(TOPDOWN_SPEC);
+      if (prompts.length === 1) {
+        await deps.fs?.create(
+          'index.html',
+          RED_SQUARE.replace('</body>', '<!-- slower windup --></body>'),
+        );
+      }
+      return { ...emptyOutput('built'), ...(prompts.length === 1 ? { hostSummary: 'x' } : {}) };
+    };
+
+    await runGeneration(
+      {
+        prompt: 'make the attacks slower',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+        initialFiles: new Map([['index.html', RED_SQUARE]]),
+      },
+      { store, generate: agent, browserJobs },
+    );
+
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain('REGRESSION');
+    expect(prompts[1]).toContain('PASSED on the previous version');
+    expect(prompts[1]).toContain('slower windup');
+    expect(prompts[1]).toContain('do NOT call declare_edit_intent');
+  });
+
   it('a play check that fails once and then passes is a flake: it ships without a repair round', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());
     const browserJobs = queuedBrowserJobs([invertedPlaytest(), passingPlaytest()]);
