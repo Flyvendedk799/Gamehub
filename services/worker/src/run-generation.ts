@@ -42,6 +42,7 @@ import {
   createEditorSession,
   decideRepairAction,
   detectInteractivityResponse,
+  extractUserRequest,
   generateViaAgent,
   orphanedJsModulePaths,
   parseVisualCritique,
@@ -1268,14 +1269,18 @@ ${unreadableNote}`
   // An iteration that reports the game is BROKEN gets a diagnosis pass, not a
   // tweak pass. See `classifyEditRequest` — project 687f2ddb answered "Game does
   // not run" by asserting that a zone counter changed, and shipped.
-  const editRequest = isIteration ? classifyEditRequest(req.prompt) : ({ kind: 'change' } as const);
+  // Classify what the user TYPED, not the continuation recap or edit wrapper around it.
+  const typedRequest = extractUserRequest(req.prompt);
+  const editRequest = isIteration
+    ? classifyEditRequest(typedRequest)
+    : ({ kind: 'change' } as const);
   if (editRequest.kind === 'breakage') {
     console.log(
       `[run-generation] iteration reads as a breakage report (matched: "${editRequest.matched}") — running the diagnosis pass`,
     );
   }
   let nextPrompt =
-    editRequest.kind === 'breakage' ? buildBreakageDiagnosisPrompt(req.prompt) : req.prompt;
+    editRequest.kind === 'breakage' ? buildBreakageDiagnosisPrompt(typedRequest) : req.prompt;
   let output: GenerateOutput = await generate(buildInput(nextPrompt, history), deps);
   let repairRounds = 0;
   let shipReason: ShipReason = 'no_verdict';

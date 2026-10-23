@@ -2077,7 +2077,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
 
     // Check for a paused continuation from a previous run on this project.
-    const paused = await deps.runRepo.getPausedContinuation(project.id);
+    const paused = await deps.runRepo.getPausedContinuation(project.id, run.id);
 
     // On an iteration (the project already has a snapshot), seed the agent with
     // the project's engine + the prior game spec so it EDITS the existing game

@@ -111,3 +111,20 @@ describe('open-ended polish requests', () => {
     expect(buildPolishRequest('make it better')).toContain('SEE and FEEL');
   });
 });
+
+describe('real messages from a live project', () => {
+  const COMBAT =
+    'Combat is pretty hard to do properly, i cant see what im doing and it needs improvement in general';
+
+  it('a readability complaint is a change request, not a broken game', () => {
+    expect(classifyEditRequest(COMBAT).kind).toBe('change');
+    expect(classifyEditRequest("i can't see anything").kind).toBe('breakage');
+  });
+
+  it('a general quality complaint gets the polish brief, so the edit has something to do', async () => {
+    const { isOpenEndedPolishRequest } = await import('./edit-request.js');
+    expect(isOpenEndedPolishRequest(COMBAT)).toBe(true);
+    expect(isOpenEndedPolishRequest('the combat feels clunky')).toBe(true);
+    expect(isOpenEndedPolishRequest('make the enemy attack faster')).toBe(false);
+  });
+});

@@ -1834,6 +1834,39 @@ describe('resume / continuation', () => {
   });
 });
 
+describe('stale paused run', () => {
+  it('does not hijack a new prompt once a later run has already continued it', async () => {
+    const repo = new InMemoryProjectRepo();
+    const runRepo = new InMemoryRunRepo();
+    const project = await repo.create({ ownerId: 'alice', name: 'Game', engine: 'phaser' });
+
+    // An old run paused, and the user then continued it: a LATER run exists and completed. The old
+    // run keeps status 'paused' (nothing closes it).
+    const paused = await runRepo.create({ projectId: project.id, userId: 'alice' });
+    await runRepo.setPaused(paused.id, { decisionRecap: 'half built' }, 'stale-manifest');
+    await new Promise((r) => setTimeout(r, 5));
+    const later = await runRepo.create({ projectId: project.id, userId: 'alice' });
+    await runRepo.updateStatus(later.id, 'completed');
+
+    const enqueued: Array<Parameters<EnqueueFn>[0]> = [];
+    const enqueue: EnqueueFn = async (input) => {
+      enqueued.push(input);
+    };
+    const app = makeApp({ repo, runRepo, enqueue });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${project.id}/generate`,
+      headers: AS_ALICE,
+      payload: { prompt: 'make the combat easier to read' },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(enqueued).toHaveLength(1);
+    expect(enqueued[0]?.continuation).toBeUndefined();
+    expect(enqueued[0]?.parentManifestKey).not.toBe('stale-manifest');
+  });
+});
+
 describe('concurrent run cap', () => {
   it('blocks generation when concurrent run limit is reached', async () => {
     const runRepo = new InMemoryRunRepo();

@@ -67,6 +67,7 @@ export interface RunRepo {
   /** Load the continuation payload (jsonb) from a paused run, if any. */
   getPausedContinuation(
     projectId: string,
+    excludeRunId?: string,
   ): Promise<{ continuation: unknown; snapshotManifestKey: string | null } | null>;
   /**
    * The project's most recent run, returned ONLY if it is still non-terminal
@@ -136,13 +137,14 @@ export class InMemoryRunRepo implements RunRepo {
 
   async getPausedContinuation(
     projectId: string,
+    excludeRunId?: string,
   ): Promise<{ continuation: unknown; snapshotManifestKey: string | null } | null> {
-    // Find the most recently created paused run for this project.
-    const paused = [...this.byId.values()]
-      .filter(
-        (r) => r.projectId === projectId && r.status === 'paused' && r.continuation !== undefined,
-      )
+    // Only the project's LATEST run can be resumed; an older paused run that a later run has
+    // already continued must not hijack new messages.
+    const latest = [...this.byId.values()]
+      .filter((r) => r.projectId === projectId && r.id !== excludeRunId)
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0];
+    const paused = latest?.status === 'paused' && latest.continuation !== undefined ? latest : null;
     if (!paused) return null;
     return {
       continuation: paused.continuation,

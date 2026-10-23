@@ -1296,3 +1296,4 @@ export {
   fieldsAbsentFromSource,
   unreadableAssertionNote,
 } from './edit-intent-feedback.js';
+export { extractUserRequest, isResumeRequest } from './user-request.js';

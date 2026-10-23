@@ -17,7 +17,7 @@ import {
   jamColorForSeat,
   jamRoundPlan,
 } from '@playforge/shared';
-import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import type { ChatMessage, ChatRepo } from './chat-repo';
 import type { CloudSaveRepo } from './cloud-save-repo';
 import {
@@ -257,12 +257,20 @@ export class DrizzleRunRepo implements RunRepo {
 
   async getPausedContinuation(
     projectId: string,
+    excludeRunId?: string,
   ): Promise<{ continuation: unknown; snapshotManifestKey: string | null } | null> {
+    // Only the project's LATEST run can be resumed. A paused run that a later run has already
+    // continued stays `paused` forever, and returning it hijacked every message after it: the
+    // user's follow-up was wrapped in a stale "# Continuation" template, and the stale run's
+    // snapshot was used as the parent instead of the project's current version.
     const row = await this.db.query.runs.findFirst({
-      where: and(eq(schema.runs.projectId, projectId), eq(schema.runs.status, 'paused')),
+      where:
+        excludeRunId === undefined
+          ? eq(schema.runs.projectId, projectId)
+          : and(eq(schema.runs.projectId, projectId), ne(schema.runs.id, excludeRunId)),
       orderBy: [desc(schema.runs.createdAt)],
     });
-    if (!row?.continuation) return null;
+    if (row?.status !== 'paused' || !row.continuation) return null;
     return { continuation: row.continuation, snapshotManifestKey: row.snapshotManifestKey ?? null };
   }
 

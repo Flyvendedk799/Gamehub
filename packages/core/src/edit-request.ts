@@ -64,7 +64,9 @@ const BREAKAGE_PATTERNS: ReadonlyArray<RegExp> = [
   // "it crashes" / "keeps crashing" / "it freezes"
   /\b(?:crash(?:es|ed|ing)?|freez(?:es|ed|ing)|hangs?)\b/i,
   // "I can't see anything" / "can't see the game"
-  /\bcan(?:'?t| ?not)\s+see\b/i,
+  // Only when nothing at all can be seen. "i cant see what im doing" is a readability complaint
+  // about a game that runs, so it is a change request, not a breakage report.
+  /\bcan(?:'?t| ?not)\s+see\s+(?:anything|a thing|nothing|the (?:game|screen|hud|page|canvas|world))\b/i,
   // "unplayable"
   /\bunplayable\b/i,
   // "there is no game" / "there's no hud"
@@ -167,12 +169,19 @@ const POLISH_PATTERNS: ReadonlyArray<RegExp> = [
   /\bmake (?:it|the game|this)(?: a lot| much| way)? (?:better|nicer|prettier|cooler|more polished|more fun|feel better|look better)\b/i,
   /\b(?:improve|enhance|upgrade|juice(?: up)?|spruce up)\s+(?:it|the game|this|everything|the (?:graphics|visuals|feel))\b/i,
   /^\s*(?:improve|make it better|more polish|better)\s*[.!]?\s*$/i,
+  // Quality complaints that name no change: "needs improvement", "hard to see what I'm doing",
+  // "feels clunky". The user's own words go into the brief, so the upgrades aim at the complaint.
+  /\bneeds?\s+(?:some\s+)?(?:improv\w*|work|polish\w*)\b/i,
+  /\b(?:hard|difficult)\s+to\s+(?:\w+\s+){0,4}(?:see|read|tell|follow|understand|control)\b/i,
+  /\bcan(?:'?t|not)\s+see\s+what\b/i,
+  /\b(?:clunky|janky|unclear|confusing|unreadable|stiff|floaty|boring|ugly)\b/i,
+  /\bfeels?\s+(?:bad|off|wrong|clunky|floaty|stiff|unresponsive|flat)\b/i,
 ];
 
 /** True for a request that asks for general quality rather than one named change. */
 export function isOpenEndedPolishRequest(prompt: string): boolean {
   const text = typeof prompt === 'string' ? prompt.trim() : '';
-  if (text.length === 0 || text.length > 100) return false;
+  if (text.length === 0 || text.length > 240) return false;
   // A named change ("add a double jump", "make the platforms longer") is a change, whatever else
   // the sentence says about polish.
   if (
