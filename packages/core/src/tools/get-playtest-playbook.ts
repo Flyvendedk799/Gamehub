@@ -23,6 +23,7 @@
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import {
+  type FightingShape,
   type PlaytestPlaybook,
   getPlaytestPlaybook,
   listSupportedGenres,
@@ -35,6 +36,18 @@ const GetPlaytestPlaybookParams = Type.Object({
       'When the genre has no built-in playbook, the tool returns a list of supported genres ' +
       'and the agent improvises a step list of its own.',
   }),
+  dimensions: Type.Optional(
+    Type.String({
+      description:
+        "The spec's dimensions ('2d' | '2_5d' | '3d'). A 3D fighting game gets the arena playbook.",
+    }),
+  ),
+  perspective: Type.Optional(
+    Type.String({
+      description:
+        "The spec's perspective (e.g. 'side_scroll', 'third_person', 'isometric'). Anything but side-on gets the arena playbook for fighting games.",
+    }),
+  ),
 });
 
 export interface GetPlaytestPlaybookDetails {
@@ -56,6 +69,10 @@ export function makeGetPlaytestPlaybookTool(): AgentTool<
     async execute(_id, params): Promise<AgentToolResult<GetPlaytestPlaybookDetails>> {
       const playbook = getPlaytestPlaybook(
         params.genre as Parameters<typeof getPlaytestPlaybook>[0],
+        {
+          dimensions: params.dimensions as FightingShape['dimensions'],
+          perspective: params.perspective as FightingShape['perspective'],
+        },
       );
       const supported = listSupportedGenres();
       if (playbook === null) {

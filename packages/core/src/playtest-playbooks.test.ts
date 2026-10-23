@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { type PlaytestTrace, scorePlaytest } from './eval/playtest-score';
-import { getPlaytestPlaybook, listSupportedGenres } from './playtest-playbooks';
+import { getPlaytestPlaybook, isSideOnFighter, listSupportedGenres } from './playtest-playbooks';
 
 describe('getPlaytestPlaybook', () => {
   it('returns the brawler playbook with the expected guard against c44763af sign error', () => {
@@ -176,5 +176,52 @@ describe('playbook machine-checkable predicates (Phase 5.4)', () => {
     };
     const score = scorePlaytest(trace, allPredicates('fighting'));
     expect(score.pass).toBe(false);
+  });
+});
+
+describe('fighting playbook shape (arena vs side-on)', () => {
+  it('treats an unspecified or side-on spec as side-on, so existing behaviour is unchanged', () => {
+    expect(isSideOnFighter(undefined)).toBe(true);
+    expect(isSideOnFighter({})).toBe(true);
+    expect(isSideOnFighter({ dimensions: '2d', perspective: 'side_scroll' })).toBe(true);
+    expect(getPlaytestPlaybook('fighting')?.steps[0]?.code).toBe('KeyD');
+    expect(getPlaytestPlaybook('fighting', { dimensions: '2d' })?.steps[0]?.code).toBe('KeyD');
+  });
+
+  it('gives a 3D or non-side-on fighter the approach-then-strike playbook', () => {
+    for (const shape of [
+      { dimensions: '3d' as const },
+      { dimensions: '3d' as const, perspective: 'third_person' as const },
+      { perspective: 'isometric' as const },
+      { perspective: 'top_down' as const },
+    ]) {
+      expect(isSideOnFighter(shape)).toBe(false);
+      const pb = getPlaytestPlaybook('fighting', shape);
+      expect(pb?.genre).toBe('fighting');
+      // The lateral probe (D then A) is gone: those keys are dodges in an arena duel.
+      expect(pb?.steps.some((s) => s.code === 'KeyD' || s.code === 'KeyA')).toBe(false);
+      expect(pb?.steps.some((s) => s.code === 'KeyW')).toBe(true);
+    }
+  });
+
+  it('the arena playbook passes a duel whose opponent loses HP after the approach', () => {
+    const pb = getPlaytestPlaybook('fighting', { dimensions: '3d' });
+    const predicates = (pb?.steps ?? []).flatMap((s) => s.predicates ?? []);
+    expect(predicates.length).toBeGreaterThan(0);
+    const frames = (pb?.steps ?? []).map((_, i, all) => ({
+      stepIndex: i,
+      snapshot: { opponentHp: i === all.length - 1 ? 47 : 100 },
+    }));
+    expect(scorePlaytest({ baseline: { opponentHp: 100 }, frames }, predicates).pass).toBe(true);
+  });
+
+  it('the arena playbook still fails a duel where no strike ever lands', () => {
+    const pb = getPlaytestPlaybook('fighting', { dimensions: '3d' });
+    const predicates = (pb?.steps ?? []).flatMap((s) => s.predicates ?? []);
+    const frames = (pb?.steps ?? []).map((_, i) => ({
+      stepIndex: i,
+      snapshot: { opponentHp: 100 },
+    }));
+    expect(scorePlaytest({ baseline: { opponentHp: 100 }, frames }, predicates).pass).toBe(false);
   });
 });

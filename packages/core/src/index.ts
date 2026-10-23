@@ -213,7 +213,9 @@ export {
 } from './tools/declare-edit-intent.js';
 export {
   getPlaytestPlaybook,
+  isSideOnFighter,
   listSupportedGenres,
+  type FightingShape,
   type PlaybookStep,
   type PlaytestPlaybook,
 } from './playtest-playbooks.js';

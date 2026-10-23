@@ -301,3 +301,18 @@ export function describeVariation(v: Variation, engine: 'three' | 'phaser' | 'ca
     'Anything the user already decided in the brief (the world, the genre, the feel, the win condition) stays EXACTLY as decided: use this direction for everything else, and where it conflicts with the brief, the brief wins. Name the arena and describe it in a short header comment in the arena module.',
   ].join('\n');
 }
+
+/**
+ * A plain-language account of the choices the host rolled for a game, for the closing message
+ * when the run stops before the agent could write its own. The brief asks the builder to "say
+ * what you chose"; a run that is cut off must still answer, and these are the choices that were
+ * actually made, not a guess.
+ */
+export function summarizeVariation(v: Variation): string {
+  return [
+    `Setting: ${v.setting.label}.`,
+    `Look: ${v.style.label}, with ${v.palette.label} colours and ${v.lighting.label} lighting.`,
+    `Camera: ${v.camera.label}.`,
+    `Twist: ${v.twist.label}.`,
+  ].join(' ');
+}

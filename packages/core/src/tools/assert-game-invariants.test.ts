@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   FATAL_FLOOR_INVARIANTS,
   assertGameInvariants,
+  findUnreadTuningKeys,
   makeAssertGameInvariantsTool,
 } from './assert-game-invariants';
 
@@ -627,6 +628,7 @@ describe('assertGameInvariants brawler-specific checks (Sequence 6)', () => {
       // Always evaluated (it only RAISES when the source shows physics-shaped
       // literals), so it belongs in the genre-independent baseline.
       'tuning-block',
+      'tuning-unread',
     ]);
     expect(result.genre).toBeNull();
   });
@@ -1148,5 +1150,52 @@ function collect(out) {
       { capabilities: { hasEnemies: true } },
     );
     expect(wired.issues.map((i) => i.invariant)).not.toContain('debug-snapshot');
+  });
+});
+
+describe('tuning-unread invariant', () => {
+  const BLOCK = `<script>window.TWEAK_DEFAULTS = /*GAME-TUNING-BEGIN*/{"playerSpeed":4,"dodgeCost":22,"parryWindow":0.22}/*GAME-TUNING-END*/;
+    window.__game = window.__game || {}; window.__game.tuning = window.TWEAK_DEFAULTS;</script>`;
+
+  it('warns when a declared block is never read (sliders would do nothing)', () => {
+    const r = assertGameInvariants(
+      deps([
+        { path: 'index.html', content: `<html><head>${BLOCK}</head><body></body></html>` },
+        { path: 'src/main.js', content: 'const speed = 3.6; const DODGE_COST = 20;' },
+      ]),
+    );
+    const issue = r.issues.find((i) => i.invariant === 'tuning-unread');
+    expect(issue).toBeDefined();
+    expect(issue?.message).toContain('playerSpeed');
+    expect(issue?.message).toContain('dodgeCost');
+  });
+
+  it('is quiet once every key is read, by property, string, or destructuring', () => {
+    const r = assertGameInvariants(
+      deps([
+        { path: 'index.html', content: `<html><head>${BLOCK}</head><body></body></html>` },
+        {
+          path: 'src/main.js',
+          content: `const t = window.__game.tuning;
+            const speed = t.playerSpeed;
+            const cost = t['dodgeCost'];
+            const { parryWindow } = window.__game.tuning;`,
+        },
+      ]),
+    );
+    expect(r.issues.map((i) => i.invariant)).not.toContain('tuning-unread');
+  });
+
+  it('is quiet when there is no tuning block at all', () => {
+    const r = assertGameInvariants(deps([{ path: 'src/main.js', content: 'const speed = 3.6;' }]));
+    expect(r.issues.map((i) => i.invariant)).not.toContain('tuning-unread');
+  });
+
+  it('does not count the declaration itself as a read', () => {
+    expect(
+      findUnreadTuningKeys(
+        '/*GAME-TUNING-BEGIN*/{"jumpVelocity":360}/*GAME-TUNING-END*/; window.__game.tuning = {};',
+      ),
+    ).toEqual(['jumpVelocity']);
   });
 });

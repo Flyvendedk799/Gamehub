@@ -63,6 +63,12 @@ import {
 } from '@playforge/shared';
 import type { TSchema } from '@sinclair/typebox';
 import { resolveCachePolicy } from './cache-policy.js';
+import {
+  FREE_INSPECTION_CALLS,
+  isInspectionCall,
+  shouldWarnWrapUp,
+  wrapUpReminder,
+} from './call-budget.js';
 import { buildTransformContext } from './context-prune.js';
 import { applyEditRequest } from './edit-pipeline.js';
 import type { EditorSession } from './editor/session.js';
@@ -139,6 +145,7 @@ import {
   makeListCompositionsTool,
   makeRegisterCompositionTool,
 } from './tools/motion-compositions.js';
+import { createPageShellGuard } from './tools/page-shell-guard.js';
 import { type Playtester, makePlaytestGameTool } from './tools/playtest-game.js';
 import { makeReadUrlTool } from './tools/read-url.js';
 import {
@@ -160,7 +167,12 @@ import {
 } from './tools/validate-motion-composition.js';
 import { makeViewSkillRuleTool } from './tools/view-skill-rule.js';
 import { extractUserRequest, isResumeRequest } from './user-request.js';
-import { describeVariation, pickVariation } from './variation.js';
+import {
+  type Variation,
+  describeVariation,
+  pickVariation,
+  summarizeVariation,
+} from './variation.js';
 
 /** Local mirror of the assistant message shape that pi-agent-core emits (via
  *  pi-ai). Declared here so this file does not take a direct dependency on
@@ -1404,6 +1416,8 @@ export async function generateViaAgent(
       makeValidateGameArtifactsTool(registry) as unknown as AgentTool<TSchema, unknown>,
     );
   }
+  // Armed once the host has drafted the game; see tools/page-shell-guard.ts.
+  const pageShellGuard = createPageShellGuard();
   if (deps.fs) {
     const editBudget = createEditBudget();
     const cameraGuard = createCameraGuard({
@@ -1416,7 +1430,7 @@ export async function generateViaAgent(
       userPrompt: input.prompt,
     });
     defaultTools.push(
-      makeTextEditorTool(deps.fs, editBudget, cameraGuard) as unknown as AgentTool<
+      makeTextEditorTool(deps.fs, editBudget, cameraGuard, pageShellGuard) as unknown as AgentTool<
         TSchema,
         unknown
       >,
@@ -1994,6 +2008,14 @@ export async function generateViaAgent(
   // otherwise burn the whole 200 calls (~30 minutes) before the run could end.
   let maxToolCalls = input.agentBudget?.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
   const POST_DRAFT_TOOL_BUDGET = 60;
+  // Once a reduced post-draft / edit-verify cap is in force, reading the project (list, view,
+  // find) does not eat into it, up to a bounded allowance. See call-budget.ts.
+  let cappedBudgetGrantsInspection = false;
+  let freeInspectionCallsGranted = 0;
+  let wrapUpReminderSent = false;
+  // The choices the host rolled for the first draft, kept to answer "say what you chose" when the
+  // run stops before the agent writes its own closing message.
+  let draftVariation: Variation | null = null;
   // After the host applies a change request, the loop only verifies it.
   const EDIT_VERIFY_TOOL_BUDGET = 40;
   const maxWallClockMs = input.agentBudget?.maxWallClockMs ?? adaptiveDefault;
@@ -2067,6 +2089,26 @@ export async function generateViaAgent(
         toolName?: string;
         args?: Record<string, unknown>;
       };
+      if (cappedBudgetGrantsInspection) {
+        // Reading is not working: a look at the project does not use up the allowance for fixing
+        // and verifying it. Bounded, so a model that only ever reads still runs out.
+        if (
+          isInspectionCall(ev.toolName, ev.args) &&
+          freeInspectionCallsGranted < FREE_INSPECTION_CALLS
+        ) {
+          freeInspectionCallsGranted += 1;
+          maxToolCalls += 1;
+        }
+        // Say so before the cut, so the run can land instead of being stopped mid-search.
+        if (shouldWarnWrapUp(maxToolCalls - toolCallCount, wrapUpReminderSent)) {
+          wrapUpReminderSent = true;
+          agent.steer({
+            role: 'user',
+            content: wrapUpReminder(maxToolCalls - toolCallCount),
+            timestamp: Date.now(),
+          });
+        }
+      }
       if (ev.toolCallId && ev.toolName) {
         inFlightToolInvocations.set(ev.toolCallId, { toolName: ev.toolName, args: ev.args ?? {} });
       }
@@ -2910,12 +2952,14 @@ Latest request: ${input.prompt}`
       );
       if ((stage === 'preflight' || stage === 'after_engine') && starterEngine !== null) {
         try {
+          const rolledVariation = pickVariation(starterEngine);
+          draftVariation = rolledVariation;
           const draft = await draftGameFromStarter({
             engine: starterEngine,
             brief,
             // Each project rolls its own camera / style / setting / lighting / palette / twist, so
             // the same prompt does not produce the same game twice.
-            direction: describeVariation(pickVariation(starterEngine), starterEngine),
+            direction: describeVariation(rolledVariation, starterEngine),
             spec: await deps.gameMode?.getSpec?.(),
             read: (path) => fsForRepair.view(path)?.content ?? null,
             write: async (path, content) => {
@@ -2924,11 +2968,14 @@ Latest request: ${input.prompt}`
             generate: (system, user) => completeWithAntigravity(system, user, 'medium'),
           });
           successfulWriteCount += draft.written.length;
+          // From here the page shell is the host's: no from-scratch index.html.
+          pageShellGuard.arm();
           // The game exists: verify / polish gets a small, fixed allowance from here.
           maxToolCalls = Math.min(maxToolCalls, toolCallCount + POST_DRAFT_TOOL_BUDGET);
+          cappedBudgetGrantsInspection = true;
           note = `
 
-[system-note] The host has ALREADY written a complete first draft of this game from the brief (${draft.written.join(', ')}). Do NOT rewrite it from scratch and do not re-read every file. Run validate_game_scene, then playtest_game, fix real problems with small patch / str_replace edits, then call done.`;
+[system-note] The host has ALREADY written a complete first draft of this game from the brief (${draft.written.join(', ')}). Do NOT rewrite it from scratch and do not re-read every file. index.html is the host's page shell: patch it with small edits and never recreate it, and keep <canvas id="game">. Looking at files is free; editing and verifying is what the budget counts. Run validate_game_scene, then playtest_game, fix real problems with small patch / str_replace edits, then call done with a short summary of what you chose (the world, who the player is, the core loop, the twist).`;
           log.info('[generate] step=starter_draft', { ...ctx, written: draft.written });
         } catch (draftErr) {
           log.warn('[generate] step=starter_draft.failed', { ...ctx, error: String(draftErr) });
@@ -2973,6 +3020,7 @@ Latest request: ${input.prompt}`
           successfulWriteCount += edit.files.length;
           gameCodeWriteCount += edit.files.length;
           maxToolCalls = Math.min(maxToolCalls, toolCallCount + EDIT_VERIFY_TOOL_BUDGET);
+          cappedBudgetGrantsInspection = true;
           note = `
 
 [system-note] The host has ALREADY applied the user's requested change (edited ${edit.files.join(', ')}): "${request.slice(0, 300)}". Do NOT redo or rewrite it. Verify with validate_game_scene and a quick playtest that it behaves EXACTLY as requested; fix only what is wrong with small patch / str_replace edits; then call done.`;
@@ -3292,7 +3340,21 @@ Latest request: ${input.prompt}`
   // Wall-clock checkpoint: append a clear "paused, type continue" hint so
   // the user knows this isn't a failure and the chat history threads the
   // next prompt naturally onto the partial state.
-  const baseMessage = stripEmptyFences(collected.text);
+  let baseMessage = stripEmptyFences(collected.text);
+  // A run cut off before `done` never wrote its own summary, and what is left is whatever
+  // sentence it was mid-way through ("I'm verifying that the project builds..."). The brief asks
+  // the builder to say what it chose, so answer with the choices the host actually rolled.
+  if (budgetReason === 'tool_calls' && !doneAccepted && draftVariation !== null) {
+    const winCondition = (await deps.gameMode?.getSpec?.())?.winCondition;
+    const chosen = [
+      summarizeVariation(draftVariation),
+      winCondition !== undefined && winCondition.length > 0 ? `Goal: ${winCondition}` : '',
+    ]
+      .filter((line) => line.length > 0)
+      .join(' ');
+    const keep = baseMessage.length >= 200 ? `${baseMessage}\n\n` : '';
+    baseMessage = `${keep}**What I chose.** ${chosen}`;
+  }
   const pausedAfter =
     budgetReason === 'tool_calls'
       ? `${toolCallCount} steps`

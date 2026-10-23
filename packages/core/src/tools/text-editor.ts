@@ -18,6 +18,7 @@ import { modulesOrphanedByRewrite } from './done-heuristics.js';
 import type { EditBudget } from './edit-budget.js';
 import { formatEditEcho } from './edit-echo.js';
 import { findInFiles } from './find-in-files.js';
+import type { PageShellGuard } from './page-shell-guard.js';
 import { assertSafeToolPath } from './path-safety.js';
 import {
   extractJsxSymbol,
@@ -572,6 +573,7 @@ export function makeTextEditorTool(
   fs: TextEditorFsCallbacks,
   editBudget?: EditBudget,
   cameraGuard?: CameraGuard,
+  shellGuard?: PageShellGuard,
 ): AgentTool<typeof TextEditorParams, TextEditorDetails> {
   // Per-run view budget: the full content of a file is returned on the FIRST
   // view of each path; subsequent views collapse to a short summary (line
@@ -914,8 +916,12 @@ export function makeTextEditorTool(
           const byteLen = Buffer.byteLength(text, 'utf8');
           const createCap = maxCreateBytesFor(path);
           if (byteLen > createCap) throwOversizedCreate(path, byteLen, createCap);
+          const shellRefusal =
+            shellGuard?.checkCreate(path, fs.view(path)?.content ?? null) ?? null;
+          if (shellRefusal !== null) throw new Error(shellRefusal);
           const previous = /\.(m?js|cjs)$/i.test(path) ? (fs.view(path)?.content ?? null) : null;
           const result = await fs.create(path, text);
+          const shellNotice = (await shellGuard?.repairCanvasId(path, fs)) ?? '';
           // E3: record the mutation tick + size for post-write view stubbing.
           const sizeAfter = fs.view(path)?.content.length ?? 0;
           lastMutationByPath.set(path, { tick, size: sizeAfter });
@@ -929,11 +935,14 @@ export function makeTextEditorTool(
               orphanNotice = `\n\nThis rewrite dropped the imports of ${orphaned.length} module(s) that nothing loads any more: ${orphaned.join(', ')}. If your game still needs them, import them again. If not, remove each with \`command: "delete"\` — do not replace them with empty stubs.`;
             }
           }
-          return ok(`Created ${result.path}`.concat(renderOutline(path, text), orphanNotice), {
-            command: 'create',
-            path,
-            result,
-          });
+          return ok(
+            `Created ${result.path}`.concat(renderOutline(path, text), orphanNotice, shellNotice),
+            {
+              command: 'create',
+              path,
+              result,
+            },
+          );
         }
         case 'str_replace': {
           const oldStr = params.old_str ?? '';
@@ -993,7 +1002,8 @@ export function makeTextEditorTool(
                   ? `\n\nTip: this edit spanned ${Math.max(newLineCount, oldLineCount)} lines. For multi-line edits, prefer \`command: "patch"\` with a \`hunks\` array — set \`expectedOriginal\` to catch line-shift errors automatically (production miss rate: ~12 % for patch vs ~32 % for str_replace).`
                   : '';
             if (patchNudge.length > 0) patchNudgedPaths.add(path);
-            const fullMessage = `${message}${budgetWarning ?? ''}${patchNudge}`;
+            const shellNotice = (await shellGuard?.repairCanvasId(path, fs)) ?? '';
+            const fullMessage = `${message}${budgetWarning ?? ''}${patchNudge}${shellNotice}`;
             return ok(fullMessage, {
               command: 'str_replace',
               path,
@@ -1111,13 +1121,14 @@ export function makeTextEditorTool(
           // on the user's requested `insert_line` for continuity, then layers
           // the post-edit range on top so the model knows where the new
           // content actually lives.
+          const insertShellNotice = (await shellGuard?.repairCanvasId(path, fs)) ?? '';
           return ok(
             formatEditOk(
               `Inserted at ${result.path}:${line}.`,
               result,
               false,
               fs.view(path)?.content ?? '',
-            ),
+            ).concat(insertShellNotice),
             {
               command: 'insert',
               path,
@@ -1272,11 +1283,17 @@ export function makeTextEditorTool(
             false,
             afterContent,
           );
-          return ok(budgetWarning !== null ? `${message}${budgetWarning}` : message, {
-            command: 'patch',
-            path,
-            result,
-          });
+          const patchShellNotice = (await shellGuard?.repairCanvasId(path, fs)) ?? '';
+          return ok(
+            (budgetWarning !== null ? `${message}${budgetWarning}` : message).concat(
+              patchShellNotice,
+            ),
+            {
+              command: 'patch',
+              path,
+              result,
+            },
+          );
         }
       }
     },

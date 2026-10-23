@@ -20,7 +20,7 @@
  */
 
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
-import { hasGameTuning, stripPlatformRuntime } from '@playforge/shared';
+import { hasGameTuning, parseGameTuning, stripPlatformRuntime } from '@playforge/shared';
 import { Type } from '@sinclair/typebox';
 import type { TextEditorFsCallbacks } from './text-editor.js';
 
@@ -85,6 +85,7 @@ export type GameInvariant =
   | 'decoy-engine'
   | 'debug-snapshot'
   | 'tuning-block'
+  | 'tuning-unread'
   | 'silent-audio'
   | 'silent-game'
   | 'dead-image'
@@ -132,6 +133,44 @@ export interface AssertGameInvariantsDeps {
    *  wires this from the in-memory virtual FS — same source the
    *  text_editor tool mutates. */
   listFiles: () => Array<{ path: string; content: string }>;
+}
+
+/**
+ * Keys of a declared GAME-TUNING block that nothing in the project reads.
+ *
+ * A block nobody reads is worse than no block: the builder shows a slider for every key, the
+ * player drags it, and nothing happens. Run a985c47a satisfied the `tuning-block` warning by
+ * pasting a block into index.html whose numbers did not even match the code's own constants, and
+ * no source file touched `window.__game.tuning`. So the declaration alone is not enough; each key
+ * has to be read somewhere outside the block.
+ *
+ * A key counts as read when it is accessed as a property (`tuning.jumpVelocity`), named as a
+ * string (`tuning['jumpVelocity']`, `get('jumpVelocity')`), or destructured from a tuning object.
+ * This is deliberately lenient: an unrelated property with the same name counts as a read, which
+ * only means a missed warning. A false warning costs the agent a turn; a missed one costs nothing
+ * it did not already cost.
+ */
+export function findUnreadTuningKeys(source: string): string[] {
+  const tuning = parseGameTuning(source);
+  if (tuning === null) return [];
+  const rest = source.replace(
+    /\/\*\s*GAME-TUNING-BEGIN\s*\*\/[\s\S]*?\/\*\s*GAME-TUNING-END\s*\*\//g,
+    '',
+  );
+  const unread: string[] = [];
+  for (const key of Object.keys(tuning)) {
+    const k = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const asProperty = new RegExp(String.raw`\.${k}\b`);
+    const asString = new RegExp(String.raw`["']${k}["']`);
+    const destructured = new RegExp(
+      String.raw`\{[^{}]*\b${k}\b[^{}]*\}\s*=\s*[\w.$]*(?:tuning|tweak)`,
+      'i',
+    );
+    if (!(asProperty.test(rest) || asString.test(rest) || destructured.test(rest))) {
+      unread.push(key);
+    }
+  }
+  return unread;
 }
 
 /**
@@ -526,6 +565,7 @@ export function assertGameInvariants(
     'decoy-engine',
     'debug-snapshot',
     'tuning-block',
+    'tuning-unread',
   ];
 
   // ── tuning-block ──────────────────────────────────────────────────────────
@@ -551,6 +591,20 @@ export function assertGameInvariants(
         'game), so a player retunes the jump with a drag instead of spending a build run. ' +
         'A value spread across several bare literals is the single most expensive ' +
         'iteration failure there is: each later edit hits some sites and misses others.',
+    });
+  }
+
+  const unreadTuning = findUnreadTuningKeys(source);
+  const declaredTuningKeys = Object.keys(parseGameTuning(source) ?? {}).length;
+  if (
+    unreadTuning.length > 0 &&
+    (unreadTuning.length >= 2 || unreadTuning.length / Math.max(1, declaredTuningKeys) >= 0.3)
+  ) {
+    const first = unreadTuning[0] ?? 'value';
+    issues.push({
+      invariant: 'tuning-unread',
+      severity: 'warn',
+      message: `These GAME-TUNING keys are declared but nothing reads them: ${unreadTuning.slice(0, 8).join(', ')}${unreadTuning.length > 8 ? ` (+${unreadTuning.length - 8} more)` : ''}. The builder shows a live-tweak slider for every key, so each of these sliders does nothing. Read the value where the game uses it (\`const { ${first} } = window.__game.tuning\` or \`window.__game.tuning.${first}\`) and delete the inline literal it replaces, or remove the key from the block. Keep the block equal to the numbers the code really uses.`,
     });
   }
 

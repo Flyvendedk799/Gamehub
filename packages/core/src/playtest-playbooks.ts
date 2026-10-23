@@ -164,6 +164,96 @@ const FIGHTING: PlaytestPlaybook = {
   ],
 };
 
+/**
+ * Fighting, but NOT side-on: a 3D / isometric / top-down arena duel.
+ *
+ * The side-on playbook above assumes A/D walk the fighter toward the opponent. In an arena duel
+ * those keys are often dodges, the fighters start several units apart on a depth axis, and a
+ * lateral probe burns the stamina the strike needs. Production run a985c47a shipped a working
+ * sword duel as a "Draft" because that probe swung at an opponent 7.6 units away.
+ *
+ * This variant closes the gap first (forward on WASD and on the arrow keys, since the game may
+ * bind either), then strikes with every common attack input, waiting out each swing's wind-up.
+ * It asserts one thing that holds for any duel: the opponent's HP is lower at the end than at the
+ * start. It deliberately makes no claim about which key moves which way.
+ */
+const FIGHTING_ARENA: PlaytestPlaybook = {
+  schemaVersion: 1,
+  genre: 'fighting',
+  intent:
+    'Arena duel: walk up to the opponent, then strike; opponent HP must be lower at the end than at the start.',
+  steps: [
+    { kind: 'wait', durationFrames: 20, assert: 'Let the round start.' },
+    { kind: 'key', code: 'KeyW', frames: 90, assert: 'Close the gap: hold forward (WASD).' },
+    { kind: 'key', code: 'KeyW', frames: 60, assert: 'Keep closing: forward again.' },
+    {
+      kind: 'key',
+      code: 'ArrowUp',
+      frames: 60,
+      assert: 'Forward on the arrow keys, in case the game binds those instead.',
+    },
+    { kind: 'key', code: 'KeyJ', frames: 5, assert: 'Light attack; wait out the wind-up below.' },
+    { kind: 'wait', durationFrames: 30, assert: 'The swing connects after its wind-up.' },
+    { kind: 'key', code: 'KeyJ', frames: 5, assert: 'Second light attack.' },
+    { kind: 'wait', durationFrames: 30, assert: 'The swing connects after its wind-up.' },
+    { kind: 'mouse', button: 0, assert: 'Click attack, in case attack is bound to the mouse.' },
+    { kind: 'wait', durationFrames: 30, assert: 'The swing connects after its wind-up.' },
+    { kind: 'key', code: 'KeyK', frames: 5, assert: 'Heavy attack.' },
+    { kind: 'wait', durationFrames: 40, assert: 'The heavy swing connects after its wind-up.' },
+    // An NPC that blocks or parries at random can absorb a few swings; keep striking so one
+    // unlucky exchange does not fail a game that works.
+    { kind: 'key', code: 'KeyJ', frames: 5, assert: 'Light attack again.' },
+    { kind: 'wait', durationFrames: 30, assert: 'The swing connects after its wind-up.' },
+    { kind: 'key', code: 'KeyK', frames: 5, assert: 'Heavy attack again.' },
+    {
+      kind: 'wait',
+      durationFrames: 40,
+      assert: 'Opponent HP is LOWER than at the start of the run.',
+      predicates: [
+        {
+          field: 'opponentHp',
+          op: 'decreased',
+          frame: 'final',
+          against: 'baseline',
+          label: 'opponent HP is lower after closing in and striking',
+        },
+      ],
+    },
+  ],
+  watchFor: [
+    'The opponent never approaches or reacts: an NPC that stands still is not a duel.',
+    'Attack keys fire but the hitbox never reaches the opponent (reach shorter than the spacing the controls allow).',
+    'Strikes drain stamina to zero with no way to recover, so the second swing never starts.',
+  ],
+};
+
+/** The slice of a spec that decides which fighting playbook applies. */
+export interface FightingShape {
+  dimensions?: '2d' | '2_5d' | '3d' | undefined;
+  perspective?:
+    | 'side_scroll'
+    | 'top_down'
+    | 'isometric'
+    | 'first_person'
+    | 'third_person'
+    | 'fixed_screen'
+    | 'orbital'
+    | undefined;
+}
+
+/**
+ * True for a fighter drawn from the side, where left/right walks toward the opponent. Anything
+ * else (3D, isometric, top-down, over-the-shoulder, orbital) is an arena duel and uses the
+ * approach-then-strike playbook. An unspecified shape is treated as side-on: that is what the
+ * playbook was written for, so existing behaviour is unchanged when the spec says nothing.
+ */
+export function isSideOnFighter(shape: FightingShape | undefined): boolean {
+  if (shape === undefined) return true;
+  if (shape.dimensions === '3d') return false;
+  const p = shape.perspective;
+  return p === undefined || p === 'side_scroll' || p === 'fixed_screen';
+}
+
 const FPS: PlaytestPlaybook = {
   schemaVersion: 1,
   genre: 'fps',
@@ -843,8 +933,13 @@ const PLAYBOOKS: Partial<Record<GameGenre | '2_5d', PlaytestPlaybook>> = {
 
 /** Return the canonical playbook for a genre, or null when no
  *  playbook is bundled yet. The agent can fall back to its own
- *  improvised step list. */
-export function getPlaytestPlaybook(genre: GameGenre | '2_5d'): PlaytestPlaybook | null {
+ *  improvised step list. Pass the spec's `dimensions` / `perspective` so a fighting game that is
+ *  not side-on gets the arena playbook instead of the lateral one. */
+export function getPlaytestPlaybook(
+  genre: GameGenre | '2_5d',
+  shape?: FightingShape,
+): PlaytestPlaybook | null {
+  if (genre === 'fighting' && !isSideOnFighter(shape)) return FIGHTING_ARENA;
   return PLAYBOOKS[genre] ?? null;
 }
 

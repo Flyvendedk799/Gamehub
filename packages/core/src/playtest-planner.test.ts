@@ -4,6 +4,7 @@ import {
   buildInteractivityFloorPlan,
   detectInteractivityResponse,
   planPlaytest,
+  selectGamePlaytestPlan,
 } from './playtest-planner';
 
 /** Build a floor-probe trace: a pre-input baseline, then one idle frame, then
@@ -144,5 +145,34 @@ describe('detectInteractivityResponse (ambient-subtracted interactivity floor)',
         steps: [{ snapshotAfter: { s: 0 } }],
       }).analyzable,
     ).toBe(false);
+  });
+});
+
+describe('selectGamePlaytestPlan: fighting shape', () => {
+  it('a 3D fighting spec gets the approach-then-strike plan, not the lateral probe', () => {
+    const plan = selectGamePlaytestPlan({ genre: 'fighting', dimensions: '3d' });
+    expect(plan).not.toBeNull();
+    const keys = (plan?.steps ?? []).flatMap((s) => (s.kind === 'key' ? [s.code] : []));
+    expect(keys).toContain('KeyW');
+    expect(keys).not.toContain('KeyD');
+    expect(plan?.predicates.map((p) => p.field)).toEqual(['opponentHp']);
+  });
+
+  it('a side-on or unspecified fighting spec keeps the lateral plan', () => {
+    for (const spec of [
+      { genre: 'fighting' as const },
+      {
+        genre: 'fighting' as const,
+        dimensions: '2d' as const,
+        perspective: 'side_scroll' as const,
+      },
+    ]) {
+      const keys = (selectGamePlaytestPlan(spec)?.steps ?? []).flatMap((s) =>
+        s.kind === 'key' ? [s.code] : [],
+      );
+      expect(keys[0]).toBe('KeyD');
+    }
+    const byGenre = selectGamePlaytestPlan('fighting');
+    expect(byGenre?.steps[0]).toMatchObject({ kind: 'key', code: 'KeyD' });
   });
 });

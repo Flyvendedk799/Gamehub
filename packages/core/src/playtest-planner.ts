@@ -262,7 +262,9 @@ export function selectGamePlaytestPlan(
         : spec
       : resolvePlaybookGenre(spec);
   if (resolved === null) return null;
-  const playbook = getPlaytestPlaybook(resolved);
+  // A fighting spec that is not side-on gets the approach-then-strike playbook: the lateral one
+  // swings at an opponent that is nowhere near and fails games that work.
+  const playbook = getPlaytestPlaybook(resolved, typeof spec === 'string' ? undefined : spec);
   if (playbook === null) return null;
   const steps: GamePlaytestStep[] = [];
   for (const step of playbook.steps) {

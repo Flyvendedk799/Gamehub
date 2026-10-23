@@ -1141,8 +1141,9 @@ describe('generateViaAgent() — per-run safety budget', () => {
         return { path };
       },
     };
-    // 80 tool calls: far under the 200 default, far over the post-draft allowance.
-    const calls = Array.from({ length: 80 }, (_, i) => ({
+    // 130 reads: under the 200 default, but over the post-draft allowance PLUS the bounded
+    // free-read allowance (60 + 40), so a model that only ever re-reads is still stopped.
+    const calls = Array.from({ length: 130 }, (_, i) => ({
       type: 'tool_execution_start',
       toolCallId: `t${i}`,
       toolName: 'list_files',
@@ -1176,6 +1177,71 @@ describe('generateViaAgent() — per-run safety budget', () => {
       vi.unstubAllGlobals();
     }
     expect(result.stoppedAtToolBudget).toBe(true);
+    // The run was cut before `done`, so the host answers "say what you chose" itself, from the
+    // choices it actually rolled, instead of leaving a half-sentence about verifying the build.
+    expect(result.message).toContain('What I chose');
+    expect(result.message).toMatch(/Setting: .*Look: .*Camera: .*Twist: /);
+  });
+
+  it('after a host draft, reading files does not use up the budget for fixing them', async () => {
+    const NL = String.fromCharCode(10);
+    const tree = new Map<string, string>(Object.entries(PREMIUM_STARTER_FILES.three));
+    tree.set('index.html', '<canvas id="game"></canvas>');
+    const reply = [
+      '=== FILE: src/main.js ===',
+      "import { createStage } from './engine/core.js'; // the real duel bootstrap for the sword game",
+      '=== END FILE ===',
+    ].join(NL);
+    const frame = JSON.stringify({
+      response: { candidates: [{ content: { parts: [{ text: reply }] } }] },
+    });
+    vi.stubGlobal('fetch', async () => new Response(`data: ${frame}${NL}${NL}`, { status: 200 }));
+    const fs = {
+      view: (path: string) => {
+        const content = tree.get(path);
+        return content === undefined ? null : { content, numLines: content.split(NL).length };
+      },
+      textFiles: () => [...tree].map(([path, content]) => ({ path, content })),
+      create: async (path: string, content: string) => {
+        tree.set(path, content);
+        return { path };
+      },
+    };
+    // 80 reads would have exhausted the old 60-call allowance (run a985c47a lost its repair
+    // rounds this way). Reads are free up to a bound, so the run is NOT cut.
+    const calls = Array.from({ length: 80 }, (_, i) => ({
+      type: 'tool_execution_start',
+      toolCallId: `t${i}`,
+      toolName: 'list_files',
+      args: {},
+    }));
+    scriptedAgent = {
+      assistantText: RESPONSE_WITH_ARTIFACT,
+      events: [...calls, { type: 'turn_end', message: {} as never, toolResults: [] }] as never,
+    };
+    let result: Awaited<ReturnType<typeof generateViaAgent>>;
+    try {
+      result = await generateViaAgent(
+        {
+          prompt: 'a sword fighting game',
+          history: [],
+          model: { provider: 'antigravity', modelId: 'gemini-3.8-flash-high' },
+          wire: 'antigravity-cloudcode',
+          apiKey: 'tok',
+        },
+        {
+          fs: fs as never,
+          gameMode: {
+            setEngine: () => {},
+            getCurrentEngine: () => 'three',
+            validate: () => ({ ok: true, engine: 'three', issues: [] }),
+          },
+        },
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(result.stoppedAtToolBudget).toBeUndefined();
   });
 
   it('applies a follow-up change request to the right file BEFORE the loop (antigravity edit mode)', async () => {

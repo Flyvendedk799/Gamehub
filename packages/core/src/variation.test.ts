@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { CAMERAS_3D, LAYOUTS_2D, PALETTES, describeVariation, pickVariation } from './variation';
+import {
+  CAMERAS_3D,
+  LAYOUTS_2D,
+  PALETTES,
+  describeVariation,
+  pickVariation,
+  summarizeVariation,
+} from './variation';
 
 /** A tiny deterministic generator so the rolls are reproducible. */
 function seeded(seed: number): () => number {
@@ -58,5 +65,17 @@ describe('describeVariation', () => {
     expect(describeVariation(pickVariation('phaser', seeded(3)), 'phaser')).toContain(
       'VIEW / LAYOUT -',
     );
+  });
+});
+
+describe('summarizeVariation', () => {
+  it('names every choice that was rolled, in plain words', () => {
+    const v = pickVariation('three', () => 0);
+    const text = summarizeVariation(v);
+    for (const label of [v.setting.label, v.style.label, v.camera.label, v.twist.label]) {
+      expect(text).toContain(label);
+    }
+    expect(text).toContain(v.palette.label);
+    expect(text).toContain(v.lighting.label);
   });
 });
