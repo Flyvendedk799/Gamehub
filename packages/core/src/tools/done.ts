@@ -495,7 +495,7 @@ function contentPlanMissingDepth(spec: CompletabilitySpec): boolean {
  *  fire. Only `fighting` maps to the brawler pass today; every other
  *  spec genre runs the four base invariants with no genre-specific add-
  *  ons. Returns undefined when there's no genre-specific mapping. */
-function mapSpecGenreToInvariantGenre(specGenre: string): InvariantGameGenre | undefined {
+export function mapSpecGenreToInvariantGenre(specGenre: string): InvariantGameGenre | undefined {
   // Plan step 8 — translate the SPEC genre to its INVARIANT-genre analog so the
   // genre-specific advisory checks (e.g. escalation for combat genres) reflect the
   // spec rather than only the agent's self-reported caps. Was a fighting→brawler

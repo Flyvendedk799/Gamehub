@@ -1282,3 +1282,9 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string> 
     throw remapProviderError(err, titleModel.provider, input.wire);
   }
 }
+
+export {
+  absentFieldWarning,
+  fieldsAbsentFromSource,
+  unreadableAssertionNote,
+} from './edit-intent-feedback.js';

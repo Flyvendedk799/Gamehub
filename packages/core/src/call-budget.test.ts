@@ -52,3 +52,14 @@ describe('wrap-up warning', () => {
     expect(wrapUpReminder(-3)).toContain('0 tool calls left');
   });
 });
+
+describe('stalled reading', () => {
+  it('nudges once a streak of reads reaches the threshold, and not before', async () => {
+    const { shouldNudgeStalledReading, STALLED_READING_CALLS, stalledReadingReminder } =
+      await import('./call-budget.js');
+    expect(shouldNudgeStalledReading(STALLED_READING_CALLS - 1, false)).toBe(false);
+    expect(shouldNudgeStalledReading(STALLED_READING_CALLS, false)).toBe(true);
+    expect(shouldNudgeStalledReading(STALLED_READING_CALLS + 5, true)).toBe(false);
+    expect(stalledReadingReminder(12)).toContain('12 read-only calls');
+  });
+});

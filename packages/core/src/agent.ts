@@ -66,7 +66,9 @@ import { resolveCachePolicy } from './cache-policy.js';
 import {
   FREE_INSPECTION_CALLS,
   isInspectionCall,
+  shouldNudgeStalledReading,
   shouldWarnWrapUp,
+  stalledReadingReminder,
   wrapUpReminder,
 } from './call-budget.js';
 import { buildTransformContext } from './context-prune.js';
@@ -91,7 +93,7 @@ import { draftGameFromStarter } from './starter-draft.js';
 import { makeAddControllerSupportTool } from './tools/add-controller-support.js';
 import { type GetGameSpecFn, makeAmendGameSpecTool } from './tools/amend-game-spec.js';
 import { makeAskUserTool } from './tools/ask-user.js';
-import { makeAssertGameInvariantsTool } from './tools/assert-game-invariants.js';
+import { type GameGenre, makeAssertGameInvariantsTool } from './tools/assert-game-invariants.js';
 import { createCameraGuard } from './tools/camera-pin.js';
 // gameplan §A5 — game-builder tools (registered when deps.gameMode is set).
 import { type ChooseEngineFn, makeChooseEngineTool } from './tools/choose-engine.js';
@@ -115,6 +117,7 @@ import {
   type DoneRuntimeVerifier,
   makeDoneTool,
   makeVerifyArtifactTool,
+  mapSpecGenreToInvariantGenre,
   runArtifactChecks,
 } from './tools/done.js';
 import { createEditBudget } from './tools/edit-budget.js';
@@ -1359,10 +1362,10 @@ export async function generateViaAgent(
     // on an iteration: on a first build there is no prior behaviour to change.
     if (deps.gameMode.isIteration === true) {
       defaultTools.push(
-        makeDeclareEditIntentTool(deps.gameMode.setEditIntent) as unknown as AgentTool<
-          TSchema,
-          unknown
-        >,
+        makeDeclareEditIntentTool(
+          deps.gameMode.setEditIntent,
+          deps.fs?.textFiles ? () => deps.fs?.textFiles?.() ?? [] : undefined,
+        ) as unknown as AgentTool<TSchema, unknown>,
       );
     }
     defaultTools.push(
@@ -1557,6 +1560,12 @@ export async function generateViaAgent(
       const fs = deps.fs;
       defaultTools.push(
         makeAssertGameInvariantsTool({
+          getGenre: async () => {
+            const specGenre = (await deps.gameMode?.getSpec?.())?.genre;
+            return specGenre === undefined
+              ? undefined
+              : (mapSpecGenreToInvariantGenre(specGenre) as GameGenre | undefined);
+          },
           listFiles: () => {
             const out: Array<{ path: string; content: string }> = [];
             const queue: string[] = [''];
@@ -2013,6 +2022,9 @@ export async function generateViaAgent(
   let cappedBudgetGrantsInspection = false;
   let freeInspectionCallsGranted = 0;
   let wrapUpReminderSent = false;
+  // Reads in a row with no edit or verify between them. See shouldNudgeStalledReading.
+  let consecutiveInspectionCalls = 0;
+  let stalledReadingNudged = false;
   // The choices the host rolled for the first draft, kept to answer "say what you chose" when the
   // run stops before the agent writes its own closing message.
   let draftVariation: Variation | null = null;
@@ -2098,6 +2110,21 @@ export async function generateViaAgent(
         ) {
           freeInspectionCallsGranted += 1;
           maxToolCalls += 1;
+        }
+        // Reading that never turns into an edit is a stall, not progress: run dec54cc9 made 73
+        // editor calls on a follow-up, every one a view or find, and shipped no change.
+        consecutiveInspectionCalls = isInspectionCall(ev.toolName, ev.args)
+          ? consecutiveInspectionCalls + 1
+          : 0;
+        if (shouldNudgeStalledReading(consecutiveInspectionCalls, stalledReadingNudged)) {
+          stalledReadingNudged = true;
+          agent.steer({
+            role: 'user',
+            content: stalledReadingReminder(consecutiveInspectionCalls),
+            timestamp: Date.now(),
+          });
+        } else if (consecutiveInspectionCalls === 0) {
+          stalledReadingNudged = false;
         }
         // Say so before the cut, so the run can land instead of being stopped mid-search.
         if (shouldWarnWrapUp(maxToolCalls - toolCallCount, wrapUpReminderSent)) {

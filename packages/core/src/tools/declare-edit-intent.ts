@@ -46,6 +46,7 @@
 
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
+import { absentFieldWarning, fieldsAbsentFromSource } from '../edit-intent-feedback.js';
 import {
   type AuthoredContract,
   type AuthoredContractCheck,
@@ -150,6 +151,8 @@ const LITERAL_OPS = new Set(['greaterThan', 'lessThan', 'equals']);
 
 export function makeDeclareEditIntentTool(
   setEditIntent: SetEditIntentFn | undefined,
+  /** Current project sources, to warn when an asserted field is not defined anywhere. */
+  listFiles?: () => Array<{ path: string; content: string }>,
 ): AgentTool<typeof DeclareEditIntentParams, DeclareEditIntentDetails> {
   return {
     name: 'declare_edit_intent',
@@ -241,6 +244,14 @@ export function makeDeclareEditIntentTool(
       }
 
       const fields = [...new Set(plan.predicates.map((p) => p.field))];
+      let absentWarning = '';
+      try {
+        absentWarning = listFiles
+          ? absentFieldWarning(fieldsAbsentFromSource(fields, listFiles()))
+          : '';
+      } catch {
+        // A warning is a nicety; never fail the declaration over it.
+      }
       if (setEditIntent !== undefined) {
         await setEditIntent({ request, observable, plan });
       }
@@ -249,7 +260,7 @@ export function makeDeclareEditIntentTool(
         content: [
           {
             type: 'text',
-            text: `Edit intent recorded: ${plan.predicates.length} assertion(s) over ${plan.steps.length} input step(s) on field(s) ${fields.join(', ')}. The run will be gated on these IN ADDITION to the genre floor, so make sure every asserted field is exposed in window.__game.debug.snapshot() before you finish. Now make the edit.`,
+            text: `Edit intent recorded: ${plan.predicates.length} assertion(s) over ${plan.steps.length} input step(s) on field(s) ${fields.join(', ')}. The run will be gated on these IN ADDITION to the genre floor, so make sure every asserted field is exposed in window.__game.debug.snapshot() before you finish. Now make the edit.${absentWarning}`,
           },
         ],
         details: { request, predicates: plan.predicates.length, fields, unobservable: false },

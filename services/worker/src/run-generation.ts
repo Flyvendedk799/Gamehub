@@ -51,6 +51,7 @@ import {
   selectGamePlaytestPlan,
   stubModulePaths,
   traceFromPlaytestResult,
+  unreadableAssertionNote,
 } from '@playforge/agent-core';
 // Import from the engines subpath, NOT the package root — the root pulls in
 // browser/Vite-only vendor assets (?raw) that have no business in the
@@ -1193,8 +1194,15 @@ export async function runGeneration(
             .filter((r) => !r.pass)
             .map((r) => `  - ${r.reason}`)
             .join('\n');
+          const unreadableNote = unreadableAssertionNote(intentScore.results);
           fatalErrors.push(
-            `The edit did NOT do what was asked. The user's request was: "${editIntent.request}" — which you said would be observable as: ${editIntent.observable}. Driven in a real browser, that is not what the game does:\n${failures}\nDo not restate the change; the measurement above is what the game actually did. Find why the edit had no effect (a value overridden elsewhere, a second hard-coded copy of the same number, an early return, a branch that never runs) and fix the real cause. If the assertion itself is wrong — wrong field, wrong sign for this engine's axes — say so and correct it.`,
+            `The edit did NOT do what was asked. The user's request was: "${editIntent.request}" — which you said would be observable as: ${editIntent.observable}. Driven in a real browser, that is not what the game does:\n${failures}\nDo not restate the change; the measurement above is what the game actually did. Find why the edit had no effect (a value overridden elsewhere, a second hard-coded copy of the same number, an early return, a branch that never runs) and fix the real cause. If the assertion itself is wrong — wrong field, wrong sign for this engine's axes — say so and correct it.${
+              unreadableNote !== null
+                ? `
+
+${unreadableNote}`
+                : ''
+            }`,
           );
         }
       }

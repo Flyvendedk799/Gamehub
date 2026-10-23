@@ -726,6 +726,17 @@ describe('assert_game_invariants tool (genre param wiring)', () => {
   });
 });
 
+describe('assert_game_invariants tool (spec genre wins)', () => {
+  it("uses the project's declared genre instead of a mismatched model argument", async () => {
+    const tool = makeAssertGameInvariantsTool({
+      listFiles: () => [{ path: 'src/main.js', content: 'rotation.y = -playerAngle;' }],
+      getGenre: async () => 'brawler' as const,
+    });
+    const result = await tool.execute('call-y', { genre: 'shooter' });
+    expect((result.details as { genre: string | null }).genre).toBe('brawler');
+  });
+});
+
 describe('assertGameInvariants — difficulty escalation (genre-gated)', () => {
   // A complete game (restart + fail + score + feedback + controls) so the ONLY
   // thing the escalation check can flag is the absence of difficulty ramp.

@@ -675,6 +675,19 @@ describe('text-editor view by symbol (backlog-2 #2)', () => {
     expect(msg).toMatch(/view_range/);
   });
 
+  it('says so plainly when view_range starts past the end of the file', async () => {
+    const fs = makeFs({ 'index.html': ['<html>', '<body></body>', '</html>'].join('\n') });
+    const tool = makeTextEditorTool(fs);
+    const result = await tool.execute('id-range-past-end', {
+      command: 'view',
+      path: 'index.html',
+      view_range: [535, 570],
+    });
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toMatch(/has only 3 lines/);
+    expect(text).toMatch(/NOTHING at line 535/);
+  });
+
   it('throws with line numbers on ambiguous symbols', async () => {
     const dupe = ['function Dup() {}', 'function Dup() {}'].join('\n');
     const fs = makeFs({ 'index.html': dupe });

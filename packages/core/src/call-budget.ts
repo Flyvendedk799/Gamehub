@@ -40,3 +40,19 @@ export function shouldWarnWrapUp(remaining: number, alreadyWarned: boolean): boo
 export function wrapUpReminder(remaining: number): string {
   return `[system-reminder] Budget: about ${Math.max(0, remaining)} tool calls left. Stop exploring. Fix only what the last verify_artifact or playtest_game reported, using its exact wording, and do not look for files that list_files does not show. Then run validate_game_scene, playtest_game and call done with a short summary that says what you chose: the world, who the player is, the core loop and the twist.`;
 }
+
+/** Reads in a row, with no edit and no verify between them, before the agent is told to act. */
+export const STALLED_READING_CALLS = 12;
+
+/** Nudge once per streak of reads, when it passes the threshold. */
+export function shouldNudgeStalledReading(
+  consecutiveReads: number,
+  alreadyNudged: boolean,
+): boolean {
+  return !alreadyNudged && consecutiveReads >= STALLED_READING_CALLS;
+}
+
+/** Steering message for an agent that keeps reading instead of changing anything. */
+export function stalledReadingReminder(consecutiveReads: number): string {
+  return `[system-reminder] You have made ${consecutiveReads} read-only calls in a row (view / find / list_files) and changed nothing. More reading will not tell you more: the files you have already viewed are in your context. Decide now. If you know the cause, make the edit with a small str_replace. If the change needs a value the game does not expose (for example a field your edit intent asserts that is missing from window.__game.debug.snapshot()), add it. If you cannot find the code, say what you are looking for in one sentence and use \`find\` with a SHORT fragment across all files — do not page through a file again.`;
+}

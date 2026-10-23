@@ -133,6 +133,10 @@ export interface AssertGameInvariantsDeps {
    *  wires this from the in-memory virtual FS — same source the
    *  text_editor tool mutates. */
   listFiles: () => Array<{ path: string; content: string }>;
+  /** The genre the project's declared spec maps to, when it has one. It wins over the model's
+   *  `genre` argument: run dec54cc9 was a fighting game and the agent passed "shooter", so the
+   *  checks it was told to fix (camera-relative aiming) belonged to a different game. */
+  getGenre?: () => GameGenre | undefined | Promise<GameGenre | undefined>;
 }
 
 /**
@@ -1149,7 +1153,8 @@ export function makeAssertGameInvariantsTool(
       'fix before shipping.',
     parameters: AssertGameInvariantsParams,
     async execute(_id, params): Promise<AgentToolResult<AssertGameInvariantsDetails>> {
-      const genre = params.genre as GameGenre | undefined;
+      const specGenre = deps.getGenre ? await deps.getGenre() : undefined;
+      const genre = specGenre ?? (params.genre as GameGenre | undefined);
       const capabilities = params.capabilities as InvariantCapabilities | undefined;
       const result = assertGameInvariants(deps, {
         ...(genre !== undefined ? { genre } : {}),

@@ -813,6 +813,24 @@ export function makeTextEditorTool(
               const start = Math.max(1, Math.floor(rawStart));
               const end = rawEnd === -1 ? lines.length : Math.max(start, Math.floor(rawEnd));
               const clampedEnd = Math.min(end, lines.length);
+              // A range that starts past the end used to come back as an empty slice under a
+              // "lines 535-65 of 65" header. Run dec54cc9 read that as "the code is further down"
+              // and paged through a 65-line file for ~25 turns looking for a game that lived in
+              // another file. Say plainly that nothing is there, and where the code actually is.
+              if (start > lines.length) {
+                const where = map.length > 0 ? map : '';
+                return ok(
+                  `${path} has only ${lines.length} lines — there is NOTHING at line ${start}, so there is nothing more to page through. If you are looking for code that is not in the lines above, it is in a different file: use \`find\` with a short fragment (it searches every file) or \`list_files\`.${where}`,
+                  {
+                    command: 'view',
+                    path,
+                    result: {
+                      numLines: file.numLines,
+                      viewRange: [start, start] as [number, number],
+                    },
+                  },
+                );
+              }
               const VIEW_RANGE_SOFT_CAP = 250;
               const requestedSpan = clampedEnd - start + 1;
               const capped = requestedSpan > VIEW_RANGE_SOFT_CAP;
