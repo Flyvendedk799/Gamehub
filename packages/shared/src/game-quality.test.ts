@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessGame, isVerifiedGame } from './game-quality';
+import { assessGame, isBootedGame, isVerifiedGame } from './game-quality';
 import { GameSpec, applyGameSpecPatch } from './game-spec';
 
 describe('artifact readiness', () => {
@@ -45,4 +45,26 @@ it('persists creative decisions through unrelated follow-up edits', () => {
   expect(
     applyGameSpecPatch(spec, { winCondition: 'Guide three boats home' }).creativeBrief,
   ).toEqual(spec.creativeBrief);
+});
+
+describe('isBootedGame', () => {
+  const base = {
+    schemaVersion: 1,
+    filesHash: 'h',
+    status: 'needs_fixes',
+    booted: true,
+    behaviorPassed: false,
+    issues: ['opponent HP did NOT decrease'],
+  };
+
+  it('accepts a version that booted even when a behaviour check failed (not verified)', () => {
+    expect(isBootedGame(base, 'h')).toBe(true);
+    expect(isVerifiedGame(base, 'h')).toBe(false);
+  });
+
+  it('rejects one that did not boot, was scored for other files, or was never scored', () => {
+    expect(isBootedGame({ ...base, booted: false }, 'h')).toBe(false);
+    expect(isBootedGame(base, 'other-hash')).toBe(false);
+    expect(isBootedGame(undefined, 'h')).toBe(false);
+  });
 });

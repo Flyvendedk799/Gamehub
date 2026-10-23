@@ -91,3 +91,12 @@ describe('the bound', () => {
     expect(MAX_VISUAL_CRITIQUES).toBe(2);
   });
 });
+
+describe('buildObservePrompt', () => {
+  it("quotes the player's request and forbids talking about code", async () => {
+    const { buildObservePrompt } = await import('./visual-critique.js');
+    const p = buildObservePrompt('State of combat is not very good. Improve it');
+    expect(p).toContain('State of combat is not very good. Improve it');
+    expect(p).toContain('No code, no file names');
+  });
+});

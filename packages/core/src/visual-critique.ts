@@ -149,3 +149,25 @@ export function buildVisualRepairInstruction(findings: readonly string[]): strin
     'call done.',
   ].join('\n');
 }
+
+/**
+ * Prompt for looking at the running game BEFORE changing it, when the user's request is general
+ * ("improve combat", "make it better"). Run a9ff5a86 got a vague request, never saw the game, and
+ * spent its edit retuning sounds. A short, concrete description of what is on screen, and what is
+ * visibly missing for what the user asked, gives the edit something to build on.
+ */
+export function buildObservePrompt(userRequest: string): string {
+  return [
+    'This is one frame of a web game while it is being played.',
+    '',
+    `The player asked for: "${userRequest.trim().slice(0, 300)}"`,
+    '',
+    'In 4 to 6 short bullets, say what you can SEE that is relevant to that request, and what is',
+    'visibly missing or weak. Be concrete and visual: for example "no visible hit effect when a',
+    'strike lands", "both fighters are the same dark silhouette", "the arena is an empty dark void',
+    'beyond the bridge", "the health bars are far from the action".',
+    '',
+    'Rules: describe only what the frame shows. No code, no file names, no guesses about how it is',
+    'implemented. If the frame is a menu, title or game-over screen, say so in one line and stop.',
+  ].join('\n');
+}

@@ -1078,6 +1078,103 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     expect(browserJobs.playtestCalls).toBe(4);
   });
 
+  it('asks for the fast first build on the first round only, not on a repair round', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = queuedBrowserJobs([
+      invertedPlaytest(),
+      invertedPlaytest(),
+      invertedPlaytest(),
+      passingPlaytest(),
+    ]);
+    const fastDraftFlags: Array<boolean | undefined> = [];
+    const agent: GenerateFn = async (input, deps) => {
+      fastDraftFlags.push(input.fastDraft);
+      await deps.gameMode?.setSpec?.(TOPDOWN_SPEC);
+      await deps.fs?.create('index.html', RED_SQUARE);
+      return emptyOutput('built');
+    };
+
+    await runGeneration(
+      {
+        prompt: 'topdown game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: agent, browserJobs },
+    );
+
+    expect(fastDraftFlags).toEqual([true, undefined]);
+  });
+
+  describe('early draft publish', () => {
+    const run = async (opts: {
+      hostSummary?: string;
+      bootFatal?: boolean;
+      publishThrows?: boolean;
+    }) => {
+      const store = new SnapshotStore(new InMemoryBlobStore());
+      const published: Array<{ manifestKey: string; filesHash: string }> = [];
+      const events: string[] = [];
+      const browserJobs = queuedBrowserJobs([passingPlaytest()]);
+      const baseVerify = browserJobs.runtimeVerify.bind(browserJobs);
+      browserJobs.runtimeVerify = async (html) =>
+        opts.bootFatal === true
+          ? { hasGameContract: true, fatalErrors: ['Uncaught Error: boom'] }
+          : baseVerify(html);
+      const agent: GenerateFn = async (_input, deps) => {
+        await deps.gameMode?.setSpec?.(TOPDOWN_SPEC);
+        await deps.fs?.create('index.html', RED_SQUARE);
+        return {
+          ...emptyOutput('built'),
+          ...(opts.hostSummary !== undefined ? { hostSummary: opts.hostSummary } : {}),
+        };
+      };
+      await runGeneration(
+        {
+          prompt: 'topdown game',
+          model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+          apiKey: 'sk-test',
+        },
+        {
+          store,
+          generate: agent,
+          browserJobs,
+          maxRepairRounds: 0,
+          onEvent: (e) => events.push((e as { type: string }).type),
+          publishDraft: async (draft) => {
+            if (opts.publishThrows === true) throw new Error('db down');
+            published.push(draft);
+          },
+        },
+      );
+      return { published, events };
+    };
+
+    it('shows a booted draft once, and tells the chat and the web', async () => {
+      const { published, events } = await run({ hostSummary: 'Here is what changed' });
+      expect(published).toHaveLength(1);
+      expect(published[0]?.manifestKey).toMatch(/\S/);
+      expect(events).toContain('draft_ready');
+    });
+
+    it('never shows a draft on a path where the host did not write the version', async () => {
+      const { published, events } = await run({});
+      expect(published).toHaveLength(0);
+      expect(events).not.toContain('draft_ready');
+    });
+
+    it('never shows a draft that did not boot cleanly', async () => {
+      const { published } = await run({ hostSummary: 'x', bootFatal: true });
+      expect(published).toHaveLength(0);
+    });
+
+    it('carries on when publishing fails', async () => {
+      const { published, events } = await run({ hostSummary: 'x', publishThrows: true });
+      expect(published).toHaveLength(0);
+      expect(events).not.toContain('draft_ready');
+    });
+  });
+
   it('a play check that fails once and then passes is a flake: it ships without a repair round', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());
     const browserJobs = queuedBrowserJobs([invertedPlaytest(), passingPlaytest()]);
@@ -1919,6 +2016,61 @@ describe('visual critique (BUILD_SPEED §3 — one frame, twice, never a loop)',
     expect(prompts).toHaveLength(2);
     expect(prompts[1]).toContain('untextured grey box');
     expect(prompts[1]).toMatch(/screenshot was taken/i);
+  });
+
+  it('offers the agent a way to look at the running game, quoting the player request to the vision model', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = seeingBrowserJobs();
+    const visionPrompts: string[] = [];
+    let observed: string | null | undefined;
+
+    await runGeneration(
+      {
+        prompt: 'a topdown arcade game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      {
+        store,
+        generate: async (_input, deps) => {
+          await deps.gameMode?.setSpec?.(SPEC);
+          await deps.fs?.create('index.html', HTML);
+          observed = await deps.gameMode?.observeGame?.('State of combat is not very good');
+          return emptyOutput('built it');
+        },
+        browserJobs,
+        visionCritic: async ({ prompt }) => {
+          visionPrompts.push(prompt);
+          return 'VERDICT: SHIP - strikes leave no visible trail';
+        },
+      },
+    );
+
+    expect(visionPrompts.some((p) => p.includes('State of combat is not very good'))).toBe(true);
+    expect(observed).toContain('strikes leave no visible trail');
+  });
+
+  it('has no way to look at the game when there is no vision model', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    let offered: boolean | undefined;
+    await runGeneration(
+      {
+        prompt: 'a topdown arcade game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      {
+        store,
+        generate: async (_input, deps) => {
+          await deps.gameMode?.setSpec?.(SPEC);
+          await deps.fs?.create('index.html', HTML);
+          offered = deps.gameMode?.observeGame !== undefined;
+          return emptyOutput('built it');
+        },
+        browserJobs: seeingBrowserJobs(),
+      },
+    );
+    expect(offered).toBe(false);
   });
 
   it('ships untouched when the frame reads finished — no repair, ONE call', async () => {

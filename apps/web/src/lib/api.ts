@@ -1,5 +1,5 @@
-import type { GameQuality } from '@playforge/shared/game-quality';
 import type { InterviewPlan } from '@playforge/shared/design-interview';
+import type { GameQuality } from '@playforge/shared/game-quality';
 import type { SocialOutroSummary } from '@playforge/shared/social-outro';
 import { getToken } from './auth';
 import { API_BASE } from './config';
@@ -502,6 +502,7 @@ export const SSE_NAMED_TYPES: ReadonlyArray<SseEvent['type']> = [
   'turn_end',
   'agent_end',
   'run_complete',
+  'draft_ready',
   'run_error',
   'message_update',
   'text_delta',

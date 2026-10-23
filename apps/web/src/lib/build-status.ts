@@ -178,7 +178,9 @@ export function deriveBuildStatus(allEvents: ReadonlyArray<SseEvent>): BuildStat
     }
 
     // Phase advance — monotonic (Math.max), driven by milestone events.
-    if (e.type === 'run_complete') {
+    if (e.type === 'draft_ready') {
+      phaseIndex = Math.max(phaseIndex, 2);
+    } else if (e.type === 'run_complete') {
       stage = e.quality?.status === 'verified' ? 'completed' : 'draft';
       phaseIndex = stage === 'completed' ? 3 : 2;
       readiness =

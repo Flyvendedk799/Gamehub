@@ -45,6 +45,7 @@ export type { StarterEngine, StarterFiles } from './premium-starters.js';
 export {
   MAX_VISUAL_CRITIQUES,
   buildVisualCritiquePrompt,
+  buildObservePrompt,
   buildVisualRepairInstruction,
   parseVisualCritique,
 } from './visual-critique.js';
@@ -389,6 +390,11 @@ export interface GenerateInput {
    *  with the failure as the prompt, when that check fails. A follow-up that took 15 minutes in
    *  the loop takes about one minute here. Ignored unless the host edit actually succeeded. */
   fastEdit?: boolean | undefined;
+  /** Fast path for a FIRST build: once the host has written the whole game from the starter in one
+   *  completion and the spec is declared, stop the agent loop. The caller verifies the draft in a
+   *  real browser and repairs only what fails. Without it a first build spends ~8 more minutes in
+   *  the loop re-reading files it just wrote. Ignored unless the host draft actually landed. */
+  fastDraft?: boolean | undefined;
   /** gameplan §A6 — engine pin for game-mode runs (set by the New-design
    *  dialog or carried from a prior snapshot). When omitted on a game run
    *  the agent calls `choose_engine` first. */

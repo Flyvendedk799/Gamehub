@@ -42,7 +42,7 @@ import {
   decodeJwtClaims,
   readCodexAuthFile,
 } from '@playforge/providers';
-import { VerificationPlan, isVerifiedGame } from '@playforge/shared';
+import { VerificationPlan, isBootedGame, isVerifiedGame } from '@playforge/shared';
 import {
   BRAND_NAME,
   type ModelRef,
@@ -2667,7 +2667,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         ? requestedSnapshot
         : kind === 'runs'
           ? runSnapshot
-          : (verified ?? current);
+          : // The newest version if it boots, even with a failed behaviour check; the last
+            // verified build only when the newest does not boot (or was never scored).
+            current && isBootedGame(current.quality, current.filesHash)
+            ? current
+            : (verified ?? current);
     const manifestKey =
       kind === 'runs'
         ? run?.snapshotManifestKey

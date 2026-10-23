@@ -1244,6 +1244,89 @@ describe('generateViaAgent() — per-run safety budget', () => {
     expect(result.stoppedAtToolBudget).toBeUndefined();
   });
 
+  describe('fastDraft (first build)', () => {
+    const NL = String.fromCharCode(10);
+    const specDeclared = {
+      type: 'tool_execution_end',
+      toolCallId: 'spec1',
+      toolName: 'declare_game_spec',
+      isError: false,
+      result: { content: [] },
+    };
+    const run = async (opts: { fastDraft: boolean; events: unknown[] }) => {
+      const tree = new Map<string, string>(Object.entries(PREMIUM_STARTER_FILES.three));
+      tree.set('index.html', '<canvas id="game"></canvas>');
+      const reply = [
+        '=== FILE: src/main.js ===',
+        "import { createStage } from './engine/core.js'; // the real duel bootstrap for the sword game",
+        '=== END FILE ===',
+      ].join(NL);
+      const frame = JSON.stringify({
+        response: { candidates: [{ content: { parts: [{ text: reply }] } }] },
+      });
+      vi.stubGlobal('fetch', async () => new Response(`data: ${frame}${NL}${NL}`, { status: 200 }));
+      const fs = {
+        view: (path: string) => {
+          const content = tree.get(path);
+          return content === undefined ? null : { content, numLines: content.split(NL).length };
+        },
+        textFiles: () => [...tree].map(([path, content]) => ({ path, content })),
+        create: async (path: string, content: string) => {
+          tree.set(path, content);
+          return { path };
+        },
+      };
+      scriptedAgent = {
+        assistantText: RESPONSE_WITH_ARTIFACT,
+        events: opts.events as never,
+      };
+      const before = agentCalls.length;
+      try {
+        const result = await generateViaAgent(
+          {
+            prompt: 'a sword fighting game',
+            history: [],
+            ...(opts.fastDraft ? { fastDraft: true } : {}),
+            model: { provider: 'antigravity', modelId: 'gemini-3.8-flash-high' },
+            wire: 'antigravity-cloudcode',
+            apiKey: 'tok',
+          },
+          {
+            fs: fs as never,
+            gameMode: {
+              setEngine: () => {},
+              getCurrentEngine: () => 'three',
+              validate: () => ({ ok: true, engine: 'three', issues: [] }),
+              getSpec: () => ({ winCondition: 'Defeat the rival duelist' }) as never,
+            },
+          },
+        );
+        return { result, aborted: agentCalls.slice(before).some((c) => c.aborted) };
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    };
+
+    it('stops the loop once the host drafted the game and the spec is declared', async () => {
+      const { result, aborted } = await run({ fastDraft: true, events: [specDeclared] });
+      expect(aborted).toBe(true);
+      expect(result.message).toContain('What I chose');
+      expect(result.hostSummary).toContain('What I chose');
+      expect(result.interrupted).toBe(false);
+      expect(result.stoppedAtToolBudget).toBeUndefined();
+    });
+
+    it('keeps going when the spec has not been declared yet', async () => {
+      const { aborted } = await run({ fastDraft: true, events: [] });
+      expect(aborted).toBe(false);
+    });
+
+    it('does not stop a build that did not ask for the fast path', async () => {
+      const { aborted } = await run({ fastDraft: false, events: [specDeclared] });
+      expect(aborted).toBe(false);
+    });
+  });
+
   it('applies a follow-up change request to the right file BEFORE the loop (antigravity edit mode)', async () => {
     const NL = String.fromCharCode(10);
     const FX = [
@@ -1335,14 +1418,22 @@ describe('generateViaAgent() — per-run safety budget', () => {
         (_, i) => `// padding line ${i} so the file is a realistic size`,
       ),
     ].join(NL);
-    const run = async (replies: string[]) => {
+    const run = async (
+      replies: string[],
+      opts: {
+        prompt?: string;
+        observeGame?: (request: string) => Promise<string | null>;
+      } = {},
+    ) => {
+      const sentToModel: string[] = [];
       const tree = new Map<string, string>([
         ['index.html', '<canvas id="game"></canvas>'],
         ['src/main.js', "import { spawnSlashArc } from './fx.js'; spawnSlashArc();"],
         ['src/fx.js', FX],
       ]);
       let call = 0;
-      vi.stubGlobal('fetch', async () => {
+      vi.stubGlobal('fetch', async (_url: unknown, init?: { body?: unknown }) => {
+        sentToModel.push(String(init?.body ?? ''));
         const text = replies[Math.min(call++, replies.length - 1)] ?? '';
         const frame = JSON.stringify({
           response: { candidates: [{ content: { parts: [{ text }] } }] },
@@ -1365,7 +1456,11 @@ describe('generateViaAgent() — per-run safety budget', () => {
       try {
         const result = await generateViaAgent(
           {
-            prompt: ['<prompt>', 'the strike should follow the mouse', '</prompt>'].join(NL),
+            prompt: [
+              '<prompt>',
+              opts.prompt ?? 'the strike should follow the mouse',
+              '</prompt>',
+            ].join(NL),
             history: [],
             editMode: true,
             fastEdit: true,
@@ -1379,11 +1474,13 @@ describe('generateViaAgent() — per-run safety budget', () => {
               setEngine: () => {},
               getCurrentEngine: () => 'three',
               validate: () => ({ ok: true, engine: 'three', issues: [] }),
+              ...(opts.observeGame !== undefined ? { observeGame: opts.observeGame } : {}),
             },
           },
         );
         return {
           result,
+          sentToModel,
           tree,
           agentRuns: agentCalls.reduce((n, c) => n + c.prompts.length, 0) - before,
         };
@@ -1403,6 +1500,45 @@ describe('generateViaAgent() — per-run safety budget', () => {
       expect(result.message).toContain('Applied your change (src/fx.js)');
       expect(result.artifacts).toHaveLength(1);
       expect(result.interrupted).toBe(false);
+    });
+
+    it('looks at the running game first for a general request, and builds on what it saw', async () => {
+      const fixed = FX.replace('mesh.rotation.z = rotY;', 'mesh.rotation.y = rotY;');
+      const asked: string[] = [];
+      const { sentToModel, agentRuns } = await run(
+        [
+          '{"files": ["src/fx.js"], "why": "effects live here"}',
+          ['=== FILE: src/fx.js ===', fixed, '=== END FILE ==='].join(NL),
+        ],
+        {
+          prompt: 'State of combat is not very good. Improve it',
+          observeGame: async (request) => {
+            asked.push(request);
+            return '- strikes leave no visible trail';
+          },
+        },
+      );
+      expect(asked).toEqual(['State of combat is not very good. Improve it']);
+      expect(agentRuns).toBe(0);
+      expect(sentToModel.join(' ')).toContain('strikes leave no visible trail');
+    });
+
+    it('does not look at the game for a specific request', async () => {
+      const asked: string[] = [];
+      const fixed = FX.replace('mesh.rotation.z = rotY;', 'mesh.rotation.y = rotY;');
+      await run(
+        [
+          '{"files": ["src/fx.js"], "why": "x"}',
+          ['=== FILE: src/fx.js ===', fixed, '=== END FILE ==='].join(NL),
+        ],
+        {
+          observeGame: async (request) => {
+            asked.push(request);
+            return 'seen';
+          },
+        },
+      );
+      expect(asked).toEqual([]);
     });
 
     it('still runs the agent loop when the host edit could not be applied', async () => {

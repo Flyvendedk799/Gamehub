@@ -18,3 +18,24 @@ describe('phaseOfProgressMessage', () => {
     expect(phaseOfProgressMessage('I think the camera is the problem.')).toBeNull();
   });
 });
+
+describe('draft_ready', () => {
+  it('is accepted off the wire and moves the tracker to Test without ending the run', async () => {
+    const { parseSseFrame } = await import('../api');
+    const { deriveBuildStatus } = await import('../build-status');
+    const frame = parseSseFrame(JSON.stringify({ type: 'draft_ready' }));
+    expect(frame?.type).toBe('draft_ready');
+
+    const status = deriveBuildStatus([
+      {
+        type: 'user_message',
+        runId: 'r1',
+        content: 'improve it',
+        timestamp: '2026-10-24T10:00:00Z',
+      },
+      { type: 'draft_ready', runId: 'r1', timestamp: '2026-10-24T10:02:00Z' },
+    ]);
+    expect(status.phaseIndex).toBe(2);
+    expect(status.done).toBe(false);
+  });
+});

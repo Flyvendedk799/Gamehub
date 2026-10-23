@@ -1148,6 +1148,9 @@ export interface GenerateViaAgentDeps {
         /** Persists the agent's `choose_engine` decision into the per-run
          *  mutable so the next snapshot writer reads it back. */
         setEngine: ChooseEngineFn;
+        /** Optional: look at the running game and describe it, for a request too general to act on
+         *  blind ("improve combat"). Host-implemented with a screenshot and a vision call. */
+        observeGame?: ((request: string) => Promise<string | null>) | undefined;
         /** Returns the engine pinned for this run (latest `choose_engine`
          *  value, or the user's pre-pick from the New-design dialog). */
         getCurrentEngine(): ValidateEngine | null;
@@ -2055,6 +2058,10 @@ export async function generateViaAgent(
   // signal and waiting for turn_end could let the loop balloon further.
   let pendingWallClockAbort = false;
   let doneAccepted = false;
+  // Fast first build: the host's draft landed, the spec is declared, so the agent loop can stop.
+  let draftWritten = false;
+  let specDeclared = false;
+  let draftStopped = false;
   let successfulWriteCount = 0;
   // Successful edits to the GAME's own code (src/**): the page shell and assets do not count.
   let gameCodeWriteCount = 0;
@@ -2221,6 +2228,7 @@ export async function generateViaAgent(
       // `done` accepted (no error): the build is finished. Some models (Gemini) keep calling
       // tools after it; turn_end below ends the run after one closing turn.
       if (toolName === 'done' && evEnd.isError !== true) doneAccepted = true;
+      if (toolName === 'declare_game_spec' && evEnd.isError !== true) specDeclared = true;
 
       // Read-only dithering guard. A model that only views/finds/lists and never edits is not
       // making progress; tell it so before it burns the whole tool budget re-reading files.
@@ -2303,6 +2311,21 @@ export async function generateViaAgent(
       return;
     }
     if (event.type === 'turn_end') {
+      // Fast first build: the whole game is drafted and its spec declared. Everything the loop
+      // would do from here (validate, playtest, polish) the caller does deterministically in a
+      // real browser, so stop at this safe boundary instead of re-reading the draft for minutes.
+      if (
+        input.fastDraft === true &&
+        draftWritten &&
+        specDeclared &&
+        !draftStopped &&
+        !doneAccepted
+      ) {
+        draftStopped = true;
+        log.info('[generate] step=fast_draft.stop', { ...ctx, toolCallCount });
+        agent.abort();
+        return;
+      }
       if (doneAccepted) {
         turnsAfterDone += 1;
         // Turn 1 is the one that called `done`; turn 2 is the closing summary. If the model
@@ -2998,6 +3021,7 @@ Latest request: ${input.prompt}`
             generate: (system, user) => completeWithAntigravity(system, user, 'medium'),
           });
           successfulWriteCount += draft.written.length;
+          draftWritten = true;
           // From here the page shell is the host's: no from-scratch index.html.
           pageShellGuard.arm();
           // The game exists: verify / polish gets a small, fixed allowance from here.
@@ -3062,9 +3086,23 @@ Latest request: ${input.prompt}`
               ? 'Reading through the game to decide which upgrades will be the most visible…'
               : 'Reading through the game to find where this change belongs…',
           );
+          // A general request ("improve combat") gives the edit nothing to act on blind. Look at the
+          // running game first, so the upgrades answer what is actually weak on screen.
+          let seen: string | null = null;
+          if (polish && deps.gameMode?.observeGame !== undefined) {
+            say('Looking at the game running first, so the upgrades fit what is on screen…');
+            try {
+              seen = await deps.gameMode.observeGame(request);
+            } catch (observeErr) {
+              log.warn('[generate] step=observe_game.failed', {
+                ...ctx,
+                error: String(observeErr),
+              });
+            }
+          }
           const edit = await applyEditRequest({
             progress: say,
-            request: polish ? buildPolishRequest(request) : request,
+            request: polish ? buildPolishRequest(request, seen) : request,
             listFiles: () => fsForRepair.textFiles?.() ?? [],
             write: async (path, content) => {
               await fsForRepair.create(path, content);
@@ -3117,7 +3155,7 @@ ${edited.summary}`
         : `${edited.polish ? 'Polished the game' : 'Applied your change'} (${edited.files.join(', ')}).${what}`;
     return {
       message,
-      ...(edited.summary !== undefined ? { hostSummary: message } : {}),
+      hostSummary: message,
       artifacts:
         entry !== null && entry.content.trim().length > 0
           ? [createArtifact(entry.content, 0, input.artifactType)]
@@ -3249,7 +3287,12 @@ ${edited.summary}`
       await withBackoff(sendOnce, retryOpts);
     }
   } catch (err) {
-    if (budgetReason === 'wall_clock' || budgetReason === 'tool_calls' || doneAccepted) {
+    if (
+      budgetReason === 'wall_clock' ||
+      budgetReason === 'tool_calls' ||
+      doneAccepted ||
+      draftStopped
+    ) {
       // wall_clock = checkpoint signal; fall through to parse_response so
       // the user sees the partial artifact + a "say continue" hint.
       // Enriched payload feeds Step 5's auto-continue + post-launch
@@ -3329,7 +3372,7 @@ ${edited.summary}`
   const isWallClockCheckpoint =
     (budgetReason !== null && finalAssistant.stopReason !== 'error') || isContinuationPause;
   // Stopped on purpose right after an accepted `done`: a normal finish, not an abort.
-  const isDoneStop = doneAccepted && finalAssistant.stopReason === 'aborted';
+  const isDoneStop = (doneAccepted || draftStopped) && finalAssistant.stopReason === 'aborted';
   if (
     !isWallClockCheckpoint &&
     !isDoneStop &&
@@ -3439,7 +3482,7 @@ ${edited.summary}`
   // A run cut off before `done` never wrote its own summary, and what is left is whatever
   // sentence it was mid-way through ("I'm verifying that the project builds..."). The brief asks
   // the builder to say what it chose, so answer with the choices the host actually rolled.
-  if (budgetReason === 'tool_calls' && !doneAccepted && draftVariation !== null) {
+  if ((budgetReason === 'tool_calls' || draftStopped) && !doneAccepted && draftVariation !== null) {
     const winCondition = (await deps.gameMode?.getSpec?.())?.winCondition;
     const chosen = [
       summarizeVariation(draftVariation),
@@ -3475,6 +3518,7 @@ ${edited.summary}`
     // pause.
     interrupted: isWallClockCheckpoint && budgetReason !== 'tool_calls',
     ...(budgetReason === 'tool_calls' ? { stoppedAtToolBudget: true } : {}),
+    ...(draftStopped ? { hostSummary: message } : {}),
     ...(runNarrationsTotal > 0 ? { narrationsTotal: runNarrationsTotal } : {}),
   };
   return skillResult.warnings.length > 0

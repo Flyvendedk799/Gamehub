@@ -204,6 +204,12 @@ export default function BuilderPage() {
             setMobileTab('play');
           }
 
+          // The server has a booted version of the game ready while it keeps testing it: show it
+          // now. The stream stays open; only run_complete / run_error / run_paused end the run.
+          if (event.type === 'draft_ready') {
+            repointPreviewAtHead();
+          }
+
           if (event.type === 'run_error') {
             const errEvent = event as RunErrorEvent;
             setHasError(true);

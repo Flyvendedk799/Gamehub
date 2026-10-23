@@ -295,6 +295,56 @@ describe('enqueueRun', () => {
     expect(order).toEqual(['settled', 'published']);
   });
 
+  it('puts the previous version back when a run fails after showing a draft', async () => {
+    const { bus, store } = makePorts();
+    const html = '<!doctype html><canvas id="game"></canvas>';
+    const parent = await store.write([
+      { path: 'index.html', bytes: new TextEncoder().encode(html) },
+    ]);
+    const calls: Array<{ projectId: string; manifestKey: string }> = [];
+    const agent: GenerateFn = async (_input, deps) => {
+      await deps.fs?.create('index.html', `${html}<!-- edited -->`);
+      return { ...emptyOutput(), hostSummary: 'Here is what changed' };
+    };
+
+    await expect(
+      enqueueRun(
+        {
+          runId: 'run_draft_fail',
+          projectId: 'proj_1',
+          prompt: 'make it better',
+          model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+          apiKey: 'sk-test',
+          parentManifestKey: parent.manifestKey,
+        },
+        {
+          bus,
+          store,
+          generate: agent,
+          browserJobs: {
+            async runtimeVerify() {
+              return { hasGameContract: true, fatalErrors: [] };
+            },
+            async playtest() {
+              return null;
+            },
+          },
+          publishDraft: async (projectId, draft) => {
+            calls.push({ projectId, manifestKey: draft.manifestKey });
+          },
+          settle: async () => {
+            throw new Error('db down');
+          },
+        },
+      ),
+    ).rejects.toThrow('db down');
+
+    // The draft went up, then the parent version was restored.
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.manifestKey).not.toBe(parent.manifestKey);
+    expect(calls[1]).toEqual({ projectId: 'proj_1', manifestKey: parent.manifestKey });
+  });
+
   it('late subscriber still receives all events via replay', async () => {
     const { bus, store } = makePorts();
     const runId = 'run_003';

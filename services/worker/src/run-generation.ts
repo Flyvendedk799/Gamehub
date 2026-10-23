@@ -35,6 +35,7 @@ import {
   type VisualCritique,
   buildBreakageDiagnosisPrompt,
   buildInteractivityFloorPlan,
+  buildObservePrompt,
   buildRepairVerdict,
   buildVisualCritiquePrompt,
   buildVisualRepairInstruction,
@@ -275,9 +276,22 @@ export interface RunTokenUsage {
   cacheWriteTokens: number;
 }
 
+/** A draft of the game that has booted cleanly, offered to the caller before verification ends. */
+export interface DraftPublication {
+  manifestKey: string;
+  filesHash: string;
+}
+
 export interface GenerationPorts {
   store: SnapshotStore;
   onEvent?: (event: AgentEvent) => void;
+  /**
+   * Show the user the new version before verification finishes. Called at most once per run, with
+   * a draft that has already booted without errors, so the preview can switch to it while the
+   * real-browser play checks, the visual critique and any repair still run. Best-effort: it must
+   * not throw, and a failure only means the preview updates at the end as it always did.
+   */
+  publishDraft?: (draft: DraftPublication) => Promise<void>;
   /** Injectable agent runner. Defaults to the real generateViaAgent. */
   generate?: GenerateFn;
   /** Engine scene validator. Defaults to a permissive pass. */
@@ -908,6 +922,28 @@ export async function runGeneration(
       : {}),
     ...(runtimeVerify !== undefined ? { runtimeVerify } : {}),
     gameMode: {
+      // Look at the game running before editing it, for a request too general to act on blind.
+      // Best-effort: no screenshot port, no vision model, or any failure just means no observation.
+      ...(ports.visionCritic !== undefined && browserJobs?.screenshot !== undefined
+        ? {
+            observeGame: async (request: string): Promise<string | null> => {
+              const entry = tree.view('index.html');
+              if (entry === null) return null;
+              const frame = await browserJobs.screenshot?.(await inlineForVerify(entry.content), {
+                playSettle: true,
+              });
+              if (frame === null || frame === undefined) return null;
+              const seen = await ports.visionCritic?.({
+                pngBase64: frame.pngBase64,
+                mimeType: 'image/png',
+                prompt: buildObservePrompt(request),
+              });
+              return seen !== null && seen !== undefined && seen.trim().length > 0
+                ? seen.trim().slice(0, 1500)
+                : null;
+            },
+          }
+        : {}),
       setEngine: (engine) => {
         if (engine === 'canvas2d' && req.engine !== 'canvas2d') {
           throw new Error(
@@ -999,6 +1035,10 @@ export async function runGeneration(
     // below; the agent loop only runs if that verification fails. A breakage report still needs
     // the agent (it must reproduce before it fixes), so it opts out.
     ...(isIteration && editRequest.kind === 'change' ? { fastEdit: true } : {}),
+    // A first build stops once the host's one-shot draft of the game exists and its spec is
+    // declared: the loop's remaining job (validate, playtest, polish) is done below, in a real
+    // browser, with bounded repairs. Only the first round: a repair round is a normal agent run.
+    ...(!isIteration && history.length === 0 ? { fastDraft: true } : {}),
     // A repair round is a focused fix of one named failure, never a rebuild. After a host edit it
     // is small; after a first build it still gets far less than the build did (live repair rounds
     // were spending the whole 20-minute allowance).
@@ -1030,6 +1070,29 @@ export async function runGeneration(
   // game artifact, no spec, or no playbook predicates for the genre) — the
   // loop then ships the attempt as-is.
   let verifyPasses = 0;
+  let draftPublished = false;
+  /**
+   * Show the user the new version now, not after the play checks, the critique and any repair.
+   * Only on a fast path (the host wrote the change or the first draft), only once, and only after
+   * the game has BOOTED without errors: a draft that does not boot is never shown.
+   */
+  const publishBootedDraft = async (): Promise<void> => {
+    if (draftPublished || ports.publishDraft === undefined) return;
+    draftPublished = true;
+    try {
+      for (const f of tree.toTextFiles()) {
+        if (!f.path.endsWith('.html')) continue;
+        const fixed = normalizeEngineCdnUrls(f.content);
+        if (fixed !== f.content) tree.create(f.path, fixed);
+      }
+      const draft = await tree.persist(ports.store);
+      await ports.publishDraft({ manifestKey: draft.manifestKey, filesHash: draft.filesHash });
+      say('Your updated game is in the preview now. I am still running the play checks on it…');
+      ports.onEvent?.({ type: 'draft_ready' } as unknown as AgentEvent);
+    } catch (err) {
+      console.warn('[run-generation] draft publish failed (non-fatal):', err);
+    }
+  };
   const observeVerdict = async (): Promise<RepairVerdict | null> => {
     if (browserJobs === undefined) return null;
     const entry = tree.view('index.html');
@@ -1069,6 +1132,16 @@ export async function runGeneration(
     const fatalErrors: string[] = rvVerdict === null ? [] : [...rvVerdict.fatalErrors];
     if (rvVerdict !== null && !rvVerdict.hasGameContract) {
       fatalErrors.push('Runtime load: window.__game never appeared — the game did not boot.');
+    }
+    // The host wrote this version and it boots: show it now; the checks below can still repair it.
+    if (
+      verifyPasses === 1 &&
+      hostSummary !== undefined &&
+      fatalErrors.length === 0 &&
+      rvVerdict?.hasGameContract === true &&
+      rvVerdict.renderedNonBlank !== false
+    ) {
+      await publishBootedDraft();
     }
     // Premium-completeness — non-blank-render gate. STRICTLY `=== false`: the browser
     // reports false ONLY when it reliably read a 2D canvas that is persistently blank
@@ -1968,7 +2041,12 @@ ${unreadableNote}`
     }
   }
 
-  if (hostSummary !== undefined) output = { ...output, message: hostSummary };
+  if (hostSummary !== undefined) {
+    output = { ...output, message: hostSummary };
+    // The chat only shows streamed text. Without this the summary lived in the return value and
+    // the user saw progress lines, then "ready", and no account of what changed.
+    say(hostSummary);
+  }
   return {
     output,
     engine: state.engine,

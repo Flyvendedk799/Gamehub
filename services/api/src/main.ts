@@ -414,6 +414,14 @@ async function main() {
         bus,
         store,
         recordRunQuality,
+        // Show a booted draft in the preview before verification finishes (HEAD only; the
+        // snapshot row still comes from finalizeRun at the end).
+        publishDraft: async (draftProjectId, draft) => {
+          await db
+            .update(schema.projects)
+            .set({ currentManifestKey: draft.manifestKey, updatedAt: new Date() })
+            .where(eq(schema.projects.id, draftProjectId));
+        },
         visionCritic: makeVisionCritic({
           model: effectiveModel,
           options: {

@@ -274,7 +274,12 @@ async function main() {
               htmlContent,
               opts?.playSettle === true,
             );
-            const result = await browserClient.waitForResult<ThumbnailResult>(jobId, 30_000);
+            // A play-settle shot plays for a moment and keeps a mid-play frame, so it needs the
+            // longer ceiling the browser worker gives it (see PLAY_SETTLE_JOB_TIMEOUT_MS).
+            const result = await browserClient.waitForResult<ThumbnailResult>(
+              jobId,
+              opts?.playSettle === true ? 60_000 : 30_000,
+            );
             if (result === null) return null;
             return {
               pngBase64: result.pngBase64,
@@ -398,6 +403,15 @@ async function main() {
               }
             },
             ...(browserJobs !== undefined ? { browserJobs } : {}),
+            // Show a booted draft in the preview before verification finishes. HEAD alone, as
+            // the paused branch of finalizeRun does: the snapshot row and the version history
+            // still come from the one canonical finalizeRun at the end.
+            publishDraft: async (draftProjectId, draft) => {
+              await db
+                .update(schema.projects)
+                .set({ currentManifestKey: draft.manifestKey, updatedAt: new Date() })
+                .where(eq(schema.projects.id, draftProjectId));
+            },
             // BUILD_SPEED §3 — the vision call, on the run's OWN model and
             // credential. Bounded to MAX_VISUAL_CRITIQUES by run-generation, so
             // the worst case is two short image completions per run. A provider

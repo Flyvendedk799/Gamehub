@@ -198,16 +198,30 @@ export function isOpenEndedPolishRequest(prompt: string): boolean {
  * Turn a vague quality request into a concrete brief for the edit step: pick a few upgrades a
  * player will SEE and FEEL, leave mechanics alone. Concrete beats "do exactly what was asked".
  */
-export function buildPolishRequest(userRequest: string): string {
+export function buildPolishRequest(userRequest: string, seen?: string | null): string {
   return [
     `The user asked, in general terms: "${userRequest.trim()}"`,
     '',
+    ...(seen !== undefined && seen !== null && seen.trim().length > 0
+      ? [
+          'WHAT THE RUNNING GAME LOOKS LIKE RIGHT NOW (from a screenshot of it being played):',
+          seen.trim(),
+          '',
+          'Build on what is really there: fix the weak points above first.',
+          '',
+        ]
+      : []),
     'That names no single change, so choose 3 to 5 upgrades a player will clearly SEE and FEEL in the first ten seconds of play, and make them. Pick the ones this game is missing, from:',
     '- Impact feedback: hit flash or squash on the victim, impact sparks or particles, short screen shake and a brief hit-stop on a clean hit, a distinct effect on block / parry / miss.',
     '- Motion: anticipation and follow-through on attacks, smooth easing instead of snapping, a readable idle and movement animation.',
     '- Readability: HUD that shows health / stamina / state clearly, floating damage or combo numbers, a clear win / lose / restart screen.',
     '- Atmosphere: lighting, fog or background depth, colour grading, a camera that follows the action.',
     '- Audio: a short sound for each of attack, hit, block, win, lose.',
+    '',
+    'Make it count:',
+    '- At least THREE of your changes must be NEW things a player can see on screen (a new effect, animation, telegraph, HUD element, lighting or camera behaviour). Retuning an existing sound or number does not count towards those three.',
+    '- Read the code first and do not re-add anything that already exists. If a hit already spawns sparks and floating numbers, add something it does NOT have yet.',
+    "- If the user's words point at an area (combat, movement, the HUD, the camera), put most of the effort there.",
     '',
     'Do NOT change rules, controls, balance numbers or the genre, and do not rewrite working systems. Additive, visible changes only, in the files that already own that behaviour.',
   ].join('\n');

@@ -84,6 +84,18 @@ export function assessGame(input: {
   };
 }
 
+/**
+ * A version whose boot was actually observed to be clean, whether or not every behaviour check
+ * passed. The builder preview shows this one rather than falling back to an older verified build:
+ * a play check against a live opponent is stochastic, and three follow-ups in a row that were
+ * `needs_fixes` left the preview on a version from before all of them, so every edit looked like it
+ * had done nothing. Publishing to the Hub keeps the strict `isVerifiedGame` rule.
+ */
+export function isBootedGame(quality: unknown, filesHash: string): boolean {
+  const parsed = GameQuality.safeParse(quality);
+  return parsed.success && parsed.data.filesHash === filesHash && parsed.data.booted;
+}
+
 export function isVerifiedGame(quality: unknown, filesHash: string): boolean {
   const parsed = GameQuality.safeParse(quality);
   return (

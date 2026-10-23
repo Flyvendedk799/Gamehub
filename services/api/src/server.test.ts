@@ -4070,6 +4070,48 @@ describe('verified publication and isolated preview capabilities', () => {
     await app.close();
   });
 
+  it('shows the newest version when it boots, even if a behaviour check failed', async () => {
+    const { app, project, repo, snapshotRepo, store } = await fixture();
+    const head = await repo.get(project.id);
+    const verifiedId = head?.currentSnapshotId;
+    if (!head || !verifiedId) throw new Error('missing fixture');
+    head.lastVerifiedSnapshotId = verifiedId;
+    const { manifestKey } = await store.write([
+      { path: 'index.html', bytes: Buffer.from('<html><body>NEWEST MARKER</body></html>') },
+    ]);
+    const newest = await snapshotRepo.append({
+      projectId: project.id,
+      type: 'edit',
+      engine: 'canvas2d',
+      filesManifestKey: manifestKey,
+      filesHash: manifestKey,
+      quality: {
+        schemaVersion: 1,
+        filesHash: manifestKey,
+        status: 'needs_fixes',
+        booted: true,
+        behaviorPassed: false,
+        issues: ['opponent HP did NOT decrease'],
+      },
+    });
+    await repo.setCurrentSnapshot(project.id, newest.id, manifestKey);
+
+    const preview = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${project.id}/preview-session`,
+      headers: AS_ALICE,
+    });
+    expect(preview.json().showingPrevious).toBe(false);
+    const url = new URL(preview.json().url);
+    const page = await app.inject({
+      method: 'GET',
+      url: url.pathname,
+      headers: { host: url.host },
+    });
+    expect(page.body).toContain('NEWEST MARKER');
+    await app.close();
+  });
+
   it('binds tickets to owner, immutable manifest and project host; game hosts expose no API', async () => {
     const { app, project } = await fixture();
     const denied = await app.inject({

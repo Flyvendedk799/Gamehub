@@ -73,6 +73,10 @@ export const ENGINE_CDN_PATH_PREFIXES: readonly string[] = ['/npm/three@', '/npm
 /** Hard ceiling on total wall-clock time for any single job, in ms. */
 export const JOB_HARD_TIMEOUT_MS = 30_000;
 
+/** A play-settle thumbnail plays for a moment, keeps a mid-play frame, then captures: two
+ *  screenshots on software-rendered WebGL. Run b3319147's play frame died at the 30s ceiling. */
+export const PLAY_SETTLE_JOB_TIMEOUT_MS = 55_000;
+
 /**
  * Decide whether an outbound request from inside an untrusted game context is
  * permitted. Default-DENY: only allow data:/blob: URLs, the inline document
@@ -1568,7 +1572,9 @@ export async function runJob(browser: Browser, data: BrowserJobData): Promise<Br
       // playtest — boot, drive synthetic input, snapshot debug state per step.
       return runPlaytest(browser, data, track);
     },
-    JOB_HARD_TIMEOUT_MS,
+    data.kind === 'thumbnail' && data.playSettle === true
+      ? PLAY_SETTLE_JOB_TIMEOUT_MS
+      : JOB_HARD_TIMEOUT_MS,
     data.kind,
     killSwitch,
   );

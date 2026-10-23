@@ -114,6 +114,15 @@ export interface QueuePorts {
    */
   visionCritic?: VisionCriticFn;
   /**
+   * Point the project's HEAD (what the preview serves) at a draft that has booted cleanly, before
+   * the run's verification finishes. Best-effort and idempotent. If the run then fails, HEAD is
+   * pointed back at the version the run started from.
+   */
+  publishDraft?: (
+    projectId: string,
+    draft: { manifestKey: string; filesHash: string },
+  ) => Promise<void>;
+  /**
    * Persist the finished run BEFORE its terminal frame is published.
    *
    * The caller settles the run here (finalizeRun: snapshot row, run status,
@@ -211,6 +220,9 @@ export async function enqueueRun(input: EnqueueInput, ports: QueuePorts): Promis
         ? `${EDIT_MODE_PREFIX}\n\n<prompt>\n${basePrompt}\n</prompt>`
         : basePrompt;
 
+  // Set once a draft was shown in the preview, so a failed run can put the old version back.
+  let draftPublished = false;
+
   try {
     const result = await runGeneration(
       {
@@ -231,6 +243,18 @@ export async function enqueueRun(input: EnqueueInput, ports: QueuePorts): Promis
         store: ports.store,
         ...(ports.generate !== undefined ? { generate: ports.generate } : {}),
         ...(ports.browserJobs !== undefined ? { browserJobs: ports.browserJobs } : {}),
+        ...(ports.publishDraft !== undefined
+          ? {
+              publishDraft: async (draft: { manifestKey: string; filesHash: string }) => {
+                try {
+                  await ports.publishDraft?.(input.projectId, draft);
+                  draftPublished = true;
+                } catch (err) {
+                  console.warn(`[run:${input.runId}] draft publish failed (non-fatal):`, err);
+                }
+              },
+            }
+          : {}),
         ...(ports.recordRunQuality !== undefined
           ? {
               recordRunQuality: (metrics: RunQualityMetrics) =>
@@ -309,6 +333,14 @@ export async function enqueueRun(input: EnqueueInput, ports: QueuePorts): Promis
     await recorder.control({ type: 'run_complete', quality: result.quality ?? null });
     return result;
   } catch (err) {
+    // A draft was shown but the run failed: do not leave the preview on a half-verified version.
+    if (draftPublished && input.parentManifestKey !== undefined) {
+      await ports
+        .publishDraft?.(input.projectId, { manifestKey: input.parentManifestKey, filesHash: '' })
+        .catch((revertErr: unknown) => {
+          console.warn(`[run:${input.runId}] could not restore the previous version:`, revertErr);
+        });
+    }
     await recorder.control({ type: 'run_error', error: String(err) });
     throw err;
   }

@@ -61,6 +61,16 @@ export interface RunCompleteEvent {
   timestamp: string;
 }
 
+/**
+ * The new version has booted cleanly and is already HEAD: switch the preview to it now, while the
+ * server is still running the play checks. Does not end the run (only run_complete does).
+ */
+export interface DraftReadyEvent {
+  type: 'draft_ready';
+  runId: string;
+  timestamp: string;
+}
+
 export interface RunErrorEvent {
   type: 'run_error';
   runId: string;
@@ -206,6 +216,7 @@ export type SseEvent =
   | TurnEndEvent
   | AgentEndEvent
   | RunCompleteEvent
+  | DraftReadyEvent
   | RunErrorEvent
   | MessageUpdateEvent
   | UserMessageEvent
