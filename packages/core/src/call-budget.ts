@@ -60,9 +60,9 @@ export function stalledReadingReminder(consecutiveReads: number): string {
 }
 
 /** Tool calls a repair round may make without a single edit before it is told to act. */
-export const REPAIR_NUDGE_CALLS = 12;
+export const REPAIR_NUDGE_CALLS = 8;
 /** ...and the point at which it is stopped: it is not going to fix anything. */
-export const REPAIR_STALL_CALLS = 24;
+export const REPAIR_STALL_CALLS = 16;
 
 /** True for a call that changes the project (an editor write), as opposed to looking or checking. */
 export function isEditingCall(
@@ -99,6 +99,12 @@ export function repairStallAction(
 }
 
 /** The steering message for a repair round that has not edited anything yet. */
-export function repairStallReminder(callsSinceEdit: number): string {
-  return `[system-reminder] This is a repair round and you have made ${callsSinceEdit} calls without changing anything. The failing check and the lines the host just changed are in your first message: that is where the cause is. Stop searching. Make ONE targeted str_replace on the most likely cause now. If you truly cannot find it, say what you looked for in one sentence and call done; the host will keep the version that already booted.`;
+export function repairStallReminder(callsSinceEdit: number, changedFiles: string[] = []): string {
+  // Run bf3a9e60 spent a whole repair round guessing a file that did not exist while the diff in
+  // its first message named the file that changed. Say that file here, in the nudge.
+  const where =
+    changedFiles.length > 0
+      ? ` The host changed ${changedFiles.slice(0, 3).join(', ')}: edit there.`
+      : '';
+  return `[system-reminder] This is a repair round and you have made ${callsSinceEdit} calls without changing anything. The failing check and the lines the host just changed are in your first message: that is where the cause is.${where} Stop searching. Make ONE targeted str_replace on the most likely cause now. If you truly cannot find it, say what you looked for in one sentence and call done; the host will keep the version that already booted.`;
 }

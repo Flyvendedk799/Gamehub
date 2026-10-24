@@ -2672,7 +2672,7 @@ describe('a repair round that never edits', () => {
   });
 
   it('is left alone when it stays under the limit', async () => {
-    const { aborted, steers } = await run(REPAIR_HISTORY, 8);
+    const { aborted, steers } = await run(REPAIR_HISTORY, 7);
     expect(aborted).toBe(false);
     expect(steers.filter((s) => /without changing anything/.test(s.content))).toHaveLength(0);
   });

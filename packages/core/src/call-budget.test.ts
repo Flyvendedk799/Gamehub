@@ -81,12 +81,12 @@ describe('repair rounds that do not edit', () => {
     expect(isEditingCall(undefined, undefined)).toBe(false);
   });
 
-  it('nudges at 12 calls without an edit, stops at 24, and only in a repair round', async () => {
+  it('nudges at 8 calls without an edit, stops at 16, and only in a repair round', async () => {
     const { repairStallAction } = await import('./call-budget.js');
-    expect(repairStallAction(11, true)).toBe('none');
-    expect(repairStallAction(12, true)).toBe('nudge');
-    expect(repairStallAction(13, true)).toBe('none');
-    expect(repairStallAction(24, true)).toBe('stop');
+    expect(repairStallAction(7, true)).toBe('none');
+    expect(repairStallAction(8, true)).toBe('nudge');
+    expect(repairStallAction(9, true)).toBe('none');
+    expect(repairStallAction(16, true)).toBe('stop');
     expect(repairStallAction(60, true)).toBe('stop');
     expect(repairStallAction(60, false)).toBe('none');
   });
@@ -96,5 +96,13 @@ describe('repair rounds that do not edit', () => {
     const text = repairStallReminder(12);
     expect(text).toContain('12 calls without changing anything');
     expect(text).toContain('ONE targeted str_replace');
+    expect(text).not.toContain('The host changed');
+  });
+
+  it('names the files the host changed so the agent does not guess one', async () => {
+    const { repairStallReminder } = await import('./call-budget.js');
+    expect(repairStallReminder(8, ['src/main.js'])).toContain(
+      'The host changed src/main.js: edit there.',
+    );
   });
 });

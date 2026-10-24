@@ -2174,7 +2174,10 @@ export async function generateViaAgent(
       if (stall === 'nudge') {
         agent.steer({
           role: 'user',
-          content: repairStallReminder(callsSinceEdit),
+          content: repairStallReminder(
+            callsSinceEdit,
+            [...input.prompt.matchAll(/^--- (\S+) \(\+\d+ -\d+\)/gm)].map((m) => m[1] ?? ''),
+          ),
           timestamp: Date.now(),
         });
       } else if (stall === 'stop' && budgetReason === null) {
