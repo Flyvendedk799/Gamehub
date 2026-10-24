@@ -129,6 +129,46 @@ describe('RunEventRecorder', () => {
     expect(textDeltaOf(persisted[0]?.event)).toBe('Setting up the car physics');
   });
 
+  it('continues numbering after the events a first attempt stored (retried job, run 951f7a7a)', async () => {
+    const published: unknown[] = [];
+    const persisted: PersistRunEventInput[] = [];
+    const rec = new RunEventRecorder(
+      'r6',
+      'p6',
+      fakeBus(published),
+      (i) => {
+        persisted.push(i);
+      },
+      10,
+    );
+
+    rec.onAgentEvent(tool('choose_engine'));
+    await rec.control({ type: 'run_complete' });
+    await flush();
+
+    expect(persisted.map((p) => p.seq)).toEqual([10, 11]);
+  });
+
+  it('starts at 0 for a new run and ignores a nonsense offset', async () => {
+    const persisted: PersistRunEventInput[] = [];
+    const fresh = new RunEventRecorder('r7', 'p7', fakeBus([]), (i) => {
+      persisted.push(i);
+    });
+    fresh.onAgentEvent(tool('choose_engine'));
+    const negative = new RunEventRecorder(
+      'r8',
+      'p8',
+      fakeBus([]),
+      (i) => {
+        persisted.push(i);
+      },
+      -5,
+    );
+    negative.onAgentEvent(tool('choose_engine'));
+    await flush();
+    expect(persisted.map((p) => p.seq)).toEqual([0, 0]);
+  });
+
   it('still streams live when no persist sink is wired (no-DB dev)', async () => {
     const published: unknown[] = [];
     const rec = new RunEventRecorder('r3', 'p3', fakeBus(published));

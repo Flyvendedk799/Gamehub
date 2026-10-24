@@ -476,6 +476,14 @@ async function main() {
             onUsage: (usage) => {
               usageRef.latest = usage;
             },
+            // A retried job continues after the events its first attempt stored.
+            nextEventSeq: async (rid) => {
+              const [row] = await db
+                .select({ last: sql<number | null>`max(${schema.runEvents.seq})` })
+                .from(schema.runEvents)
+                .where(eq(schema.runEvents.runId, rid));
+              return row?.last == null ? 0 : Number(row.last) + 1;
+            },
             // Durable build-feed log so the SSE relay can replay after a refresh.
             persistEvent: async (rec) => {
               await db

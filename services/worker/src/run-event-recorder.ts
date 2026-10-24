@@ -154,18 +154,27 @@ function summarizeToolResult(result: unknown): string {
 }
 
 export class RunEventRecorder {
-  private seq = 0;
+  private seq: number;
   private turnNo = 0;
   private textBuffer = '';
   private readonly channel: string;
 
+  /**
+   * `startSeq` is where this recorder's numbering begins. A job that is retried after a crash
+   * or redeploy (BullMQ re-runs a stalled job from scratch) must continue after the rows the
+   * first attempt stored: starting again at 0 collided with them on the (run_id, seq) unique
+   * key and `onConflictDoNothing` dropped the whole re-run (run 951f7a7a finished with no
+   * events past the first attempt's 9).
+   */
   constructor(
     private readonly runId: string,
     private readonly projectId: string,
     private readonly bus: EventBus,
     private readonly persist?: PersistRunEventFn,
+    startSeq = 0,
   ) {
     this.channel = runChannel(runId);
+    this.seq = Math.max(0, Math.trunc(startSeq));
   }
 
   /**

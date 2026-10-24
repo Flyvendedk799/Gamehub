@@ -101,6 +101,11 @@ export interface QueuePorts {
    */
   persistEvent?: PersistRunEventFn;
   /**
+   * The next free `run_events.seq` for a run: 0 for a new run, one past the last stored row when
+   * the job is being retried. Best-effort; omitted means every run starts at 0.
+   */
+  nextEventSeq?: (runId: string) => Promise<number>;
+  /**
    * Running token usage for the active run (see `GenerationPorts.onUsage`).
    * main.ts keeps the latest and persists it in its `finally`, so an aborted
    * run records what it spent instead of 0/0.
@@ -142,13 +147,29 @@ export interface EnqueueResult extends GenerationResult {
 }
 
 export async function enqueueRun(input: EnqueueInput, ports: QueuePorts): Promise<EnqueueResult> {
-  // Streams every event live AND durably persists it (text coalesced per turn).
+  // Streams every event live AND durably persists it (text coalesced per turn). A retried job
+  // continues the numbering after what the first attempt stored, so its events are not dropped.
+  let startSeq = 0;
+  try {
+    startSeq = (await ports.nextEventSeq?.(input.runId)) ?? 0;
+  } catch (err) {
+    console.warn(`[run:${input.runId}] could not read the stored event count: ${String(err)}`);
+  }
   const recorder = new RunEventRecorder(
     input.runId,
     input.projectId,
     ports.bus,
     ports.persistEvent,
+    startSeq,
   );
+  if (startSeq > 0) {
+    // The log would otherwise jump from the first attempt straight into the second.
+    recorder.onAgentEvent({
+      type: 'progress',
+      label: 'Picking this build back up after an interruption',
+      phase: 'understand',
+    } as unknown as AgentEvent);
+  }
 
   // Seed the working tree from the parent snapshot for iteration. Text files
   // become editable strings; binary assets (sprites/audio) are carried through

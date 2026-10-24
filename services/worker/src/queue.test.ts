@@ -95,6 +95,63 @@ describe('enqueueRun', () => {
     expect(types[types.length - 1]).toBe('run_complete');
   });
 
+  it('numbers a retried job after the events its first attempt stored, and says it restarted', async () => {
+    const { bus, store } = makePorts();
+    const stored: Array<{ seq: number; event: unknown }> = [];
+
+    await enqueueRun(
+      {
+        runId: 'run_retry',
+        projectId: 'proj_1',
+        prompt: 'red square',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      {
+        bus,
+        store,
+        generate: successAgent,
+        nextEventSeq: async () => 9,
+        persistEvent: (rec) => {
+          stored.push({ seq: rec.seq, event: rec.event });
+        },
+      },
+    );
+    await new Promise((r) => setTimeout(r, 0));
+
+    const seqs = stored.map((s) => s.seq);
+    expect(Math.min(...seqs)).toBe(9);
+    expect(new Set(seqs).size).toBe(seqs.length);
+    const first = stored.find((s) => s.seq === 9)?.event as { type?: string; label?: string };
+    expect(first.type).toBe('progress');
+    expect(first.label).toContain('back up after an interruption');
+  });
+
+  it('starts a first attempt at 0 with no restart marker', async () => {
+    const { bus, store } = makePorts();
+    const stored: number[] = [];
+    await enqueueRun(
+      {
+        runId: 'run_first',
+        projectId: 'proj_1',
+        prompt: 'red square',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      {
+        bus,
+        store,
+        generate: successAgent,
+        nextEventSeq: async () => 0,
+        persistEvent: (rec) => {
+          stored.push(rec.seq);
+        },
+      },
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(Math.min(...stored)).toBe(0);
+  });
+
   it('publishes run_error and rethrows when the agent fails', async () => {
     const { bus, store } = makePorts();
     const runId = 'run_002';
