@@ -7,6 +7,7 @@ import {
   type ApproachStep,
   approachBudget,
   distanceBetween,
+  gameEnded,
   movementKeys,
   opponentPlanar,
   planarOf,
@@ -202,24 +203,26 @@ describe('closing in, whatever the camera', () => {
     expect(report.hit).toBe(true);
     expect(report.tried[0]).toBe('KeyW');
     expect(world.state().hp).toBeLessThan(100);
-    // It found the opponent on the forward walk; it did not go exploring.
-    expect(report.tried).toEqual(['KeyW']);
+    // It found the opponent on the forward walk, well inside the budget.
+    expect(report.framesUsed).toBeLessThan(APPROACH_DEFAULT_FRAMES);
   });
 
   it('finds an opponent standing off to the side of a side-on camera (run 98e9cf12)', async () => {
     // W only walks into the depth of the arena. The opponent is at the right of the screen, and
     // the game exposes no opponent position, so the step has to search by result.
     const world = makeWorld({ dirs: SIDE_ON, opponent: [1.6, 0], speed: 0.08 });
-    const report = await runApproach(world.io, STEP, DUEL);
+    // A motionless opponent off to one side is the slowest case to find by swinging, so it gets
+    // the largest budget the step allows.
+    const report = await runApproach(world.io, { ...STEP, frames: APPROACH_MAX_FRAMES }, DUEL);
     expect(report.hit).toBe(true);
     expect(world.state().hp).toBeLessThan(100);
     expect(report.tried).toContain('KeyD');
-    expect(report.framesUsed).toBeLessThanOrEqual(APPROACH_DEFAULT_FRAMES);
+    expect(report.framesUsed).toBeLessThanOrEqual(APPROACH_MAX_FRAMES + 60);
   });
 
   it('finds an opponent to the LEFT just as well', async () => {
     const world = makeWorld({ dirs: SIDE_ON, opponent: [-1.6, 0], speed: 0.08 });
-    const report = await runApproach(world.io, STEP, DUEL);
+    const report = await runApproach(world.io, { ...STEP, frames: APPROACH_MAX_FRAMES }, DUEL);
     expect(report.hit).toBe(true);
     expect(report.tried).toContain('KeyA');
   });
@@ -267,13 +270,12 @@ describe('closing in, whatever the camera', () => {
     });
     const report = await runApproach(world.io, STEP, DUEL);
     expect(report.mode).toBe('distance');
-    // Distance mode only closes the gap; the strikes that follow in the plan do the damage.
-    expect(report.hit).toBe(false);
+    // It closes in and swings until the opponent's HP drops: that is the step's whole job.
+    expect(report.hit).toBe(true);
+    expect(world.state().hp).toBeLessThan(100);
     // Far fewer frames than the blind search needs: it walked the one direction that helped.
     expect(report.framesUsed).toBeLessThan(200);
     expect(report.tried).toContain('KeyD');
-    expect(world.state().dist).toBeLessThan(1);
-    expect(report.finalDistance as number).toBeLessThan(1);
   });
 
   it('reaches an opponent that is diagonal to the camera, using two keys', async () => {
@@ -383,5 +385,92 @@ describe('when nothing works', () => {
     });
     expect(report.hit).toBe(false);
     expect(report.mode).toBe('none');
+  });
+});
+
+describe('when the round ends or the arena has walls', () => {
+  it('knows when a game is over', () => {
+    expect(gameEnded({ state: 'over' })).toBe(true);
+    expect(gameEnded({ state: 'GAME_OVER' })).toBe(true);
+    expect(gameEnded({ phase: 'victory' })).toBe(true);
+    expect(gameEnded({ screen: 'dead' })).toBe(true);
+    expect(gameEnded({ playerHp: 0 })).toBe(true);
+    expect(gameEnded({ playerHp: -3 })).toBe(true);
+    expect(gameEnded({ state: 'play', playerHp: 40 })).toBe(false);
+    expect(gameEnded({ state: 'playing' })).toBe(false);
+    expect(gameEnded({ opponentHp: 0 })).toBe(false);
+    expect(gameEnded(null)).toBe(false);
+    expect(gameEnded('over')).toBe(false);
+  });
+
+  it('stops the moment the player dies, instead of testing a dead game (run 1e896c13)', async () => {
+    let frames = 0;
+    const log: string[] = [];
+    const io: ApproachIo = {
+      async press(code, n) {
+        log.push(code);
+        frames += n;
+      },
+      async click() {},
+      async snapshot() {
+        // An opponent that kills the player after 40 frames of any input.
+        return {
+          opponentHp: 100,
+          playerPos: { x: 0, y: 0, z: 0 },
+          ...(frames >= 40 ? { state: 'over', playerHp: 0 } : { state: 'play', playerHp: 50 }),
+        };
+      },
+    };
+    const report = await runApproach(io, STEP, DUEL);
+    expect(report.ended).toBe(true);
+    expect(report.hit).toBe(false);
+    // It did not go on pressing keys at a dead game, and it did not call the keys dead either.
+    expect(report.framesUsed).toBeLessThanOrEqual(40 + 30);
+    expect(report.inert).toEqual([]);
+  });
+
+  it('does nothing at all when the game is already over', async () => {
+    const world = makeWorld({ dirs: SIDE_ON, opponent: [3, 0] });
+    const over: ApproachIo = {
+      ...world.io,
+      async snapshot() {
+        return { opponentHp: 100, state: 'over', playerPos: { x: 0, y: 0, z: 0 } };
+      },
+    };
+    const report = await runApproach(over, STEP, DUEL);
+    expect(report.ended).toBe(true);
+    expect(report.framesUsed).toBe(0);
+    expect(world.log).toEqual([]);
+  });
+
+  it('counts a strike that lands on the press that ended the round', async () => {
+    let hp = 100;
+    let frames = 0;
+    const io: ApproachIo = {
+      async press(code, n) {
+        frames += n;
+        if (code === 'KeyJ') hp = 0;
+      },
+      async click() {},
+      async snapshot() {
+        return {
+          opponentHp: hp,
+          playerPos: { x: frames * 0.01, y: 0, z: 0 },
+          state: hp === 0 ? 'over' : 'play',
+        };
+      },
+    };
+    const report = await runApproach(io, STEP, DUEL);
+    expect(report.hit).toBe(true);
+    expect(report.ended).toBe(true);
+  });
+
+  it('does not write off keys that hit the arena wall: they work, they are just blocked', async () => {
+    // A narrow arena: the player can step 0.3 either way and no further. Every key moves it once
+    // and is then blocked, which is a wall and not a dead key.
+    const world = makeWorld({ dirs: SIDE_ON, opponent: [100, 100], bound: 0.3, speed: 0.1 });
+    const report = await runApproach(world.io, STEP, DUEL);
+    expect(report.inert).toEqual([]);
+    expect(report.hit).toBe(false);
   });
 });

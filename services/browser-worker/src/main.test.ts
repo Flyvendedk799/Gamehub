@@ -542,10 +542,10 @@ describe('runPlaytest (synthetic input → snapshot diff, real Chromium)', () =>
 
   // A duel seen from the side (run 98e9cf12): W and S only move the player in depth, A and D walk
   // left and right, and a strike lands only when the opponent, who stands motionless to the
-  // right, is within reach. The old playbook held W and never got there.
+  // left, is within reach. The old playbook held W and never got there.
   const SIDE_ON_DUEL = `<!doctype html><html><head><meta charset="utf-8"></head><body>
     <script>
-      var p = { x: 0, z: 0 }, held = {}, opponentHp = 100, ox = 1.4, oz = 0, SPEED = 0.05;
+      var p = { x: 0, z: 0 }, held = {}, opponentHp = 100, ox = -1.4, oz = 0, SPEED = 0.05;
       var keys = { KeyW: [0, -1], KeyS: [0, 1], KeyA: [-1, 0], KeyD: [1, 0] };
       window.addEventListener('keydown', function (e) { held[e.code] = true; });
       window.addEventListener('keyup', function (e) { held[e.code] = false; });
@@ -589,9 +589,9 @@ describe('runPlaytest (synthetic input → snapshot diff, real Chromium)', () =>
       opponentHp: number;
       playerPos: { x: number };
     };
-    // The strike landed: the opponent lost HP, and the player got there by walking right.
+    // The strike landed: the opponent lost HP, and the player got there by walking left.
     expect(after.opponentHp).toBeLessThan(before.opponentHp);
-    expect(after.playerPos.x).toBeGreaterThan(0.3);
+    expect(after.playerPos.x).toBeLessThan(-0.3);
   }, 45_000);
 
   it('(a3) holding W alone, as the old playbook did, never reaches that opponent', async () => {

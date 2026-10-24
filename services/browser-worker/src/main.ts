@@ -1513,6 +1513,10 @@ export async function runPlaytest(
                 await page.mouse.up({ button: 'left' });
               },
               snapshot: () => readSnapshot(page),
+              // Set APPROACH_TRACE=1 on the browser worker to log every press of the search.
+              ...(process.env['APPROACH_TRACE'] === '1'
+                ? { trace: (line: string) => console.info(`[approach] ${line}`) }
+                : {}),
             },
             step,
             controlManifest,

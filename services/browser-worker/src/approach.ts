@@ -45,10 +45,8 @@ const PROBE_FRAMES = 6;
 const COMMIT_FRAMES = 40;
 /** The finest step the steering will take once it starts converging. */
 const MIN_STEP_FRAMES = 2;
-/** Outcome mode: a short hop in each direction (sets facing, covers an opponent that walks up). */
-const HOP_FRAMES = 14;
-/** Outcome mode: the most frames spent walking back to where a hop began. */
-const HOP_RETURN_FRAMES = 24;
+/** Outcome mode: a short move in each direction (sets facing, covers an opponent that walks up). */
+const FACE_FRAMES = 8;
 /** Outcome mode: one step of a longer walk, followed by a strike. */
 const SWEEP_CHUNK_FRAMES = 30;
 /** Outcome mode: the forward walk the playbook always did, with strikes along it. */
@@ -61,7 +59,14 @@ const RECENTER_FRAMES = 70;
 const RECENTER_ABOVE_UNITS = 1;
 /** Outcome mode: a sweep stops once it is this far from where the step began. */
 const SWEEP_UNITS = 2;
-const STRIKE_FRAMES = 10;
+/** As long as the playbook's own strikes: long enough to cover a swing's wind-up. */
+const STRIKE_FRAMES = 14;
+/** Distance mode: start swinging once within this share of the starting distance. */
+const NEAR_FRACTION = 0.25;
+/** Distance mode: close in again when a swing leaves the player this much farther than its closest. */
+const REGAP_RATIO = 1.25;
+/** Distance mode: the most frames spent closing in again between swings. */
+const REGAP_FRAMES = 30;
 /** Smallest change in distance / position that counts as real movement (world units). */
 const EPSILON = 0.02;
 /** A key that moved nothing this many times is not a movement key in this game. */
@@ -76,16 +81,21 @@ export interface ApproachIo {
   click(): Promise<void>;
   /** The game's current `window.__game.debug.snapshot()`, or null. */
   snapshot(): Promise<unknown>;
+  /** Optional diagnostic sink: one line per key press, with where the player was afterwards. */
+  trace?(line: string): void;
 }
 
 export interface ApproachReport {
   mode: 'distance' | 'outcome' | 'none';
   /** True when the watched field dropped below its value at the start of the step. */
   hit: boolean;
+  /** True when the game ended (player dead, round over) before the search finished: no key does
+   *  anything after that, so the step stops instead of burning frames on a dead game. */
+  ended: boolean;
   framesUsed: number;
   /** Movement keys in the order they were tried. */
   tried: string[];
-  /** Keys that never moved the player, and were dropped. */
+  /** Keys that never moved the player at any point, and were dropped. */
   inert: string[];
   /** Planar player-to-opponent distance when the step ended; null without both positions. */
   finalDistance: number | null;
@@ -187,6 +197,27 @@ export function planarDistance(from: Planar, to: Planar): number {
   return Math.hypot(from.a - to.a, from.b - to.b);
 }
 
+/** `state` / `phase` / `screen` values that mean the round is over and input does nothing. */
+const ENDED_STATE =
+  /^(over|game.?over|gameover|dead|died|lost|lose|defeat(ed)?|ended|finished|won|win|victory)$/i;
+
+/**
+ * Has the game ended? A duel with an aggressive opponent can kill a passive player in a second, and
+ * after that no key does anything: the step then reads as "every key is inert" when the real
+ * answer is "the round is over". Looks at the conventional fields only (`state`, `phase`,
+ * `screen`, and the player's HP at or below zero) and abstains on anything else.
+ */
+export function gameEnded(snapshot: unknown): boolean {
+  if (snapshot === null || typeof snapshot !== 'object') return false;
+  const root = snapshot as Record<string, unknown>;
+  for (const field of ['state', 'phase', 'screen', 'gameState']) {
+    const value = root[field];
+    if (typeof value === 'string' && ENDED_STATE.test(value.trim())) return true;
+  }
+  const hp = readNumber(snapshot, 'playerHp');
+  return hp !== null && hp <= 0;
+}
+
 /** Player-to-opponent distance, or null when either position is not in the snapshot. */
 export function distanceBetween(snapshot: unknown): number | null {
   const me = playerPlanar(snapshot);
@@ -281,24 +312,48 @@ export function approachBudget(step: ApproachStep): number {
   return Math.min(APPROACH_MAX_FRAMES, Math.max(APPROACH_MIN_FRAMES, asked));
 }
 
+/** Thrown inside the search the moment it is over (a hit landed, or the game ended); caught in
+ *  `runApproach`, which reports which. */
+class StepOver extends Error {}
+
 /** Run the adaptive approach. Resolves with a report; never rejects on bad game data. */
 export async function runApproach(
   io: ApproachIo,
   step: ApproachStep,
   manifest: unknown,
 ): Promise<ApproachReport> {
-  const budget = approachBudget(step);
-  const start = await io.snapshot();
-  const startWatch = readNumber(start, step.watch);
-  const { keys, backward } = movementKeys(manifest);
   const report: ApproachReport = {
     mode: 'none',
     hit: false,
+    ended: false,
     framesUsed: 0,
     tried: [],
     inert: [],
-    finalDistance: distanceBetween(start),
+    finalDistance: null,
   };
+  try {
+    return await search(io, step, manifest, report);
+  } catch (err) {
+    if (err instanceof StepOver) return report;
+    throw err;
+  }
+}
+
+async function search(
+  io: ApproachIo,
+  step: ApproachStep,
+  manifest: unknown,
+  report: ApproachReport,
+): Promise<ApproachReport> {
+  const budget = approachBudget(step);
+  const start = await io.snapshot();
+  if (gameEnded(start)) {
+    report.ended = true;
+    return report;
+  }
+  const startWatch = readNumber(start, step.watch);
+  const { keys, backward } = movementKeys(manifest);
+  report.finalDistance = distanceBetween(start);
 
   const dropped = async (): Promise<boolean> => {
     if (startWatch === null) return false;
@@ -308,16 +363,41 @@ export async function runApproach(
   const press = async (code: string, frames: number): Promise<void> => {
     await io.press(code, frames);
     report.framesUsed += frames;
+    const snap = await io.snapshot();
+    if (io.trace !== undefined) {
+      const me = playerPlanar(snap);
+      io.trace(
+        `${code} x${frames} used=${report.framesUsed} player=${
+          me === null ? 'n/a' : `(${me.a.toFixed(2)},${me.b.toFixed(2)})`
+        } ${step.watch}=${readNumber(snap, step.watch) ?? 'n/a'} state=${(snap as { state?: unknown } | null)?.state ?? 'n/a'} playerHp=${readNumber(snap, 'playerHp') ?? 'n/a'}`,
+      );
+    }
+    // Every press looks at the watched field, not just the strike that was meant to land: a swing
+    // connects a few frames after its key goes down, so the drop shows up on the NEXT press. A hit
+    // on the press that also ended the round still counts.
+    const now = readNumber(snap, step.watch);
+    const hitNow = startWatch !== null && now !== null && now < startWatch;
+    const endedNow = gameEnded(snap);
+    if (hitNow) report.hit = true;
+    if (endedNow) report.ended = true;
+    if (hitNow || endedNow) throw new StepOver();
   };
+  // A key that has moved the player even once works: later "no movement" means a wall, a cooldown
+  // or the end of the round, not that the key is dead. Only a key that has NEVER moved the player
+  // is written off.
+  const everMoved = new Set<string>();
   const misses = new Map<string, number>();
   const noteMovement = (code: string, moved: boolean): void => {
     if (moved) {
+      everMoved.add(code);
       misses.set(code, 0);
       return;
     }
     const count = (misses.get(code) ?? 0) + 1;
     misses.set(code, count);
-    if (count >= INERT_AFTER_MISSES && !report.inert.includes(code)) report.inert.push(code);
+    if (count >= INERT_AFTER_MISSES && !everMoved.has(code) && !report.inert.includes(code)) {
+      report.inert.push(code);
+    }
   };
   const usable = (): string[] => keys.filter((k) => !report.inert.includes(k));
   const noteTried = (code: string): void => {
@@ -360,6 +440,8 @@ export async function runApproach(
     limit: number,
     commitFrames: number,
     stopOnHit: boolean,
+    /** Stop as soon as the target is this close: the caller will take it from there. */
+    stopWithin?: number,
   ): Promise<{ hit: boolean; distance: number | null }> => {
     const gapOf = (snapshot: unknown): { gap: Planar; distance: number } | null => {
       const me = playerPlanar(snapshot);
@@ -386,6 +468,7 @@ export async function runApproach(
       if (here === null) break;
       now = here;
       best = Math.min(best, now.distance);
+      if (stopWithin !== undefined && now.distance <= stopWithin) break;
       let pick: { code: string; speed: number; along: number } | null = null;
       for (const code of usable()) {
         const v = velocity.get(code);
@@ -429,9 +512,46 @@ export async function runApproach(
   // ── Distance mode ────────────────────────────────────────────────────────
   if (report.finalDistance !== null) {
     report.mode = 'distance';
-    const result = await steer(opponentPlanar, budget, COMMIT_FRAMES, true);
-    report.finalDistance = result.distance ?? report.finalDistance;
-    return finish(result.hit);
+    const attack = strikeKey(manifest);
+    const heavy = resolveControlKey(manifest, 'heavy');
+    const initial = report.finalDistance;
+    // Close in until the fight is plausibly within reach (a quarter of the way is the scale of
+    // this arena, whatever its units), then strike. Standing next to an opponent is not the job;
+    // landing a hit is.
+    const near = initial * NEAR_FRACTION;
+    const closed = await steer(opponentPlanar, budget, COMMIT_FRAMES, true, near);
+    report.finalDistance = closed.distance ?? report.finalDistance;
+    if (closed.hit) return finish(true);
+    let closest = report.finalDistance;
+    let fruitless = 0;
+    for (let round = 0; report.framesUsed < budget; round++) {
+      // Light, light, heavy: a heavy swing out-reaches and out-damages a light one, and a blocking
+      // opponent absorbs some swings. The click covers games that bind attack to the mouse.
+      const key = heavy !== null && round % 3 === 2 ? heavy : attack;
+      await press(key, STRIKE_FRAMES);
+      await io.click();
+      report.framesUsed += 2;
+      if (await dropped()) return finish(true);
+      // A miss means out of reach, or knocked away: try to get closer before the next swing. Stop
+      // trying after two attempts in a row that gained nothing (the opponent's body is in the
+      // way), until a swing leaves the player farther away than it has been.
+      const here = distanceBetween(await io.snapshot());
+      if (here !== null) {
+        report.finalDistance = here;
+        closest = Math.min(closest, here);
+        const drifted = here > closest * REGAP_RATIO + EPSILON;
+        if ((drifted || fruitless < 2) && report.framesUsed < budget) {
+          const limit = Math.min(budget, report.framesUsed + REGAP_FRAMES);
+          const again = await steer(opponentPlanar, limit, COMMIT_FRAMES, true);
+          if (again.hit) return finish(true);
+          const reached = again.distance ?? here;
+          fruitless = reached < here - EPSILON ? 0 : fruitless + 1;
+          closest = Math.min(closest, reached);
+          report.finalDistance = reached;
+        }
+      }
+    }
+    return finish(false);
   }
 
   // ── Outcome mode ─────────────────────────────────────────────────────────
@@ -491,28 +611,23 @@ export async function runApproach(
     await steer(() => origin, limit, COMMIT_FRAMES, false);
   };
 
-  // 1. Forward, as the playbook always did, now striking along the way. Bounded by distance as
-  //    well as frames: the farther it walks, the farther from every other direction it strikes.
+  // 1. Face and strike each way at once. A key held for a few frames turns the player that way
+  //    and nudges it, and a strike straight after finds an opponent that has come up to the player,
+  //    which an aggressive one usually has. It is also the cheapest phase, so it goes first: a long
+  //    walk down the wrong axis can cost the whole fight (the player in run 1e896c13 was dead
+  //    within 90 frames of a passive search).
   const forward = keys[0];
+  for (const code of usable()) {
+    if (report.framesUsed >= budget) break;
+    const moved = await learn(code, FACE_FRAMES);
+    if (moved && (await strike())) return finish(true);
+  }
+  // 2. Forward, as the playbook always did, now striking along the way. Bounded by distance as
+  //    well as frames: the farther it walks, the farther from every other direction it strikes.
   if (forward !== undefined && (await sweep(forward, FORWARD_SWEEP_FRAMES, true))) {
     return finish(true);
   }
-  // 2. Back to the start, then a short hop in every other direction, striking after each. This
-  //    sets the player's facing each way and covers an opponent that walks up to the player.
-  await recenter();
   const others = (): string[] => usable().filter((k) => k !== forward);
-  for (const code of others()) {
-    if (report.framesUsed >= budget) break;
-    const base = playerPlanar(await io.snapshot());
-    const moved = await learn(code, HOP_FRAMES);
-    if (moved && (await strike())) return finish(true);
-    // Back to where the hop began. Left then right would otherwise cancel, and the right-hand
-    // side would never be struck from at all.
-    if (base !== null) {
-      const limit = Math.min(budget, report.framesUsed + HOP_RETURN_FRAMES);
-      await steer(() => base, limit, COMMIT_FRAMES, false);
-    }
-  }
   // 3. Walk each remaining direction outward from the start; backward last.
   await recenter();
   const ordered = [
