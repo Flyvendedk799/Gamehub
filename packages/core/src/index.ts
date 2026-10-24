@@ -392,6 +392,12 @@ export interface GenerateInput {
    *  with the failure as the prompt, when that check fails. A follow-up that took 15 minutes in
    *  the loop takes about one minute here. Ignored unless the host edit actually succeeded. */
   fastEdit?: boolean | undefined;
+  /** A repair round whose prompt is the verifier's failure text. The host first tries its own
+   *  loop-free edit (locate the file, rewrite it) with that text as the request, because the
+   *  open agent loop re-reads files and guesses paths instead of editing (runs bf3a9e60 and
+   *  63c19601: 16 to 25 calls, no edit). Combine with `fastEdit`; when the host edit cannot be
+   *  made the agent loop runs as before. */
+  hostRepair?: boolean | undefined;
   /** Fast path for a FIRST build: once the host has written the whole game from the starter in one
    *  completion and the spec is declared, stop the agent loop. The caller verifies the draft in a
    *  real browser and repairs only what fails. Without it a first build spends ~8 more minutes in

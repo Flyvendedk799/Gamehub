@@ -77,6 +77,7 @@ import { buildTransformContext } from './context-prune.js';
 import { applyEditRequest, fileNames } from './edit-pipeline.js';
 import {
   buildGameplayRequest,
+  buildHostRepairRequest,
   buildPolishRequest,
   isGameplayDepthRequest,
   isOpenEndedPolishRequest,
@@ -3129,33 +3130,41 @@ Latest request: ${input.prompt}`
       // follow-up the loop made 115 editor calls, 12 failed and the one that landed changed the
       // page shell, so the user's request was never applied.
       const request = extractUserRequest(input.prompt);
-      // First turn only: a repair round re-enters generate() with the verifier's failure text as
-      // the prompt and the transcript as history. Run af88707f fed that text to the edit step as
-      // if the user had typed it, and the host rewrote main.js against "PLAYTEST REPAIR - ...".
+      // A repair round re-enters generate() with the verifier's failure text as the prompt and the
+      // transcript as history. Run af88707f fed that text to the edit step as if the user had
+      // typed it, and the host rewrote main.js against "PLAYTEST REPAIR - ...", so a plain first
+      // turn is the only place a prompt is taken as the user's words. The caller can ask for a
+      // repair deliberately with `hostRepair`: the failure then goes through its own framing
+      // (buildHostRepairRequest), never as a user request, because the open loop it replaces read
+      // files and guessed paths for 16 to 25 calls without one edit (runs bf3a9e60, 63c19601).
+      const hostRepair = input.hostRepair === true;
       if (
         stage === 'preflight' &&
-        input.editMode === true &&
-        input.history.length === 0 &&
-        !isResumeRequest(request) &&
+        (input.editMode === true || hostRepair) &&
+        (input.history.length === 0 || hostRepair) &&
+        (hostRepair || !isResumeRequest(request)) &&
         unmodifiedStarterEngine((path) => fsForRepair.view(path)?.content ?? null) === null
       ) {
         try {
           // Two kinds of broad request, with different briefs: one about how the game LOOKS and
           // feels (polish: additive, rules untouched) and one about how it PLAYS (gameplay depth:
           // rules and opponent are fair game). A request that is both gets the gameplay brief.
-          const gameplay = isGameplayDepthRequest(request);
-          const polish = gameplay || isOpenEndedPolishRequest(request);
+          const gameplay = !hostRepair && isGameplayDepthRequest(request);
+          const polish = gameplay || (!hostRepair && isOpenEndedPolishRequest(request));
           // The host edit takes a minute or two and emits no agent events; say what it is doing
           // so the chat is not silent.
           const say = (label: string, phase: 'understand' | 'edit' = 'edit'): void => {
             deps.onEvent?.({ type: 'progress', label, phase } as unknown as AgentEvent);
           };
-          say(
-            polish
-              ? 'Reading through your game to find the best upgrades'
-              : 'Reading through your game',
-            'understand',
-          );
+          // A repair round already announced itself ("Fixing a failed check").
+          if (!hostRepair) {
+            say(
+              polish
+                ? 'Reading through your game to find the best upgrades'
+                : 'Reading through your game',
+              'understand',
+            );
+          }
           // A general request ("improve combat") gives the edit nothing to act on blind. Look at the
           // running game first, so the upgrades answer what is actually weak on screen.
           let seen: string | null = null;
@@ -3174,11 +3183,13 @@ Latest request: ${input.prompt}`
             progress: say,
             userRequest: request,
             debug: (detail) => console.warn(`[edit-pipeline] ${detail}`),
-            request: gameplay
-              ? buildGameplayRequest(request, seen)
-              : polish
-                ? buildPolishRequest(request, seen)
-                : request,
+            request: hostRepair
+              ? buildHostRepairRequest(input.prompt)
+              : gameplay
+                ? buildGameplayRequest(request, seen)
+                : polish
+                  ? buildPolishRequest(request, seen)
+                  : request,
             listFiles: () => fsForRepair.textFiles?.() ?? [],
             write: async (path, content) => {
               await fsForRepair.create(path, content);
@@ -3191,7 +3202,7 @@ Latest request: ${input.prompt}`
           cappedBudgetGrantsInspection = true;
           note = `
 
-[system-note] The host has ALREADY applied the user's requested change (edited ${edit.files.join(', ')}): "${request.slice(0, 300)}". Do NOT redo or rewrite it. Verify with validate_game_scene and a quick playtest that it behaves EXACTLY as requested; fix only what is wrong with small patch / str_replace edits; then call done.${
+[system-note] The host has ALREADY applied ${hostRepair ? 'a fix for the failing check above' : "the user's requested change"} (edited ${edit.files.join(', ')})${hostRepair ? '' : `: "${request.slice(0, 300)}"`}. Do NOT redo or rewrite it. Verify with validate_game_scene and a quick playtest that it behaves EXACTLY as requested; fix only what is wrong with small patch / str_replace edits; then call done.${
             polish
               ? ' This was a broad request, so there is no single value to assert: call declare_edit_intent with checks: [] rather than inventing a field, and in your closing summary list ONLY changes that are really in the code (view them first) — never claim an effect or a mechanic you did not see.'
               : ''

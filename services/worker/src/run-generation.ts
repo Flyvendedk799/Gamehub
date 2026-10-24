@@ -1884,7 +1884,13 @@ ${changeText}`;
     }
     repairRounds += 1;
     say(`Fixing a failed check (attempt ${repairRounds} of ${maxRepairRounds})`, 'repair');
-    output = await generate(buildInput(nextPrompt, history), deps);
+    // The host makes the fix itself first (locate the file, rewrite it): the open agent loop spent
+    // whole repair rounds re-reading files and guessing paths without one edit (runs bf3a9e60 and
+    // 63c19601). If the host edit cannot be made, generate() falls through to the loop as before.
+    output = await generate(
+      { ...buildInput(nextPrompt, history), fastEdit: true, hostRepair: true },
+      deps,
+    );
   }
 
   // Cosmetic/behavior repairs can regress a previously working game. Restore

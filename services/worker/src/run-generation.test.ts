@@ -1248,6 +1248,37 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     expect(fastDraftFlags).toEqual([true, undefined]);
   });
 
+  it('asks the host to make the fix itself on a verdict-driven repair round, never on the first round', async () => {
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    const browserJobs = queuedBrowserJobs([
+      invertedPlaytest(),
+      invertedPlaytest(),
+      invertedPlaytest(),
+      passingPlaytest(),
+    ]);
+    const rounds: Array<{ hostRepair: boolean | undefined; fastEdit: boolean | undefined }> = [];
+    const agent: GenerateFn = async (input, deps) => {
+      rounds.push({ hostRepair: input.hostRepair, fastEdit: input.fastEdit });
+      await deps.gameMode?.setSpec?.(TOPDOWN_SPEC);
+      await deps.fs?.create('index.html', RED_SQUARE);
+      return emptyOutput('built');
+    };
+
+    await runGeneration(
+      {
+        prompt: 'topdown game',
+        model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+        apiKey: 'sk-test',
+      },
+      { store, generate: agent, browserJobs },
+    );
+
+    expect(rounds).toEqual([
+      { hostRepair: undefined, fastEdit: undefined },
+      { hostRepair: true, fastEdit: true },
+    ]);
+  });
+
   describe('early draft publish', () => {
     const run = async (opts: {
       hostSummary?: string;

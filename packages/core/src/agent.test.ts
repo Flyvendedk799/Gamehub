@@ -1462,6 +1462,9 @@ describe('generateViaAgent() — per-run safety budget', () => {
       opts: {
         prompt?: string;
         observeGame?: (request: string) => Promise<string | null>;
+        /** A repair round: the transcript so far, and whether the host should try the fix. */
+        history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+        hostRepair?: boolean;
       } = {},
     ) => {
       const sentToModel: string[] = [];
@@ -1508,9 +1511,10 @@ describe('generateViaAgent() — per-run safety budget', () => {
               opts.prompt ?? 'the strike should follow the mouse',
               '</prompt>',
             ].join(NL),
-            history: [],
+            history: opts.history ?? [],
             editMode: true,
             fastEdit: true,
+            ...(opts.hostRepair === true ? { hostRepair: true } : {}),
             model: { provider: 'antigravity', modelId: 'gemini-3.8-flash-high' },
             wire: 'antigravity-cloudcode',
             apiKey: 'tok',
@@ -1549,6 +1553,50 @@ describe('generateViaAgent() — per-run safety budget', () => {
       expect(result.message).toContain('Updated the game (fx.js)');
       expect(result.artifacts).toHaveLength(1);
       expect(result.interrupted).toBe(false);
+    });
+
+    describe('a repair round with hostRepair', () => {
+      const HISTORY = [
+        { role: 'user' as const, content: 'make the strike follow the mouse' },
+        { role: 'assistant' as const, content: 'done' },
+      ];
+      const FAILURE =
+        'PLAYTEST REPAIR - the controls do not follow the camera. Holding ArrowLeft moved the player to the RIGHT on screen.';
+
+      it('makes the fix itself, framed as a failed test and not as the user typing it', async () => {
+        const fixed = FX.replace('mesh.rotation.z = rotY;', 'mesh.rotation.y = rotY;');
+        const { sentToModel, agentRuns, tree, result } = await run(
+          [
+            '{"files": ["src/fx.js"], "why": "input is mapped here"}',
+            ['=== FILE: src/fx.js ===', fixed, '=== END FILE ==='].join(NL),
+          ],
+          { prompt: FAILURE, history: HISTORY, hostRepair: true },
+        );
+        expect(agentRuns).toBe(0);
+        expect(tree.get('src/fx.js')).toContain('mesh.rotation.y = rotY');
+        expect(result.interrupted).toBe(false);
+        const sent = sentToModel.join(' ');
+        expect(sent).toContain('automated test drove this game in a real browser and it FAILED');
+        expect(sent).toContain('Holding ArrowLeft moved the player to the RIGHT');
+        // The failure is a fact to fix, never the user's own request to polish or deepen.
+        expect(sent).not.toContain('PLAY deeper');
+      });
+
+      it('falls back to the agent loop when the host cannot make the edit', async () => {
+        const { agentRuns, tree } = await run(['not json', 'not json', 'not json'], {
+          prompt: FAILURE,
+          history: HISTORY,
+          hostRepair: true,
+        });
+        expect(agentRuns).toBe(1);
+        expect(tree.get('src/fx.js')).toContain('mesh.rotation.z = rotY');
+      });
+
+      it('leaves an ordinary repair round on the agent loop', async () => {
+        const { agentRuns, sentToModel } = await run([], { prompt: FAILURE, history: HISTORY });
+        expect(agentRuns).toBe(1);
+        expect(sentToModel).toHaveLength(0);
+      });
     });
 
     it('looks at the running game first for a general request, and builds on what it saw', async () => {

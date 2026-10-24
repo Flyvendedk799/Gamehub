@@ -243,6 +243,22 @@ export function buildPolishRequest(userRequest: string, seen?: string | null): s
 }
 
 /**
+ * The request the host's loop-free edit gets for a REPAIR round. The verifier's failure text is
+ * written for the agent loop ("re-run validate_game_scene", "do not re-read whole files"); the edit
+ * step has no tools, so those lines are noise at best. What it needs is the measured failure and
+ * the order to fix the cause in the code.
+ */
+export function buildHostRepairRequest(failure: string): string {
+  return [
+    'An automated test drove this game in a real browser and it FAILED. Fix the cause in the source code. The measurements below are facts from the running game; do not argue with them.',
+    '',
+    failure.trim(),
+    '',
+    'You are editing code directly with no tools: ignore any instruction above about calling tools, re-running checks, re-reading files or declaring intent. Change only what the failure needs. If the failure says a field is missing from window.__game.debug.snapshot(), add the one window.__game.debug.track({ ... }) line that exposes it, and make the change that was asked for. Keep every feature that already works.',
+  ].join('\n');
+}
+
+/**
  * A request about how the game PLAYS, not how it looks: "more skill based", "the AI is too
  * predictable", "it needs more depth".
  *
