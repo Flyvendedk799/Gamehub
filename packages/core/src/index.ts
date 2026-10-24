@@ -183,7 +183,9 @@ export {
   buildBreakageDiagnosisPrompt,
   type EditRequestKind,
   type EditRequestClassification,
+  buildGameplayRequest,
   buildPolishRequest,
+  isGameplayDepthRequest,
   isOpenEndedPolishRequest,
 } from './edit-request.js';
 export {
@@ -1306,3 +1308,15 @@ export {
   unreadableAssertionNote,
 } from './edit-intent-feedback.js';
 export { extractUserRequest, isResumeRequest } from './user-request.js';
+
+export { describeChange, unifiedDiff } from './change-diff.js';
+
+export { exposeCameraInEngine } from './engine-camera.js';
+export {
+  SCREEN_PROBE_FRAMES,
+  SCREEN_PROBE_KEYS,
+  controlsFollowCameraAdvice,
+  evaluateScreenControls,
+  type ScreenPoint,
+  type ScreenControlsVerdict,
+} from './screen-controls.js';

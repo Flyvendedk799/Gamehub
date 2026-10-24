@@ -1533,6 +1533,35 @@ describe('generateViaAgent() — per-run safety budget', () => {
       expect(sentToModel.join(' ')).toContain('strikes leave no visible trail');
     });
 
+    it('gives a gameplay request the gameplay brief, which may change rules and the opponent', async () => {
+      const fixed = FX.replace('mesh.rotation.z = rotY;', 'mesh.rotation.y = rotY;');
+      const { sentToModel } = await run(
+        [
+          '{"files": ["src/fx.js"], "why": "x"}',
+          ['=== FILE: src/fx.js ===', fixed, '=== END FILE ==='].join(NL),
+        ],
+        { prompt: 'Take this to the next level. Make it more skill based.' },
+      );
+      const sent = sentToModel.join(' ');
+      expect(sent).toContain('PLAY deeper');
+      expect(sent).toContain('Change mechanics and AI where needed');
+      expect(sent).not.toContain('Do NOT change rules');
+    });
+
+    it('keeps the cosmetic brief for a cosmetic request', async () => {
+      const fixed = FX.replace('mesh.rotation.z = rotY;', 'mesh.rotation.y = rotY;');
+      const { sentToModel } = await run(
+        [
+          '{"files": ["src/fx.js"], "why": "x"}',
+          ['=== FILE: src/fx.js ===', fixed, '=== END FILE ==='].join(NL),
+        ],
+        { prompt: 'make it look more polished' },
+      );
+      const sent = sentToModel.join(' ');
+      expect(sent).toContain('Do NOT change rules');
+      expect(sent).not.toContain('PLAY deeper');
+    });
+
     it('does not look at the game for a specific request', async () => {
       const asked: string[] = [];
       const fixed = FX.replace('mesh.rotation.z = rotY;', 'mesh.rotation.y = rotY;');
@@ -1560,7 +1589,12 @@ describe('generateViaAgent() — per-run safety budget', () => {
       const progress = events
         .filter((e) => e.type === 'progress')
         .map((e) => (e as { label?: string }).label);
-      expect(progress).toEqual(['Reading through your game', 'Editing fx.js']);
+      // The model gave no summary of its own, so the host writes one from the diff.
+      expect(progress).toEqual([
+        'Reading through your game',
+        'Editing fx.js',
+        'Writing up what changed',
+      ]);
       expect(events.some((e) => e.type === 'message_update')).toBe(false);
     });
 
@@ -1570,10 +1604,10 @@ describe('generateViaAgent() — per-run safety budget', () => {
         '{"files": ["src/fx.js"], "why": "x"}',
         ['=== FILE: src/fx.js ===', fixed, '=== END FILE ==='].join(NL),
       ]);
-      // A locate and a rewrite, 1000 in / 200 out each.
-      expect(result.inputTokens).toBe(2000);
-      expect(result.outputTokens).toBe(400);
-      expect(events.filter((e) => e.type === 'turn_end')).toHaveLength(2);
+      // A locate, a rewrite and the summary written from the diff: 1000 in / 200 out each.
+      expect(result.inputTokens).toBe(3000);
+      expect(result.outputTokens).toBe(600);
+      expect(events.filter((e) => e.type === 'turn_end')).toHaveLength(3);
     });
 
     it('still runs the agent loop when the host edit could not be applied', async () => {
@@ -2557,5 +2591,55 @@ describe('Phase-1.7 game-feel library registration', () => {
     const names = registeredToolNames();
     expect(names.has('list_game_feel')).toBe(false);
     expect(names.has('view_game_feel')).toBe(false);
+  });
+});
+
+describe('a repair round that never edits', () => {
+  const reads = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      type: 'tool_execution_start',
+      toolCallId: `r${i}`,
+      toolName: 'list_files',
+      args: {},
+    }));
+
+  const run = async (
+    history: Array<{ role: 'user' | 'assistant'; content: string }>,
+    calls: number,
+  ) => {
+    scriptedAgent = {
+      assistantText: RESPONSE_WITH_ARTIFACT,
+      events: reads(calls) as never,
+    };
+    const before = agentCalls.length;
+    const result = await generateViaAgent(
+      { prompt: 'PLAYTEST REPAIR - fix it', history, model: MODEL, apiKey: 'sk-test' },
+      {},
+    );
+    const call = agentCalls[before];
+    return { result, aborted: call?.aborted === true, steers: call?.steers ?? [] };
+  };
+
+  const REPAIR_HISTORY = [
+    { role: 'user' as const, content: 'make combat better' },
+    { role: 'assistant' as const, content: 'done' },
+  ];
+
+  it('is nudged once, then stopped, so the host can keep the version that booted', async () => {
+    const { result, aborted, steers } = await run(REPAIR_HISTORY, 30);
+    expect(aborted).toBe(true);
+    expect(result.stoppedAtToolBudget).toBe(true);
+    expect(steers.filter((s) => /without changing anything/.test(s.content))).toHaveLength(1);
+  });
+
+  it('is left alone when it stays under the limit', async () => {
+    const { aborted, steers } = await run(REPAIR_HISTORY, 8);
+    expect(aborted).toBe(false);
+    expect(steers.filter((s) => /without changing anything/.test(s.content))).toHaveLength(0);
+  });
+
+  it('does not apply to the first turn of a run, which legitimately reads a lot', async () => {
+    const { aborted } = await run([], 30);
+    expect(aborted).toBe(false);
   });
 });

@@ -226,3 +226,62 @@ export function buildPolishRequest(userRequest: string, seen?: string | null): s
     'Do NOT change rules, controls, balance numbers or the genre, and do not rewrite working systems. Additive, visible changes only, in the files that already own that behaviour.',
   ].join('\n');
 }
+
+/**
+ * A request about how the game PLAYS, not how it looks: "more skill based", "the AI is too
+ * predictable", "it needs more depth".
+ *
+ * Run e229481c: "Take this to the next level. Make it better and more skill based." matched the
+ * polish patterns ("make it better"), so it got the polish brief, whose last line says "Do NOT
+ * change rules, controls, balance numbers". The edit obediently changed the camera, added sound
+ * effects and a spacing push, and left combat.js and ai.js untouched: the one thing asked for.
+ * Deliberately narrow: "make it harder" or "make it faster" are tuning requests, not this.
+ */
+const GAMEPLAY_PATTERNS: ReadonlyArray<RegExp> = [
+  /\bskill(?:s|ed|ful)?(?:[- ]based)?\b/i,
+  /\bmechanics?\b/i,
+  /\bgame ?play\b/i,
+  /\bdepth\b|\bshallow\b/i,
+  /\bstrateg(?:y|ic)\b|\btactic(?:s|al)?\b/i,
+  /\b(?:smarter|predictable|dumb)\b/i,
+  /\b(?:enemy|opponent|npc|bot)s?\s+(?:ai|behaviou?r|logic)\b|\bthe ai\b/i,
+  /\b(?:repetitive|button[- ]?mash\w*|counter-?play)\b|\bmash(?:ing)? (?:the )?buttons?\b/i,
+  /\brisk (?:and|\/|&) reward\b/i,
+];
+
+export function isGameplayDepthRequest(prompt: string): boolean {
+  const text = typeof prompt === 'string' ? prompt.trim() : '';
+  if (text.length === 0 || text.length > 400) return false;
+  return GAMEPLAY_PATTERNS.some((re) => re.test(text));
+}
+
+/**
+ * The brief for a request about gameplay depth. Unlike the polish brief it is allowed, and
+ * required, to change rules and AI: the point is how the game plays, not how it looks.
+ */
+export function buildGameplayRequest(userRequest: string, seen?: string | null): string {
+  return [
+    `The user asked: "${userRequest.trim()}"`,
+    '',
+    ...(seen !== undefined && seen !== null && seen.trim().length > 0
+      ? [
+          'WHAT THE RUNNING GAME LOOKS LIKE RIGHT NOW (from a screenshot of it being played):',
+          seen.trim(),
+          '',
+        ]
+      : []),
+    'They want the game to PLAY deeper, not just look better. Choose 3 to 5 changes to how it plays and make them in the code that owns the rules and the opponent, not only in the visuals. Skill means reading, timing and positioning beat button-mashing. Good changes, adapted to this game and genre:',
+    '- Telegraphs and counterplay: every enemy action has a readable lead-in and a right answer (block, parry, dodge, or punish its recovery). Vary the actions (quick, slow and heavy, feints, delayed) so one answer is not always correct.',
+    '- Risk and reward: strong moves leave you open; a well-timed parry or dodge opens a counter window; mashing drains stamina and gets punished.',
+    '- A smarter opponent: it mixes up timing, feints, backs off to recover, punishes your recovery and adjusts to repeated patterns, but stays fair (it never reads inputs and never has unblockable moves).',
+    '- Positioning: range, spacing and pushback matter; stepping out of reach is a real choice.',
+    '- Clear outcomes: a clean hit, block, parry, dodge, whiff and punish each look and sound different.',
+    '',
+    'Rules for this change:',
+    '- Change mechanics and AI where needed. At least one change must be to the OPPONENT behaviour and at least one to the PLAYER options. Retuning an existing number or sound does not count.',
+    '- Read the code first. Do not re-add what exists, and do not rewrite systems that already work.',
+    '- Keep the controls, keep the game completable, and keep every field exposed through window.__game.debug.track (the automatic playtest reads them). If you change the camera, change how input becomes movement with it: right must still move the player right on screen.',
+    '- A player who walks up and strikes repeatedly must still be able to land hits: difficulty comes from timing and reading, never from an opponent that cannot be hit.',
+    '- Add the matching feedback (animation, effect, sound or HUD) so each new mechanic is visible, but the mechanics come first.',
+  ].join('\n');
+}

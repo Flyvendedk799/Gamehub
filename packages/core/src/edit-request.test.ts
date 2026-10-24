@@ -128,3 +128,46 @@ describe('real messages from a live project', () => {
     expect(isOpenEndedPolishRequest('make the enemy attack faster')).toBe(false);
   });
 });
+
+describe('gameplay-depth requests', () => {
+  it('recognises asks about how the game plays, including the one that got a cosmetic edit', async () => {
+    const { isGameplayDepthRequest } = await import('./edit-request.js');
+    for (const p of [
+      'While combat has indeed improved. It is not good enough. Take this to the next level. Make it better and more "skill based".',
+      'The game needs an upgrade. Combat isnt skill based, and while its functional, its not very good.',
+      'the enemy AI is too predictable',
+      'it needs more depth, it gets repetitive',
+      'I just mash buttons and win',
+    ]) {
+      expect(isGameplayDepthRequest(p), p).toBe(true);
+    }
+  });
+
+  it('leaves tuning, cosmetic and bug-fix requests alone', async () => {
+    const { isGameplayDepthRequest } = await import('./edit-request.js');
+    for (const p of [
+      'make it harder as I progress',
+      'make the jump lower',
+      'movement is inverted (sideways movement)',
+      'make it look more polished',
+      'State of combat is not very good. Improve it',
+      '',
+    ]) {
+      expect(isGameplayDepthRequest(p), p).toBe(false);
+    }
+  });
+
+  it('the gameplay brief allows changing rules and AI, where the polish brief forbids it', async () => {
+    const { buildGameplayRequest, buildPolishRequest } = await import('./edit-request.js');
+    const gameplay = buildGameplayRequest(
+      'make combat more skill based',
+      '- the enemy never blocks',
+    );
+    expect(gameplay).toContain('make combat more skill based');
+    expect(gameplay).toContain('the enemy never blocks');
+    expect(gameplay).toMatch(/Change mechanics and AI where needed/);
+    expect(gameplay).toMatch(/OPPONENT behaviour/);
+    expect(gameplay).not.toMatch(/Do NOT change rules/);
+    expect(buildPolishRequest('make it better')).toMatch(/Do NOT change rules/);
+  });
+});

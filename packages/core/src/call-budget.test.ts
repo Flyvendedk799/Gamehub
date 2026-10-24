@@ -69,3 +69,32 @@ describe('stalled reading', () => {
     expect(stalledReadingReminder(12)).toContain('12 read-only calls');
   });
 });
+
+describe('repair rounds that do not edit', () => {
+  it('tells editing calls from looking and checking', async () => {
+    const { isEditingCall } = await import('./call-budget.js');
+    expect(isEditingCall('str_replace_based_edit_tool', { command: 'str_replace' })).toBe(true);
+    expect(isEditingCall('str_replace_based_edit_tool', { command: 'create' })).toBe(true);
+    expect(isEditingCall('str_replace_based_edit_tool', { command: 'view' })).toBe(false);
+    expect(isEditingCall('str_replace_based_edit_tool', { command: 'find' })).toBe(false);
+    expect(isEditingCall('playtest_game', {})).toBe(false);
+    expect(isEditingCall(undefined, undefined)).toBe(false);
+  });
+
+  it('nudges at 12 calls without an edit, stops at 24, and only in a repair round', async () => {
+    const { repairStallAction } = await import('./call-budget.js');
+    expect(repairStallAction(11, true)).toBe('none');
+    expect(repairStallAction(12, true)).toBe('nudge');
+    expect(repairStallAction(13, true)).toBe('none');
+    expect(repairStallAction(24, true)).toBe('stop');
+    expect(repairStallAction(60, true)).toBe('stop');
+    expect(repairStallAction(60, false)).toBe('none');
+  });
+
+  it('asks for one targeted edit and points at the host change', async () => {
+    const { repairStallReminder } = await import('./call-budget.js');
+    const text = repairStallReminder(12);
+    expect(text).toContain('12 calls without changing anything');
+    expect(text).toContain('ONE targeted str_replace');
+  });
+});

@@ -1021,6 +1021,144 @@ describe('runGeneration boot-and-repair loop (#1.6 — bounded, deterministic ve
     };
   }
 
+  describe('controls follow the screen (the camera was moved, the controls were not)', () => {
+    const SPEC_3D = { ...TOPDOWN_SPEC, dimensions: '3d' } as unknown as GameSpec;
+
+    /** What holding D, A, ArrowRight, ArrowLeft does, as seen through the game's camera. */
+    function probeVerdict(kind: 'wrong' | 'right' | 'blind'): PlaytestVerdict {
+      const pos = (x: number) => ({ playerPos: { x, y: 0, z: 3.8 } });
+      // 'right': D moves +2 along the screen's horizontal axis; A brings the player back.
+      // 'wrong': D moves the player toward the camera, which barely changes screen x.
+      const stride = kind === 'right' ? 0.3 : 0.01;
+      const screen = (n: number) => (kind === 'blind' ? null : { x: 0.1 + n * stride, y: 0 });
+      return {
+        hasGameContract: true,
+        hasDebugContract: true,
+        baselineSnapshot: pos(0),
+        baselineScreen: screen(0),
+        steps: [
+          {
+            step: { kind: 'key', code: 'KeyD' },
+            snapshotAfter: pos(2),
+            screenAfter: screen(1),
+            errors: [],
+          },
+          {
+            step: { kind: 'key', code: 'KeyA' },
+            snapshotAfter: pos(0),
+            screenAfter: screen(0),
+            errors: [],
+          },
+          {
+            step: { kind: 'key', code: 'ArrowRight' },
+            snapshotAfter: pos(2),
+            screenAfter: screen(1),
+            errors: [],
+          },
+          {
+            step: { kind: 'key', code: 'ArrowLeft' },
+            snapshotAfter: pos(0),
+            screenAfter: screen(0),
+            errors: [],
+          },
+        ],
+        bootErrors: [],
+      };
+    }
+
+    /** A port that answers the four-key probe from `probes` (in order) and everything else with
+     *  a passing play-through. */
+    function probingJobs(probes: Array<'wrong' | 'right' | 'blind'>) {
+      const seen: { probes: number } = { probes: 0 };
+      const port: BrowserJobsPort = {
+        async runtimeVerify() {
+          return { hasGameContract: true, fatalErrors: [] } satisfies RuntimeVerifyVerdict;
+        },
+        async playtest(_html, steps) {
+          const first = steps[0] as { code?: string } | undefined;
+          const isProbe = steps.length === 4 && first?.code === 'KeyD';
+          if (!isProbe) return passingPlaytest();
+          const kind = probes[Math.min(seen.probes, probes.length - 1)] ?? 'blind';
+          seen.probes += 1;
+          return probeVerdict(kind);
+        },
+      };
+      return { port, seen };
+    }
+
+    const agent =
+      (prompts: string[]): GenerateFn =>
+      async (input, deps) => {
+        prompts.push(input.prompt);
+        await deps.gameMode?.setSpec?.(SPEC_3D);
+        // A repair round changes the files; an identical tree would (correctly) reuse the
+        // earlier measurement of that tree.
+        const html =
+          prompts.length > 1 ? RED_SQUARE.replace('</body>', '<!-- fixed --></body>') : RED_SQUARE;
+        await deps.fs?.create('index.html', html);
+        return emptyOutput('built a 3d game');
+      };
+
+    const run = async (probes: Array<'wrong' | 'right' | 'blind'>) => {
+      const store = new SnapshotStore(new InMemoryBlobStore());
+      const prompts: string[] = [];
+      const { port, seen } = probingJobs(probes);
+      const result = await runGeneration(
+        {
+          prompt: 'a 3d duel',
+          model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+          apiKey: 'sk-test',
+        },
+        { store, generate: agent(prompts), browserJobs: port },
+      );
+      return { result, prompts, probes: seen.probes };
+    };
+
+    it('turns controls that do not follow the camera into a repair, with the fix spelled out', async () => {
+      const { result, prompts } = await run(['wrong', 'right']);
+      expect(result.repairRounds).toBe(1);
+      expect(result.shipReason).toBe('passed');
+      expect(prompts).toHaveLength(2);
+      expect(prompts[1]).toContain('The controls do not follow the camera');
+      expect(prompts[1]).toContain(
+        'Holding KeyD (right) moved the player almost straight toward or away from the camera',
+      );
+      expect(prompts[1]).toContain('camera.getWorldDirection');
+    });
+
+    it('passes controls that do follow it, without a repair', async () => {
+      const { result, prompts } = await run(['right']);
+      expect(result.repairRounds).toBe(0);
+      expect(prompts).toHaveLength(1);
+    });
+
+    it('has no opinion about a game that gives the probe nothing to measure', async () => {
+      const { result, prompts } = await run(['blind']);
+      expect(result.repairRounds).toBe(0);
+      expect(prompts).toHaveLength(1);
+    });
+
+    it('does not run for a 2D game, whose axes are the screen axes', async () => {
+      const store = new SnapshotStore(new InMemoryBlobStore());
+      const { port, seen } = probingJobs(['wrong']);
+      await runGeneration(
+        {
+          prompt: 'a 2d game',
+          model: { provider: 'anthropic', modelId: 'claude-opus-4-8' },
+          apiKey: 'sk-test',
+        },
+        { store, generate: specAgent(), browserJobs: port },
+      );
+      expect(seen.probes).toBe(0);
+    });
+
+    it('does not repeat the probe on a tree it already measured', async () => {
+      const { probes } = await run(['right']);
+      // One verification pass over one tree: probed once, however many times it is re-checked.
+      expect(probes).toBe(1);
+    });
+  });
+
   it('a PASSING playtest ships with 0 repair rounds and shipReason=passed', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());
     const browserJobs = queuedBrowserJobs([passingPlaytest()]);

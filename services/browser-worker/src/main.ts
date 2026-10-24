@@ -42,6 +42,7 @@ import { Worker } from 'bullmq';
  */
 import { type Browser, type BrowserContext, type Page, type Route, chromium } from 'playwright';
 import { resolveControlKey } from './control-intents.js';
+import { readPlayerScreenInPage } from './screen-projection.js';
 
 function parseRedisUrl(url: string): { host: string; port: number } {
   try {
@@ -76,6 +77,9 @@ export const JOB_HARD_TIMEOUT_MS = 30_000;
 /** A play-settle thumbnail plays for a moment, keeps a mid-play frame, then captures: two
  *  screenshots on software-rendered WebGL. Run b3319147's play frame died at the 30s ceiling. */
 export const PLAY_SETTLE_JOB_TIMEOUT_MS = 55_000;
+
+/** A play-check drives the game for a few hundred frames at about 18 a second on the server. */
+export const PLAYTEST_JOB_TIMEOUT_MS = 45_000;
 
 /**
  * Decide whether an outbound request from inside an untrusted game context is
@@ -544,6 +548,9 @@ export interface PlaytestStepResult {
   snapshotAfter: unknown;
   /** Page errors captured between this step and the previous one. */
   errors: string[];
+  /** Where the player is on the SCREEN after this step (normalised -1..1), projected through the
+   *  game's own camera. Null when the game publishes no camera or no player position. */
+  screenAfter?: { x: number; y: number } | null;
 }
 
 /**
@@ -562,6 +569,8 @@ export interface PlaytestResult {
   hasDebugContract: boolean;
   /** Snapshot taken once after boot, before the first step ran. */
   baselineSnapshot: unknown;
+  /** Where the player was on screen before the first step (see `PlaytestStepResult.screenAfter`). */
+  baselineScreen?: { x: number; y: number } | null;
   /** Per-step snapshot trace, in dispatch order. */
   steps: PlaytestStepResult[];
   /** Errors thrown during load / boot, before the first step ran (includes a
@@ -1445,6 +1454,9 @@ export async function runPlaytest(
     const baselineSnapshot = await waitForDebugSnapshot(page, SNAPSHOT_READY_BUDGET_MS);
     bootErrors.push(...drainErrors());
     const hasDebugContract = baselineSnapshot !== null;
+    // Where the player stands on screen, so the caller can tell whether the controls follow the
+    // camera. Null for any game that does not publish its camera.
+    const baselineScreen = await page.evaluate(readPlayerScreenInPage).catch(() => null);
 
     for (const step of steps) {
       switch (step.kind) {
@@ -1496,13 +1508,15 @@ export async function runPlaytest(
       }
 
       const snapshotAfter = await readSnapshot(page);
-      stepResults.push({ step, snapshotAfter, errors: drainErrors() });
+      const screenAfter = await page.evaluate(readPlayerScreenInPage).catch(() => null);
+      stepResults.push({ step, snapshotAfter, errors: drainErrors(), screenAfter });
     }
 
     return {
       hasGameContract,
       hasDebugContract,
       baselineSnapshot,
+      baselineScreen,
       steps: stepResults,
       bootErrors,
       blockedRequests: [...egress.blocked],
@@ -1574,7 +1588,9 @@ export async function runJob(browser: Browser, data: BrowserJobData): Promise<Br
     },
     data.kind === 'thumbnail' && data.playSettle === true
       ? PLAY_SETTLE_JOB_TIMEOUT_MS
-      : JOB_HARD_TIMEOUT_MS,
+      : data.kind === 'playtest'
+        ? PLAYTEST_JOB_TIMEOUT_MS
+        : JOB_HARD_TIMEOUT_MS,
     data.kind,
     killSwitch,
   );

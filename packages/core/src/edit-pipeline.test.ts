@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { applyEditRequest, outlineOf, parseLocateReply } from './edit-pipeline';
+import {
+  applyEditRequest,
+  buildEditSystemPrompt,
+  outlineOf,
+  parseLocateReply,
+} from './edit-pipeline';
 
 const NL = String.fromCharCode(10);
 const block = (path: string, body: string) =>
@@ -177,5 +182,78 @@ describe('fileNames', () => {
     expect(fileNames(['src/combat.js', 'src/duelist.js'])).toBe('combat.js and duelist.js');
     expect(fileNames(['src/a.js', 'src/b.js', 'src/c.js'])).toBe('a.js, b.js and c.js');
     expect(fileNames([])).toBe('the game');
+  });
+});
+
+describe('summary of the applied edit', () => {
+  const NO_SUMMARY = block('src/fx.js', GOOD_FX);
+
+  it('is written from the diff when the model did not summarise its own edit', async () => {
+    const h = harness([
+      LOCATE,
+      NO_SUMMARY,
+      '- Slashes now follow where you aim.\n- Hits feel heavier.',
+    ]);
+    const result = await applyEditRequest({
+      ...h.options,
+      userRequest: 'make the strike follow the mouse',
+    });
+    expect(result.summary).toBe('- Slashes now follow where you aim.\n- Hits feel heavier.');
+    // The summary call saw the player's own words and the real change, not the expanded brief.
+    const summaryPrompt = h.prompts[2] ?? '';
+    expect(summaryPrompt).toContain('make the strike follow the mouse');
+    expect(summaryPrompt).toContain('+  mesh.rotation.y = rotY; // follows the aim angle');
+    expect(summaryPrompt).toContain('-  mesh.rotation.z = rotY; // BUG: ignores aim');
+  });
+
+  it('is left alone when the model wrote one', async () => {
+    const withSummary = ['=== SUMMARY ===', '- Mine.', '=== END SUMMARY ===', NO_SUMMARY].join(NL);
+    const h = harness([LOCATE, withSummary]);
+    const result = await applyEditRequest(h.options);
+    expect(result.summary).toBe('- Mine.');
+    expect(h.prompts).toHaveLength(2);
+  });
+
+  it('never blocks the edit: a failed or useless summary call just means no summary', async () => {
+    const h = harness([LOCATE, NO_SUMMARY, 'I have no bullets for you.']);
+    const result = await applyEditRequest(h.options);
+    expect(result.files).toEqual(['src/fx.js']);
+    expect(result.summary).toBeUndefined();
+
+    const throwing = harness([LOCATE, NO_SUMMARY]);
+    let call = 0;
+    const generate = throwing.options.generate;
+    throwing.options.generate = async (s: string, u: string) => {
+      call += 1;
+      if (call === 3) throw new Error('model unavailable');
+      return generate(s, u);
+    };
+    const second = await applyEditRequest(throwing.options);
+    expect(second.files).toEqual(['src/fx.js']);
+    expect(second.summary).toBeUndefined();
+  });
+});
+
+describe('cleanBullets', () => {
+  it('keeps at most four bullets, normalised, and ignores prose around them', async () => {
+    const { cleanBullets } = await import('./edit-pipeline');
+    expect(cleanBullets('Here you go:\n* One\n• Two\n3. Three\n- Four\n- Five')).toBe(
+      '- One\n- Two\n- Three\n- Four',
+    );
+    expect(cleanBullets('no bullets at all')).toBeNull();
+    expect(cleanBullets('')).toBeNull();
+  });
+});
+
+describe('the camera rule', () => {
+  it('tells the edit step to keep the controls on screen axes whenever it touches the camera', () => {
+    for (const mode of ['diff', 'full'] as const) {
+      const prompt = buildEditSystemPrompt(mode);
+      expect(prompt).toContain('Controls follow the SCREEN');
+      expect(prompt).toContain('camera.getWorldDirection');
+      expect(prompt).toContain(
+        'A camera change that leaves the controls mapped to the old orientation is a broken game',
+      );
+    }
   });
 });

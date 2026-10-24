@@ -30,6 +30,8 @@ import {
   type PlaytesterInput,
   type PlaytesterOutput,
   type RepairVerdict,
+  SCREEN_PROBE_FRAMES,
+  SCREEN_PROBE_KEYS,
   type ShipReason,
   type StarterEngine,
   type VisualCritique,
@@ -40,11 +42,15 @@ import {
   buildVisualCritiquePrompt,
   buildVisualRepairInstruction,
   classifyEditRequest,
+  controlsFollowCameraAdvice,
   createEditorSession,
   decideRepairAction,
   detectInteractivityResponse,
+  evaluateScreenControls,
+  exposeCameraInEngine,
   extractUserRequest,
   generateViaAgent,
+  isGameplayDepthRequest,
   isOpenEndedPolishRequest,
   orphanedJsModulePaths,
   parseVisualCritique,
@@ -254,10 +260,13 @@ export interface PlaytestVerdict {
   hasGameContract: boolean;
   hasDebugContract: boolean;
   baselineSnapshot: unknown;
+  /** Where the player stood on screen before the first step, when the game publishes a camera. */
+  baselineScreen?: { x: number; y: number } | null;
   steps: ReadonlyArray<{
     step: PlaytestStep;
     snapshotAfter: unknown;
     errors: ReadonlyArray<string>;
+    screenAfter?: { x: number; y: number } | null;
   }>;
   bootErrors: ReadonlyArray<string>;
 }
@@ -598,6 +607,14 @@ export async function runGeneration(
   const generate = ports.generate ?? generateViaAgent;
   const validateScene = ports.validateScene ?? ENGINE_SCENE_VALIDATOR;
   const tree = new WorkingTree(req.initialFiles, req.initialBinaryFiles);
+  // Make sure the 3D engine module publishes its camera (projects seeded before it did), so the
+  // play-check can verify that the controls follow what the player sees. Done before the baseline
+  // below so it never counts as part of the user's edit.
+  const engineCore = tree.view('src/engine/core.js');
+  if (engineCore !== null) {
+    const patched = exposeCameraInEngine(engineCore.content);
+    if (patched !== engineCore.content) tree.create('src/engine/core.js', patched);
+  }
   // The project as this run received it, to measure how much an edit changed.
   const parentFiles: ReadonlyMap<string, string> | undefined =
     req.initialFiles === undefined
@@ -1082,6 +1099,35 @@ export async function runGeneration(
   // Returns null when no deterministic verdict is obtainable (no port, no
   // game artifact, no spec, or no playbook predicates for the genre) — the
   // loop then ships the attempt as-is.
+  /** The probe: each direction key, held, from where the previous one left the player. */
+  const SCREEN_PROBE_PLAN = SCREEN_PROBE_KEYS.map((k) => ({
+    kind: 'key' as const,
+    code: k.code,
+    frames: SCREEN_PROBE_FRAMES,
+  }));
+  let screenProbeCache: { key: string; violations: string[] } | null = null;
+  const probeScreenControls = async (html: string): Promise<string[]> => {
+    const key = treeKey();
+    if (screenProbeCache !== null && screenProbeCache.key === key)
+      return screenProbeCache.violations;
+    const result =
+      browserJobs === undefined ? null : await browserJobs.playtest(html, SCREEN_PROBE_PLAN);
+    let violations: string[] = [];
+    // No verdict, no debug contract, no camera, no player position, no movement: no opinion.
+    if (result?.hasDebugContract) {
+      violations = evaluateScreenControls({
+        baselineSnapshot: result.baselineSnapshot,
+        baselineScreen: result.baselineScreen ?? null,
+        steps: result.steps.map((s) => ({
+          code: (s.step as { code?: string }).code ?? '',
+          snapshotAfter: s.snapshotAfter,
+          screenAfter: s.screenAfter ?? null,
+        })),
+      }).violations;
+    }
+    screenProbeCache = { key, violations };
+    return violations;
+  };
   let verifyPasses = 0;
   let draftPublished = false;
   /**
@@ -1325,6 +1371,14 @@ export async function runGeneration(
         'The genre playbook needs window.__game.debug.snapshot() to read game state, but it returned no contract. Wire it in ONE line: call window.__game.debug.track({ score: () => score, player, ... }) (or set window.__game.state.*) exposing the fields the gameplay updates — otherwise the playtest cannot verify your game.',
       );
     }
+    // ── Do the controls still follow the screen? ────────────────────────────
+    // Hold right and left and see where the player lands on screen. A camera that was moved or
+    // turned while the input mapping was not (run e229481c: a side-on camera, W/D still mapped to
+    // the old orientation) passes every other check and is wrong from the first second.
+    if (fatalErrors.length === 0 && spec.dimensions !== '2d' && browserJobs !== undefined) {
+      const violations = await probeScreenControls(verifyHtml);
+      if (violations.length > 0) fatalErrors.push(controlsFollowCameraAdvice(violations));
+    }
     // ── Did the edit do what the USER asked? ────────────────────────────────
     // Everything above verifies the game as a GAME. This is the only check that
     // asks whether THIS turn's request happened, and it is deliberately scored
@@ -1443,7 +1497,8 @@ ${unreadableNote}`
    */
   const critiqueNotWorthIt = (): boolean => {
     if (!fastEditRun || parentFiles === undefined) return false;
-    if (isOpenEndedPolishRequest(typedRequest)) return false;
+    if (isOpenEndedPolishRequest(typedRequest) || isGameplayDepthRequest(typedRequest))
+      return false;
     return countChangedLines(parentFiles, tree.toTextFiles()) <= SMALL_EDIT_LINES;
   };
   const critiqueCurrentFrame = async (): Promise<VisualCritique | null> => {

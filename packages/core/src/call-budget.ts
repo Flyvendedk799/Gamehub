@@ -58,3 +58,47 @@ export function shouldNudgeStalledReading(
 export function stalledReadingReminder(consecutiveReads: number): string {
   return `[system-reminder] You have made ${consecutiveReads} read-only calls in a row (view / find / list_files) and changed nothing. More reading will not tell you more: the files you have already viewed are in your context. Decide now. If you know the cause, make the edit with a small str_replace. If the change needs a value the game does not expose (for example a field your edit intent asserts that is missing from window.__game.debug.snapshot()), add it. If you cannot find the code, say what you are looking for in one sentence and use \`find\` with a SHORT fragment across all files — do not page through a file again.`;
 }
+
+/** Tool calls a repair round may make without a single edit before it is told to act. */
+export const REPAIR_NUDGE_CALLS = 12;
+/** ...and the point at which it is stopped: it is not going to fix anything. */
+export const REPAIR_STALL_CALLS = 24;
+
+/** True for a call that changes the project (an editor write), as opposed to looking or checking. */
+export function isEditingCall(
+  toolName: string | undefined,
+  args: Record<string, unknown> | undefined,
+): boolean {
+  if (toolName === 'import_skill') return true;
+  if (toolName !== 'str_replace_based_edit_tool') return false;
+  const command = args?.['command'];
+  return (
+    command === 'create' ||
+    command === 'str_replace' ||
+    command === 'insert' ||
+    command === 'patch' ||
+    command === 'delete'
+  );
+}
+
+/**
+ * A repair round exists to change something. Run e229481c's repair spent 2m36s and ~40 calls
+ * viewing, searching and re-reading the playbook, and edited nothing; the budget cap eventually
+ * ended it, and the re-test passed on the unchanged game. Measured in calls SINCE THE LAST EDIT,
+ * so looking things up before a first edit is allowed, within reason, and checking in between
+ * edits does not count against it.
+ */
+export function repairStallAction(
+  callsSinceEdit: number,
+  isRepairRound: boolean,
+): 'none' | 'nudge' | 'stop' {
+  if (!isRepairRound) return 'none';
+  if (callsSinceEdit >= REPAIR_STALL_CALLS) return 'stop';
+  if (callsSinceEdit === REPAIR_NUDGE_CALLS) return 'nudge';
+  return 'none';
+}
+
+/** The steering message for a repair round that has not edited anything yet. */
+export function repairStallReminder(callsSinceEdit: number): string {
+  return `[system-reminder] This is a repair round and you have made ${callsSinceEdit} calls without changing anything. The failing check and the lines the host just changed are in your first message: that is where the cause is. Stop searching. Make ONE targeted str_replace on the most likely cause now. If you truly cannot find it, say what you looked for in one sentence and call done; the host will keep the version that already booted.`;
+}

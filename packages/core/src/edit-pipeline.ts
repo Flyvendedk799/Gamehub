@@ -14,6 +14,7 @@
  *
  * Everything model- and filesystem-facing is injected so this is unit-testable.
  */
+import { describeChange } from './change-diff.js';
 import { applyHunks, parseEditBlocks, parseSummary } from './edit-blocks.js';
 import { isRepairablePath, parseFileBlocks } from './import-repair.js';
 import { projectProblems } from './tools/project-checks.js';
@@ -84,6 +85,50 @@ export function fileNames(paths: readonly string[]): string {
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
 
+/** Keep at most four bullet lines of a model reply, normalised to "- text". Null when none. */
+export function cleanBullets(text: string): string | null {
+  const bullets = text
+    .split('\n')
+    .map((line) => /^\s*(?:[-*•]|\d+[.)])\s+(.*\S)\s*$/.exec(line)?.[1])
+    .filter((line): line is string => line !== undefined)
+    .slice(0, 4)
+    .map((line) => `- ${line.slice(0, 220)}`);
+  return bullets.length > 0 ? bullets.join('\n') : null;
+}
+
+const SUMMARY_SYSTEM = [
+  'You write the short account a player reads after their game was updated.',
+  "You get the player's request and the code diff that was applied (lines starting with - were removed, + added).",
+  'Write 2 to 4 bullets, each one line, past tense, in plain language about what the player will notice when they play.',
+  'Rules: no file names, no function or variable names, no code. Only say what the diff really does; if it did less than was asked, say so plainly rather than claiming more.',
+  'Output ONLY the bullets, each starting with "- ".',
+].join('\n');
+
+/** One cheap completion that turns the applied diff into the player-facing summary. */
+async function summariseFromDiff(
+  opts: EditOptions,
+  before: ReadonlyMap<string, string>,
+  changed: ReadonlyArray<{ path: string; content: string }>,
+): Promise<string | null> {
+  try {
+    const diff = describeChange(before, changed, 7000);
+    if (diff.length === 0) return null;
+    const reply = await opts.generate(
+      SUMMARY_SYSTEM,
+      `THE PLAYER ASKED:
+${(opts.userRequest ?? opts.request).trim().slice(0, 600)}
+
+THE DIFF THAT WAS APPLIED:
+${diff}`,
+      'low',
+    );
+    return cleanBullets(reply);
+  } catch (err) {
+    opts.debug?.(`summary from diff failed: ${String(err).slice(0, 200)}`);
+    return null;
+  }
+}
+
 export type EditMode = 'diff' | 'full';
 
 export function buildEditSystemPrompt(mode: EditMode = 'full'): string {
@@ -98,6 +143,7 @@ export function buildEditSystemPrompt(mode: EditMode = 'full'): string {
       : '- Return each changed file COMPLETE and otherwise byte-for-byte identical - never abbreviate with "...", never drop code you did not mean to change.',
     '- Keep every existing export and import working; do not rename exports other files use.',
     "- A complaint about which way something FACES, aims or points is about what happens every frame, not at spawn. Find the per-frame code that sets rotation / facing / flip / aim and make THAT follow the target or the movement; changing only an initial value is not a fix when the update loop never maintains it (the first live attempt set the spawn yaw and left the loop alone, so the character still turned the wrong way as soon as play started). In Three.js a mesh's front is its local +Z axis, so `rotation.y = Math.atan2(dx, dz)` turns it toward the vector (dx, dz); Phaser uses `flipX` / `setRotation` the same way. Check the model's own front against the camera before deciding which sign is right.",
+    '- Controls follow the SCREEN. Pressing right (D / ArrowRight) moves the player right on screen, left moves left, up (W / ArrowUp) moves away up the screen, down moves toward the viewer. If your change moves, turns or re-aims the camera in any way, you MUST also change how input becomes movement so this still holds: derive the directions from the camera each frame (forward = camera.getWorldDirection with y set to 0 and normalised; right = cross(forward, up)), and use the same directions for dodges, aim and knockback. A camera change that leaves the controls mapped to the old orientation is a broken game.',
     '- The page provides ONE input API: window.__game.controls has ONLY define({ actions }), isDown(actionId), on(actionId, fn), rebind(). There is NO controls.active/get/pressed.',
     '- Mouse position is available through your own mousemove listener; convert it to world space with the camera when the request is about aiming.',
     '- Write the SUMMARY for the PLAYER: 2 to 4 short bullets in plain language about what they will notice when they play. No file names, no function names, no code terms.',
@@ -165,6 +211,8 @@ export interface EditOptions {
   progress?: (message: string) => void;
   /** Technical detail for the server log: why an attempt was thrown away. */
   debug?: (message: string) => void;
+  /** The player's own words, for the summary (`request` may be an expanded brief). */
+  userRequest?: string;
 }
 
 export interface EditResult {
@@ -276,7 +324,17 @@ export async function applyEditRequest(opts: EditOptions): Promise<EditResult> {
       continue;
     }
     for (const c of changed) await opts.write(c.path, c.content);
-    const summary = parseSummary(reply);
+    // The model is asked to summarise its own edit and often does not (run e229481c shipped the
+    // bland "Polished the game (...)" fallback). Write the summary from the actual diff instead.
+    let summary = parseSummary(reply);
+    if (summary === null) {
+      opts.progress?.('Writing up what changed');
+      summary = await summariseFromDiff(
+        opts,
+        new Map(sources.map((f) => [f.path, f.content])),
+        changed,
+      );
+    }
     return { files: changed.map((c) => c.path), why, ...(summary !== null ? { summary } : {}) };
   }
   throw new Error(`no acceptable edit after retry: ${(problems ?? []).join('; ').slice(0, 200)}`);

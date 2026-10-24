@@ -155,3 +155,11 @@ describe('draft prompt carries the design direction', () => {
     expect(sys).toContain('hemi, sun, ground');
   });
 });
+
+describe('the draft prompt and the camera', () => {
+  it('requires movement to be derived from the camera, not from fixed axes', () => {
+    const prompt = buildDraftSystemPrompt();
+    expect(prompt).toContain('Controls follow the SCREEN');
+    expect(prompt).toContain('never hard-code world axes');
+  });
+});

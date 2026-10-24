@@ -65,7 +65,10 @@ import type { TSchema } from '@sinclair/typebox';
 import { resolveCachePolicy } from './cache-policy.js';
 import {
   FREE_INSPECTION_CALLS,
+  isEditingCall,
   isInspectionCall,
+  repairStallAction,
+  repairStallReminder,
   shouldNudgeStalledReading,
   shouldWarnWrapUp,
   stalledReadingReminder,
@@ -73,7 +76,12 @@ import {
 } from './call-budget.js';
 import { buildTransformContext } from './context-prune.js';
 import { applyEditRequest, fileNames } from './edit-pipeline.js';
-import { buildPolishRequest, isOpenEndedPolishRequest } from './edit-request.js';
+import {
+  buildGameplayRequest,
+  buildPolishRequest,
+  isGameplayDepthRequest,
+  isOpenEndedPolishRequest,
+} from './edit-request.js';
 import type { EditorSession } from './editor/session.js';
 import { type ContextMessage, pruneContextAtomic } from './engine/context.js';
 import { remapProviderError } from './errors.js';
@@ -2031,6 +2039,8 @@ export async function generateViaAgent(
   let wrapUpReminderSent = false;
   // Reads in a row with no edit or verify between them. See shouldNudgeStalledReading.
   let consecutiveInspectionCalls = 0;
+  // Calls since the last edit, for repair rounds (see repairStallAction).
+  let callsSinceEdit = 0;
   let stalledReadingNudged = false;
   // The choices the host rolled for the first draft, kept to answer "say what you chose" when the
   // run stops before the agent writes its own closing message.
@@ -2146,6 +2156,21 @@ export async function generateViaAgent(
             timestamp: Date.now(),
           });
         }
+      }
+      // A repair round that keeps looking and never edits is not going to fix anything: nudge it
+      // once, then stop it, so the host can keep the version that already booted.
+      callsSinceEdit = isEditingCall(ev.toolName, ev.args) ? 0 : callsSinceEdit + 1;
+      const stall = repairStallAction(callsSinceEdit, input.history.length > 0);
+      if (stall === 'nudge') {
+        agent.steer({
+          role: 'user',
+          content: repairStallReminder(callsSinceEdit),
+          timestamp: Date.now(),
+        });
+      } else if (stall === 'stop' && budgetReason === null) {
+        budgetReason = 'tool_calls';
+        log.warn('[generate] step=repair_stalled', { ...ctx, callsSinceEdit, toolCallCount });
+        pendingWallClockAbort = true;
       }
       if (ev.toolCallId && ev.toolName) {
         inFlightToolInvocations.set(ev.toolCallId, { toolName: ev.toolName, args: ev.args ?? {} });
@@ -3098,7 +3123,11 @@ Latest request: ${input.prompt}`
         unmodifiedStarterEngine((path) => fsForRepair.view(path)?.content ?? null) === null
       ) {
         try {
-          const polish = isOpenEndedPolishRequest(request);
+          // Two kinds of broad request, with different briefs: one about how the game LOOKS and
+          // feels (polish: additive, rules untouched) and one about how it PLAYS (gameplay depth:
+          // rules and opponent are fair game). A request that is both gets the gameplay brief.
+          const gameplay = isGameplayDepthRequest(request);
+          const polish = gameplay || isOpenEndedPolishRequest(request);
           // The host edit takes a minute or two and emits no agent events; say what it is doing
           // so the chat is not silent.
           const say = (label: string, phase: 'understand' | 'edit' = 'edit'): void => {
@@ -3126,8 +3155,13 @@ Latest request: ${input.prompt}`
           }
           const edit = await applyEditRequest({
             progress: say,
+            userRequest: request,
             debug: (detail) => console.warn(`[edit-pipeline] ${detail}`),
-            request: polish ? buildPolishRequest(request, seen) : request,
+            request: gameplay
+              ? buildGameplayRequest(request, seen)
+              : polish
+                ? buildPolishRequest(request, seen)
+                : request,
             listFiles: () => fsForRepair.textFiles?.() ?? [],
             write: async (path, content) => {
               await fsForRepair.create(path, content);
@@ -3142,7 +3176,7 @@ Latest request: ${input.prompt}`
 
 [system-note] The host has ALREADY applied the user's requested change (edited ${edit.files.join(', ')}): "${request.slice(0, 300)}". Do NOT redo or rewrite it. Verify with validate_game_scene and a quick playtest that it behaves EXACTLY as requested; fix only what is wrong with small patch / str_replace edits; then call done.${
             polish
-              ? ' This was a general polish request, so there is no single value to assert: call declare_edit_intent with checks: [] rather than inventing a field, and in your closing summary list ONLY visual or feel changes that are really in the code (view them first) — never claim an effect you did not see.'
+              ? ' This was a broad request, so there is no single value to assert: call declare_edit_intent with checks: [] rather than inventing a field, and in your closing summary list ONLY changes that are really in the code (view them first) — never claim an effect or a mechanic you did not see.'
               : ''
           }`;
           hostEdit = {

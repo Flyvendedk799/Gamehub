@@ -198,15 +198,16 @@ describe('selectGamePlaytestPlan: action hints', () => {
 
 describe('selectGamePlaytestPlan: arena plan fits the browser job', () => {
   it('has no wait steps and stays within the job budget', () => {
-    // The job has a hard 30 s ceiling and runs ~18 frames/s on the server. A `wait` over an
-    // unchanged snapshot extends itself by up to 180 frames, so a duel plan made of waits timed
-    // out every run (measured: 537 nominal frames, 30 s, mostly killed).
+    // The job runs ~18 frames/s on the server under a 45 s ceiling for play-checks (it was 30 s;
+    // the arena plan was then capped at 300 frames). A `wait` over an unchanged snapshot extends
+    // itself by up to 180 frames, so a duel plan made of waits timed out every run (measured: 537
+    // nominal frames took the full 30 s). 360 frames is about 20 s plus boot: a wide margin.
     const steps = selectGamePlaytestPlan({ genre: 'fighting', dimensions: '3d' })?.steps ?? [];
     expect(steps.some((s) => s.kind === 'wait')).toBe(false);
     const frames = steps.reduce(
       (n, s) => n + (s.kind === 'key' ? (s.frames ?? 15) : s.kind === 'wait' ? s.frames : 2),
       0,
     );
-    expect(frames).toBeLessThanOrEqual(300);
+    expect(frames).toBeLessThanOrEqual(360);
   });
 });

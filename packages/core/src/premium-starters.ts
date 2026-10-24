@@ -48,6 +48,8 @@
  * meter + thumbnails). The agent is told (choose_engine result) to adapt, not replace.
  */
 
+import { exposeCameraInEngine } from './engine-camera.js';
+
 export type StarterEngine = 'canvas2d' | 'phaser' | 'three';
 
 /** One seeded project: relative path -> file content. */
@@ -810,6 +812,13 @@ runLoop((dt) => {
 `,
 };
 
+function withPublishedCamera(files: StarterFiles): StarterFiles {
+  const core = files['src/engine/core.js'];
+  return core === undefined
+    ? files
+    : { ...files, 'src/engine/core.js': exposeCameraInEngine(core) };
+}
+
 /**
  * The complete seeded project per engine — a MODULE SET, not one file.
  *
@@ -820,7 +829,9 @@ runLoop((dt) => {
 export const PREMIUM_STARTER_FILES: Record<StarterEngine, StarterFiles> = {
   canvas2d: CANVAS2D_FILES,
   phaser: PHASER_FILES,
-  three: THREE_FILES,
+  // The 3D engine module publishes its camera so the play-check can verify that the controls
+  // follow what the player sees (see engine-camera.ts).
+  three: withPublishedCamera(THREE_FILES),
 };
 
 /**

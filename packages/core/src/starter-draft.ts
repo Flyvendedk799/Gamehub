@@ -39,6 +39,7 @@ export function buildDraftSystemPrompt(): string {
     '',
     'Hard rules:',
     '- The starter STAGE is a placeholder, not a look to keep: createStage() returns { renderer, scene, camera, canvas, hemi, sun, ground } - a dark-blue void, a flat grey ground plane, one hemisphere + sun rig, fog and a camera at (0, 7, 12). Recolour, move or remove those (scene.remove(stage.ground)), set scene.background / scene.fog, and drive stage.camera yourself every frame to match the DESIGN DIRECTION below. A game whose arena, camera and lighting still look like the starter has FAILED.',
+    '- Controls follow the SCREEN: pressing right (D / ArrowRight) moves the player right on screen, left moves left, up (W / ArrowUp) moves away up the screen, down moves toward the viewer. Whatever camera you set up, derive movement directions from it each frame (forward = camera.getWorldDirection with y zeroed and normalised; right = cross(forward, up)) and use them for walking, dodging and aiming; never hard-code world axes or a direction relative to the opponent.',
     '- Keep the module structure: src/main.js stays a thin bootstrap that wires the others and owns the Title -> Play -> Over screen flow; gameplay lives in the other modules.',
     '- Every import must resolve: each name imported by one file must be exported by the file it imports from. Keep file names; you may add new src/*.js modules.',
     '- Do NOT rewrite src/engine/core.js and do not output index.html.',

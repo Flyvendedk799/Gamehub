@@ -250,12 +250,14 @@ async function main() {
           },
           async playtest(htmlContent: string, steps: ReadonlyArray<PlaytestStep>) {
             const jobId = await browserClient.enqueuePlaytest(htmlContent, [...steps]);
-            const result = await browserClient.waitForResult<PlaytestResult>(jobId, 30_000);
+            // Play-checks get 45 s (the browser worker's ceiling for them), not the default 30.
+            const result = await browserClient.waitForResult<PlaytestResult>(jobId, 45_000);
             if (result === null) return null;
             return {
               hasGameContract: result.hasGameContract,
               hasDebugContract: result.hasDebugContract,
               baselineSnapshot: result.baselineSnapshot,
+              baselineScreen: result.baselineScreen ?? null,
               steps: result.steps,
               bootErrors: result.bootErrors,
             };

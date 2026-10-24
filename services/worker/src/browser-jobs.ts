@@ -68,6 +68,8 @@ export interface PlaytestStepResult {
   step: PlaytestStep;
   snapshotAfter: unknown;
   errors: string[];
+  /** Where the player is on screen after the step (-1..1), when the game publishes a camera. */
+  screenAfter?: { x: number; y: number } | null;
 }
 
 /** BUILD_SPEED §3 — one frame of the running game, for the visual critique. */
@@ -82,6 +84,7 @@ export interface PlaytestResult {
   hasGameContract: boolean;
   hasDebugContract: boolean;
   baselineSnapshot: unknown;
+  baselineScreen?: { x: number; y: number } | null;
   steps: PlaytestStepResult[];
   bootErrors: string[];
   blockedRequests: string[];

@@ -191,8 +191,9 @@ const FIGHTING_ARENA: PlaytestPlaybook = {
   genre: 'fighting',
   intent:
     'Arena duel: walk up to the opponent, then strike; opponent HP must be lower at the end than at the start.',
-  // SIZED FOR THE BROWSER JOB, which has a hard 30 s ceiling and runs about 18 frames a second on
-  // the server (software rendering). So: roughly 250 frames in total, and NO `wait` steps. A wait
+  // SIZED FOR THE BROWSER JOB, which runs about 18 frames a second on the server (software
+  // rendering) under a 45 s ceiling for play-checks. So: roughly 320 frames in total (about 18 s
+  // plus boot), and NO `wait` steps. A wait
   // that sees an unchanged snapshot silently extends itself by up to 180 frames, and a duel's idle
   // moments are exactly that; eight of them blew the ceiling and failed every run. Each strike is
   // a key HOLD long enough to cover its own wind-up, which also keeps the clock moving.
@@ -219,6 +220,13 @@ const FIGHTING_ARENA: PlaytestPlaybook = {
     // exchange does not fail a game that works.
     { kind: 'key', code: 'KeyJ', action: 'attack', frames: 14, assert: 'Light attack again.' },
     { kind: 'key', code: 'KeyK', action: 'heavy', frames: 22, assert: 'Heavy attack again.' },
+    // A better opponent defends more: run e229481c's strike check failed three times in a row and
+    // then passed on an unchanged build. A second volley turns "one unlucky exchange" into "no
+    // swing in the whole fight landed", which is the failure this playbook exists to catch.
+    { kind: 'key', code: 'KeyJ', action: 'attack', frames: 14, assert: 'Light attack again.' },
+    { kind: 'key', code: 'KeyJ', action: 'attack', frames: 14, assert: 'Light attack again.' },
+    { kind: 'key', code: 'KeyK', action: 'heavy', frames: 22, assert: 'Heavy attack again.' },
+    { kind: 'key', code: 'KeyJ', action: 'attack', frames: 14, assert: 'Light attack again.' },
     {
       kind: 'key',
       code: 'KeyJ',
