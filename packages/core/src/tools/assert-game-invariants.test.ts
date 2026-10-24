@@ -481,6 +481,24 @@ describe('assertGameInvariants', () => {
   });
 });
 
+describe('normalizeInvariantGenre', () => {
+  it('maps spec-style names to the invariant vocabulary and ignores unknown ones', async () => {
+    const { normalizeInvariantGenre } = await import('./assert-game-invariants');
+    expect(normalizeInvariantGenre('fighting')).toBe('brawler');
+    expect(normalizeInvariantGenre('Tower_Defense')).toBe('tower-defense');
+    expect(normalizeInvariantGenre('racing')).toBe('racer');
+    expect(normalizeInvariantGenre('brawler')).toBe('brawler');
+    expect(normalizeInvariantGenre('topdown_arcade')).toBeUndefined();
+    expect(normalizeInvariantGenre(42)).toBeUndefined();
+  });
+
+  it('accepts genre "fighting" at the schema instead of rejecting the call (run 63c19601)', async () => {
+    const { Value } = await import('@sinclair/typebox/value');
+    const tool = makeAssertGameInvariantsTool({ listFiles: () => [] });
+    expect(Value.Check(tool.parameters, { genre: 'fighting' })).toBe(true);
+  });
+});
+
 describe('makeAssertGameInvariantsTool', () => {
   it('returns a no-op-args tool that surfaces a friendly summary', async () => {
     const tool = makeAssertGameInvariantsTool({

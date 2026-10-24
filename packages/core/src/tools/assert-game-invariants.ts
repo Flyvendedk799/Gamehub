@@ -39,6 +39,36 @@ export const GAME_GENRES = [
 ] as const;
 export type GameGenre = (typeof GAME_GENRES)[number];
 
+/**
+ * The invariant-genre list is its own vocabulary (brawler, not fighting), and the spec and the
+ * playtest playbook use another. Run 63c19601 passed "fighting" and the call was rejected twice
+ * by schema validation, so the check never ran. Accept the spec names and map them; an unknown
+ * word means "no genre-specific checks", never a rejected call.
+ */
+const GENRE_ALIASES: Readonly<Record<string, GameGenre>> = {
+  fighting: 'brawler',
+  fighter: 'brawler',
+  fight: 'brawler',
+  'beat-em-up': 'brawler',
+  beatemup: 'brawler',
+  racing: 'racer',
+  'endless-runner': 'runner',
+  fps: 'shooter',
+  tps: 'shooter',
+  shmup: 'shooter',
+  towerdefense: 'tower-defense',
+};
+
+export function normalizeInvariantGenre(raw: unknown): GameGenre | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const key = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, '-');
+  const direct = (GAME_GENRES as readonly string[]).includes(key) ? (key as GameGenre) : undefined;
+  return direct ?? GENRE_ALIASES[key];
+}
+
 const AssertGameInvariantsParams = Type.Object({
   /** Genre token from the Mechanic spec block (Sequence 1). When set,
    *  the cross-engine pass adds genre-specific checks (e.g. brawler →
@@ -46,18 +76,10 @@ const AssertGameInvariantsParams = Type.Object({
    *  the tool stays backward-compatible with the design-mode pre-`done`
    *  invariant pass. */
   genre: Type.Optional(
-    Type.Union([
-      Type.Literal('brawler'),
-      Type.Literal('shooter'),
-      Type.Literal('platformer'),
-      Type.Literal('puzzle'),
-      Type.Literal('racer'),
-      Type.Literal('runner'),
-      Type.Literal('tower-defense'),
-      Type.Literal('survival'),
-      Type.Literal('rhythm'),
-      Type.Literal('other'),
-    ]),
+    Type.String({
+      description:
+        'One of: brawler, shooter, platformer, puzzle, racer, runner, tower-defense, survival, rhythm, other. Spec-style names (fighting, racing, tower_defense, ...) are mapped; anything else is ignored.',
+    }),
   ),
   /** Declared capabilities (Phase 1) — when supplied, the pass reflects the
    *  game's intent: pointer/drag/touch schemes skip the keyboard-controls
@@ -1154,7 +1176,7 @@ export function makeAssertGameInvariantsTool(
     parameters: AssertGameInvariantsParams,
     async execute(_id, params): Promise<AgentToolResult<AssertGameInvariantsDetails>> {
       const specGenre = deps.getGenre ? await deps.getGenre() : undefined;
-      const genre = specGenre ?? (params.genre as GameGenre | undefined);
+      const genre = specGenre ?? normalizeInvariantGenre(params.genre);
       const capabilities = params.capabilities as InvariantCapabilities | undefined;
       const result = assertGameInvariants(deps, {
         ...(genre !== undefined ? { genre } : {}),
