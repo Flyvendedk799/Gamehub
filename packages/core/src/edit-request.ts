@@ -178,9 +178,24 @@ const POLISH_PATTERNS: ReadonlyArray<RegExp> = [
   /\bfeels?\s+(?:bad|off|wrong|clunky|floaty|stiff|unresponsive|flat)\b/i,
 ];
 
+/**
+ * Drop "keep X as it is" sentences before classifying. They say what must NOT change, so a keyword
+ * inside them is not a request: run e6a0a7ae asked for a fixed top-down camera and ended with "Keep
+ * every other mechanic exactly as it is", the bare word "mechanic" matched the gameplay-depth
+ * patterns, and the host wrote a gameplay-upgrade brief that never touched the camera.
+ */
+function withoutPreserveClauses(prompt: string): string {
+  return prompt
+    .replace(
+      /(?:^|(?<=[.!?\n]))[^.!?\n]*\b(?:keep|leave|preserve|maintain|(?:do not|don'?t) (?:change|touch|alter|remove)|without (?:changing|touching|altering))\b[^.!?]*(?:[.!?]|$)/gi,
+      ' ',
+    )
+    .trim();
+}
+
 /** True for a request that asks for general quality rather than one named change. */
 export function isOpenEndedPolishRequest(prompt: string): boolean {
-  const text = typeof prompt === 'string' ? prompt.trim() : '';
+  const text = typeof prompt === 'string' ? withoutPreserveClauses(prompt) : '';
   if (text.length === 0 || text.length > 240) return false;
   // A named change ("add a double jump", "make the platforms longer") is a change, whatever else
   // the sentence says about polish.
@@ -250,7 +265,7 @@ const GAMEPLAY_PATTERNS: ReadonlyArray<RegExp> = [
 ];
 
 export function isGameplayDepthRequest(prompt: string): boolean {
-  const text = typeof prompt === 'string' ? prompt.trim() : '';
+  const text = typeof prompt === 'string' ? withoutPreserveClauses(prompt) : '';
   if (text.length === 0 || text.length > 400) return false;
   return GAMEPLAY_PATTERNS.some((re) => re.test(text));
 }

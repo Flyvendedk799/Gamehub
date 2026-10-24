@@ -157,6 +157,19 @@ describe('gameplay-depth requests', () => {
     }
   });
 
+  it('ignores keywords inside "keep it as it is" sentences (run e6a0a7ae)', async () => {
+    const { isGameplayDepthRequest, isOpenEndedPolishRequest } = await import('./edit-request.js');
+    const camera =
+      'Switch to a fixed top-down camera looking straight down at the\n  arena, rotated 90 degrees so that the screen\'s "up" is the\n  arena\'s old "left". Keep every other mechanic exactly as it is.';
+    expect(isGameplayDepthRequest(camera)).toBe(false);
+    expect(isOpenEndedPolishRequest(camera)).toBe(false);
+    expect(isGameplayDepthRequest('Add a dash. Do not change the gameplay or the controls.')).toBe(
+      false,
+    );
+    // The same words as a real ask still count, and a keep-clause elsewhere does not hide them.
+    expect(isGameplayDepthRequest('the mechanics are shallow. Keep the art style.')).toBe(true);
+  });
+
   it('the gameplay brief allows changing rules and AI, where the polish brief forbids it', async () => {
     const { buildGameplayRequest, buildPolishRequest } = await import('./edit-request.js');
     const gameplay = buildGameplayRequest(
