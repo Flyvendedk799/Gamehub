@@ -1,4 +1,5 @@
 import type { GameSpec } from '@playforge/shared';
+import { Value } from '@sinclair/typebox/value';
 /**
  * may9 Phase 4 — declare_game_spec + amend_game_spec round-trip.
  *
@@ -7,10 +8,44 @@ import type { GameSpec } from '@playforge/shared';
  * carry-forward case); amend without a prior spec rejects.
  */
 import { describe, expect, it } from 'vitest';
+import { gardenProductionPlan } from '../../../shared/src/testing/production-fixtures';
 import { makeAmendGameSpecTool } from './amend-game-spec';
+import { makeChooseEngineTool } from './choose-engine';
 import { makeDeclareGameSpecTool } from './declare-game-spec';
+import { ProductionPlanParams } from './production-plan-schema';
 
 describe('declare_game_spec', () => {
+  it('requires a complete production plan on new cloud builds before engine selection', async () => {
+    let spec: GameSpec | undefined;
+    const declare = makeDeclareGameSpecTool((next) => {
+      spec = next;
+    }, true);
+    const choose = makeChooseEngineTool(undefined, () => spec, true);
+    const params = {
+      genre: 'other' as const,
+      dimensions: '2d' as const,
+      perspective: 'fixed_screen' as const,
+      cameraKind: 'static' as const,
+      primaryInputs: ['mouse' as const],
+      numActors: 0,
+      winCondition: '—',
+      loseCondition: '—',
+    };
+    await expect(
+      choose.execute('early', { engine: 'phaser', rationale: 'Pointer composition' }),
+    ).rejects.toThrow('productionPlan');
+    await expect(declare.execute('no-plan', params)).rejects.toThrow('productionPlan');
+    const productionPlan: unknown = gardenProductionPlan();
+    if (!Value.Check(ProductionPlanParams, productionPlan)) throw new Error('Invalid tool fixture');
+    await declare.execute('planned', { ...params, productionPlan });
+    await expect(
+      choose.execute('ready', { engine: 'phaser', rationale: 'Pointer composition' }),
+    ).resolves.toMatchObject({ details: { engine: 'phaser' } });
+    await expect(
+      choose.execute('legacy', { engine: 'canvas2d', rationale: 'Legacy' }),
+    ).rejects.toThrow('existing projects');
+    expect(spec?.productionPlan?.requirements[0]?.id).toBe('connect');
+  });
   it('persists a parsed GameSpec via setSpec', async () => {
     let captured: GameSpec | undefined;
     const tool = makeDeclareGameSpecTool((spec) => {

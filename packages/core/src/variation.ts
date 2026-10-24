@@ -1,14 +1,6 @@
-/**
- * Mandatory design variation for a first draft.
- *
- * Every game used to come out as the same game: the starter's stage (dark blue void, grey ground
- * plane, one light rig, a camera fixed at the same spot) plus the model's own convergence on the
- * same arena. Asking a model to "be creative" does not fix that - it converges on its favourite.
- * So the HOST rolls the dice: each new project gets a randomly chosen camera, visual style,
- * lighting, palette, setting composition and mechanic twist, handed to the draft as a binding
- * direction. The same prompt therefore yields visibly different games, while anything the user
- * decided (the world, the genre, the feel) stays fixed.
- */
+/** Visual variation without constraining the user's game to a genre or setting.
+ * Preserve declared camera choices; use visual suggestions only where compatible
+ * with the brief. This catalog never introduces new gameplay rules. */
 
 export interface Option {
   id: string;
@@ -21,33 +13,33 @@ export interface Option {
 export const CAMERAS_3D: Option[] = [
   {
     id: 'side-on',
-    label: 'side-on 2.5D duel camera',
-    how: 'Fixed side view: camera at about (0, 2.4, 13) looking at (0, 1.4, 0), fov 38. Movement is along X only; the camera tracks the midpoint of the action horizontally with smoothing. It never orbits.',
+    label: 'side-on view',
+    how: 'Frame the meaningful interaction plane clearly, with stable framing and no automatic orbit.',
   },
   {
     id: 'iso-high',
-    label: 'high isometric tactical camera',
-    how: 'Fixed high angle: camera at about (11, 13, 11) looking at the arena centre, fov 30. The arena reads like a diorama; punch the fov in slightly on big hits.',
+    label: 'isometric overview',
+    how: 'Use an elevated oblique view that makes spatial relationships and selectable objects easy to read.',
   },
   {
-    id: 'low-heroic',
-    label: 'low-angle heroic orbit',
-    how: 'Low and close: camera y about 1.2, orbiting slowly around the midpoint of the action, looking up at the fighters, fov 55. It swings wide on finishing blows.',
+    id: 'orbital',
+    label: 'inspectable orbit',
+    how: 'Allow deliberate orbit and zoom when inspection is part of the idea. Keep orientation and selection stable.',
   },
   {
     id: 'over-shoulder',
-    label: 'over-the-shoulder follow',
-    how: 'Camera about 3.5 behind and 2.2 above the player, aimed at the nearest opponent, fov 60; it turns with the player and the aim.',
+    label: 'third-person follow',
+    how: 'Follow the controlled subject with damping and maintain clear sightlines to relevant interactions.',
   },
   {
     id: 'top-down',
-    label: 'top-down arena view',
-    how: 'Camera straight above (y about 22) with a slight tilt, fov 40; the arena reads as a map. Use shadows and screen shake for impact.',
+    label: 'top-down overview',
+    how: 'Show spatial relationships clearly from above; keep interaction targets and labels legible.',
   },
   {
-    id: 'cinematic-dolly',
-    label: 'cinematic wide dolly',
-    how: 'A wide camera that drifts slowly on a rail and punches in (fov animation) on impacts; fov 45; it frames both fighters at all times.',
+    id: 'first-person',
+    label: 'first-person view',
+    how: 'Use the player viewpoint with responsive look controls, comfortable field of view and readable interaction cues.',
   },
 ];
 
@@ -117,46 +109,38 @@ export const STYLES: Option[] = [
   },
 ];
 
+// Composition suggestions work with the user's world; they do not choose a world for them.
+
 export const SETTINGS: Option[] = [
   {
-    id: 'bridge',
-    label: 'long narrow bridge duel',
-    how: 'A narrow raised platform with a visible drop on both sides; ring-out edges matter.',
+    id: 'layered',
+    label: 'layered depth',
+    how: 'Separate foreground interaction, middle-distance context and background atmosphere using the requested setting.',
   },
   {
-    id: 'sunken-pit',
-    label: 'sunken pit with crowd silhouettes',
-    how: 'A pit below ground level ringed by tiers of crowd silhouettes and torches.',
+    id: 'landmark',
+    label: 'distinctive focal landmark',
+    how: 'Give the requested world or board a recognizable focal motif while leaving interactive areas clear.',
   },
   {
-    id: 'ruined-courtyard',
-    label: 'ruined courtyard',
-    how: 'Broken columns, rubble, a central cracked statue; cover and sightlines vary around it.',
+    id: 'zones',
+    label: 'readable regions',
+    how: 'Group related spaces or information into visually distinct regions, using consistent boundaries and a coherent palette.',
   },
   {
-    id: 'floating-dais',
-    label: 'circular dais over a void',
-    how: 'A round platform floating over water, lava or clouds with drifting debris.',
+    id: 'crafted',
+    label: 'crafted details',
+    how: 'Use small theme-specific details and varied silhouettes to make the requested objects recognizable.',
   },
   {
-    id: 'cliff-shrine',
-    label: 'cliffside shrine at the edge of the world',
-    how: 'Stone steps, a shrine gate, wind-blown banners, a sheer drop behind.',
+    id: 'negative-space',
+    label: 'deliberate negative space',
+    how: 'Give important interactions breathing room; concentrate detail around relevant choices rather than filling every surface.',
   },
   {
-    id: 'lantern-ring',
-    label: 'tournament ring under lanterns',
-    how: 'A raised ring with rope posts under swaying paper lanterns and banners.',
-  },
-  {
-    id: 'frozen-lake',
-    label: 'frozen lake',
-    how: 'A cracked ice sheet, snow drifts, breath mist; ice cracks spread on heavy hits.',
-  },
-  {
-    id: 'ship-deck',
-    label: 'storm-tossed ship deck',
-    how: 'A wooden deck that rocks gently, masts and ropes, sea beyond the rail.',
+    id: 'changing-world',
+    label: 'visible state changes',
+    how: 'Let the scene or board visibly reflect the rules and changes already requested by the user.',
   },
 ];
 
@@ -222,36 +206,38 @@ export const PALETTES: Array<Option & { colors: string[] }> = [
   { id: 'sand-azure', label: 'sand and azure', colors: ['#3a2f22', '#d9b97a', '#38bdf8'], how: '' },
 ];
 
+// Distinctive treatment of existing mechanics, never mandatory extra mechanics.
+
 export const TWISTS: Option[] = [
   {
-    id: 'edge-hazard',
-    label: 'dangerous edges',
-    how: 'The arena edge is a hazard: standing near it costs health or risks a ring-out.',
+    id: 'anticipation',
+    label: 'readable anticipation',
+    how: 'Where a rule has a delayed consequence, show what is about to happen using a cue appropriate to the theme.',
   },
   {
-    id: 'telegraph-colours',
-    label: 'colour-coded telegraphs',
-    how: 'Enemy wind-ups glow white for parry, red for dodge, so reading colours is the skill.',
+    id: 'consequence',
+    label: 'persistent consequences',
+    how: "Make the consequences of the player's existing choices legible in the world or UI.",
   },
   {
-    id: 'rhythm-parry',
-    label: 'rhythmic parry window',
-    how: 'Attacks land on a readable beat; perfect timing triggers a brief slow-motion flash.',
+    id: 'discovery',
+    label: 'guided discovery',
+    how: 'Introduce the requested mechanic through a small readable example before exposing its full possibilities.',
   },
   {
-    id: 'rising-stakes',
-    label: 'rising stakes between rounds',
-    how: 'Each round changes one rule: faster foes, a hazard appears, the light dims.',
+    id: 'expression',
+    label: 'expressive feedback',
+    how: 'Give the core interaction a recognizable visual or musical response suited to this game.',
   },
   {
-    id: 'stamina-ring',
-    label: 'visible stamina ring',
-    how: 'A ring around the player shows stamina; overextending leaves you open.',
+    id: 'relationships',
+    label: 'visible relationships',
+    how: 'Reveal useful relationships between objects, choices or resources when the player focuses on them.',
   },
   {
-    id: 'environment-kill',
-    label: 'environmental finisher',
-    how: 'A finishing blow near scenery (brazier, statue, rail) triggers a special kill.',
+    id: 'continuity',
+    label: 'coherent transitions',
+    how: 'Preserve context through state changes so the player understands how one action led to the next.',
   },
 ];
 
@@ -270,12 +256,22 @@ function pick<T>(items: T[], rng: () => number): T {
 }
 
 /** Roll a variation. `rng` returns [0,1); inject a seeded one in tests. */
+
 export function pickVariation(
   engine: 'three' | 'phaser' | 'canvas2d',
   rng: () => number = Math.random,
+  spec?: { perspective?: string; cameraKind?: string },
 ): Variation {
+  const selectedCamera = pick(engine === 'three' ? CAMERAS_3D : LAYOUTS_2D, rng);
+  const camera = spec?.perspective
+    ? {
+        id: 'declared-view',
+        label: spec.perspective.replaceAll('_', ' '),
+        how: `Preserve the declared ${spec.perspective} perspective and ${spec.cameraKind ?? 'appropriate'} camera. Compose and size the view around this game's actual interactions; never change its movement plane to fit a visual suggestion.`,
+      }
+    : selectedCamera;
   return {
-    camera: pick(engine === 'three' ? CAMERAS_3D : LAYOUTS_2D, rng),
+    camera,
     style: pick(STYLES, rng),
     setting: pick(SETTINGS, rng),
     lighting: pick(LIGHTING, rng),
@@ -285,20 +281,21 @@ export function pickVariation(
 }
 
 /** The binding direction block for the draft prompt. */
+
 export function describeVariation(v: Variation, engine: 'three' | 'phaser' | 'canvas2d'): string {
   const cameraLine =
     engine === 'three'
       ? `CAMERA - ${v.camera.label}: ${v.camera.how}`
       : `VIEW / LAYOUT - ${v.camera.label}: ${v.camera.how}`;
   return [
-    "DESIGN DIRECTION (mandatory - this is what makes THIS game look and feel different from every other game; follow it, do not fall back to the starter's default look or to a generic dark-blue arena):",
+    'DESIGN DIRECTION (mandatory: preserve the brief and declared mechanics; the following visual starting points are optional where compatible):',
     cameraLine,
     `VISUAL STYLE - ${v.style.label}: ${v.style.how}`,
-    `SETTING COMPOSITION - ${v.setting.label}: ${v.setting.how}`,
+    `COMPOSITION - ${v.setting.label}: ${v.setting.how}`,
     `LIGHTING - ${v.lighting.label}: ${v.lighting.how}`,
-    `PALETTE - ${v.palette.label}: background ${v.palette.colors[0]}, main ${v.palette.colors[1]}, highlight ${v.palette.colors[2]}. Derive every colour from these.`,
-    `SIGNATURE TWIST - ${v.twist.label}: ${v.twist.how}`,
-    'Anything the user already decided in the brief (the world, the genre, the feel, the win condition) stays EXACTLY as decided: use this direction for everything else, and where it conflicts with the brief, the brief wins. Name the arena and describe it in a short header comment in the arena module.',
+    `PALETTE - ${v.palette.label}: background ${v.palette.colors[0]}, main ${v.palette.colors[1]}, highlight ${v.palette.colors[2]}. Use these only if the user has not requested another palette; retain sufficient contrast.`,
+    `INTERACTION TREATMENT - ${v.twist.label}: ${v.twist.how}`,
+    'Anything the user already decided in the brief (the world, the genre, the feel, the win condition) stays EXACTLY as decided: the brief wins. These suggestions must not introduce enemies, hazards, combat, a scoring system or a different world. Adapt the visual treatment to the selected renderer (2D art for Phaser/Canvas2D). Choose a different treatment when these suggestions do not fit.',
   ].join('\n');
 }
 
@@ -308,11 +305,12 @@ export function describeVariation(v: Variation, engine: 'three' | 'phaser' | 'ca
  * what you chose"; a run that is cut off must still answer, and these are the choices that were
  * actually made, not a guess.
  */
+
 export function summarizeVariation(v: Variation): string {
   return [
     `Setting: ${v.setting.label}.`,
     `Look: ${v.style.label}, with ${v.palette.label} colours and ${v.lighting.label} lighting.`,
     `Camera: ${v.camera.label}.`,
-    `Twist: ${v.twist.label}.`,
+    `Interaction treatment: ${v.twist.label}.`,
   ].join(' ');
 }

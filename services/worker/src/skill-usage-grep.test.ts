@@ -3,6 +3,27 @@ import { analyzeSkillUsage } from './skill-usage-grep.js';
 import type { SkillUsageSignals } from './skill-usage-grep.js';
 
 describe('analyzeSkillUsage', () => {
+  it('retains sibling and parent dependencies used by composed engine systems', () => {
+    const result = analyzeSkillUsage([
+      { path: 'src/main.js', content: "import { run } from './engine/core.js'; run();" },
+      {
+        path: 'src/engine/core.js',
+        content:
+          "import { createState } from './state.js'; export function run() { return createState(); }",
+      },
+      {
+        path: 'src/engine/state.js',
+        content:
+          "export { clone } from '../shared/clone.js'; export function createState() { return {}; }",
+      },
+      {
+        path: 'src/shared/clone.js',
+        content: 'export function clone(value) { return structuredClone(value); }',
+      },
+    ]);
+    expect(result.engineImports).toBe(2);
+    expect(result.unreferencedEngineFiles).toEqual([]);
+  });
   it('survival: two engine files both imported and called → engineImports=2, skillImportedNotCalled=[]', () => {
     const files = [
       {

@@ -58,7 +58,7 @@ export interface PlaytestPredicate {
    *  the frame to compare AGAINST. Defaults to `baseline`. */
   against?: FrameRef;
   /** For literal ops (`eq`/`gt`/`lt`), the value to compare to. */
-  value?: number;
+  value?: number | string | boolean;
   /** Minimum absolute delta for `increased`/`decreased`/`changed` to
    *  count (filters out float jitter). Defaults to 0 (any non-zero
    *  delta). For `unchanged`, the max tolerated drift. Defaults to 0. */
@@ -132,6 +132,7 @@ export function resolvePath(snapshot: unknown, path: string): unknown {
       continue;
     }
     if (isRecord(cursor)) {
+      if (!Object.hasOwn(cursor, seg)) return undefined;
       cursor = cursor[seg];
       continue;
     }
@@ -232,6 +233,14 @@ export function evaluatePredicate(
     if (predicate.value === undefined) {
       return fail(`${label}: op '${predicate.op}' requires a 'value'`);
     }
+    if (predicate.op === 'eq' && typeof predicate.value !== 'number') {
+      return subjectRaw === predicate.value
+        ? pass(`${label}: ${String(subjectRaw)} === ${String(predicate.value)}`)
+        : fail(`${label}: ${String(subjectRaw)} !== ${String(predicate.value)}`);
+    }
+    if (typeof predicate.value !== 'number' || !Number.isFinite(predicate.value)) {
+      return fail(`${label}: op '${predicate.op}' requires a finite numeric value`);
+    }
     const subjectNum = asNumber(subjectRaw);
     if (subjectNum === undefined) {
       // eq supports non-numeric equality; gt/lt require numbers.
@@ -271,6 +280,16 @@ export function evaluatePredicate(
     }
     const subjectNum = asNumber(subjectRaw);
     const againstNum = asNumber(againstRaw);
+    if (
+      (predicate.op === 'changed' || predicate.op === 'unchanged') &&
+      ((typeof subjectRaw === 'string' && typeof againstRaw === 'string') ||
+        (typeof subjectRaw === 'boolean' && typeof againstRaw === 'boolean'))
+    ) {
+      const changed = subjectRaw !== againstRaw;
+      const ok = predicate.op === 'changed' ? changed : !changed;
+      const reason = `${label}: ${String(againstRaw)} → ${String(subjectRaw)}`;
+      return ok ? pass(reason) : fail(reason);
+    }
     if (subjectNum === undefined || againstNum === undefined) {
       return fail(`${label}: relative op '${predicate.op}' requires numeric values`);
     }
@@ -423,10 +442,15 @@ export function parsePlaytestPredicate(raw: unknown): PlaytestPredicate {
   if (raw['frame'] !== undefined) out.frame = parseFrameRef(raw['frame'], 'frame');
   if (raw['against'] !== undefined) out.against = parseFrameRef(raw['against'], 'against');
   if (raw['value'] !== undefined) {
-    if (typeof raw['value'] !== 'number' || !Number.isFinite(raw['value'])) {
-      throw new Error('predicate.value must be a finite number');
+    const value = raw['value'];
+    if (
+      !(typeof value === 'number' && Number.isFinite(value)) &&
+      typeof value !== 'string' &&
+      typeof value !== 'boolean'
+    ) {
+      throw new Error('predicate.value must be a finite number, string, or boolean');
     }
-    out.value = raw['value'];
+    out.value = value;
   }
   if (raw['epsilon'] !== undefined) {
     if (
@@ -444,6 +468,9 @@ export function parsePlaytestPredicate(raw: unknown): PlaytestPredicate {
   }
   if ((out.op === 'eq' || out.op === 'gt' || out.op === 'lt') && out.value === undefined) {
     throw new Error(`predicate.op '${out.op}' requires a 'value'`);
+  }
+  if ((out.op === 'gt' || out.op === 'lt') && typeof out.value !== 'number') {
+    throw new Error(`predicate.op '${out.op}' requires a finite number`);
   }
   return out;
 }

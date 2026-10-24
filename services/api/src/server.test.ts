@@ -2,6 +2,7 @@ import { InMemoryEventBus, runChannel } from '@playforge/bus';
 import { BRAND_NAME, SocialOutroSummarySchema } from '@playforge/shared';
 import { InMemoryBlobStore, SnapshotStore } from '@playforge/storage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { gardenProductionPlan } from '../../../packages/shared/src/testing/production-fixtures';
 import { InMemoryAccountRepo } from './account-repo';
 import { type Authenticator, HeaderAuthenticator } from './auth';
 import { InMemoryCloudSaveRepo } from './cloud-save-repo';
@@ -3960,6 +3961,69 @@ describe('re-publishing after a failed publish (status recovery)', () => {
 });
 
 describe('verified publication and isolated preview capabilities', () => {
+  it.each([true, false])(
+    'replays the complete production suite at publication (recovery works=%s)',
+    async (recoveryWorks) => {
+      const calls: string[] = [];
+      const { app, project, repo, snapshotRepo, publishRepo } = await fixture({
+        ...passingVerifier,
+        async playtest(_html, steps) {
+          calls.push(steps.some((s) => s.kind === 'key') ? 'recovery' : 'core');
+          return {
+            hasGameContract: true,
+            hasDebugContract: true,
+            bootErrors: [],
+            baselineSnapshot: { connections: 0 },
+            steps: steps.map((step) => ({
+              step,
+              errors: [],
+              snapshotAfter: { connections: step.kind === 'key' && recoveryWorks ? 0 : 1 },
+            })),
+          };
+        },
+      });
+      const current = await repo.get(project.id);
+      const prior = await snapshotRepo.getById(current!.currentSnapshotId!);
+      const plan = gardenProductionPlan();
+      const candidate = await snapshotRepo.append({
+        projectId: project.id,
+        type: 'initial',
+        engine: 'canvas2d',
+        filesManifestKey: prior!.filesManifestKey,
+        filesHash: prior!.filesHash,
+        quality: {
+          schemaVersion: 1,
+          filesHash: prior!.filesHash,
+          status: 'verified',
+          booted: true,
+          behaviorPassed: true,
+          issues: [],
+          production: {
+            plan,
+            buildPasses: 2,
+            scenarios: plan.scenarios.map((s) => ({
+              id: s.id,
+              requirements: s.requirements,
+              status: 'passed',
+              assertions: s.plan.predicates.length,
+              observed: s.plan.predicates.length,
+              failures: [],
+            })),
+          },
+        },
+      });
+      await repo.setCurrentSnapshot(project.id, candidate.id, candidate.filesManifestKey);
+      const response = await app.inject({
+        method: 'POST',
+        url: `/v1/projects/${project.id}/publish`,
+        headers: AS_ALICE,
+      });
+      expect(response.statusCode).toBe(recoveryWorks ? 200 : 422);
+      expect(calls).toEqual(['core', 'recovery']);
+      if (!recoveryWorks) expect(await publishRepo.getByProject(project.id)).toBeNull();
+      await app.close();
+    },
+  );
   async function fixture(verifier?: ServerDeps['publishVerifier']) {
     const repo = new InMemoryProjectRepo();
     const snapshotRepo = new InMemorySnapshotRepo();

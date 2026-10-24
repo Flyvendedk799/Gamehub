@@ -56,6 +56,7 @@ import {
   parseVisualCritique,
   recommendSkills,
   resolveMaxRepairRounds,
+  runProductionSuite,
   scorePlaytest,
   selectGamePlaytestPlan,
   stubModulePaths,
@@ -66,7 +67,13 @@ import {
 // browser/Vite-only vendor assets (?raw) that have no business in the
 // game-gen worker and won't resolve under its tsconfig.
 import { GAME_ENGINE_ADAPTERS } from '@playforge/runtime/engines';
-import { type GameQuality, VerificationPlan, assessGame } from '@playforge/shared';
+import {
+  GameProductionPlan,
+  type GameQuality,
+  type GameScenarioEvidence,
+  VerificationPlan,
+  assessGame,
+} from '@playforge/shared';
 import {
   computeImpliedCost,
   inferTweakSchema,
@@ -82,6 +89,8 @@ import type { SnapshotStore, WriteResult } from '@playforge/storage';
 import { buildGameHtml } from '../../../packages/exporters/src/index';
 import { canOfferImageGeneration, makeAssetGenerator } from './asset-generator';
 import { SMALL_EDIT_LINES, changedFilePaths, countChangedLines, describeChange } from './edit-size';
+import { productionMilestonePrompt } from './production-build';
+import { compareRepairVerdicts } from './repair-candidate';
 import { createRunSignalAggregator } from './run-signal';
 import { analyzeSkillUsage } from './skill-usage-grep.js';
 import { buildSpecialistJobPlan } from './specialist-jobs.js';
@@ -664,6 +673,8 @@ export async function runGeneration(
   const maxToolCalls =
     ports.maxTokens !== undefined ? Math.max(40, Math.floor(ports.maxTokens / 3000)) : 120;
   const maxWallClockMs = 20 * 60 * 1000; // 20 minutes hard wall
+  const buildStartedAt = Date.now();
+  const remainingBuildMs = () => Math.max(0, maxWallClockMs - (Date.now() - buildStartedAt));
 
   // In-run mutable state the agent reads/writes via the gameMode callbacks and
   // that we persist alongside the snapshot once the run completes.
@@ -689,6 +700,26 @@ export async function runGeneration(
    *  from a parent snapshot. Gates `declare_edit_intent`: a first build has no
    *  prior behaviour to change, so there is nothing for it to assert against. */
   const isIteration = req.initialFiles !== undefined;
+  // Freeze the actual checks before the first observation. Genre labels describe
+  // games; they must not override a deliberate custom interaction contract.
+  let lockedPlan: GamePlaytestPlan | null | undefined;
+  let lockedProductionPlan: GameProductionPlan | null | undefined;
+  let scenarioEvidence: GameScenarioEvidence[] = [];
+  let productionBuildPasses = 0;
+  let bestAttempt: {
+    files: ReturnType<WorkingTree['checkpoint']>;
+    verdict: RepairVerdict | null;
+    spec: GameSpec | null;
+    editIntent: EditIntent | null;
+  } | null = null;
+  // Identity of the tree the last verdict was observed on. Re-driving a browser check on
+  // byte-identical files can only add noise: run b3319147 shipped on a passing verdict, then the
+  // final re-check of the same files failed once and stamped the snapshot `needs_fixes`.
+  const treeKey = (): string =>
+    tree
+      .toTextFiles()
+      .map((f) => `${f.path}\u0000${f.content}`)
+      .join('\u0001');
 
   // Wrap the caller's event sink so we can meter token usage from `turn_end`
   // events and trip the abort signal once the budget is exceeded. When no token
@@ -1010,11 +1041,32 @@ export async function runGeneration(
       // and mislabeled as phaser.
       validate: (engine, files) => validateScene(engine, files),
       setSpec: (spec) => {
-        state.spec = spec;
+        if (state.spec?.productionPlan && !spec.productionPlan) {
+          throw new Error(
+            'Preserve the production plan when editing this game. Amend its requirements and scenarios instead of removing verification.',
+          );
+        }
+        if (
+          lockedProductionPlan !== undefined &&
+          JSON.stringify(spec.productionPlan ?? null) !== JSON.stringify(lockedProductionPlan)
+        ) {
+          throw new Error(
+            'The production requirements and scenarios are frozen for this build. Repair the implementation without weakening or removing the plan. Amend it at the start of a new user edit when the requested rules change.',
+          );
+        }
+        state.spec = structuredClone(spec);
+        if (!isIteration && lockedProductionPlan === undefined && spec.productionPlan) {
+          lockedProductionPlan = GameProductionPlan.parse(structuredClone(spec.productionPlan));
+        }
       },
       getSpec: () => state.spec ?? undefined,
       setContract: (plan) => {
-        state.contract = plan;
+        if (lockedPlan !== undefined) {
+          throw new Error(
+            'Verification has started. Repair the game without changing its playtest contract.',
+          );
+        }
+        state.contract = structuredClone(plan);
       },
       getContract: () => state.contract ?? undefined,
       isIteration,
@@ -1077,13 +1129,13 @@ export async function runGeneration(
         ? isIteration && editRequest.kind === 'change'
           ? {
               maxToolCalls: Math.min(maxToolCalls, REPAIR_AFTER_FAST_EDIT_CALLS),
-              maxWallClockMs: Math.min(maxWallClockMs, REPAIR_AFTER_FAST_EDIT_MS),
+              maxWallClockMs: Math.max(1, Math.min(remainingBuildMs(), REPAIR_AFTER_FAST_EDIT_MS)),
             }
           : {
               maxToolCalls: Math.min(maxToolCalls, REPAIR_ROUND_CALLS),
-              maxWallClockMs: Math.min(maxWallClockMs, REPAIR_ROUND_MS),
+              maxWallClockMs: Math.max(1, Math.min(remainingBuildMs(), REPAIR_ROUND_MS)),
             }
-        : { maxToolCalls, maxWallClockMs },
+        : { maxToolCalls, maxWallClockMs: Math.max(1, remainingBuildMs()) },
     // WS-D — pause the agent at the next safe boundary once it has asked a
     // question (the existing continuation seam: agent.ts aborts cleanly when
     // this returns non-null, yielding output.interrupted=true). 'model_requested'
@@ -1153,6 +1205,18 @@ export async function runGeneration(
     }
   };
   const observeVerdict = async (): Promise<RepairVerdict | null> => {
+    if (lockedProductionPlan === undefined) {
+      lockedProductionPlan = state.spec?.productionPlan
+        ? GameProductionPlan.parse(structuredClone(state.spec.productionPlan))
+        : null;
+    }
+    scenarioEvidence = [];
+    if (lockedPlan === undefined) {
+      const genrePlan = state.spec ? selectGamePlaytestPlan(state.spec) : null;
+      lockedPlan = structuredClone(
+        state.contract ?? (genrePlan?.predicates.length ? genrePlan : null),
+      );
+    }
     if (browserJobs === undefined) return null;
     const entry = tree.view('index.html');
     if (entry === null) return null;
@@ -1225,14 +1289,19 @@ export async function runGeneration(
       return fatalErrors.length > 0 ? buildRepairVerdict({ trace: null, fatalErrors }, []) : null;
     }
 
-    // The genre playbook is the preferred verdict source (an EXTERNAL check the
-    // agent didn't author). When the genre has none (genre-less / novel games),
-    // fall back to the agent-authored contract so creativity is still verified
-    // against its own declared input→state behaviour instead of shipping
-    // unverified. Boot + juice stay external regardless.
-    const genrePlan = selectGamePlaytestPlan(spec);
-    const plan = genrePlan?.predicates.length ? genrePlan : state.contract;
-    const hasPredicates = plan !== null && plan.predicates.length > 0;
+    // Custom rules can differ from a genre's default controls and objectives.
+    // Boot, rendering, runtime errors and edit checks remain independent.
+    const plan = lockedPlan;
+    const productionResult =
+      lockedProductionPlan && fatalErrors.length === 0
+        ? await runProductionSuite(
+            lockedProductionPlan,
+            (steps) => browserJobs.playtest(verifyHtml, steps),
+            (title) => say(`Testing: ${title}`, 'test'),
+          )
+        : null;
+    if (productionResult) scenarioEvidence = productionResult.evidence;
+    const hasPredicates = !lockedProductionPlan && plan !== null && plan.predicates.length > 0;
 
     // Plan step 7 — booted cleanly, but the genre has no playbook predicates AND no
     // agent contract. We do NOT fabricate a pass/fail from generic input here: a
@@ -1244,7 +1313,7 @@ export async function runGeneration(
     // DECLARED gameplay capabilities (it wants a real verdict) but wired none,
     // that's repairable — push the actionable wire-snapshot fatal (same discipline
     // the predicate path applies). Otherwise ship an honest no_verdict.
-    if (fatalErrors.length === 0 && !hasPredicates) {
+    if (fatalErrors.length === 0 && !hasPredicates && !lockedProductionPlan) {
       const caps = spec.capabilities;
       const wantsVerdict =
         caps?.hasFailState === true ||
@@ -1428,6 +1497,14 @@ ${unreadableNote}`
       trace: playVerdict === null ? null : traceFromPlaytestResult(playVerdict),
       fatalErrors,
     };
+    if (productionResult) {
+      return {
+        ...productionResult.verdict,
+        fatalErrors: [...fatalErrors, ...productionResult.verdict.fatalErrors],
+        pass: productionResult.verdict.pass && fatalErrors.length === 0,
+        noEvidence: productionResult.verdict.noEvidence && fatalErrors.length === 0,
+      };
+    }
     return buildRepairVerdict(observation, hasPredicates && plan !== null ? plan.predicates : []);
   };
 
@@ -1453,7 +1530,50 @@ ${unreadableNote}`
   let output: GenerateOutput = await generate(buildInput(nextPrompt, history), deps);
   // The host's plain-language account of the change it applied. Later repair rounds write their
   // own (internal) text; the chat keeps this one.
-  const hostSummary = output.hostSummary;
+  let hostSummary = output.hostSummary;
+  // The first draft is only the foundation. Each remaining milestone gets its own
+  // source-inspecting implementation pass, sharing the run's token and wall budget.
+  // Edits keep the existing suite but never rebuild every production milestone.
+  if (!isIteration && state.spec?.productionPlan) {
+    lockedProductionPlan = GameProductionPlan.parse(structuredClone(state.spec.productionPlan));
+    productionBuildPasses = 1;
+    for (let index = 1; index < lockedProductionPlan.milestones.length; index++) {
+      if (aborted || output.interrupted || output.stoppedAtToolBudget || remainingBuildMs() <= 0)
+        break;
+      // Checkpoint the earlier playable milestone before expanding it. A later
+      // broken build must not erase an already working core interaction.
+      let syntaxValid = true;
+      try {
+        await assertGeneratedJavaScriptSyntax(tree.toTextFiles());
+      } catch {
+        syntaxValid = false;
+      }
+      if (syntaxValid) {
+        const verdict = await observeVerdict();
+        if (bestAttempt === null || compareRepairVerdicts(verdict, bestAttempt.verdict) >= 0) {
+          bestAttempt = {
+            files: tree.checkpoint(),
+            verdict,
+            spec: structuredClone(state.spec),
+            editIntent: structuredClone(state.editIntent),
+          };
+        }
+      }
+      if (aborted || remainingBuildMs() <= 0) break;
+      history.push(
+        { role: 'user', content: nextPrompt },
+        { role: 'assistant', content: output.message },
+      );
+      nextPrompt = productionMilestonePrompt(typedRequest, lockedProductionPlan, index);
+      say(`Building: ${lockedProductionPlan.milestones[index]?.goal}`, 'edit');
+      output = await generate(
+        { ...buildInput(nextPrompt, history), editMode: true, fastDraft: false, fastEdit: false },
+        deps,
+      );
+      productionBuildPasses++;
+      hostSummary = undefined;
+    }
+  }
   let repairRounds = 0;
   let shipReason: ShipReason = 'no_verdict';
   // Phase 5.6 — retain the deterministic verdict for the SHIPPED attempt so the
@@ -1632,6 +1752,13 @@ ${unreadableNote}`
       budgetExhausted ||
       repairRounds >= maxRepairRounds
     ) {
+      if (bestAttempt !== null) {
+        tree.restore(bestAttempt.files);
+        state.spec = bestAttempt.spec;
+        state.editIntent = bestAttempt.editIntent;
+        say('Recovering the last tested version after a broken repair', 'repair');
+        return false;
+      }
       const errorDetails = formatTreeAstIssues(issues);
       throw new Error(
         `Generated JavaScript syntax check failed. AST syntax verification failed (reflexion exhausted or budget reached):\n\n${errorDetails}`,
@@ -1652,17 +1779,7 @@ ${unreadableNote}`
     return true;
   };
 
-  // The tree as the host's edit left it, when it booted cleanly: what we fall back to if the
-  // repair rounds that follow do not make it pass.
-  let hostEditTree: Array<{ path: string; content: string }> | null = null;
-  // Identity of the tree the last verdict was observed on. Re-driving a browser check on
-  // byte-identical files can only add noise: run b3319147 shipped on a passing verdict, then the
-  // final re-check of the same files failed once and stamped the snapshot `needs_fixes`.
-  const treeKey = (): string =>
-    tree
-      .toTextFiles()
-      .map((f) => `${f.path} ${f.content}`)
-      .join('');
+  // Best measured attempt, including binary assets and the matching design state.
   let verdictTreeKey: string | null = null;
   const fastEditRun = isIteration && editRequest.kind === 'change';
   for (;;) {
@@ -1671,14 +1788,23 @@ ${unreadableNote}`
     if (fastEditRun && repairRounds > 0 && output.interrupted && pendingQuestion === null) {
       output = { ...output, interrupted: false, stoppedAtToolBudget: true };
     }
-    const budgetExhausted = aborted || output.interrupted || output.stoppedAtToolBudget === true;
+    const budgetExhausted =
+      aborted ||
+      output.interrupted ||
+      output.stoppedAtToolBudget === true ||
+      remainingBuildMs() <= 0;
     if (await runAstReflexionRound(budgetExhausted)) continue;
 
     const verdict = await observeVerdict();
     shippedVerdict = verdict;
     verdictTreeKey = treeKey();
-    if (fastEditRun && repairRounds === 0 && verdict !== null && verdict.fatalErrors.length === 0) {
-      hostEditTree = tree.toTextFiles().map((f) => ({ path: f.path, content: f.content }));
+    if (bestAttempt === null || compareRepairVerdicts(verdict, bestAttempt.verdict) >= 0) {
+      bestAttempt = {
+        files: tree.checkpoint(),
+        verdict,
+        spec: structuredClone(state.spec),
+        editIntent: structuredClone(state.editIntent),
+      };
     }
     if (verdict === null) {
       // No deterministic verdict (no port / no spec / no predicates / no
@@ -1696,8 +1822,7 @@ ${unreadableNote}`
     // The verdict's predicates came from the agent's contract (not a genre
     // playbook) when the genre has no bundled playbook and a contract was set.
     // This makes a non-completable creative game gate on its OWN contract.
-    const contractAuthored =
-      state.spec !== null && selectGamePlaytestPlan(state.spec) === null && state.contract !== null;
+    const contractAuthored = state.contract !== null || lockedProductionPlan != null;
     const action = decideRepairAction(verdict, state.spec, {
       roundsRun: repairRounds,
       maxRounds: maxRepairRounds,
@@ -1762,6 +1887,17 @@ ${changeText}`;
     output = await generate(buildInput(nextPrompt, history), deps);
   }
 
+  // Cosmetic/behavior repairs can regress a previously working game. Restore
+  // only on measured deterioration; ties keep the latest improvements.
+  if (bestAttempt !== null && compareRepairVerdicts(bestAttempt.verdict, shippedVerdict) > 0) {
+    tree.restore(bestAttempt.files);
+    state.spec = bestAttempt.spec;
+    state.editIntent = bestAttempt.editIntent;
+    shippedVerdict = await observeVerdict();
+    verdictTreeKey = treeKey();
+    say('Keeping the strongest tested version', 'repair');
+  }
+
   // BUILD_SPEED §3 — the second and last look: one frame AFTER the repair that the
   // first critique bought. Recorded, never acted on — this is the measurement that
   // says whether looking at a frame actually improved the shipped game, which is
@@ -1808,29 +1944,13 @@ ${changeText}`;
     if (fixed !== f.content) tree.create(f.path, fixed);
   }
 
-  // Repairs that did not end in a pass are more likely to have damaged a game that booted cleanly
-  // than to have fixed it. When the host's edit booted without errors and the repair rounds that
-  // followed still did not pass, ship the host's edit.
-  if (
-    hostEditTree !== null &&
-    repairRounds > 0 &&
-    (shipReason === 'budget_exhausted' || shipReason === 'repair_exhausted')
-  ) {
-    const keep = new Set(hostEditTree.map((f) => f.path));
-    for (const f of tree.toTextFiles()) if (!keep.has(f.path)) tree.delete(f.path);
-    for (const f of hostEditTree) tree.create(f.path, f.content);
-    console.log(
-      '[run-generation] repairs after the host edit did not pass — shipping the host edit as it booted',
-    );
-    say('Keeping your change as it first booted', 'repair');
-  }
-
   // Cleanup/normalization can change the bytes after the repair loop. Verify the
   // final tree, not an earlier attempt, before attaching an assessment.
   const finalVerdict =
     shippedVerdict !== null && verdictTreeKey !== null && treeKey() === verdictTreeKey
       ? shippedVerdict
       : await observeVerdict();
+  shippedVerdict = finalVerdict;
   const snapshot = await tree.persist(ports.store);
   const quality = assessGame({
     filesHash: snapshot.filesHash,
@@ -1854,12 +1974,29 @@ ${changeText}`;
   //
   // Best-effort by construction: a missing or malformed block yields null and
   // the panel simply doesn't offer sliders. It must never fail a run.
-  const genrePlan = state.spec ? selectGamePlaytestPlan(state.spec) : null;
-  const verificationPlan = VerificationPlan.safeParse(
-    genrePlan?.predicates.length ? genrePlan : state.contract,
-  );
-  if (verificationPlan.success) quality.verificationPlan = verificationPlan.data;
+  const verificationPlan = VerificationPlan.safeParse(lockedPlan);
+  if (lockedProductionPlan) {
+    quality.production = {
+      plan: lockedProductionPlan,
+      buildPasses: productionBuildPasses,
+      scenarios: scenarioEvidence,
+    };
+    if (
+      scenarioEvidence.length !== lockedProductionPlan.scenarios.length ||
+      scenarioEvidence.some((e) => e.status !== 'passed')
+    ) {
+      quality.behaviorPassed = false;
+      if (quality.status === 'verified') quality.status = 'unverified';
+    }
+  } else if (verificationPlan.success) quality.verificationPlan = verificationPlan.data;
   else if (quality.status === 'verified') quality.status = 'unverified';
+  // New builds cannot earn the legacy single-plan quality badge by skipping planning.
+  // Old projects remain editable and verifiable with their existing contracts.
+  if (!isIteration && !lockedProductionPlan) {
+    quality.behaviorPassed = false;
+    if (quality.status === 'verified') quality.status = 'unverified';
+    quality.issues.push('The new game has no production plan or complete requirement coverage.');
+  }
   if (state.editIntent?.plan) {
     const editPlan = VerificationPlan.safeParse(state.editIntent.plan);
     if (editPlan.success) quality.editVerificationPlan = editPlan.data;
@@ -2017,6 +2154,10 @@ ${changeText}`;
     juiceScore: lastRuntimeVerify?.juiceScore ?? null,
     playbookPass: reportScore === null ? 0 : reportScore.results.length - reportScore.failures,
     playbookTotal: reportScore === null ? 0 : reportScore.results.length,
+    productionBuildPasses,
+    productionRequirements: lockedProductionPlan?.requirements.length ?? 0,
+    productionScenarios: lockedProductionPlan?.scenarios.length ?? 0,
+    productionScenariosPassed: scenarioEvidence.filter((s) => s.status === 'passed').length,
     inputTokens: usedInputTokens,
     outputTokens: usedOutputTokens,
     totalTokens: usedInputTokens + usedOutputTokens,

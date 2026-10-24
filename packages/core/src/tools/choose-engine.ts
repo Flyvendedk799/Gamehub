@@ -55,6 +55,7 @@ export type GetGameSpecForFitFn = () => GameSpec | undefined | Promise<GameSpec 
 export function makeChooseEngineTool(
   setEngine: ChooseEngineFn | undefined,
   getSpec?: GetGameSpecForFitFn,
+  requireProductionPlan = false,
 ): AgentTool<typeof ChooseEngineParams, ChooseEngineDetails> {
   return {
     name: 'choose_engine',
@@ -85,6 +86,14 @@ export function makeChooseEngineTool(
         }
       }
 
+      if (requireProductionPlan && !spec?.productionPlan) {
+        throw new Error('Declare the game spec with its productionPlan before choosing an engine.');
+      }
+      if (requireProductionPlan && engine === 'canvas2d') {
+        throw new Error(
+          'New cloud games use Phaser or Three.js. canvas2d is supported only for existing projects.',
+        );
+      }
       if (fitVerdict === 'reject') {
         return {
           content: [

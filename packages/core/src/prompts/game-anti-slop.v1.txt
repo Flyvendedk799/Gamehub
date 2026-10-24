@@ -1,5 +1,7 @@
 # Game anti-slop (forbidden patterns)
 
+Apply each mechanic-specific rule only when that mechanic belongs in the requested game. These checks do not require adding scores, enemies, damage, respawning, scaling difficulty or a failure state to ideas that do not need them. The brief and declared capabilities determine applicability.
+
 Every item below is a hard fail in production play-testing. The validator catches some via lint; the rest are caught only by you reading your own code before `done`.
 
 ## Core mechanic

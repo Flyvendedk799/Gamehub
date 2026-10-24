@@ -221,16 +221,16 @@ describe('checkEngineFit — gating matrix', () => {
 });
 
 describe('validateCapabilities — capability reconciliation (P4)', () => {
-  it('demotes escalates for a handcrafted-level genre (platformer)', () => {
+  it('preserves an escalating platformer hybrid', () => {
     const { corrected, conflicts } = validateCapabilities({
       genre: 'platformer',
       capabilities: GameCapabilities.parse({ escalates: true, hasProgression: true }),
     });
-    expect(corrected?.escalates).toBe(false);
-    expect(conflicts.length).toBeGreaterThan(0);
+    expect(corrected?.escalates).toBe(true);
+    expect(conflicts).toEqual([]);
   });
 
-  it('demotes escalates for an ambient pointer/drag toy with no enemies (garden)', () => {
+  it('preserves escalating pointer games without requiring enemies', () => {
     const { corrected, conflicts } = validateCapabilities({
       genre: 'other',
       capabilities: GameCapabilities.parse({
@@ -239,8 +239,8 @@ describe('validateCapabilities — capability reconciliation (P4)', () => {
         hasEnemies: false,
       }),
     });
-    expect(corrected?.escalates).toBe(false);
-    expect(conflicts.length).toBeGreaterThan(0);
+    expect(corrected?.escalates).toBe(true);
+    expect(conflicts).toEqual([]);
   });
 
   it('leaves a real wave-shooter escalates flag intact', () => {

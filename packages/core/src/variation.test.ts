@@ -18,6 +18,26 @@ function seeded(seed: number): () => number {
 }
 
 describe('pickVariation', () => {
+  it.each(['first_person', 'top_down', 'side_scroll', 'fixed_screen', 'orbital'])(
+    'preserves the declared %s view across random styles',
+    (perspective) => {
+      for (let seed = 1; seed < 10; seed++) {
+        const v = pickVariation('three', seeded(seed), { perspective, cameraKind: 'static' });
+        expect(v.camera.id).toBe('declared-view');
+        expect(v.camera.how).toContain(perspective);
+      }
+    },
+  );
+
+  it('never assigns combat mechanics or an arena setting to arbitrary ideas', () => {
+    for (let seed = 1; seed < 100; seed++) {
+      const v = pickVariation('three', seeded(seed));
+      expect(`${v.twist.how} ${v.setting.how} ${v.camera.how}`).not.toMatch(
+        /opponent|fighter|finishing blow|parry|ring-out|costs health/i,
+      );
+      expect(describeVariation(v, 'three')).toContain('must not introduce');
+    }
+  });
   it('is deterministic for a given rng and covers every dimension', () => {
     const a = pickVariation('three', seeded(7));
     const b = pickVariation('three', seeded(7));

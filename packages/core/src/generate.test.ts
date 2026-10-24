@@ -1844,20 +1844,23 @@ describe('game-mode composeSystemPrompt (gameplan §A4)', () => {
 describe('GAME_WORKFLOW mechanic spec / camera-lock / edit-budget directives', () => {
   const prompt = composeSystemPrompt({ mode: 'create', artifactType: 'game' });
 
-  it('requires a Mechanic spec block as step 2 with the canonical fields', () => {
+  it("requires production coverage and explains the mechanic in the user's terms", () => {
     expect(prompt).toContain('Mechanic spec block');
-    expect(prompt).toContain('Genre: <brawler');
-    expect(prompt).toContain('Reference:');
-    expect(prompt).toContain('Camera: <orthographic-top');
-    expect(prompt).toContain('Inputs:');
-    expect(prompt).toContain('Win:');
-    expect(prompt).toContain('Lose:');
+    expect(prompt).toContain('productionPlan');
+    expect(prompt).toContain('covering ALL requirements');
+    expect(prompt).toContain('Each starts on a fresh page');
+    expect(prompt).toContain(
+      'core action, meaningful choice, world response, viewpoint and controls',
+    );
   });
 
-  it('cites the c44763af regression so future agents know why genre vocabulary matters', () => {
-    expect(prompt).toContain('c44763af');
-    expect(prompt).toContain('topview');
-    expect(prompt).toContain('Jab vs Cross');
+  it('keeps unfamiliar mechanics and noncompetitive games independent of starter conventions', () => {
+    expect(prompt).toContain('must not replace unfamiliar mechanics with a familiar template');
+    expect(prompt).toContain('zero actors is valid');
+    expect(prompt).toContain(
+      'subject, hazards, scoring and screen flow are examples, not requirements',
+    );
+    expect(prompt).not.toContain('Apply at LEAST a few: impact feedback on hits');
   });
 
   it('asks for brief per-step narration (reverses the old no-inter-tool-text rule for games)', () => {

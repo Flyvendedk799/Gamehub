@@ -3134,7 +3134,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       });
     }
     const plan = VerificationPlan.safeParse(sourceSnapshot.quality?.verificationPlan);
-    if ((!deps.browserQueue && !deps.publishVerifier) || !plan.success) {
+    const production = sourceSnapshot.quality?.production;
+    if ((!deps.browserQueue && !deps.publishVerifier) || (!plan.success && !production)) {
       return reply.code(503).send({
         error: 'verification_pending',
         message:
@@ -3167,7 +3168,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       });
       if (!boot.ok || live.renderedNonBlank === false)
         return reply.code(422).send({ error: 'boot_check_failed', errors: boot.errors });
-      const checks = [plan.data];
+      const checks = production
+        ? production.plan.scenarios.map((scenario) => scenario.plan)
+        : plan.success
+          ? [plan.data]
+          : [];
       if (sourceSnapshot.quality?.editVerificationPlan)
         checks.push(sourceSnapshot.quality.editVerificationPlan);
       for (const check of checks) {
@@ -3189,6 +3194,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           !play.hasDebugContract ||
           play.bootErrors.length ||
           play.steps.some((step) => step.errors.length > 0) ||
+          play.steps.length !== check.steps.length ||
           !score.pass
         ) {
           return reply.code(422).send({

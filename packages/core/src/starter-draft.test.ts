@@ -77,7 +77,7 @@ describe('draftGameFromStarter', () => {
     const tree = starterTree();
     const before = tree.get('src/engine/core.js');
     const reply = [
-      block('src/main.js', GOOD_MAIN),
+      block('src/main.js', "import { resetPlayer } from './player.js';"),
       block('src/engine/core.js', `${GOOD_PLAYER} // attempt to replace the engine`),
       block('index.html', `<html>nope</html> ${'x'.repeat(100)}`),
     ].join(NL);
@@ -105,6 +105,86 @@ describe('draftGameFromStarter', () => {
         generate: async () => block('src/player.js', GOOD_PLAYER),
       }),
     ).rejects.toThrow(/usable src\/main\.js/);
+    expect(writes).toEqual([]);
+  });
+});
+
+describe('draft integrity and creative scope', () => {
+  it.each(['three', 'phaser', 'canvas2d'] as const)(
+    'uses only the %s engine contract',
+    (engine) => {
+      const prompt = buildDraftSystemPrompt(engine);
+      expect(prompt).toContain('Do not add combat');
+      expect(prompt).toContain('open-ended games');
+      expect(prompt).toContain('custom playtest contract');
+      if (engine !== 'three') {
+        expect(prompt).not.toContain('camera.getWorldDirection');
+        expect(prompt).not.toContain('hemi, sun, ground');
+      }
+      if (engine === 'phaser') expect(prompt).toContain('Phaser owns the update/physics loop');
+    },
+  );
+
+  it('accepts a short complete module without discarding it by byte count', async () => {
+    const writes = new Map<string, string>();
+    await draftGameFromStarter({
+      engine: 'three',
+      brief: 'a musical garden',
+      read: () => null,
+      write: (path, body) => {
+        writes.set(path, body);
+      },
+      generate: async () =>
+        block('src/main.js', "import { grow } from './garden.js'; grow();") +
+        NL +
+        block('src/garden.js', 'export function grow() {}'),
+    });
+    expect(writes.size).toBe(2);
+  });
+
+  it('rejects broken module links before any write and retries with a concrete diagnosis', async () => {
+    const writes: string[] = [];
+    const prompts: string[] = [];
+    await draftGameFromStarter({
+      engine: 'three',
+      brief: 'a musical garden',
+      read: () => null,
+      write: (path) => {
+        writes.push(path);
+      },
+      generate: async (_system, user) => {
+        prompts.push(user);
+        expect(writes).toHaveLength(0);
+        return (
+          block('src/main.js', "import { grow } from './garden.js'; grow();") +
+          NL +
+          block(
+            'src/garden.js',
+            prompts.length === 1 ? 'export const seed = 1;' : 'export function grow() {}',
+          )
+        );
+      },
+    });
+    expect(prompts[1]).toContain('does not export');
+    expect(writes).toEqual(['src/main.js', 'src/garden.js']);
+  });
+
+  it('rejects duplicate modules without partially replacing the starter', async () => {
+    const writes: string[] = [];
+    await expect(
+      draftGameFromStarter({
+        engine: 'three',
+        brief: 'x',
+        read: () => null,
+        write: (path) => {
+          writes.push(path);
+        },
+        generate: async () =>
+          block('src/main.js', 'export const x = 1;') +
+          NL +
+          block('src/main.js', 'export const x = 2;'),
+      }),
+    ).rejects.toThrow('duplicate file paths');
     expect(writes).toEqual([]);
   });
 });

@@ -614,8 +614,8 @@ describe('scaffold survival telemetry', () => {
     expect(report?.['scaffoldSeeded']).toBe(starterPathsFor('canvas2d').length);
     expect(report?.['scaffoldStubbed']).toEqual(['src/hud.js']);
     expect(report?.['scaffoldOrphaned']).toContain('src/theme.js');
-    // Only the entry and the engine still ship code the page loads.
-    expect(report?.['scaffoldSurvived']).toBe(2);
+    // The entry, engine and re-exported rules runtime are reachable.
+    expect(report?.['scaffoldSurvived']).toBe(3);
     expect(report?.['scaffoldDeleted']).toEqual([]);
   });
 });

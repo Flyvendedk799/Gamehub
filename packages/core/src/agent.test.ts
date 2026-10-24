@@ -2,6 +2,7 @@ import type { AgentEvent, AgentMessage, AgentOptions } from '@mariozechner/pi-ag
 import type { LoadedSkill, ModelRef } from '@playforge/shared';
 import { ERROR_CODES, PlayforgeError } from '@playforge/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { gardenProductionPlan } from '../../shared/src/testing/production-fixtures';
 
 const loadBuiltinSkillsMock = vi.fn(async (): Promise<LoadedSkill[]> => []);
 
@@ -342,6 +343,44 @@ describe('generateViaAgent() — Phase 1 pass-through', () => {
     expect(init?.messages).toHaveLength(1);
     const seed = init?.messages?.[0];
     expect(seed?.role).toBe('user');
+  });
+
+  it('carries the full production design into later agent invocations', async () => {
+    scriptedAgent = { assistantText: RESPONSE_WITH_ARTIFACT };
+    const productionPlan = gardenProductionPlan();
+    await generateViaAgent(
+      {
+        prompt: 'Complete the garden recovery milestone',
+        artifactType: 'game',
+        history: [],
+        model: MODEL,
+        apiKey: 'test',
+      },
+      {
+        tools: [],
+        gameMode: {
+          setEngine: () => {},
+          getCurrentEngine: () => 'phaser',
+          validate: () => ({ ok: true, engine: 'phaser', issues: [] }),
+          getSpec: () => ({
+            schemaVersion: 1,
+            genre: 'other',
+            dimensions: '2d',
+            perspective: 'fixed_screen',
+            cameraKind: 'static',
+            primaryInputs: ['mouse'],
+            numActors: 0,
+            winCondition: '—',
+            loseCondition: '—',
+            features: {},
+            productionPlan,
+          }),
+        },
+      },
+    );
+    const prompt = agentCalls[0]?.options.initialState?.systemPrompt;
+    expect(prompt).toContain(JSON.stringify(productionPlan));
+    expect(prompt).toContain('possibly inherited from a remix');
   });
 
   it('forwards apiKey through getApiKey callback', async () => {
@@ -1180,7 +1219,7 @@ describe('generateViaAgent() — per-run safety budget', () => {
     // The run was cut before `done`, so the host answers "say what you chose" itself, from the
     // choices it actually rolled, instead of leaving a half-sentence about verifying the build.
     expect(result.message).toContain('What I chose');
-    expect(result.message).toMatch(/Setting: .*Look: .*Camera: .*Twist: /);
+    expect(result.message).toMatch(/Setting: .*Look: .*Camera: .*Interaction treatment: /);
   });
 
   it('after a host draft, reading files does not use up the budget for fixing them', async () => {

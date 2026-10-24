@@ -1,6 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { composeSystemPrompt, formatPromptAssistConstraints } from './index.js';
 
+describe('game creativity requirements', () => {
+  it.each(['three', 'phaser', 'canvas2d'] as const)(
+    'keeps %s builds open to custom mechanics',
+    (engine) => {
+      const prompt = composeSystemPrompt({ mode: 'create', artifactType: 'game', engine });
+      expect(prompt).toContain('Genres and starters are implementation aids');
+      expect(prompt).toContain('Do not add combat');
+      expect(prompt).toContain('custom playtest contract');
+      expect(prompt).toContain('need not have a win or lose condition');
+      expect(prompt).toContain('The brief and declared capabilities determine applicability');
+      expect(prompt).not.toContain('the win AND lose conditions are reachable');
+    },
+  );
+});
+
 describe('composeSystemPrompt — mobile-flow keyword routing (backlog-2 #6)', () => {
   it('routes the mobile-flow template into the prompt for mobile keywords', () => {
     const out = composeSystemPrompt({

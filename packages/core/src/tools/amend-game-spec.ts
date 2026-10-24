@@ -16,6 +16,7 @@ import {
   validateCapabilities,
 } from '@playforge/shared';
 import { Type } from '@sinclair/typebox';
+import { ProductionPlanParams } from './production-plan-schema';
 
 const FeatureValue = Type.Union([
   Type.String(),
@@ -27,14 +28,15 @@ const FeatureValue = Type.Union([
 const FeatureRecord = Type.Record(Type.String(), FeatureValue);
 
 const AmendGameSpecParams = Type.Object({
+  productionPlan: Type.Optional(ProductionPlanParams),
   genre: Type.Optional(Type.String()),
   dimensions: Type.Optional(Type.String()),
   perspective: Type.Optional(Type.String()),
   cameraKind: Type.Optional(Type.String()),
   primaryInputs: Type.Optional(Type.Array(Type.String(), { minItems: 1 })),
-  numActors: Type.Optional(Type.Integer({ minimum: 1, maximum: 64 })),
-  winCondition: Type.Optional(Type.String({ minLength: 3, maxLength: 280 })),
-  loseCondition: Type.Optional(Type.String({ minLength: 3, maxLength: 280 })),
+  numActors: Type.Optional(Type.Integer({ minimum: 0, maximum: 64 })),
+  winCondition: Type.Optional(Type.String({ minLength: 1, maxLength: 280 })),
+  loseCondition: Type.Optional(Type.String({ minLength: 1, maxLength: 280 })),
   // Capabilities are replace-whole on amend — restate the full set when changing it.
   capabilities: Type.Optional(
     Type.Object({
@@ -127,8 +129,7 @@ export function makeAmendGameSpecTool(
       }
       const patch = GameSpecPatch.parse(params);
       const merged = applyGameSpecPatch(prior, patch);
-      // v2 P4 — reconcile on amend too, so amending escalates:true onto a
-      // handcrafted-level platformer is demoted just like it is on declare.
+      // Preserve explicit capabilities on edits and surface platform limitations.
       const { corrected, conflicts } = validateCapabilities(merged);
       const after =
         corrected !== undefined && corrected !== merged.capabilities

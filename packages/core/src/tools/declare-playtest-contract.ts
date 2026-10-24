@@ -67,7 +67,10 @@ const CheckParams = Type.Object({
     ]),
   ),
   assertValue: Type.Optional(
-    Type.Number({ description: 'Comparison number for greaterThan / lessThan / equals.' }),
+    Type.Union([Type.Number(), Type.String(), Type.Boolean()], {
+      description:
+        'equals accepts a number, string or boolean; greaterThan/lessThan require a number.',
+    }),
   ),
   assertVsPrevious: Type.Optional(
     Type.Boolean({
@@ -76,6 +79,12 @@ const CheckParams = Type.Object({
     }),
   ),
   note: Type.Optional(Type.String({ description: 'Human-readable intent for this check.' })),
+  outcome: Type.Optional(
+    Type.Boolean({
+      description:
+        'True when this assertion checks state that determines completion or failure. Use for any field name (e.g. connectedTerminals, harmony, harvest), not just score/health.',
+    }),
+  ),
 });
 
 const DeclarePlaytestContractParams = Type.Object({
@@ -123,7 +132,7 @@ export function makeDeclarePlaytestContractTool(
     name: 'declare_playtest_contract',
     label: 'Declare playtest contract',
     description:
-      'For a game that does NOT fit a built-in genre playbook (genre "other", or a niche genre): declare your ' +
+      'For any game whose mechanics do NOT fit its built-in genre playbook, including hybrids: declare your ' +
       'own input→state checks so the game can be deterministically verified — call this RIGHT AFTER ' +
       'declare_game_spec and BEFORE writing any file. Each check names a synthetic input and (optionally) a ' +
       'snapshot field that must change as a result. It is a pre-build commitment: build the game so each ' +
@@ -141,6 +150,15 @@ export function makeDeclarePlaytestContractTool(
         );
       }
       for (const c of checks) {
+        if (
+          (c.assertOp === 'greaterThan' || c.assertOp === 'lessThan') &&
+          c.assertValue !== undefined &&
+          typeof c.assertValue !== 'number'
+        ) {
+          throw new Error(
+            'greaterThan/lessThan require a numeric assertValue. Use equals for story states or flags.',
+          );
+        }
         if (c.action === 'key' && (c.key === undefined || c.key.length === 0)) {
           throw new Error(
             'A check with action:"key" must provide "key" (a KeyboardEvent.code such as "Space", "ArrowLeft", "KeyW").',
@@ -157,7 +175,7 @@ export function makeDeclarePlaytestContractTool(
           c.assertValue === undefined
         ) {
           throw new Error(
-            `assertOp:"${c.assertOp}" must include assertValue (the number to compare against).`,
+            `assertOp:"${c.assertOp}" must include assertValue (the value to compare against).`,
           );
         }
       }
@@ -170,7 +188,11 @@ export function makeDeclarePlaytestContractTool(
       if (
         spec !== undefined &&
         (declaresOutcome(spec.winCondition) || declaresOutcome(spec.loseCondition)) &&
-        !checks.some((c) => c.assertOp !== undefined && OUTCOME_FIELD_RE.test(c.assertField ?? ''))
+        !checks.some(
+          (c) =>
+            c.assertOp !== undefined &&
+            (c.outcome === true || OUTCOME_FIELD_RE.test(c.assertField ?? '')),
+        )
       ) {
         throw new Error(
           `This game declares how it is won or lost (win: "${spec.winCondition ?? '—'}", lose: "${spec.loseCondition ?? '—'}"), but no check asserts on the state that decides it — a game where that state never changes would still pass. Add at least one check on the score / lives / progress field the condition depends on, e.g. {action:"wait", holdFrames:240, assertField:"aiScore", assertOp:"increases"} for an opponent that scores past an idle player.`,
@@ -211,7 +233,7 @@ export function makeDeclarePlaytestContractTool(
         content: [
           {
             type: 'text',
-            text: `Playtest contract recorded: ${plan.predicates.length} machine-checked assertion(s) over ${plan.steps.length} input step(s) on field(s) ${fields.join(', ')}. Because this genre has no bundled playbook, the boot-and-repair loop will gate your game on THIS contract. Build so every asserted field is exposed in window.__game.debug.snapshot() and responds exactly as declared, then proceed.`,
+            text: `Playtest contract recorded: ${plan.predicates.length} machine-checked assertion(s) over ${plan.steps.length} input step(s) on field(s) ${fields.join(', ')}. The boot-and-repair loop will use THIS contract in preference to genre defaults. It is locked when verification starts. Build so every asserted field is exposed in window.__game.debug.snapshot() and responds exactly as declared, then proceed.`,
           },
         ],
         details: { predicates: plan.predicates.length, steps: plan.steps.length, fields },

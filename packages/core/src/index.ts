@@ -1320,3 +1320,7 @@ export {
   type ScreenPoint,
   type ScreenControlsVerdict,
 } from './screen-controls.js';
+
+export { runProductionSuite } from './production-suite';
+export type { ScenarioTrace } from './production-suite';
+export { filesReferencing } from './tools/unresolved-imports';

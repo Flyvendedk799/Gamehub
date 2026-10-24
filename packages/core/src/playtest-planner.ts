@@ -445,7 +445,7 @@ export interface AuthoredContractCheck {
     | 'lessThan'
     | 'equals';
   /** Comparison value for greaterThan / lessThan / equals. */
-  assertValue?: number;
+  assertValue?: number | string | boolean;
   /** Compare against the PREVIOUS asserting check instead of the pre-input
    *  baseline (for round-trips like move-left-then-right). Default false. */
   assertVsPrevious?: boolean;

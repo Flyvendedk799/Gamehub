@@ -1,3 +1,5 @@
+import { filesReferencing } from '@playforge/agent-core';
+
 export interface SkillUsageSignals {
   engineFilesWritten: number;
   engineImports: number;
@@ -110,7 +112,9 @@ export function analyzeSkillUsage(
       .filter((f) => f.path !== ef.path)
       .map((f) => f.content)
       .join('\n\n');
-    const imported = isImported(others, base);
+    // Engine systems can depend on siblings ('./events.js') or parents. A basename
+    // search for '/engine/' missed those edges and could delete a live dependency.
+    const imported = isImported(others, base) || filesReferencing(sourceFiles, ef.path).length > 0;
     if (imported) engineImports += 1;
 
     let callCount = 0;

@@ -1,45 +1,7 @@
 import { z } from 'zod';
-
-const Frame = z.union([
-  z.literal('final'),
-  z.literal('baseline'),
-  z.object({ step: z.number().int().nonnegative() }),
-]);
-export const VerificationPlan = z.object({
-  steps: z
-    .array(
-      z.discriminatedUnion('kind', [
-        z.object({
-          kind: z.literal('key'),
-          code: z.string(),
-          frames: z.number().int().positive().max(600).optional(),
-        }),
-        z.object({ kind: z.literal('mouseMove'), x: z.number(), y: z.number() }),
-        z.object({
-          kind: z.literal('mouseDown'),
-          button: z.number().int().min(0).max(2).optional(),
-        }),
-        z.object({ kind: z.literal('mouseUp'), button: z.number().int().min(0).max(2).optional() }),
-        z.object({ kind: z.literal('wait'), frames: z.number().int().positive().max(600) }),
-      ]),
-    )
-    .min(1)
-    .max(100),
-  predicates: z
-    .array(
-      z.object({
-        field: z.string().min(1),
-        op: z.enum(['increased', 'decreased', 'changed', 'unchanged', 'eq', 'gt', 'lt']),
-        frame: Frame.optional(),
-        against: Frame.optional(),
-        value: z.number().optional(),
-        epsilon: z.number().nonnegative().optional(),
-        label: z.string().optional(),
-      }),
-    )
-    .min(1)
-    .max(100),
-});
+import { GameProductionPlan, GameScenarioEvidence } from './game-production';
+import { VerificationPlan } from './verification-plan';
+export { VerificationPlan } from './verification-plan';
 
 /** Evidence belongs to immutable bytes, never to a mutable project or model claim. */
 export const GameQuality = z.object({
@@ -50,6 +12,13 @@ export const GameQuality = z.object({
   behaviorPassed: z.boolean(),
   issues: z.array(z.string()),
   verificationPlan: VerificationPlan.optional(),
+  production: z
+    .object({
+      plan: GameProductionPlan,
+      buildPasses: z.number().int().nonnegative(),
+      scenarios: z.array(GameScenarioEvidence),
+    })
+    .optional(),
   editVerificationPlan: VerificationPlan.optional(),
   visualEvidence: z
     .array(z.object({ moment: z.enum(['title', 'play']), blobKey: z.string() }))
@@ -104,6 +73,27 @@ export function isVerifiedGame(quality: unknown, filesHash: string): boolean {
     parsed.data.status === 'verified' &&
     parsed.data.booted &&
     parsed.data.behaviorPassed &&
-    parsed.data.issues.length === 0
+    parsed.data.issues.length === 0 &&
+    (!parsed.data.production || hasCompleteProductionEvidence(parsed.data.production))
   );
+}
+
+/** Persisted claims cannot hide omitted, duplicated, failed or unreadable scenarios. */
+export function hasCompleteProductionEvidence(
+  production: NonNullable<GameQuality['production']>,
+): boolean {
+  if (production.scenarios.length !== production.plan.scenarios.length) return false;
+  const evidence = new Map(production.scenarios.map((s) => [s.id, s]));
+  if (evidence.size !== production.scenarios.length) return false;
+  return production.plan.scenarios.every((scenario) => {
+    const result = evidence.get(scenario.id);
+    return (
+      result?.status === 'passed' &&
+      result.failures.length === 0 &&
+      result.assertions === scenario.plan.predicates.length &&
+      result.observed >= result.assertions &&
+      result.requirements.length === scenario.requirements.length &&
+      scenario.requirements.every((id) => result.requirements.includes(id))
+    );
+  });
 }

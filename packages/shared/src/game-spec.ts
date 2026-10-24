@@ -13,6 +13,7 @@
  * preserve untouched features verbatim.
  */
 import { z } from 'zod';
+import { GameProductionPlan } from './game-production';
 
 export const GAME_SPEC_SCHEMA_VERSION = 1 as const;
 
@@ -192,6 +193,7 @@ export type CreativeBrief = z.infer<typeof CreativeBrief>;
 
 export const GameSpec = z.object({
   creativeBrief: CreativeBrief.optional(),
+  productionPlan: GameProductionPlan.optional(),
   schemaVersion: z.literal(GAME_SPEC_SCHEMA_VERSION).default(GAME_SPEC_SCHEMA_VERSION),
   genre: GameGenre,
   /** Composable capabilities — the primary genre-agnostic description (Phase 1). */
@@ -200,15 +202,15 @@ export const GameSpec = z.object({
   perspective: GamePerspective,
   cameraKind: GameCameraKind,
   primaryInputs: z.array(GameInputKind).min(1),
-  numActors: z.number().int().min(1).max(64),
+  numActors: z.number().int().min(0).max(64),
   winCondition: z
     .string()
-    .min(3)
+    .min(1)
     .max(280)
     .describe('One sentence on how the player wins. "—" if endless.'),
   loseCondition: z
     .string()
-    .min(3)
+    .min(1)
     .max(280)
     .describe('One sentence on how the player loses. "—" if no fail state.'),
   features: z
@@ -228,15 +230,16 @@ export type GameSpec = z.infer<typeof GameSpec>;
  *  it, so partial-update bugs can't quietly drop invariants). */
 export const GameSpecPatch = z.object({
   creativeBrief: CreativeBrief.optional(),
+  productionPlan: GameProductionPlan.optional(),
   genre: GameGenre.optional(),
   capabilities: GameCapabilitiesPatch.optional(),
   dimensions: GameDimensions.optional(),
   perspective: GamePerspective.optional(),
   cameraKind: GameCameraKind.optional(),
   primaryInputs: z.array(GameInputKind).min(1).optional(),
-  numActors: z.number().int().min(1).max(64).optional(),
-  winCondition: z.string().min(3).max(280).optional(),
-  loseCondition: z.string().min(3).max(280).optional(),
+  numActors: z.number().int().min(0).max(64).optional(),
+  winCondition: z.string().min(1).max(280).optional(),
+  loseCondition: z.string().min(1).max(280).optional(),
   features: z.record(GameFeatureSpec).optional(),
   /** Optional human-readable note on WHY the amend was needed. Stored
    *  for audit only. */
@@ -272,6 +275,7 @@ export function applyGameSpecPatch(prior: GameSpec, patch: GameSpecPatch): GameS
       : prior.capabilities;
   const merged: GameSpec = {
     ...prior,
+    ...(patch.productionPlan !== undefined ? { productionPlan: patch.productionPlan } : {}),
     ...(patch.creativeBrief !== undefined ? { creativeBrief: patch.creativeBrief } : {}),
     ...(patch.genre !== undefined ? { genre: patch.genre } : {}),
     ...(mergedCapabilities !== undefined ? { capabilities: mergedCapabilities } : {}),
@@ -287,35 +291,14 @@ export function applyGameSpecPatch(prior: GameSpec, patch: GameSpecPatch): GameS
   return GameSpec.parse(merged);
 }
 
-/** Genres whose difficulty does NOT ramp in the wave/spawn sense — they pace via
- *  handcrafted levels (platformer/puzzle), fixed beatmaps (rhythm), story
- *  (visual_novel), or open-ended play (sandbox/idle). Declaring `escalates:true`
- *  for these drove the Loop-2 escalation false-positives. */
-const NON_ESCALATING_GENRES: ReadonlySet<string> = new Set<string>([
-  'platformer',
-  'puzzle',
-  'visual_novel',
-  'sandbox',
-  'idle',
-  'rhythm',
-]);
-
 export interface CapabilityReconciliation {
-  /** The capabilities after demoting flags the genre/scheme contradicts. Same
-   *  reference as the input when nothing changed. */
+  /** Declared capabilities, preserved across genre labels. */
   corrected: GameCapabilities | undefined;
-  /** Human-readable demotions, surfaced to the agent so it can amend or justify. */
+  /** Human-readable platform limitations to address explicitly. */
   conflicts: string[];
 }
 
-/**
- * Capability reconciliation (Engine Evolution v2 P4) — cross-check self-declared
- * capability flags against the genre + control scheme and DEMOTE the ones that
- * contradict, rather than trusting them raw. Pure; returns corrected caps +
- * the conflicts so `declare_game_spec` can apply the correction AND tell the
- * agent what it changed. Today it focuses on `escalates`, the one noisy flag
- * that feeds BOTH the escalation invariant and the wave-spawner recommendation.
- */
+/** Preserve declared mechanics; surface platform limitations without genre-based rewrites. */
 export function validateCapabilities(spec: {
   genre: GameGenre;
   capabilities?: GameCapabilities | undefined;
@@ -323,23 +306,9 @@ export function validateCapabilities(spec: {
   const caps = spec.capabilities;
   if (caps === undefined) return { corrected: undefined, conflicts: [] };
   const conflicts: string[] = [];
-  let escalates = caps.escalates;
-  if (escalates === true) {
-    if (NON_ESCALATING_GENRES.has(spec.genre)) {
-      escalates = false;
-      conflicts.push(
-        `escalates demoted to false: ${spec.genre} games pace via handcrafted content / fixed structure, not a wave-style difficulty ramp. If you genuinely ramp spawn pressure, re-declare it.`,
-      );
-    } else if (
-      (caps.controlScheme === 'drag' || caps.controlScheme === 'pointer') &&
-      caps.hasEnemies !== true
-    ) {
-      escalates = false;
-      conflicts.push(
-        'escalates demoted to false: a pointer/drag game with no enemies is not a difficulty-ramp game. Re-declare if you meant rising spawn/speed pressure.',
-      );
-    }
-  }
+  // Genre and input method do not constrain possible rules. A puzzle can ramp
+  // time pressure; a pointer-driven simulation can escalate without enemies.
+  // Preserve explicit capabilities rather than silently narrowing creative intent.
   // P10 — honest multiplayer scoping. The sandbox is single-origin (CSP
   // connect-src 'self'); a networked idea must be scoped to LOCAL multiplayer
   // (split-screen / hotseat / shared-keyboard) or explicitly decline the online
@@ -349,8 +318,7 @@ export function validateCapabilities(spec: {
       'requiresNetworking: online/networked play is not available in the sandbox (single-origin). Scope to LOCAL multiplayer (split-screen / hotseat / shared-keyboard) and say so, or explicitly decline the online part — do not silently ship single-player.',
     );
   }
-  if (escalates === caps.escalates) return { corrected: caps, conflicts };
-  return { corrected: { ...caps, escalates }, conflicts };
+  return { corrected: caps, conflicts };
 }
 
 /**

@@ -99,7 +99,10 @@ const CheckParams = Type.Object({
     ]),
   ),
   assertValue: Type.Optional(
-    Type.Number({ description: 'Comparison number for greaterThan / lessThan / equals.' }),
+    Type.Union([Type.Number(), Type.String(), Type.Boolean()], {
+      description:
+        'equals accepts a number, string or boolean; greaterThan/lessThan require a number.',
+    }),
   ),
   assertVsPrevious: Type.Optional(
     Type.Boolean({
@@ -197,6 +200,15 @@ export function makeDeclareEditIntentTool(
         );
       }
       for (const c of checks) {
+        if (
+          (c.assertOp === 'greaterThan' || c.assertOp === 'lessThan') &&
+          c.assertValue !== undefined &&
+          typeof c.assertValue !== 'number'
+        ) {
+          throw new Error(
+            'greaterThan/lessThan require a numeric assertValue. Use equals for story states or flags.',
+          );
+        }
         if (c.action === 'key' && (c.key === undefined || c.key.length === 0)) {
           throw new Error(
             'A check with action:"key" must provide "key" (a KeyboardEvent.code such as "Space", "ArrowLeft", "KeyW").',
@@ -213,7 +225,7 @@ export function makeDeclareEditIntentTool(
           c.assertValue === undefined
         ) {
           throw new Error(
-            `assertOp:"${c.assertOp}" must include assertValue (the number to compare against).`,
+            `assertOp:"${c.assertOp}" must include assertValue (the value to compare against).`,
           );
         }
       }

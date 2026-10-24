@@ -27,6 +27,25 @@ const MOTION_ONLY = [
 ];
 
 describe('declare_playtest_contract — outcome coverage', () => {
+  it('accepts explicit outcome semantics without requiring an arcade field name', async () => {
+    const tool = makeDeclarePlaytestContractTool(undefined, () => ({
+      winCondition: 'Connect every terminal',
+      loseCondition: '—',
+    }));
+    const result = await tool.execute('circuits', {
+      intent: 'Connecting a wire completes a circuit',
+      checks: [
+        { action: 'pointerMove', x: 0.4, y: 0.5 },
+        {
+          action: 'pointerDown',
+          assertField: 'connectedTerminals',
+          assertOp: 'increases',
+          outcome: true,
+        },
+      ],
+    });
+    expect(result.details.fields).toEqual(['connectedTerminals']);
+  });
   it('refuses a contract that never checks score/lives/progress when the game can be won', async () => {
     const tool = makeDeclarePlaytestContractTool(undefined, () => PONG_SPEC);
     await expect(

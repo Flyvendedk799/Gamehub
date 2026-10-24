@@ -110,6 +110,24 @@ export class WorkingTree {
     }
   }
 
+  /** An independent in-memory snapshot for bounded repair rollback. */
+  checkpoint(): { text: Map<string, string>; binary: Map<string, Uint8Array> } {
+    return {
+      text: new Map(this.files),
+      binary: new Map([...this.binary].map(([path, bytes]) => [path, bytes.slice()])),
+    };
+  }
+
+  /** Restore both code and assets; text-only rollback can lose replaced sprites. */
+  restore(checkpoint: ReturnType<WorkingTree['checkpoint']>): void {
+    this.files.clear();
+    this.binary.clear();
+    for (const [path, text] of checkpoint.text) this.files.set(assertSafeBundlePath(path), text);
+    for (const [path, bytes] of checkpoint.binary) {
+      this.binary.set(assertSafeBundlePath(path), bytes.slice());
+    }
+  }
+
   /** TextEditorFsCallbacks.view */
   view(path: string): { content: string; numLines: number } | null {
     assertSafeBundlePath(path);

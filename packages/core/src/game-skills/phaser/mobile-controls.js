@@ -6,8 +6,6 @@
 // game logic reads the same way it reads keyboard state. Also detects
 // touch-vs-desktop so you can hide the overlay on non-touch devices.
 
-import * as Phaser from 'phaser';
-
 /** True when the runtime environment has a touch screen. */
 export function isTouchDevice() {
   return (
@@ -42,7 +40,9 @@ export function createMobileControls(scene, config = {}) {
   scene.input.addPointer(2);
 
   // Visibility: hide on desktop unless forced.
-  const shouldShow = !hideOnDesktop || isTouchDevice();
+  let shouldShow = !hideOnDesktop || isTouchDevice();
+  let destroyed = false;
+  const buttonPointers = new Map();
 
   const cam = scene.cameras.main;
   const stickX = config.stickX ?? 70;
@@ -112,28 +112,30 @@ export function createMobileControls(scene, config = {}) {
   }
 
   // Pointer events — handle multiple pointers for stick + buttons simultaneously.
-  scene.input.on('pointerdown', (ptr) => {
-    if (!shouldShow) return;
+  function onDown(ptr) {
+    if (!shouldShow || destroyed) return;
     const px = ptr.x;
     const py = ptr.y;
 
     // Check joystick hit.
     if (_distFromStick(px, py) <= stickRadius + thumbRadius && stickPointerId === -1) {
       stickPointerId = ptr.id;
+      onMove(ptr);
       return;
     }
     // Check action buttons.
     for (const btn of buttonDefs) {
       const r = btn.radius ?? 28;
       if (Math.hypot(px - btn.x, py - btn.y) <= r) {
+        buttonPointers.set(ptr.id, btn.name);
         input.buttons[btn.name] = true;
         _redraw();
       }
     }
-  });
+  }
 
-  scene.input.on('pointermove', (ptr) => {
-    if (ptr.id !== stickPointerId) return;
+  function onMove(ptr) {
+    if (!shouldShow || destroyed || ptr.id !== stickPointerId) return;
     const dx = ptr.x - stickX;
     const dy = ptr.y - stickY;
     const dist = Math.hypot(dx, dy);
@@ -144,9 +146,9 @@ export function createMobileControls(scene, config = {}) {
     input.axis.x = (thumbX - stickX) / stickRadius;
     input.axis.y = (thumbY - stickY) / stickRadius;
     _redraw();
-  });
+  }
 
-  scene.input.on('pointerup', (ptr) => {
+  function onUp(ptr) {
     if (ptr.id === stickPointerId) {
       stickPointerId = -1;
       thumbX = stickX;
@@ -156,29 +158,65 @@ export function createMobileControls(scene, config = {}) {
       _redraw();
       return;
     }
-    const px = ptr.x;
-    const py = ptr.y;
-    for (const btn of buttonDefs) {
-      const r = btn.radius ?? 28;
-      if (Math.hypot(px - btn.x, py - btn.y) <= r) {
-        input.buttons[btn.name] = false;
-        _redraw();
-      }
+    // Release by pointer ownership, not release coordinates: dragging a finger
+    // off a button must not leave that action permanently held.
+    const name = buttonPointers.get(ptr.id);
+    buttonPointers.delete(ptr.id);
+    if (name !== undefined) {
+      input.buttons[name] = [...buttonPointers.values()].includes(name);
+      _redraw();
     }
-  });
+  }
+
+  function reset() {
+    stickPointerId = -1;
+    thumbX = stickX;
+    thumbY = stickY;
+    input.axis.x = 0;
+    input.axis.y = 0;
+    buttonPointers.clear();
+    for (const name of Object.keys(input.buttons)) input.buttons[name] = false;
+    if (!destroyed) _redraw();
+  }
+  function onHidden() {
+    if (document.hidden) reset();
+  }
+  function destroy() {
+    if (destroyed) return;
+    reset();
+    destroyed = true;
+    scene.input.off('pointerdown', onDown);
+    scene.input.off('pointermove', onMove);
+    scene.input.off('pointerup', onUp);
+    scene.input.off('pointerupoutside', onUp);
+    scene.input.off('gameout', reset);
+    scene.events.off('shutdown', destroy);
+    window.removeEventListener('blur', reset);
+    document.removeEventListener('visibilitychange', onHidden);
+    gfx.destroy();
+    for (const label of labelObjs) label.destroy();
+  }
+  scene.input.on('pointerdown', onDown);
+  scene.input.on('pointermove', onMove);
+  scene.input.on('pointerup', onUp);
+  scene.input.on('pointerupoutside', onUp);
+  scene.input.on('gameout', reset);
+  scene.events.once('shutdown', destroy);
+  window.addEventListener('blur', reset);
+  document.addEventListener('visibilitychange', onHidden);
 
   _redraw();
 
   return {
     input,
     setVisible(v) {
-      gfx.setVisible(v);
+      if (destroyed) return;
+      shouldShow = !!v;
+      if (!shouldShow) reset();
+      gfx.setVisible(shouldShow);
       for (const l of labelObjs) l.setVisible(v);
     },
-    destroy() {
-      gfx.destroy();
-      for (const l of labelObjs) l.destroy();
-    },
+    destroy,
   };
 }
 

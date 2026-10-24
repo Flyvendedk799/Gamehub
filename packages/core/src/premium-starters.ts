@@ -49,6 +49,8 @@
  */
 
 import { exposeCameraInEngine } from './engine-camera.js';
+import { GAME_SESSION_RUNTIME } from './game-session-runtime';
+import { STARTER_AUDIO, STARTER_LOOP, STARTER_RESIZE } from './starter-runtime.js';
 
 export type StarterEngine = 'canvas2d' | 'phaser' | 'three';
 
@@ -67,41 +69,24 @@ const CANVAS2D_FILES: StarterFiles = {
 export function createStage(canvasId) {
   const canvas = document.getElementById(canvasId || 'game');
   const ctx = canvas.getContext('2d');
-  function resize() {
-    canvas.width = canvas.clientWidth * devicePixelRatio;
-    canvas.height = canvas.clientHeight * devicePixelRatio;
-    ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-  }
-  resize();
-  window.addEventListener('resize', resize);
-  return { canvas, ctx, get width() { return canvas.clientWidth; }, get height() { return canvas.clientHeight; } };
+  if (!ctx) throw new Error('Canvas 2D is unavailable');
+  const stopResize = watchStageSize(canvas, (width, height, ratio) => {
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  });
+  function dispose() { stopResize(); window.removeEventListener('pagehide', dispose); }
+  window.addEventListener('pagehide', dispose);
+  return { canvas, ctx, dispose, get width() { return canvas.clientWidth; }, get height() { return canvas.clientHeight; } };
 }
 
-/** Per-frame loop. dt is seconds, clamped so a background tab can't teleport the world. */
-export function runLoop(step) {
-  let last = 0;
-  function frame(t) {
-    const dt = Math.min((t - last) / 1000, 0.05);
-    last = t;
-    step(dt, t);
-    requestAnimationFrame(frame);
-  }
-  requestAnimationFrame(frame);
-}
+${STARTER_RESIZE}
 
-// REAL audio, synthesised in-browser — never a reference to an audio file that
-// does not exist in this project.
-let audioCtx;
-export function sfx(freq, dur, type) {
-  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
-  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-  o.type = type || 'square'; o.frequency.value = freq || 440;
-  o.connect(g); g.connect(audioCtx.destination);
-  g.gain.setValueAtTime(0.25, audioCtx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.08));
-  o.start(); o.stop(audioCtx.currentTime + (dur || 0.08));
-}
+${STARTER_LOOP}
+
+${STARTER_AUDIO}
+
+export { createGameSession } from '../runtime/session.js';
 
 export function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 `,
@@ -310,19 +295,9 @@ const PHASER_FILES: StarterFiles = {
 import * as Phaser from 'phaser';
 import { PAL } from '../theme.js';
 
-// REAL audio, synthesised in-browser — never a reference to an audio file that
-// does not exist in this project.
-let audioCtx;
-export function sfx(freq, dur, type) {
-  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
-  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-  o.type = type || 'square'; o.frequency.value = freq || 440;
-  o.connect(g); g.connect(audioCtx.destination);
-  g.gain.setValueAtTime(0.25, audioCtx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.08));
-  o.start(); o.stop(audioCtx.currentTime + (dur || 0.08));
-}
+${STARTER_AUDIO}
+
+export { createGameSession } from '../runtime/session.js';
 
 /** Gradient sky on every scene — a flat fill reads as unfinished. */
 export function gradientBg(scene) {
@@ -495,6 +470,7 @@ export class OverScene extends SceneBase {
     centerText(this, -10, 'GAME OVER', '52px', PAL.ink);
     centerText(this, 34, 'Score ' + (data?.score ?? 0) + ' \\u00b7 Space to retry', '20px', PAL.accent);
     this.input.keyboard.once('keydown-SPACE', () => this.scene.start('Play'));
+    this.input.once('pointerdown', () => this.scene.start('Play'));
   }
 }
 `,
@@ -518,6 +494,7 @@ const game = new Phaser.Game({
   parent: 'game',
   width: 800,
   height: 600,
+  scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   physics: { default: 'arcade', arcade: { gravity: { y: 0 } } },
   render: { preserveDrawingBuffer: true }, // readable canvas (juice meter + thumbnails)
   scene: [TitleScene, PlayScene, OverScene], // a no-fail sandbox/zen game: just [PlayScene]
@@ -555,13 +532,12 @@ export function createStage(canvasId) {
   const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 200);
   camera.position.set(0, 7, 12); camera.lookAt(0, 0.5, -2);
 
-  function resize() {
-    renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-    camera.aspect = canvas.clientWidth / canvas.clientHeight;
+  const stopResize = watchStageSize(canvas, (width, height, ratio) => {
+    renderer.setPixelRatio(ratio);
+    renderer.setSize(width, height, false);
+    camera.aspect = width / height;
     camera.updateProjectionMatrix();
-  }
-  resize();
-  window.addEventListener('resize', resize);
+  });
 
   const hemi = new THREE.HemisphereLight(0xbfd4ff, 0x202830, 0.95);
   scene.add(hemi);
@@ -574,37 +550,40 @@ export function createStage(canvasId) {
   );
   ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
 
-  window.addEventListener('beforeunload', () => renderer.dispose());
+  let disposed = false;
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    stopResize();
+    window.removeEventListener('pagehide', dispose);
+    // Include built-in resources even if the authored game removed them from the scene.
+    const resources = new Set([ground.geometry, ground.material, sun.shadow]);
+    scene.traverse((node) => {
+      if (node.geometry) resources.add(node.geometry);
+      const materials = Array.isArray(node.material) ? node.material : [node.material];
+      for (const material of materials) {
+        if (!material) continue;
+        resources.add(material);
+        for (const value of Object.values(material)) if (value?.isTexture) resources.add(value);
+      }
+      if (node.shadow) resources.add(node.shadow);
+    });
+    for (const resource of resources) resource.dispose();
+    renderer.dispose();
+  }
+  window.addEventListener('pagehide', dispose);
   // hemi / sun / ground are PLACEHOLDERS: a game recolours, moves or removes them (scene.remove)
   // to build its own sky, lighting and floor.
-  return { renderer, scene, camera, canvas, hemi, sun, ground };
+  return { renderer, scene, camera, canvas, hemi, sun, ground, dispose };
 }
 
-/** Per-frame loop. dt is seconds, clamped so a background tab can't teleport the world. */
-export function runLoop(step) {
-  let last = 0;
-  function tick(t) {
-    const dt = Math.min((t - last) / 1000, 0.05);
-    last = t;
-    step(dt, t);
-    requestAnimationFrame(tick);
-  }
-  requestAnimationFrame(tick);
-}
+${STARTER_RESIZE}
 
-// REAL audio, synthesised in-browser — never a reference to an audio file that
-// does not exist in this project.
-let audioCtx;
-export function sfx(freq, dur, type) {
-  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
-  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-  o.type = type || 'square'; o.frequency.value = freq || 440;
-  o.connect(g); g.connect(audioCtx.destination);
-  g.gain.setValueAtTime(0.25, audioCtx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.08));
-  o.start(); o.stop(audioCtx.currentTime + (dur || 0.08));
-}
+${STARTER_LOOP}
+
+${STARTER_AUDIO}
+
+export { createGameSession } from '../runtime/session.js';
 `,
 
   'src/theme.js': `// src/theme.js — ART DIRECTION. One edit here re-skins the whole scene.
@@ -812,6 +791,10 @@ runLoop((dt) => {
 `,
 };
 
+function withRulesRuntime(files: StarterFiles): StarterFiles {
+  return { ...files, 'src/runtime/session.js': GAME_SESSION_RUNTIME };
+}
+
 function withPublishedCamera(files: StarterFiles): StarterFiles {
   const core = files['src/engine/core.js'];
   return core === undefined
@@ -827,11 +810,11 @@ function withPublishedCamera(files: StarterFiles): StarterFiles {
  * no ranged read, and invalidates only its own prompt-cache suffix.
  */
 export const PREMIUM_STARTER_FILES: Record<StarterEngine, StarterFiles> = {
-  canvas2d: CANVAS2D_FILES,
-  phaser: PHASER_FILES,
+  canvas2d: withRulesRuntime(CANVAS2D_FILES),
+  phaser: withRulesRuntime(PHASER_FILES),
   // The 3D engine module publishes its camera so the play-check can verify that the controls
   // follow what the player sees (see engine-camera.ts).
-  three: withPublishedCamera(THREE_FILES),
+  three: withRulesRuntime(withPublishedCamera(THREE_FILES)),
 };
 
 /**

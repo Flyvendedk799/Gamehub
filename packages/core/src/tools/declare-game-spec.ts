@@ -21,6 +21,7 @@ import {
   validateCapabilities,
 } from '@playforge/shared';
 import { Type } from '@sinclair/typebox';
+import { ProductionPlanParams } from './production-plan-schema';
 
 const FeatureValue = Type.Union([
   Type.String(),
@@ -87,6 +88,7 @@ const CapabilitiesSchema = Type.Object({
 });
 
 const DeclareGameSpecParams = Type.Object({
+  productionPlan: Type.Optional(ProductionPlanParams),
   genre: Type.Union([
     Type.Literal('platformer'),
     Type.Literal('topdown_arcade'),
@@ -137,9 +139,9 @@ const DeclareGameSpecParams = Type.Object({
     ]),
     { minItems: 1 },
   ),
-  numActors: Type.Integer({ minimum: 1, maximum: 64 }),
-  winCondition: Type.String({ minLength: 3, maxLength: 280 }),
-  loseCondition: Type.String({ minLength: 3, maxLength: 280 }),
+  numActors: Type.Integer({ minimum: 0, maximum: 64 }),
+  winCondition: Type.String({ minLength: 1, maxLength: 280 }),
+  loseCondition: Type.String({ minLength: 1, maxLength: 280 }),
   capabilities: Type.Optional(CapabilitiesSchema),
   creativeBrief: Type.Optional(
     Type.Object({
@@ -168,6 +170,7 @@ export type SetGameSpecFn = (spec: import('@playforge/shared').GameSpec) => void
 
 export function makeDeclareGameSpecTool(
   setSpec: SetGameSpecFn | undefined,
+  requireProductionPlan = false,
 ): AgentTool<typeof DeclareGameSpecParams, DeclareGameSpecDetails> {
   return {
     name: 'declare_game_spec',
@@ -177,18 +180,27 @@ export function makeDeclareGameSpecTool(
       'inputs, actors, win/lose conditions, and per-feature invariants — BEFORE calling choose_engine or ' +
       'text_editor. The spec is persisted on the next snapshot and re-injected on every follow-up turn so ' +
       'feature invariants (e.g. "vault: manual trigger, directional, animated") survive across edits without ' +
-      'the user re-stating them. Use amend_game_spec for follow-up changes — never restate the whole spec.',
+      'the user re-stating them. For a NEW game include productionPlan: preserve every user requirement; ' +
+      'map requirements to interacting systems with dependencies; schedule 2–4 implementation milestones ' +
+      '(first playable loop, then complete depth/content/lifecycle); and author 2–12 independent browser ' +
+      'scenarios covering ALL requirements, including core interaction and recovery. Every scenario starts ' +
+      'from a fresh page: include start inputs, expose real game state through debug getters, and assert ' +
+      'consequences of play, never test-only counters. Pointer coordinates are normalized 0–1. ' +
+      'Use amend_game_spec for follow-up changes — never restate the whole spec.',
     parameters: DeclareGameSpecParams,
     async execute(_toolCallId, params): Promise<AgentToolResult<DeclareGameSpecDetails>> {
+      if (requireProductionPlan && params.productionPlan === undefined) {
+        throw new Error(
+          'New games require productionPlan: user requirements, systems, build milestones, and behavioral scenarios covering the core interaction and recovery.',
+        );
+      }
       const candidate = {
         schemaVersion: GAME_SPEC_SCHEMA_VERSION,
         ...params,
         features: params.features ?? {},
       };
       const parsed = GameSpec.parse(candidate);
-      // v2 P4 — reconcile self-declared capability flags against genre/scheme and
-      // demote the ones they contradict (e.g. escalates on a handcrafted-level
-      // platformer), so the escalation invariant + recommender act on clean flags.
+      // Preserve declared mechanics across genre labels and surface platform limitations.
       const { corrected, conflicts } = validateCapabilities(parsed);
       const spec =
         corrected !== undefined && corrected !== parsed.capabilities
@@ -203,9 +215,7 @@ export function makeDeclareGameSpecTool(
           ? `Features pinned: ${featureNames.join(', ')}.`
           : 'No per-feature invariants yet.';
       const conflictLine = conflicts.length > 0 ? ` Capability check: ${conflicts.join(' ')}` : '';
-      // v2 P8 — soft engine preference from capabilities (e.g. an ambient drag toy
-      // → canvas2d), surfaced BEFORE choose_engine so the agent isn't forced into
-      // phaser/three and then tempted to fake a scene.
+      // Soft engine preference from capabilities, surfaced before choose_engine.
       const engineHint = recommendEngine(spec);
       const engineLine =
         engineHint !== null
