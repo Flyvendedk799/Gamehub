@@ -85,6 +85,7 @@ import {
 import type { EditorSession } from './editor/session.js';
 import { type ContextMessage, pruneContextAtomic } from './engine/context.js';
 import { remapProviderError } from './errors.js';
+import { hostCompletionTimeoutMs, withTimeout } from './host-completion.js';
 import { repairUnresolvedImports } from './import-repair.js';
 import type {
   AttachmentContext,
@@ -3003,6 +3004,11 @@ export async function generateViaAgent(
     reasoning: string,
   ): Promise<string> => {
     const apiKey = (await input.getApiKey?.()) ?? input.apiKey;
+    // Our own abort, chained to the caller's, so a stalled stream can be cancelled on timeout.
+    const controller = new AbortController();
+    const forwardAbort = (): void => controller.abort();
+    if (input.signal?.aborted === true) controller.abort();
+    input.signal?.addEventListener('abort', forwardAbort, { once: true });
     const completion = streamAntigravity(
       piModel as never,
       {
@@ -3011,12 +3017,19 @@ export async function generateViaAgent(
       },
       {
         apiKey,
-        ...(input.signal !== undefined ? { signal: input.signal } : {}),
+        signal: controller.signal,
         maxTokens: 60_000,
         reasoning,
       },
     );
-    const done = await completion.result();
+    let done: Awaited<ReturnType<typeof completion.result>>;
+    try {
+      done = await withTimeout(completion.result(), hostCompletionTimeoutMs(reasoning), () =>
+        controller.abort(),
+      );
+    } finally {
+      input.signal?.removeEventListener('abort', forwardAbort);
+    }
     const used = (
       done as {
         usage?: {
