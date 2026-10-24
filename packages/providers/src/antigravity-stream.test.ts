@@ -3,6 +3,7 @@ import {
   ANTIGRAVITY_API,
   ANTIGRAVITY_PROJECT_HEADER,
   streamAntigravity,
+  stringifyNonStringEnums,
   toAntigravityContents,
 } from './antigravity-stream';
 
@@ -314,5 +315,37 @@ describe('streamAntigravity forced tool use', () => {
     expect(sys(2)).toBe('SYS');
     // The endpoint ignores toolConfig, so none is sent.
     expect(bodies[0]?.['request'].toolConfig).toBeUndefined();
+  });
+});
+
+describe('stringifyNonStringEnums', () => {
+  it('removes numeric literals nested in properties and keeps string enums', () => {
+    const out = stringifyNonStringEnums({
+      type: 'object',
+      properties: {
+        spec: {
+          type: 'object',
+          properties: {
+            schemaVersion: { type: 'number', const: 1 },
+            level: { type: 'integer', enum: [1, 2] },
+            kind: { type: 'string', enum: ['a', 'b'] },
+          },
+        },
+      },
+    }) as {
+      properties: {
+        spec: {
+          properties: {
+            schemaVersion: unknown;
+            level: { enum?: unknown };
+            kind: { enum?: unknown };
+          };
+        };
+      };
+    };
+    const p = out.properties.spec.properties;
+    expect(p.schemaVersion).toEqual({ type: 'number', description: 'Allowed value(s): 1.' });
+    expect(p.level.enum).toBeUndefined();
+    expect(p.kind.enum).toEqual(['a', 'b']);
   });
 });

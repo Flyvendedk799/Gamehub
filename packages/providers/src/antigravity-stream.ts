@@ -51,6 +51,58 @@ const SIGNATURE_PLACEHOLDER = 'skip_thought_signature_validator';
 
 type Part = CodeAssistContentPart & { thoughtSignature?: string };
 
+/**
+ * Gemini's Schema only accepts string enum values; a numeric/boolean literal (`const: 1`,
+ * `enum: [1]`) is rejected with 400 INVALID_ARGUMENT. Drop such constraints, keep the scalar
+ * type, and state the allowed values in the description so the model still sees them.
+ */
+type LooseSchema = {
+  type?: unknown;
+  enum?: unknown;
+  const?: unknown;
+  description?: unknown;
+  [key: string]: unknown;
+};
+
+export function stringifyNonStringEnums(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(stringifyNonStringEnums);
+  if (!schema || typeof schema !== 'object') return schema;
+  const src = schema as LooseSchema;
+  const out: LooseSchema = {};
+  for (const [key, value] of Object.entries(src)) {
+    if (key === 'properties' && value && typeof value === 'object' && !Array.isArray(value)) {
+      out[key] = Object.fromEntries(
+        Object.entries(value).map(([name, child]) => [name, stringifyNonStringEnums(child)]),
+      );
+    } else if (key === 'items' || key === 'anyOf' || key === 'oneOf' || key === 'allOf') {
+      out[key] = stringifyNonStringEnums(value);
+    } else {
+      out[key] = value;
+    }
+  }
+  const allowed: unknown[] | undefined = Array.isArray(src.enum)
+    ? src.enum
+    : 'const' in src
+      ? [src.const]
+      : undefined;
+  if (allowed?.some((v) => typeof v !== 'string')) {
+    out.enum = undefined;
+    out.const = undefined;
+    const note = `Allowed value(s): ${allowed.map((v) => JSON.stringify(v)).join(', ')}.`;
+    out.description = typeof src.description === 'string' ? `${src.description} ${note}` : note;
+    if (!out.type) {
+      out.type = allowed.every((v) => typeof v === 'boolean')
+        ? 'boolean'
+        : allowed.every((v) => typeof v === 'number')
+          ? Number.isInteger(allowed[0])
+            ? 'integer'
+            : 'number'
+          : 'string';
+    }
+  }
+  return out;
+}
+
 function toolResultText(content: ReadonlyArray<{ type: string; text?: string }>): string {
   return content
     .filter((c) => c.type === 'text' && typeof c.text === 'string')
@@ -286,7 +338,7 @@ export function streamAntigravity(
               tools: context.tools.map((t) => ({
                 name: t.name,
                 description: t.description,
-                parameters: t.parameters,
+                parameters: stringifyNonStringEnums(t.parameters) as typeof t.parameters,
               })),
             }
           : {}),
