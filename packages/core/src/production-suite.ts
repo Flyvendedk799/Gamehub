@@ -31,6 +31,12 @@ export async function runProductionSuite(
         };
       if (s.kind === 'mouseDown' || s.kind === 'mouseUp')
         return { kind: s.kind, ...(s.button !== undefined ? { button: s.button } : {}) };
+      if (s.kind === 'approach')
+        return {
+          kind: s.kind,
+          watch: s.watch,
+          ...(s.frames !== undefined ? { frames: s.frames } : {}),
+        };
       return s;
     });
     // Queue failures are unavailable evidence, not a claim that game logic is broken.

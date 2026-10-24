@@ -43,7 +43,13 @@ import type { PlaytestPredicate } from './eval/playtest-score.js';
 export type PlaytestAction = 'forward' | 'attack' | 'heavy';
 
 export interface PlaybookStep {
-  kind: 'key' | 'mouse' | 'wait';
+  kind: 'key' | 'mouse' | 'wait' | 'approach';
+  /**
+   * For 'approach': the snapshot field that should DROP once a strike lands (e.g. `opponentHp`).
+   * The browser worker works out which keys close the gap in THIS game's camera and walks them,
+   * striking along the way, instead of the playbook guessing that W is "forward".
+   */
+  watch?: string;
   /** For 'key': DOM KeyboardEvent.code. */
   code?: string;
   /** For 'key': the intent behind `code`; resolved through the game's controls manifest. */
@@ -198,18 +204,17 @@ const FIGHTING_ARENA: PlaytestPlaybook = {
   // moments are exactly that; eight of them blew the ceiling and failed every run. Each strike is
   // a key HOLD long enough to cover its own wind-up, which also keeps the clock moving.
   steps: [
+    // The camera decides which key closes the gap: W is "forward" behind the shoulder and a walk
+    // into the depth of the arena from the side (run 98e9cf12 failed a correct side-on duel this
+    // way). So the step works it out in the game: it learns what each declared key does to the
+    // player, steers to the opponent when the game exposes where it is, and otherwise walks and
+    // strikes in each direction until the opponent's HP drops. About 260 frames, replacing the 130
+    // the two fixed walks used.
     {
-      kind: 'key',
-      code: 'KeyW',
-      action: 'forward',
-      frames: 90,
-      assert: "Close the gap: hold forward (resolved through the game's controls when declared).",
-    },
-    {
-      kind: 'key',
-      code: 'ArrowUp',
-      frames: 40,
-      assert: 'Forward on the arrow keys, in case the game declares no controls and binds those.',
+      kind: 'approach',
+      watch: 'opponentHp',
+      assert:
+        "Close the gap, whatever the camera: find which keys walk toward the opponent and strike when there (resolved through the game's controls when declared).",
     },
     { kind: 'key', code: 'KeyJ', action: 'attack', frames: 14, assert: 'Light attack.' },
     { kind: 'key', code: 'KeyJ', action: 'attack', frames: 14, assert: 'Light attack again.' },

@@ -200,7 +200,12 @@ describe('fighting playbook shape (arena vs side-on)', () => {
       expect(pb?.genre).toBe('fighting');
       // The lateral probe (D then A) is gone: those keys are dodges in an arena duel.
       expect(pb?.steps.some((s) => s.code === 'KeyD' || s.code === 'KeyA')).toBe(false);
-      expect(pb?.steps.some((s) => s.code === 'KeyW')).toBe(true);
+      // The gap is closed by one adaptive step, not by a guess that W is forward: the camera
+      // decides that (run 98e9cf12 failed a correct side-on duel on exactly this guess).
+      expect(pb?.steps.some((s) => s.code === 'KeyW')).toBe(false);
+      const approach = pb?.steps.find((s) => s.kind === 'approach');
+      expect(approach?.watch).toBe('opponentHp');
+      expect(pb?.steps[0]?.kind).toBe('approach');
     }
   });
 

@@ -23,7 +23,8 @@ export type PlaytestStep =
   | { kind: 'mouseMove'; x: number; y: number }
   | { kind: 'mouseDown'; button?: number }
   | { kind: 'mouseUp'; button?: number }
-  | { kind: 'wait'; frames: number };
+  | { kind: 'wait'; frames: number }
+  | { kind: 'approach'; watch: string; frames?: number };
 
 interface BrowserJobData {
   kind: 'runtime-verify' | 'playtest' | 'thumbnail';

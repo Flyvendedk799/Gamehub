@@ -41,6 +41,7 @@ import { Worker } from 'bullmq';
  *   WORKER_CONCURRENCY  parallel browser jobs (default: 2)
  */
 import { type Browser, type BrowserContext, type Page, type Route, chromium } from 'playwright';
+import { type ApproachStep, runApproach } from './approach.js';
 import { resolveControlKey } from './control-intents.js';
 import { readPlayerScreenInPage } from './screen-projection.js';
 
@@ -446,13 +447,17 @@ export type BrowserJobKind = 'runtime-verify' | 'playtest' | 'thumbnail';
  * `mouseMove`— move the pointer to a normalised (0..1) viewport coordinate.
  * `mouseDown`/`mouseUp` — press / release a mouse button (0=left,1=mid,2=right).
  * `wait`     — tick `frames` RAF frames with no input (let physics settle).
+ * `approach` — close in on the opponent whatever the camera is (see approach.ts): learn which
+ *              keys move the player where, steer to the opponent, striking along the way until
+ *              the `watch` field drops.
  */
 export type PlaytestStep =
   | { kind: 'key'; code: string; frames?: number; action?: string }
   | { kind: 'mouseMove'; x: number; y: number }
   | { kind: 'mouseDown'; button?: number }
   | { kind: 'mouseUp'; button?: number }
-  | { kind: 'wait'; frames: number };
+  | { kind: 'wait'; frames: number }
+  | ApproachStep;
 
 export interface BrowserJobData {
   kind: BrowserJobKind;
@@ -1488,6 +1493,33 @@ export async function runPlaytest(
         case 'mouseUp': {
           await page.mouse.up({ button: mouseButton(step.button) });
           await tickFrames(page, 2);
+          break;
+        }
+        case 'approach': {
+          controlManifest ??= await readControlManifest(page);
+          const report = await runApproach(
+            {
+              press: async (code, frames) => {
+                await page.keyboard.down(code);
+                try {
+                  await tickFrames(page, frames);
+                } finally {
+                  await page.keyboard.up(code);
+                }
+              },
+              click: async () => {
+                await page.mouse.down({ button: 'left' });
+                await tickFrames(page, 2);
+                await page.mouse.up({ button: 'left' });
+              },
+              snapshot: () => readSnapshot(page),
+            },
+            step,
+            controlManifest,
+          );
+          console.info(
+            `[playtest] approach mode=${report.mode} hit=${report.hit} frames=${report.framesUsed} tried=${report.tried.join(',')} inert=${report.inert.join(',')} distance=${report.finalDistance ?? 'n/a'}`,
+          );
           break;
         }
         case 'wait': {

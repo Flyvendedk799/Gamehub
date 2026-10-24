@@ -153,8 +153,10 @@ describe('selectGamePlaytestPlan: fighting shape', () => {
     const plan = selectGamePlaytestPlan({ genre: 'fighting', dimensions: '3d' });
     expect(plan).not.toBeNull();
     const keys = (plan?.steps ?? []).flatMap((s) => (s.kind === 'key' ? [s.code] : []));
-    expect(keys).toContain('KeyW');
     expect(keys).not.toContain('KeyD');
+    // One adaptive step closes the gap, whatever the camera, watching the opponent's HP.
+    expect(plan?.steps[0]).toEqual({ kind: 'approach', watch: 'opponentHp' });
+    expect(keys).toContain('KeyJ');
     expect(plan?.predicates.map((p) => p.field)).toEqual(['opponentHp']);
   });
 
@@ -181,7 +183,8 @@ describe('selectGamePlaytestPlan: action hints', () => {
   it('tags the arena plan with the intent behind each key, for the worker to resolve', () => {
     const plan = selectGamePlaytestPlan({ genre: 'fighting', dimensions: '3d' });
     const keys = (plan?.steps ?? []).flatMap((s) => (s.kind === 'key' ? [s] : []));
-    expect(keys.filter((s) => s.action === 'forward').map((s) => s.code)).toEqual(['KeyW']);
+    // "Forward" is no longer a key step: the approach step resolves movement itself.
+    expect(keys.filter((s) => s.action === 'forward')).toEqual([]);
     expect(keys.filter((s) => s.action === 'attack').every((s) => s.code === 'KeyJ')).toBe(true);
     expect(keys.filter((s) => s.action === 'heavy').every((s) => s.code === 'KeyK')).toBe(true);
     // Every hinted step keeps a concrete fallback key for games that declare no controls.

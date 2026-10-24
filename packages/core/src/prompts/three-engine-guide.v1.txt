@@ -183,6 +183,8 @@ window.__game.debug.track({
 
 Use these exact keys (`playerPos`, `cameraYaw`, and `score` or `itemsCollected`) so the genre playbook's predicates can resolve them. `debug.track` accepts live object refs OR `() => value` getters. Wire it BEFORE your first frame.
 
+If the player must reach an opponent or enemy (a duel, a brawler, a boss), also expose where it stands and its health the same way: `opponentPos: opponent.position` and `opponentHp: () => opponent.hp`. The playtester uses `opponentPos` to walk the player up to the opponent whatever the camera is (side-on, behind the shoulder, top-down); without it, it can only search for the opponent by swinging in each direction, which is slower and can miss.
+
 ## Hard rules & Three.js r160+ Modern Standards (REQUIRED)
 
 - Output Color Space: Enforce `renderer.outputColorSpace = THREE.SRGBColorSpace`. The legacy `sRGBEncoding` property is deprecated and forbidden.

@@ -64,12 +64,24 @@ const PlaytestWaitStep = Type.Object({
   frames: Type.Integer({ minimum: 1, maximum: 240 }),
 });
 
+const PlaytestApproachStep = Type.Object({
+  kind: Type.Literal('approach'),
+  /** Snapshot field that drops once a strike lands, e.g. `opponentHp`. */
+  watch: Type.String({
+    minLength: 1,
+    description:
+      'Snapshot field that should DROP when a strike lands, e.g. "opponentHp". The host finds which keys close the gap in this game.',
+  }),
+  frames: Type.Optional(Type.Integer({ minimum: 60, maximum: 420 })),
+});
+
 const PlaytestStep = Type.Union([
   PlaytestKeyStep,
   PlaytestMouseMoveStep,
   PlaytestMouseDownStep,
   PlaytestMouseUpStep,
   PlaytestWaitStep,
+  PlaytestApproachStep,
 ]);
 
 export type PlaytestStep =
@@ -77,7 +89,8 @@ export type PlaytestStep =
   | { kind: 'mouseMove'; x: number; y: number }
   | { kind: 'mouseDown'; button?: number }
   | { kind: 'mouseUp'; button?: number }
-  | { kind: 'wait'; frames: number };
+  | { kind: 'wait'; frames: number }
+  | { kind: 'approach'; watch: string; frames?: number };
 
 const PlaytestGameParams = Type.Object({
   /** Ordered list of input steps to dispatch. The host snapshots
@@ -149,7 +162,8 @@ const PLAYTEST_TOOL_DESCRIPTION =
   // Every step is an object with a `kind` discriminator. Models that read the playbook JSON
   // (which carries `assert`/`label` fields) otherwise copy its shape and fail validation.
   'EVERY step needs a `kind`: key {kind:"key",code:"KeyD",frames:12} | wait {kind:"wait",frames:6} | ' +
-  'mouseMove {kind:"mouseMove",x:0.5,y:0.5} | mouseDown {kind:"mouseDown",button:0} | mouseUp {kind:"mouseUp",button:0}. ' +
+  'mouseMove {kind:"mouseMove",x:0.5,y:0.5} | mouseDown {kind:"mouseDown",button:0} | mouseUp {kind:"mouseUp",button:0} | ' +
+  'approach {kind:"approach",watch:"opponentHp"} (a duel: the host finds which keys close the gap in YOUR camera, steering to the opponent when the snapshot exposes `opponentPos`, else walking and striking until `watch` drops; use it instead of guessing which key is forward). ' +
   'Example: {"steps":[{"kind":"key","code":"KeyD","frames":12},{"kind":"wait","frames":6},{"kind":"key","code":"KeyJ","frames":4}]}. ' +
   'Playbook `assert`/`label` fields are for YOU to evaluate against the returned snapshots — do not put them in steps.';
 
@@ -226,6 +240,8 @@ function describeStep(s: PlaytestStep): string {
       return `mouseUp b${s.button ?? 0}`;
     case 'wait':
       return `wait ${s.frames}f`;
+    case 'approach':
+      return `approach (until ${s.watch} drops)`;
   }
 }
 

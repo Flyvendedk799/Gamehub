@@ -21,6 +21,13 @@ export const VerificationPlan = z.object({
         }),
         z.object({ kind: z.literal('mouseUp'), button: z.number().int().min(0).max(2).optional() }),
         z.object({ kind: z.literal('wait'), frames: z.number().int().positive().max(600) }),
+        // Close in on the opponent whatever the camera: the browser worker learns which keys move
+        // the player where and steers, striking until the `watch` field drops.
+        z.object({
+          kind: z.literal('approach'),
+          watch: z.string().min(1),
+          frames: z.number().int().positive().max(700).optional(),
+        }),
       ]),
     )
     .min(1)

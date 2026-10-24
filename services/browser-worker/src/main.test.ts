@@ -540,6 +540,75 @@ describe('runPlaytest (synthetic input → snapshot diff, real Chromium)', () =>
     expect(afterA).toBeLessThan(afterD);
   }, 30_000);
 
+  // A duel seen from the side (run 98e9cf12): W and S only move the player in depth, A and D walk
+  // left and right, and a strike lands only when the opponent, who stands motionless to the
+  // right, is within reach. The old playbook held W and never got there.
+  const SIDE_ON_DUEL = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+    <script>
+      var p = { x: 0, z: 0 }, held = {}, opponentHp = 100, ox = 1.4, oz = 0, SPEED = 0.05;
+      var keys = { KeyW: [0, -1], KeyS: [0, 1], KeyA: [-1, 0], KeyD: [1, 0] };
+      window.addEventListener('keydown', function (e) { held[e.code] = true; });
+      window.addEventListener('keyup', function (e) { held[e.code] = false; });
+      window.addEventListener('keydown', function (e) {
+        if (e.code === 'KeyJ' && Math.hypot(p.x - ox, p.z - oz) < 0.8) opponentHp -= 10;
+      });
+      function loop() {
+        Object.keys(keys).forEach(function (k) {
+          if (held[k]) { p.x += keys[k][0] * SPEED; p.z += keys[k][1] * SPEED; }
+        });
+        requestAnimationFrame(loop);
+      }
+      requestAnimationFrame(loop);
+      window.__game = {
+        controls: { manifest: { actions: [
+          { id: 'forward', label: 'Step Forward', keys: ['KeyW'] },
+          { id: 'backward', label: 'Step Back', keys: ['KeyS'] },
+          { id: 'stepLeft', label: 'Dodge Left', keys: ['KeyA'] },
+          { id: 'stepRight', label: 'Dodge Right', keys: ['KeyD'] },
+          { id: 'light', label: 'Light Attack', keys: ['KeyJ'] },
+        ] } },
+        debug: { snapshot: function () {
+          return { opponentHp: opponentHp, playerPos: { x: p.x, y: 0, z: p.z } };
+        } },
+      };
+    </script>
+  </body></html>`;
+
+  it('(a2) an approach step finds an opponent off to the side of a side-on view', async () => {
+    const result = await runPlaytest(browser, {
+      kind: 'playtest',
+      htmlContent: SIDE_ON_DUEL,
+      bootTimeoutMs: 5_000,
+      steps: [{ kind: 'approach', watch: 'opponentHp' }],
+    });
+    expect(result.hasDebugContract).toBe(true);
+    expect(result.bootErrors).toEqual([]);
+    expect(result.steps).toHaveLength(1);
+    const before = result.baselineSnapshot as { opponentHp: number };
+    const after = result.steps[0]!.snapshotAfter as {
+      opponentHp: number;
+      playerPos: { x: number };
+    };
+    // The strike landed: the opponent lost HP, and the player got there by walking right.
+    expect(after.opponentHp).toBeLessThan(before.opponentHp);
+    expect(after.playerPos.x).toBeGreaterThan(0.3);
+  }, 45_000);
+
+  it('(a3) holding W alone, as the old playbook did, never reaches that opponent', async () => {
+    const result = await runPlaytest(browser, {
+      kind: 'playtest',
+      htmlContent: SIDE_ON_DUEL,
+      bootTimeoutMs: 5_000,
+      steps: [
+        { kind: 'key', code: 'KeyW', action: 'forward', frames: 90 },
+        { kind: 'key', code: 'KeyJ', action: 'attack', frames: 10 },
+        { kind: 'key', code: 'KeyJ', action: 'attack', frames: 10 },
+      ],
+    });
+    const after = result.steps[2]!.snapshotAfter as { opponentHp: number };
+    expect(after.opponentHp).toBe(100);
+  }, 45_000);
+
   it('(b) a throwing boot surfaces in bootErrors, snapshots stay null', async () => {
     const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
       <script>throw new Error('boot blew up: PLAYTEST_TEST_THROW');</script>
