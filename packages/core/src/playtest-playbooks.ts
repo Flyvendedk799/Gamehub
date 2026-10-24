@@ -50,6 +50,8 @@ export interface PlaybookStep {
    * striking along the way, instead of the playbook guessing that W is "forward".
    */
   watch?: string;
+  /** For 'approach': end the whole plan once this step has hit or the game has ended. */
+  finishPlan?: boolean;
   /** For 'key': DOM KeyboardEvent.code. */
   code?: string;
   /** For 'key': the intent behind `code`; resolved through the game's controls manifest. */
@@ -213,6 +215,9 @@ const FIGHTING_ARENA: PlaytestPlaybook = {
     {
       kind: 'approach',
       watch: 'opponentHp',
+      // The strikes below only repeat what this step does until the opponent's HP drops. Once it
+      // has, or the player is dead, they cannot change the verdict.
+      finishPlan: true,
       assert:
         "Close the gap, whatever the camera: find which keys walk toward the opponent and strike when there (resolved through the game's controls when declared).",
     },

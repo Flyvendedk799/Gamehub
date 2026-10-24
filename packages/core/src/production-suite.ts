@@ -36,6 +36,7 @@ export async function runProductionSuite(
           kind: s.kind,
           watch: s.watch,
           ...(s.frames !== undefined ? { frames: s.frames } : {}),
+          ...(s.finishPlan === true ? { finishPlan: true } : {}),
         };
       return s;
     });

@@ -132,7 +132,7 @@ export type GamePlaytestStep =
   | { kind: 'mouseDown'; button?: number }
   | { kind: 'mouseUp'; button?: number }
   | { kind: 'wait'; frames: number }
-  | { kind: 'approach'; watch: string; frames?: number };
+  | { kind: 'approach'; watch: string; frames?: number; finishPlan?: boolean };
 
 /** The genre-selected game playtest plan: the playbook it came from, the
  *  ordered synthetic-input steps to dispatch, and the flattened predicate
@@ -167,6 +167,7 @@ function projectPlaybookStep(step: PlaybookStep): GamePlaytestStep | null {
       kind: 'approach',
       watch: step.watch,
       ...(step.frames !== undefined ? { frames: step.frames } : {}),
+      ...(step.finishPlan === true ? { finishPlan: true } : {}),
     };
   }
   if (step.kind === 'wait') {

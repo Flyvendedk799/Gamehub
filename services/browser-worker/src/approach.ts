@@ -27,6 +27,12 @@ export interface ApproachStep {
   watch: string;
   /** Total frame budget for the whole search. */
   frames?: number;
+  /**
+   * End the whole plan after this step when it hit or the game ended. The steps that follow in the
+   * arena-duel playbook are only more swings: once one landed, or the player is dead, they cannot
+   * change the verdict and cost about 190 frames of a 45 s budget.
+   */
+  finishPlan?: boolean;
 }
 
 /**

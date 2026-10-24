@@ -594,6 +594,49 @@ describe('runPlaytest (synthetic input → snapshot diff, real Chromium)', () =>
     expect(after.playerPos.x).toBeLessThan(-0.3);
   }, 45_000);
 
+  it('(a2b) a finishing approach step ends the plan once it has hit; without the flag the plan runs on', async () => {
+    const plan = (finishPlan: boolean) => [
+      { kind: 'approach' as const, watch: 'opponentHp', ...(finishPlan ? { finishPlan } : {}) },
+      { kind: 'key' as const, code: 'KeyJ', frames: 14 },
+      { kind: 'key' as const, code: 'KeyJ', frames: 14 },
+    ];
+    const finishing = await runPlaytest(browser, {
+      kind: 'playtest',
+      htmlContent: SIDE_ON_DUEL,
+      bootTimeoutMs: 5_000,
+      steps: plan(true),
+    });
+    // The strike landed inside the approach step, so the two fixed strikes were never dispatched,
+    // and the last snapshot is still the one that shows the opponent's lost HP.
+    expect(finishing.steps).toHaveLength(1);
+    const last = finishing.steps[0]!.snapshotAfter as { opponentHp: number };
+    expect(last.opponentHp).toBeLessThan(100);
+
+    const running = await runPlaytest(browser, {
+      kind: 'playtest',
+      htmlContent: SIDE_ON_DUEL,
+      bootTimeoutMs: 5_000,
+      steps: plan(false),
+    });
+    expect(running.steps).toHaveLength(3);
+  }, 60_000);
+
+  it('(a2c) a finishing approach step that finds nothing does not end the plan', async () => {
+    // The opponent is out of reach in every direction the step can walk in its budget, so the
+    // fixed strikes after it still run (they are the plan's last chance).
+    const far = SIDE_ON_DUEL.replace('ox = -1.4', 'ox = -40');
+    const result = await runPlaytest(browser, {
+      kind: 'playtest',
+      htmlContent: far,
+      bootTimeoutMs: 5_000,
+      steps: [
+        { kind: 'approach', watch: 'opponentHp', frames: 60, finishPlan: true },
+        { kind: 'key', code: 'KeyJ', frames: 14 },
+      ],
+    });
+    expect(result.steps).toHaveLength(2);
+  }, 60_000);
+
   it('(a3) holding W alone, as the old playbook did, never reaches that opponent', async () => {
     const result = await runPlaytest(browser, {
       kind: 'playtest',

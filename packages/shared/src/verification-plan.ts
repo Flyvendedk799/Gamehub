@@ -27,6 +27,7 @@ export const VerificationPlan = z.object({
           kind: z.literal('approach'),
           watch: z.string().min(1),
           frames: z.number().int().min(60).max(420).optional(),
+          finishPlan: z.boolean().optional(),
         }),
       ]),
     )

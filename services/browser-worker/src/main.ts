@@ -1464,6 +1464,7 @@ export async function runPlaytest(
     const baselineScreen = await page.evaluate(readPlayerScreenInPage).catch(() => null);
 
     for (const step of steps) {
+      let finishPlan = false;
       switch (step.kind) {
         case 'key': {
           const frames = step.frames ?? 15;
@@ -1521,8 +1522,9 @@ export async function runPlaytest(
             step,
             controlManifest,
           );
+          finishPlan = step.finishPlan === true && (report.hit || report.ended);
           console.info(
-            `[playtest] approach mode=${report.mode} hit=${report.hit} frames=${report.framesUsed} tried=${report.tried.join(',')} inert=${report.inert.join(',')} distance=${report.finalDistance ?? 'n/a'}`,
+            `[playtest] approach mode=${report.mode} hit=${report.hit} ended=${report.ended} frames=${report.framesUsed} tried=${report.tried.join(',')} inert=${report.inert.join(',')} distance=${report.finalDistance ?? 'n/a'}`,
           );
           break;
         }
@@ -1546,6 +1548,7 @@ export async function runPlaytest(
       const snapshotAfter = await readSnapshot(page);
       const screenAfter = await page.evaluate(readPlayerScreenInPage).catch(() => null);
       stepResults.push({ step, snapshotAfter, errors: drainErrors(), screenAfter });
+      if (finishPlan) break;
     }
 
     return {

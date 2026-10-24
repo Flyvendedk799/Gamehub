@@ -155,7 +155,9 @@ describe('selectGamePlaytestPlan: fighting shape', () => {
     const keys = (plan?.steps ?? []).flatMap((s) => (s.kind === 'key' ? [s.code] : []));
     expect(keys).not.toContain('KeyD');
     // One adaptive step closes the gap, whatever the camera, watching the opponent's HP.
-    expect(plan?.steps[0]).toEqual({ kind: 'approach', watch: 'opponentHp' });
+    // It ends the plan once it has hit (or the player is dead): the strikes after it cannot
+    // change the verdict.
+    expect(plan?.steps[0]).toEqual({ kind: 'approach', watch: 'opponentHp', finishPlan: true });
     expect(keys).toContain('KeyJ');
     expect(plan?.predicates.map((p) => p.field)).toEqual(['opponentHp']);
   });

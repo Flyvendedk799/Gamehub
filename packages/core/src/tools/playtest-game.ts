@@ -73,6 +73,8 @@ const PlaytestApproachStep = Type.Object({
       'Snapshot field that should DROP when a strike lands, e.g. "opponentHp". The host finds which keys close the gap in this game.',
   }),
   frames: Type.Optional(Type.Integer({ minimum: 60, maximum: 420 })),
+  /** End the whole plan after this step when it hit or the game ended. */
+  finishPlan: Type.Optional(Type.Boolean()),
 });
 
 const PlaytestStep = Type.Union([
@@ -90,7 +92,7 @@ export type PlaytestStep =
   | { kind: 'mouseDown'; button?: number }
   | { kind: 'mouseUp'; button?: number }
   | { kind: 'wait'; frames: number }
-  | { kind: 'approach'; watch: string; frames?: number };
+  | { kind: 'approach'; watch: string; frames?: number; finishPlan?: boolean };
 
 const PlaytestGameParams = Type.Object({
   /** Ordered list of input steps to dispatch. The host snapshots
