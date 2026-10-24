@@ -942,7 +942,14 @@ export function makeTextEditorTool(
           // Treat as directory if no file matches
           const entries = fs.listDir(path);
           if (entries.length === 0) {
-            throw new Error(`Path not found: ${path}`);
+            const existing = [...projectTextFiles(fs).keys()].sort();
+            const listed = existing.slice(0, 40).join(', ');
+            const more = existing.length > 40 ? ` (+${existing.length - 40} more)` : '';
+            throw new Error(
+              existing.length === 0
+                ? `Path not found: ${path}`
+                : `Path not found: ${path}. Files in this project: ${listed}${more}.`,
+            );
           }
           return ok(entries.join('\n'), { command: 'view', path, result: { entries } });
         }

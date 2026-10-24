@@ -65,7 +65,6 @@ import type { TSchema } from '@sinclair/typebox';
 import { resolveCachePolicy } from './cache-policy.js';
 import {
   FREE_INSPECTION_CALLS,
-  isEditingCall,
   isInspectionCall,
   repairStallAction,
   repairStallReminder,
@@ -2168,7 +2167,9 @@ export async function generateViaAgent(
       }
       // A repair round that keeps looking and never edits is not going to fix anything: nudge it
       // once, then stop it, so the host can keep the version that already booted.
-      callsSinceEdit = isEditingCall(ev.toolName, ev.args) ? 0 : callsSinceEdit + 1;
+      // Counted up here; only a SUCCESSFUL write resets it (tool_execution_end), so an edit
+      // aimed at a file that does not exist cannot buy another 24 calls of reading.
+      callsSinceEdit += 1;
       const stall = repairStallAction(callsSinceEdit, input.history.length > 0);
       if (stall === 'nudge') {
         agent.steer({
@@ -2289,7 +2290,10 @@ export async function generateViaAgent(
         'done',
       ].includes(toolName);
       const isReadOnlyCall = !isWriteCall && !isNeutralCall;
-      if (isWriteCall) successfulWriteCount += 1;
+      if (isWriteCall) {
+        successfulWriteCount += 1;
+        callsSinceEdit = 0;
+      }
       if (isWriteCall && toolName === 'str_replace_based_edit_tool') {
         const editedPath = String((inFlight?.args as { path?: unknown } | undefined)?.path ?? '');
         if (editedPath.startsWith('src/')) gameCodeWriteCount += 1;

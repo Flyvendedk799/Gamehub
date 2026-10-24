@@ -31,6 +31,16 @@ describe('WorkingTree edits', () => {
     expect(r.totalLines).toBe(2);
   });
 
+  it('names the real files when an edit targets a path that does not exist', () => {
+    const t = new WorkingTree([
+      ['src/main.js', 'a'],
+      ['src/combat.js', 'b'],
+    ]);
+    expect(() => t.strReplace('src/player.js', 'a', 'b')).toThrow(
+      /file not found: src\/player\.js\. Files in this project: src\/combat\.js, src\/main\.js/,
+    );
+  });
+
   it('strReplace throws on no match and on non-unique match', () => {
     const t = new WorkingTree([['a.js', 'x\nx']]);
     expect(() => t.strReplace('a.js', 'nope', 'y')).toThrow();

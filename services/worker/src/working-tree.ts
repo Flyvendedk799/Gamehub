@@ -337,7 +337,15 @@ export class WorkingTree {
     assertSafeBundlePath(path);
     const content = this.files.get(path);
     if (content === undefined) {
-      throw new PlayforgeError(`file not found: ${path}`, ERROR_CODES.IPC_NOT_FOUND);
+      // Name the files that DO exist: an agent that guessed a path (a repair round told
+      // "movement is wrong" will invent src/player.js) otherwise keeps guessing or searching.
+      const existing = [...this.files.keys()].sort();
+      const listed = existing.slice(0, 40).join(', ');
+      const more = existing.length > 40 ? ` (+${existing.length - 40} more)` : '';
+      throw new PlayforgeError(
+        `file not found: ${path}. Files in this project: ${listed}${more}. Edit one of these, or create the file if you really mean a new one.`,
+        ERROR_CODES.IPC_NOT_FOUND,
+      );
     }
     return content;
   }
