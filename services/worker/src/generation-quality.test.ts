@@ -122,6 +122,7 @@ describe('creative game verification and repair rollback', () => {
           expect(input.editMode).toBe(true);
           expect(input.fastDraft).toBe(false);
           expect(input.fastEdit).toBe(false);
+          expect(input.buildPass).toBe(true);
           try {
             await deps.gameMode?.setSpec?.(SPEC);
           } catch {

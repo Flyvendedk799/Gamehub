@@ -2172,7 +2172,10 @@ export async function generateViaAgent(
       // Counted up here; only a SUCCESSFUL write resets it (tool_execution_end), so an edit
       // aimed at a file that does not exist cannot buy another 24 calls of reading.
       callsSinceEdit += 1;
-      const stall = repairStallAction(callsSinceEdit, input.history.length > 0);
+      const stall = repairStallAction(
+        callsSinceEdit,
+        input.history.length > 0 && input.buildPass !== true,
+      );
       if (stall === 'nudge') {
         agent.steer({
           role: 'user',

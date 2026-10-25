@@ -1204,7 +1204,21 @@ export async function runGeneration(
       console.warn('[run-generation] draft publish failed (non-fatal):', err);
     }
   };
+  // The worker log used to show tool calls but never the verdict they led to, so watching a run
+  // meant guessing pass or fail from the progress labels. One line per verdict fixes that.
   const observeVerdict = async (): Promise<RepairVerdict | null> => {
+    const verdict = await observeVerdictOnce();
+    const score = verdict?.score ?? null;
+    console.log(
+      `[verdict] pass#${verifyPasses} ${
+        verdict === null ? 'none' : verdict.pass ? 'PASS' : 'FAIL'
+      } predicates=${score === null ? 'n/a' : `${score.failures} failing, ${score.observed} observed`} fatal=${
+        verdict?.fatalErrors.length ?? 0
+      }${verdict?.fatalErrors[0] ? ` first="${verdict.fatalErrors[0].slice(0, 160)}"` : ''}`,
+    );
+    return verdict;
+  };
+  const observeVerdictOnce = async (): Promise<RepairVerdict | null> => {
     if (lockedProductionPlan === undefined) {
       lockedProductionPlan = state.spec?.productionPlan
         ? GameProductionPlan.parse(structuredClone(state.spec.productionPlan))
@@ -1564,10 +1578,27 @@ ${unreadableNote}`
         { role: 'user', content: nextPrompt },
         { role: 'assistant', content: output.message },
       );
-      nextPrompt = productionMilestonePrompt(typedRequest, lockedProductionPlan, index);
+      // The checkpoint above just ran every scenario. What failed is the most useful thing this
+      // pass can be told; without it run 9b0cfbce's milestone spent 28 calls rediscovering a
+      // game whose every check was failing for one named reason.
+      const failingChecks = scenarioEvidence
+        .filter((e) => e.status === 'failed')
+        .map((e) => ({ id: e.id, failures: [...e.failures] }));
+      nextPrompt = productionMilestonePrompt(
+        typedRequest,
+        lockedProductionPlan,
+        index,
+        failingChecks,
+      );
       say(`Building: ${lockedProductionPlan.milestones[index]?.goal}`, 'edit');
       output = await generate(
-        { ...buildInput(nextPrompt, history), editMode: true, fastDraft: false, fastEdit: false },
+        {
+          ...buildInput(nextPrompt, history),
+          editMode: true,
+          fastDraft: false,
+          fastEdit: false,
+          buildPass: true,
+        },
         deps,
       );
       productionBuildPasses++;

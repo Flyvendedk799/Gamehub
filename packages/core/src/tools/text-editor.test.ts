@@ -1739,6 +1739,19 @@ describe('text-editor large-file patch steering — BUILD_SPEED §5', () => {
       }),
     ).rejects.toThrow(/old_str not found/);
   });
+
+  it('refuses a str_replace whose old_str and new_str are identical', async () => {
+    const fs = makeFs({ 'index.html': '<!doctype html>\n<html></html>' });
+    const tool = makeTextEditorTool(fs);
+    await expect(
+      tool.execute('e1', {
+        command: 'str_replace',
+        path: 'index.html',
+        old_str: '<!doctype html>',
+        new_str: '<!doctype html>',
+      }),
+    ).rejects.toThrow(/identical, so nothing would change/);
+  });
 });
 
 // ---------------------------------------------------------------------------

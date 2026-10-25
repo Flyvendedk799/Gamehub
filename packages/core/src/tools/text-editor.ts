@@ -990,6 +990,14 @@ export function makeTextEditorTool(
           const oldStr = params.old_str ?? '';
           const newStr = params.new_str ?? '';
           if (oldStr.length === 0) throw new Error('str_replace requires non-empty old_str');
+          // Run 9b0cfbce replaced "<!DOCTYPE html>" with itself in a repair round: it changes
+          // nothing, and the miss that followed (the file says "<!doctype html>") sent it
+          // hunting for a typo that was never the problem.
+          if (oldStr === newStr) {
+            throw new Error(
+              `str_replace on \`${path}\` refused: old_str and new_str are identical, so nothing would change. Decide what the file should say instead, or skip this edit.`,
+            );
+          }
           const newBytes = Buffer.byteLength(newStr, 'utf8');
           const replaceCap = maxStrReplaceBytesFor(path);
           if (newBytes > replaceCap) {

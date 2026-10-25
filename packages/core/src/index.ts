@@ -403,6 +403,10 @@ export interface GenerateInput {
    *  real browser and repairs only what fails. Without it a first build spends ~8 more minutes in
    *  the loop re-reading files it just wrote. Ignored unless the host draft actually landed. */
   fastDraft?: boolean | undefined;
+  /** A production-milestone build pass. It carries history like a repair round but its job is to
+   *  implement, so the repair-round stall guard must not apply: run 9b0cfbce's milestone 2 was cut
+   *  after 16 reads and the run then shipped with all four scenarios failing and no repair. */
+  buildPass?: boolean | undefined;
   /** gameplan §A6 — engine pin for game-mode runs (set by the New-design
    *  dialog or carried from a prior snapshot). When omitted on a game run
    *  the agent calls `choose_engine` first. */
