@@ -1465,6 +1465,9 @@ describe('generateViaAgent() — per-run safety budget', () => {
         /** A repair round: the transcript so far, and whether the host should try the fix. */
         history?: Array<{ role: 'user' | 'assistant'; content: string }>;
         hostRepair?: boolean;
+        /** The loop's own budget, and how long each host model call takes to answer. */
+        agentBudget?: { maxWallClockMs: number };
+        modelDelayMs?: number;
       } = {},
     ) => {
       const sentToModel: string[] = [];
@@ -1476,6 +1479,8 @@ describe('generateViaAgent() — per-run safety budget', () => {
       ]);
       let call = 0;
       vi.stubGlobal('fetch', async (_url: unknown, init?: { body?: unknown }) => {
+        if (opts.modelDelayMs !== undefined)
+          await new Promise((resolve) => setTimeout(resolve, opts.modelDelayMs));
         sentToModel.push(String(init?.body ?? ''));
         const text = replies[Math.min(call++, replies.length - 1)] ?? '';
         const frame = JSON.stringify({
@@ -1515,6 +1520,7 @@ describe('generateViaAgent() — per-run safety budget', () => {
             editMode: true,
             fastEdit: true,
             ...(opts.hostRepair === true ? { hostRepair: true } : {}),
+            ...(opts.agentBudget !== undefined ? { agentBudget: opts.agentBudget } : {}),
             model: { provider: 'antigravity', modelId: 'gemini-3.8-flash-high' },
             wire: 'antigravity-cloudcode',
             apiKey: 'tok',
@@ -1590,6 +1596,21 @@ describe('generateViaAgent() — per-run safety budget', () => {
         });
         expect(agentRuns).toBe(1);
         expect(tree.get('src/fx.js')).toContain('mesh.rotation.z = rotY');
+      });
+
+      it('starts the loop budget when the loop starts, not before the host edit', async () => {
+        // Run 458b45a6: the host edit took longer than the whole 4-minute loop budget, so the
+        // loop was aborted on its first turn. Here the budget is 150 ms and the host edit
+        // spends 400 ms or more before falling back.
+        const { agentRuns, result } = await run(['not json', 'not json', 'not json'], {
+          prompt: FAILURE,
+          history: HISTORY,
+          hostRepair: true,
+          agentBudget: { maxWallClockMs: 150 },
+          modelDelayMs: 400,
+        });
+        expect(agentRuns).toBe(1);
+        expect(result.interrupted).toBe(false);
       });
 
       it('leaves an ordinary repair round on the agent loop', async () => {

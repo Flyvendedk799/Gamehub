@@ -1909,10 +1909,17 @@ ${unreadableNote}`
     // no edits, and a nonsense edit intent that became the run's final failure).
     if (fastEditRun && repairRounds === 0 && parentFiles !== undefined) {
       const changeText = describeChange(parentFiles, tree.toTextFiles());
+      // Only the genre playbook is known to have passed on the parent. The production scenarios were
+      // not re-measured on it: run 458b45a6 told the agent "this PASSED before" about a scenario
+      // that never could (its click had no target), and sent it hunting through its own edit.
+      const regressionLead =
+        lockedProductionPlan != null
+          ? `The previous version of the game was NOT re-measured, so this check may already have been failing before the edit below, made for the player's request: "${typedRequest.slice(0, 300)}". Look at the changed lines first; if they cannot affect what the check reads, the cause is older, so fix the game so the check can pass.`
+          : `REGRESSION — this check PASSED on the previous version of the game. The only thing that changed is the edit below, made for the player's request: "${typedRequest.slice(0, 300)}". So the cause is in the changed lines.`;
       if (changeText.length > 0) {
         nextPrompt = `${action.instruction}
 
-REGRESSION — this check PASSED on the previous version of the game. The only thing that changed is the edit below, made for the player's request: "${typedRequest.slice(0, 300)}". So the cause is in the changed lines: start there, with ONE targeted str_replace. Do not re-read whole files and do NOT call declare_edit_intent. If the check fails because the change legitimately altered timing (for example a longer attack windup), adjust the change so the same inputs still connect; do not weaken the check and do not delete the new behaviour.
+${regressionLead} Start with ONE targeted str_replace. Do not re-read whole files and do NOT call declare_edit_intent. If the check fails because the change legitimately altered timing (for example a longer attack windup), adjust the change so the same inputs still connect; do not weaken the check and do not delete the new behaviour.
 
 WHAT CHANGED (- before, + after):
 ${changeText}`;

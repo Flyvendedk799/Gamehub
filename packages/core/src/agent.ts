@@ -2965,18 +2965,20 @@ export async function generateViaAgent(
     });
   });
 
-  const budgetTimer = setTimeout(() => {
-    if (budgetReason !== null) return;
-    budgetReason = 'wall_clock';
-    log.warn('[generate] step=budget_exceeded', {
-      ...ctx,
-      reason: 'wall_clock',
-      maxWallClockMs,
-    });
-    // Defer the actual abort to the next turn_end so the in-flight
-    // assistant message gets to settle cleanly.
-    pendingWallClockAbort = true;
-  }, maxWallClockMs);
+  const armBudgetTimer = (): ReturnType<typeof setTimeout> =>
+    setTimeout(() => {
+      if (budgetReason !== null) return;
+      budgetReason = 'wall_clock';
+      log.warn('[generate] step=budget_exceeded', {
+        ...ctx,
+        reason: 'wall_clock',
+        maxWallClockMs,
+      });
+      // Defer the actual abort to the next turn_end so the in-flight
+      // assistant message gets to settle cleanly.
+      pendingWallClockAbort = true;
+    }, maxWallClockMs);
+  let budgetTimer = armBudgetTimer();
 
   if (input.signal) {
     if (input.signal.aborted) {
@@ -3027,9 +3029,13 @@ export async function generateViaAgent(
     );
     let done: Awaited<ReturnType<typeof completion.result>>;
     try {
-      done = await withTimeout(completion.result(), hostCompletionTimeoutMs(reasoning), () =>
-        controller.abort(),
+      // A repair round has a small budget of its own (4 minutes after a host edit); one stalled
+      // call must not be able to spend all of it. Run 458b45a6 waited 8 minutes on a rewrite.
+      const callMs = Math.min(
+        hostCompletionTimeoutMs(reasoning),
+        input.hostRepair === true ? Math.floor(maxWallClockMs / 2) : Number.POSITIVE_INFINITY,
       );
+      done = await withTimeout(completion.result(), callMs, () => controller.abort());
     } finally {
       input.signal?.removeEventListener('abort', forwardAbort);
     }
@@ -3291,6 +3297,15 @@ Latest request: ${input.prompt}`
   // generate() calls). Safe across retries: the RETRY_BLOCKED guard inside
   // sendOnce only allows retries when zero messages were appended.
   const runStartIndex = agent.state.messages.length;
+  // The loop's wall-clock budget is for the loop. The host's own edit runs first and has its own
+  // timeouts: run 458b45a6's host repair used 8 minutes, the 4-minute loop budget had expired
+  // before the loop's first turn, and the round was aborted after one call. Start the clock now.
+  clearTimeout(budgetTimer);
+  if (budgetReason === 'wall_clock') {
+    budgetReason = null;
+    pendingWallClockAbort = false;
+  }
+  budgetTimer = armBudgetTimer();
   const sendOnce = async (): Promise<void> => {
     const preLen = agent.state.messages.length;
     try {
