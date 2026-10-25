@@ -367,6 +367,25 @@ describe('runThumbnail (gameplay capture, real Chromium)', () => {
     expect(await pngIsNonUniform(result.pngBase64)).toBe(true);
   }, 30_000);
 
+  it('(a2) the start nudge reaches a title that only reads the legacy keyCode, as Phaser does', async () => {
+    // Phaser's keyboard plugin looks keys up by keyCode; a synthetic event without one reads 0.
+    const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+      <script>
+        let started = false;
+        addEventListener('keydown', function (e) { if (e.keyCode === 32) started = true; });
+        window.__game = { debug: { snapshot() { return started ? { started } : null; } } };
+      </script>
+    </body></html>`;
+    const result = await runPlaytest(browser, {
+      kind: 'playtest',
+      htmlContent: html,
+      bootTimeoutMs: 5_000,
+      steps: [{ kind: 'wait', frames: 5 }],
+    });
+    expect(result.hasDebugContract).toBe(true);
+    expect(result.baselineSnapshot).toEqual({ started: true });
+  }, 30_000);
+
   it('(b) captures a non-blank frame from a game that paints immediately (no regression)', async () => {
     const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
       <canvas id="game" width="640" height="360"></canvas>

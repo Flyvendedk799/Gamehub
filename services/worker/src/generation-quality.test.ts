@@ -83,6 +83,49 @@ describe('creative game verification and repair rollback', () => {
     ]);
   });
 
+  it('still repairs a failing game when the first pass ran out of tool calls', async () => {
+    // Run 489e99ec: the pass spent its cap reading, the game still failed, and the run shipped
+    // as budget_exhausted without one repair round. The cap belongs to that pass, not the run.
+    const store = new SnapshotStore(new InMemoryBlobStore());
+    let builds = 0;
+    const result = await runGeneration(REQUEST, {
+      store,
+      browserJobs: {
+        async runtimeVerify() {
+          return { hasGameContract: true, fatalErrors: [] };
+        },
+        async playtest(html, steps) {
+          const recovery = steps.some((s) => s.kind === 'key' && s.code === 'KeyR');
+          return {
+            hasGameContract: true,
+            hasDebugContract: true,
+            bootErrors: [],
+            baselineSnapshot: { connections: 0 },
+            steps: steps.map((step, index) => ({
+              step,
+              errors: [],
+              snapshotAfter: {
+                connections: recovery && index === 2 && html.includes('RECOVERED') ? 0 : 1,
+              },
+            })),
+          };
+        },
+      },
+      async generate(_input, deps) {
+        builds += 1;
+        if (builds === 1) {
+          await deps.gameMode?.setSpec?.({ ...SPEC, productionPlan: gardenProductionPlan() });
+          await deps.fs?.create('index.html', '<html><body>STILL BROKEN</body></html>');
+          return { ...output(), stoppedAtToolBudget: true };
+        }
+        await deps.fs?.create('index.html', '<html><body>RECOVERED</body></html>');
+        return output();
+      },
+    });
+    expect(result.repairRounds).toBe(1);
+    expect(result.quality?.status).toBe('verified');
+  });
+
   it('builds the declared milestones, verifies every scenario, repairs recovery, and locks requirements', async () => {
     const store = new SnapshotStore(new InMemoryBlobStore());
     const plan = gardenProductionPlan();

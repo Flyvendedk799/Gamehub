@@ -1121,6 +1121,8 @@ export async function runGeneration(
     // declared: the loop's remaining job (validate, playtest, polish) is done below, in a real
     // browser, with bounded repairs. Only the first round: a repair round is a normal agent run.
     ...(!isIteration && history.length === 0 ? { fastDraft: true } : {}),
+    // The breakage-diagnosis pass must end in an edit; see GenerateInput.diagnosis.
+    ...(editRequest.kind === 'breakage' && history.length === 0 ? { diagnosis: true } : {}),
     // A repair round is a focused fix of one named failure, never a rebuild. After a host edit it
     // is small; after a first build it still gets far less than the build did (live repair rounds
     // were spending the whole 20-minute allowance).
@@ -1819,10 +1821,13 @@ ${unreadableNote}`
     if (fastEditRun && repairRounds > 0 && output.interrupted && pendingQuestion === null) {
       output = { ...output, interrupted: false, stoppedAtToolBudget: true };
     }
+    // The tool cap belongs to ONE agent pass; a repair round starts with its own allowance. So a
+    // pass that spent its calls reading (run 489e99ec: 64 views and finds, no edit, game still
+    // failing) must not forbid the first repair. After a repair has run, hitting the cap does end it.
     const budgetExhausted =
       aborted ||
       output.interrupted ||
-      output.stoppedAtToolBudget === true ||
+      (output.stoppedAtToolBudget === true && repairRounds > 0) ||
       remainingBuildMs() <= 0;
     if (await runAstReflexionRound(budgetExhausted)) continue;
 

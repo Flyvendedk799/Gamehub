@@ -2174,7 +2174,7 @@ export async function generateViaAgent(
       callsSinceEdit += 1;
       const stall = repairStallAction(
         callsSinceEdit,
-        input.history.length > 0 && input.buildPass !== true,
+        (input.history.length > 0 || input.diagnosis === true) && input.buildPass !== true,
       );
       if (stall === 'nudge') {
         agent.steer({

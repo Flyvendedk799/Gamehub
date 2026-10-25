@@ -2940,9 +2940,12 @@ describe('breakage-report iterations get a diagnosis pass', () => {
     };
   }
 
+  let firstPassDiagnosis: boolean | undefined;
+
   async function firstPromptFor(prompt: string, iteration: boolean): Promise<string> {
     const store = new SnapshotStore(new InMemoryBlobStore());
     const prompts: string[] = [];
+    firstPassDiagnosis = undefined;
     await runGeneration(
       {
         prompt,
@@ -2953,6 +2956,7 @@ describe('breakage-report iterations get a diagnosis pass', () => {
       {
         store,
         async generate(input, deps) {
+          if (prompts.length === 0) firstPassDiagnosis = input.diagnosis;
           prompts.push(input.prompt);
           await deps.gameMode?.setSpec?.(SPEC);
           await deps.fs?.create('index.html', HTML);
@@ -2969,11 +2973,14 @@ describe('breakage-report iterations get a diagnosis pass', () => {
     expect(first).toMatch(/reproduce first/i);
     expect(first).toContain('Game  does not run');
     expect(first).toContain('setScrollFactor(0, 0, true)');
+    // Marked so the repair-round stall guard applies: a diagnosis that only reads helps nobody.
+    expect(firstPassDiagnosis).toBe(true);
   });
 
   it('leaves an ordinary tweak alone', async () => {
     const first = await firstPromptFor('the jump is way too high', true);
     expect(first).toBe('the jump is way too high');
+    expect(firstPassDiagnosis).toBeUndefined();
   });
 
   it('never fires on a first build — there is nothing yet to be broken', async () => {

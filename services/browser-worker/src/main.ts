@@ -874,12 +874,16 @@ async function dispatchStartInput(page: Page): Promise<void> {
           target.dispatchEvent(new MouseEvent('mouseup', mouseInit));
           target.dispatchEvent(new MouseEvent('click', mouseInit));
         }
+        // Phaser's keyboard plugin looks keys up by the legacy `keyCode`, and a synthetic event
+        // without one reads as keyCode 0: run 489e99ec's Phaser title never saw the Space and the
+        // whole suite sampled an empty title snapshot.
         for (const k of [
-          { code: 'Space', key: ' ' },
-          { code: 'Enter', key: 'Enter' },
+          { code: 'Space', key: ' ', keyCode: 32 },
+          { code: 'Enter', key: 'Enter', keyCode: 13 },
         ]) {
-          window.dispatchEvent(new KeyboardEvent('keydown', { ...k, bubbles: true }));
-          window.dispatchEvent(new KeyboardEvent('keyup', { ...k, bubbles: true }));
+          const init = { ...k, which: k.keyCode, bubbles: true };
+          window.dispatchEvent(new KeyboardEvent('keydown', init));
+          window.dispatchEvent(new KeyboardEvent('keyup', init));
         }
       } catch {
         /* dispatch best-effort */

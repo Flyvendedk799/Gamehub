@@ -407,6 +407,10 @@ export interface GenerateInput {
    *  implement, so the repair-round stall guard must not apply: run 9b0cfbce's milestone 2 was cut
    *  after 16 reads and the run then shipped with all four scenarios failing and no repair. */
   buildPass?: boolean | undefined;
+  /** The first pass of a breakage report ("the game crashes ..."). It has no history but its only
+   *  job is to change something, so the repair-round stall guard applies. Run 489e99ec made 64
+   *  views and finds on a one-line "Phaser is not defined" crash and edited nothing. */
+  diagnosis?: boolean | undefined;
   /** gameplan §A6 — engine pin for game-mode runs (set by the New-design
    *  dialog or carried from a prior snapshot). When omitted on a game run
    *  the agent calls `choose_engine` first. */
