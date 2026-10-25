@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { gardenProductionPlan } from '../../../shared/src/testing/production-fixtures';
 import { makeAmendGameSpecTool } from './amend-game-spec';
 import { makeChooseEngineTool } from './choose-engine';
-import { makeDeclareGameSpecTool } from './declare-game-spec';
+import { makeDeclareGameSpecTool, unaimedPointerScenarios } from './declare-game-spec';
 import { ProductionPlanParams } from './production-plan-schema';
 
 describe('declare_game_spec', () => {
@@ -143,5 +143,20 @@ describe('amend_game_spec — feature carry-forward (FPS vault)', () => {
       type: 'text',
       text: expect.stringContaining('unavailable'),
     });
+  });
+});
+
+describe('unaimedPointerScenarios', () => {
+  it('flags a scenario that presses the mouse before ever moving it, and only that one', () => {
+    const plan = gardenProductionPlan();
+    expect(unaimedPointerScenarios(plan.scenarios)).toEqual(['reset']);
+  });
+
+  it('is quiet for a scenario with no pointer press at all', () => {
+    expect(
+      unaimedPointerScenarios([
+        { id: 'keys', plan: { steps: [{ kind: 'key' }, { kind: 'wait' }] } },
+      ]),
+    ).toEqual([]);
   });
 });

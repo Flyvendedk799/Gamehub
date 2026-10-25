@@ -185,7 +185,7 @@ export function makeDeclareGameSpecTool(
       '(first playable loop, then complete depth/content/lifecycle); and author 2–12 independent browser ' +
       'scenarios covering ALL requirements, including core interaction and recovery. Every scenario starts ' +
       'from a fresh page: include start inputs, expose real game state through debug getters, and assert ' +
-      'consequences of play, never test-only counters. Pointer coordinates are normalized 0–1. ' +
+      'consequences of play, never test-only counters. Pointer coordinates are normalized 0–1, and a mouseDown acts where the pointer already is (the top-left corner after load), so put a mouseMove onto the target first. ' +
       'Use amend_game_spec for follow-up changes — never restate the whole spec.',
     parameters: DeclareGameSpecParams,
     async execute(_toolCallId, params): Promise<AgentToolResult<DeclareGameSpecDetails>> {
@@ -215,6 +215,11 @@ export function makeDeclareGameSpecTool(
           ? `Features pinned: ${featureNames.join(', ')}.`
           : 'No per-feature invariants yet.';
       const conflictLine = conflicts.length > 0 ? ` Capability check: ${conflicts.join(' ')}` : '';
+      const unaimed = unaimedPointerScenarios(spec.productionPlan?.scenarios ?? []);
+      const aimLine =
+        unaimed.length > 0
+          ? ` WARNING: ${unaimed.join(', ')} press the mouse without a mouseMove first, so the press lands at the top-left corner, not on a pad, button or tile. If the action needs a target, amend_game_spec with a mouseMove (normalized 0-1) before the mouseDown.`
+          : '';
       // Soft engine preference from capabilities, surfaced before choose_engine.
       const engineHint = recommendEngine(spec);
       const engineLine =
@@ -225,7 +230,7 @@ export function makeDeclareGameSpecTool(
         content: [
           {
             type: 'text',
-            text: `Spec recorded: ${spec.genre}/${spec.dimensions} (${spec.perspective}, camera=${spec.cameraKind}). ${spec.numActors} actor(s), inputs=${spec.primaryInputs.join('+')}. ${featuresLine}${conflictLine}${engineLine} Now call choose_engine.`,
+            text: `Spec recorded: ${spec.genre}/${spec.dimensions} (${spec.perspective}, camera=${spec.cameraKind}). ${spec.numActors} actor(s), inputs=${spec.primaryInputs.join('+')}. ${featuresLine}${conflictLine}${aimLine}${engineLine} Now call choose_engine.`,
           },
         ],
         details: {
@@ -241,4 +246,25 @@ export function makeDeclareGameSpecTool(
       };
     },
   };
+}
+
+/**
+ * Scenarios whose first mouseDown has no mouseMove before it. Run 99a0de20's "place a turret"
+ * scenario pressed the mouse at the corner, could never pass, and cost three repair rounds. A
+ * click-anywhere game is fine with that, so this warns instead of refusing.
+ */
+export function unaimedPointerScenarios(
+  scenarios: ReadonlyArray<{ id: string; plan: { steps: ReadonlyArray<{ kind: string }> } }>,
+): string[] {
+  const ids: string[] = [];
+  for (const scenario of scenarios) {
+    for (const step of scenario.plan.steps) {
+      if (step.kind === 'mouseMove') break;
+      if (step.kind === 'mouseDown') {
+        ids.push(scenario.id);
+        break;
+      }
+    }
+  }
+  return ids;
 }
