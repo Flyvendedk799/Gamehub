@@ -1506,6 +1506,57 @@ describe('text-editor view stubs — Improver1 §4', () => {
     expect(text).not.toContain('<p>x</p>');
   });
 
+  describe('stale-view stub vs a pruned copy', () => {
+    // context-prune cuts old tool results to 8 KB, so for a bigger file the "already in your
+    // context" claim only holds for a few calls after the body was actually sent.
+    const BIG = `${'x'.repeat(100)}\n`.repeat(120); // ~12 KB
+    const makeBigFs = () => makeFs({ 'big.html': BIG, 'a.js': 'a', 'b.js': 'b', 'c.js': 'c' });
+
+    const touchOthers = async (tool: ReturnType<typeof makeTextEditorTool>, n: number) => {
+      const others = ['a.js', 'b.js', 'c.js'];
+      for (let i = 0; i < n; i += 1) {
+        await tool.execute(`o${i}`, { command: 'view', path: others[i % others.length] ?? 'a.js' });
+      }
+    };
+
+    it('still stubs a large file seen a moment ago', async () => {
+      const tool = makeTextEditorTool(makeBigFs());
+      await tool.execute('v1', { command: 'view', path: 'big.html' });
+      await touchOthers(tool, 1);
+      const v2 = await tool.execute('v2', { command: 'view', path: 'big.html' });
+      expect(readText(v2)).toMatch(/unchanged since your last view/i);
+    });
+
+    it('re-sends a large file once its copy has aged out of the context', async () => {
+      const tool = makeTextEditorTool(makeBigFs());
+      await tool.execute('v1', { command: 'view', path: 'big.html' });
+      await touchOthers(tool, 6);
+      const v2 = await tool.execute('v2', { command: 'view', path: 'big.html' });
+      expect(readText(v2)).not.toMatch(/unchanged since your last view/i);
+      expect(readText(v2)).toContain(BIG.slice(0, 200));
+    });
+
+    it('stubs do not extend the window: a chain of re-views cannot hide a pruned copy', async () => {
+      const tool = makeTextEditorTool(makeBigFs());
+      await tool.execute('v1', { command: 'view', path: 'big.html' });
+      // Each of these is within the window of the previous one, but not of the real delivery.
+      for (let i = 0; i < 3; i += 1) {
+        await tool.execute(`s${i}`, { command: 'view', path: 'big.html' });
+      }
+      await touchOthers(tool, 2);
+      const again = await tool.execute('again', { command: 'view', path: 'big.html' });
+      expect(readText(again)).toContain(BIG.slice(0, 200));
+    });
+
+    it('never re-sends a small file: it survives pruning, so the stub stays honest', async () => {
+      const tool = makeTextEditorTool(makeBigFs());
+      await tool.execute('v1', { command: 'view', path: 'a.js' });
+      await touchOthers(tool, 8);
+      const v2 = await tool.execute('v2', { command: 'view', path: 'a.js' });
+      expect(readText(v2)).toMatch(/unchanged since your last view/i);
+    });
+  });
+
   it('stale-view stub does NOT fire after a mutation (file has changed)', async () => {
     const fs = makeFs({ 'index.html': '<p>x</p>' });
     const tool = makeTextEditorTool(fs);

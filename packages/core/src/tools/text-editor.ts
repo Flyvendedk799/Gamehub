@@ -615,6 +615,12 @@ export function makeTextEditorTool(
   // 91 mutations; a meaningful fraction were "I just looked at this
   // 2 turns ago and nothing changed".
   const lastViewByPath = new Map<string, { tick: number; size: number }>();
+  // The last tick at which a path's full BODY went to the model (stubs and summaries excluded).
+  const lastDeliveryByPath = new Map<string, { tick: number; size: number }>();
+  // context-prune keeps a tool result verbatim for roughly the last turn (a few calls) and cuts
+  // older ones to 8 KB (TOOL_RESULT_LIMIT), so a stale-view stub is only honest inside that.
+  const VIEW_SURVIVES_PRUNE_BYTES = 8 * 1024;
+  const VIEW_HELD_TICKS = 3;
   // Improver1 §5 — per-(path,run) nudge tracker for multi-line
   // str_replace successes. We append a hint suggesting `command: "patch"`
   // on the FIRST multi-line str_replace per path; we don't keep
@@ -907,17 +913,37 @@ export function makeTextEditorTool(
               lastView.size === file.content.length &&
               lastMutTick <= lastView.tick;
             if (noMutationSinceView && lastView !== undefined) {
-              const stub = `${path} unchanged since your last view at tick ${lastView.tick} (${file.numLines} lines, ${file.content.length} bytes). The bytes already in your context for this path are still current — no need to re-emit them. To inspect a specific region, pass \`view_range: [start, end]\` (1-indexed); otherwise continue.`;
+              // "Already in your context" is only true while the pruner still holds the bytes it
+              // delivered: results older than a turn or two are cut to VIEW_SURVIVES_PRUNE_BYTES.
+              // Judge that from the last time the BODY was sent (stubs don't count, or a chain of
+              // stubs would keep vouching for a copy that is long gone), and re-send when it is gone.
+              // Run 42d46ec5 made 97 views of a 45 KB starter, was told every time its copy was
+              // current, could not write against it, and shipped the starter untouched.
+              const delivered = lastDeliveryByPath.get(path) ?? lastView;
+              const stillHeld =
+                file.content.length <= VIEW_SURVIVES_PRUNE_BYTES ||
+                tick - delivered.tick <= VIEW_HELD_TICKS;
+              if (stillHeld) {
+                const stub = `${path} unchanged since your last view at tick ${delivered.tick} (${file.numLines} lines, ${file.content.length} bytes). The bytes already in your context for this path are still current — no need to re-emit them. To inspect a specific region, pass \`view_range: [start, end]\` (1-indexed); otherwise continue.`;
+                lastViewByPath.set(path, { tick, size: file.content.length });
+                return ok(stub + map, {
+                  command: 'view',
+                  path,
+                  result: { numLines: file.numLines, staleViewStub: true },
+                });
+              }
               lastViewByPath.set(path, { tick, size: file.content.length });
-              return ok(stub + map, {
+              lastDeliveryByPath.set(path, { tick, size: file.content.length });
+              return ok(file.content + map, {
                 command: 'view',
                 path,
-                result: { numLines: file.numLines, staleViewStub: true },
+                result: { numLines: file.numLines, redelivered: true },
               });
             }
             const count = (viewCountByPath.get(path) ?? 0) + 1;
             viewCountByPath.set(path, count);
             lastViewByPath.set(path, { tick, size: file.content.length });
+            if (count === 1) lastDeliveryByPath.set(path, { tick, size: file.content.length });
             if (count === 1) {
               // Improver1 §8 — first full-file view delivers fresh
               // bytes; clear retry-budget for this path.
