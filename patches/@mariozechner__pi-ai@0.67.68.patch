@@ -1,3 +1,101 @@
+diff --git a/dist/providers/anthropic.js b/dist/providers/anthropic.js
+index b58328a530eb071de744bd37e700c26de47b5916..e4e8556ff20a5e6276bf6e854e69d2fe5a299a2d 100644
+--- a/dist/providers/anthropic.js
++++ b/dist/providers/anthropic.js
+@@ -367,7 +367,32 @@ function supportsAdaptiveThinking(modelId) {
+         modelId.includes("opus-4-7") ||
+         modelId.includes("opus-4.7") ||
+         modelId.includes("sonnet-4-6") ||
+-        modelId.includes("sonnet-4.6"));
++        modelId.includes("sonnet-4.6") ||
++        isAdaptiveOnlyGeneration(modelId));
++}
++/**
++ * Opus 4.8 and the Claude 5 family (Sonnet 5 / 5.5, Opus 5 / 5.5, Fable 5 / 5.1, Mythos 5 / 5.1).
++ * Thinking is adaptive only: `{type:"enabled", budget_tokens}` and non-default sampling params
++ * (temperature / top_p / top_k) are rejected with a 400.
++ */
++function isAdaptiveOnlyGeneration(modelId) {
++    return /(opus-4[-.]8|opus-5|sonnet-5|fable-5|mythos-5)/.test(modelId);
++}
++/**
++ * How to turn thinking off on a model. `{type:"disabled"}` is a 400 on Sonnet 5.5 (which wants
++ * `{type:"between_tools"}`) and on the models where thinking is always on (Opus 5.5, Fable, Mythos),
++ * where the field has to be omitted instead.
++ */
++function thinkingOffMode(modelId) {
++    if (/sonnet-5[-.]5/.test(modelId))
++        return "between_tools";
++    if (/(opus-5[-.]5|fable-5|mythos-5)/.test(modelId))
++        return "omit";
++    return "disabled";
++}
++/** Forced `tool_choice` (`any` / `tool`) returns a 400 on these models; only `auto` / `none` are accepted. */
++function rejectsForcedToolChoice(modelId) {
++    return /(sonnet-5[-.]5|opus-5[-.]5|fable-5[-.]1|mythos-5[-.]1)/.test(modelId);
+ }
+ /**
+  * Map ThinkingLevel to Anthropic effort levels for adaptive thinking.
+@@ -387,7 +412,7 @@ function mapThinkingLevelToEffort(level, modelId) {
+             if (modelId.includes("opus-4-6") || modelId.includes("opus-4.6")) {
+                 return "max";
+             }
+-            if (modelId.includes("opus-4-7") || modelId.includes("opus-4.7")) {
++            if (modelId.includes("opus-4-7") || modelId.includes("opus-4.7") || isAdaptiveOnlyGeneration(modelId)) {
+                 return "xhigh";
+             }
+             return "high";
+@@ -518,7 +543,7 @@ function buildParams(model, context, isOAuthToken, options) {
+         ];
+     }
+     // Temperature is incompatible with extended thinking (adaptive or budget-based).
+-    if (options?.temperature !== undefined && !options?.thinkingEnabled) {
++    if (options?.temperature !== undefined && !options?.thinkingEnabled && !isAdaptiveOnlyGeneration(model.id)) {
+         params.temperature = options.temperature;
+     }
+     if (context.tools) {
+@@ -552,7 +577,18 @@ function buildParams(model, context, isOAuthToken, options) {
+             }
+         }
+         else if (options?.thinkingEnabled === false) {
+-            params.thinking = { type: "disabled" };
++            const off = thinkingOffMode(model.id);
++            if (off === "between_tools") {
++                // Takes no other field, and is only accepted at effort "high" or below.
++                params.thinking = { type: "between_tools" };
++            }
++            else if (off === "disabled") {
++                params.thinking = { type: "disabled" };
++            }
++            else if (options.effort) {
++                // Thinking can't be switched off here; effort is the only lever on how much it does.
++                params.output_config = { effort: options.effort };
++            }
+         }
+     }
+     if (options?.metadata) {
+@@ -562,11 +598,16 @@ function buildParams(model, context, isOAuthToken, options) {
+         }
+     }
+     if (options?.toolChoice) {
+-        if (typeof options.toolChoice === "string") {
+-            params.tool_choice = { type: options.toolChoice };
+-        }
+-        else {
+-            params.tool_choice = options.toolChoice;
++        const choiceType = typeof options.toolChoice === "string" ? options.toolChoice : options.toolChoice.type;
++        const forced = choiceType === "any" || choiceType === "tool";
++        // Dropped (leaving the default "auto") where the API rejects a forced choice.
++        if (!(forced && rejectsForcedToolChoice(model.id))) {
++            if (typeof options.toolChoice === "string") {
++                params.tool_choice = { type: options.toolChoice };
++            }
++            else {
++                params.tool_choice = options.toolChoice;
++            }
+         }
+     }
+     return params;
 diff --git a/dist/providers/openai-completions.js b/dist/providers/openai-completions.js
 index 3c76d767f1d3637ef421f0d3979a3c2183d254d0..28c34063877222f27b65d3354c1a6db3790f31c8 100644
 --- a/dist/providers/openai-completions.js

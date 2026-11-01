@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@mariozechner/pi-ai@0.67.68':
-    hash: 6wqkrgieuutepjczap4pzdaoca
+    hash: zsho2cefamr6olul4g6fafaa2u
     path: patches/@mariozechner__pi-ai@0.67.68.patch
 
 importers:
@@ -124,7 +124,7 @@ importers:
         version: 0.67.68(ws@8.21.0)(zod@3.25.76)
       '@mariozechner/pi-ai':
         specifier: ^0.67.68
-        version: 0.67.68(patch_hash=6wqkrgieuutepjczap4pzdaoca)(ws@8.21.0)(zod@3.25.76)
+        version: 0.67.68(patch_hash=zsho2cefamr6olul4g6fafaa2u)(ws@8.21.0)(zod@3.25.76)
       '@playforge/artifacts':
         specifier: workspace:*
         version: link:../artifacts
@@ -236,7 +236,7 @@ importers:
         version: https://codeload.github.com/Flyvendedk799/ai-auth/tar.gz/2a48443139009068ebba8a4b6f6916a29a5a35f4(fastify@5.8.5)(react@19.2.7)
       '@mariozechner/pi-ai':
         specifier: ^0.67.68
-        version: 0.67.68(patch_hash=6wqkrgieuutepjczap4pzdaoca)(ws@8.21.0)(zod@3.25.76)
+        version: 0.67.68(patch_hash=zsho2cefamr6olul4g6fafaa2u)(ws@8.21.0)(zod@3.25.76)
       '@playforge/shared':
         specifier: workspace:*
         version: link:../shared
@@ -3819,7 +3819,7 @@ snapshots:
 
   '@mariozechner/pi-agent-core@0.67.68(ws@8.21.0)(zod@3.25.76)':
     dependencies:
-      '@mariozechner/pi-ai': 0.67.68(patch_hash=6wqkrgieuutepjczap4pzdaoca)(ws@8.21.0)(zod@3.25.76)
+      '@mariozechner/pi-ai': 0.67.68(patch_hash=zsho2cefamr6olul4g6fafaa2u)(ws@8.21.0)(zod@3.25.76)
     transitivePeerDependencies:
       - '@modelcontextprotocol/sdk'
       - bufferutil
@@ -3828,7 +3828,7 @@ snapshots:
       - ws
       - zod
 
-  '@mariozechner/pi-ai@0.67.68(patch_hash=6wqkrgieuutepjczap4pzdaoca)(ws@8.21.0)(zod@3.25.76)':
+  '@mariozechner/pi-ai@0.67.68(patch_hash=zsho2cefamr6olul4g6fafaa2u)(ws@8.21.0)(zod@3.25.76)':
     dependencies:
       '@anthropic-ai/sdk': 0.90.0(zod@3.25.76)
       '@aws-sdk/client-bedrock-runtime': 3.1069.0

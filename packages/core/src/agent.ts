@@ -85,6 +85,7 @@ import {
 import type { EditorSession } from './editor/session.js';
 import { type ContextMessage, pruneContextAtomic } from './engine/context.js';
 import { remapProviderError } from './errors.js';
+import { appendToolNudge, rejectsForcedToolChoice, thinkingAlwaysOn } from './forced-tool-turn.js';
 import { hostCompletionTimeoutMs, withTimeout } from './host-completion.js';
 import { repairUnresolvedImports } from './import-repair.js';
 import type {
@@ -1876,6 +1877,12 @@ export async function generateViaAgent(
       if (forceTools) {
         lowered['toolChoice'] = 'any';
         lowered['thinkingEnabled'] = false;
+        if (rejectsForcedToolChoice(model.id)) {
+          // The API 400s on a forced tool choice here (pi-ai drops it), so carry the
+          // intent in the prompt; and where thinking can't be switched off, cap it.
+          lowered['onPayload'] = (params: { messages?: unknown }) => appendToolNudge(params);
+          if (thinkingAlwaysOn(model.id)) lowered['effort'] = 'low';
+        }
       } else if (reasoning) {
         // Adaptive thinking — pi-ai translates effort to thinking budget.
         lowered['thinkingEnabled'] = true;
