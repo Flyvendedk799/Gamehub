@@ -47,7 +47,14 @@ function OnboardingForm() {
         if (cancelled) return;
         setSettings(data);
         setProvider(data.defaultProvider);
-        setModelId(data.defaultModelId);
+        // A saved id outside the dropdown would stay in state while the select
+        // shows its first option, so Save would send the id the user can't see.
+        const options = MODEL_OPTIONS[data.defaultProvider];
+        setModelId(
+          options.length === 0 || options.includes(data.defaultModelId)
+            ? data.defaultModelId
+            : (options[0] ?? data.defaultModelId),
+        );
         setStatus('idle');
       })
       .catch((err: unknown) => {

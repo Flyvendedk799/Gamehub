@@ -113,7 +113,14 @@ export default function SettingsPage() {
     setBio(data.user.bio ?? '');
     setAvatarUrl(data.user.avatarUrl ?? '');
     setProvider(data.defaultProvider);
-    setModelId(data.defaultModelId);
+    // The dropdown can only show listed models; a saved id outside it would stay
+    // in state while the select displays the first option, and Save would send it.
+    const options = MODEL_OPTIONS[data.defaultProvider];
+    setModelId(
+      options.length === 0 || options.includes(data.defaultModelId)
+        ? data.defaultModelId
+        : (options[0] ?? data.defaultModelId),
+    );
     setApiKey('');
   }
 

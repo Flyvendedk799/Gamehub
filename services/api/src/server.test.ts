@@ -185,7 +185,7 @@ describe('account settings', () => {
         enqueued.push(input);
       },
     });
-    return { app, repo, enqueued };
+    return { app, repo, enqueued, accountRepo };
   }
 
   it('returns profile and provider metadata without exposing ciphertext', async () => {
@@ -252,6 +252,57 @@ describe('account settings', () => {
       apiKey: 'sk-ant-test-1234',
       model: { provider: 'anthropic', modelId: 'claude-sonnet-4-6' },
     });
+  });
+
+  it('never sends a leftover model from another vendor to a Claude key', async () => {
+    const { app, repo, enqueued, accountRepo } = makeAccountApp();
+    await app.inject({
+      method: 'PUT',
+      url: '/v1/account/provider',
+      headers: AS_ALICE,
+      payload: { provider: 'anthropic', modelId: 'claude-opus-5-5', apiKey: 'sk-ant-test-1234' },
+    });
+    // Switching away from an Antigravity login can leave its Gemini model on the row.
+    await accountRepo.saveProvider('alice', {
+      provider: 'anthropic',
+      modelId: 'gemini-3.1-flash-lite',
+      markOnboardingComplete: true,
+    });
+
+    const settings = await app.inject({
+      method: 'GET',
+      url: '/v1/account/settings',
+      headers: AS_ALICE,
+    });
+    expect(settings.json()).toMatchObject({ defaultModelId: 'claude-sonnet-5-5' });
+
+    const project = await repo.create({ ownerId: 'alice', name: 'Stale', engine: 'phaser' });
+    const generated = await app.inject({
+      method: 'POST',
+      url: `/v1/projects/${project.id}/generate`,
+      headers: AS_ALICE,
+      payload: { prompt: 'make a tiny platformer' },
+    });
+    expect(generated.statusCode).toBe(202);
+    expect(enqueued[0]).toMatchObject({
+      model: { provider: 'anthropic', modelId: 'claude-sonnet-5-5' },
+    });
+  });
+
+  it('replaces a model that does not belong to the provider being saved', async () => {
+    const { app } = makeAccountApp();
+    const saved = await app.inject({
+      method: 'PUT',
+      url: '/v1/account/provider',
+      headers: AS_ALICE,
+      payload: {
+        provider: 'anthropic',
+        modelId: 'gemini-3.1-flash-lite',
+        apiKey: 'sk-ant-test-1234',
+      },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).toMatchObject({ defaultModelId: 'claude-sonnet-5-5' });
   });
 
   it('falls back to platform when the active provider key is deleted', async () => {

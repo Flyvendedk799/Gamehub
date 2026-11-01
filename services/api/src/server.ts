@@ -77,6 +77,7 @@ import {
   type SubscriptionProvider,
   isAccountProvider,
   isByokProvider,
+  isModelForByokProvider,
   isSubscriptionProvider,
 } from './account-repo';
 import { listAntigravityModels } from './ai-auth';
@@ -1047,6 +1048,18 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     return DEFAULT_BYOK_MODELS[provider];
   }
 
+  /** The model to use for a provider given what the user row has stored. A BYOK
+   *  provider never gets another vendor's leftover model id (a stale `gemini-*`
+   *  would 404 against Anthropic); it falls back to that provider's default. */
+  function storedModelFor(provider: AccountProvider, stored: string | null | undefined): string {
+    const trimmed = stored?.trim() ?? '';
+    if (trimmed.length === 0) return defaultModelForProvider(provider);
+    if (isByokProvider(provider) && !isModelForByokProvider(provider, trimmed)) {
+      return defaultModelForProvider(provider);
+    }
+    return trimmed;
+  }
+
   /** True when the named subscription has a connected identity in its store. */
   async function isSubscriptionConnected(
     provider: SubscriptionProvider,
@@ -1069,8 +1082,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   async function accountSettingsResponse(settings: AccountSettings) {
     const keyByProvider = new Map(settings.keys.map((key) => [key.provider, key]));
-    const defaultModelId =
-      settings.defaultModelId?.trim() || defaultModelForProvider(settings.defaultProvider);
+    const defaultModelId = storedModelFor(settings.defaultProvider, settings.defaultModelId);
     const connectedByProvider: Record<SubscriptionProvider, boolean> = {
       'claude-subscription': await isSubscriptionConnected('claude-subscription', settings.userId),
       'codex-subscription': await isSubscriptionConnected('codex-subscription', settings.userId),
@@ -1265,7 +1277,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         ok: true,
         model: {
           provider,
-          modelId: settings.defaultModelId?.trim() || defaultModelForProvider(provider),
+          modelId: storedModelFor(provider, settings.defaultModelId),
         },
         apiKey: decryptApiKey(savedKey.ciphertext, deps.apiKeyEncryptionSecret),
       };
@@ -1540,10 +1552,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(400).send({ error: 'invalid_provider' });
     }
 
-    const modelId =
-      typeof body.modelId === 'string' && body.modelId.trim().length > 0
-        ? body.modelId.trim()
-        : defaultModelForProvider(provider);
+    const modelId = storedModelFor(
+      provider,
+      typeof body.modelId === 'string' ? body.modelId : null,
+    );
     const markOnboardingComplete = body.completeOnboarding !== false;
 
     if (isByokProvider(provider)) {

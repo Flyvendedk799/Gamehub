@@ -67,6 +67,20 @@ export function isByokProvider(provider: string): provider is ByokProvider {
   return (BYOK_PROVIDERS as readonly string[]).includes(provider);
 }
 
+/**
+ * Whether a stored model id can possibly be served by a BYOK provider. The model
+ * lives on the user row separately from the provider, so switching provider (say
+ * from an Antigravity login to Anthropic) can leave a `gemini-*` id behind that
+ * the new provider 404s on. This only rules out ids that clearly belong to
+ * another vendor; it is not an allowlist, so any real model id still passes.
+ */
+export function isModelForByokProvider(provider: ByokProvider, modelId: string): boolean {
+  const id = modelId.trim().toLowerCase();
+  if (id.length === 0) return false;
+  if (provider === 'anthropic') return id.startsWith('claude-');
+  return !id.startsWith('claude-') && !id.startsWith('gemini-');
+}
+
 export function isSubscriptionProvider(provider: string): provider is SubscriptionProvider {
   return (SUBSCRIPTION_PROVIDERS as readonly string[]).includes(provider);
 }
