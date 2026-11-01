@@ -266,3 +266,20 @@ describe('CREDIT_PACKS (Phase 6.1)', () => {
     expect(min).toBeGreaterThanOrEqual(10);
   });
 });
+
+describe('current Claude models are priced explicitly', () => {
+  const MILLION: UsageTokens = {
+    inputTokens: 1_000_000,
+    cachedInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    outputTokens: 1_000_000,
+  };
+
+  it.each([
+    ['claude-sonnet-5-5', 12],
+    ['claude-opus-5-5', 24],
+    ['claude-fable-5-1', 60],
+  ])('%s is billed at its own rates, not the unknown-model fallback', (modelId, expected) => {
+    expect(computeImpliedCost(MILLION, modelId)).toBeCloseTo(expected, 6);
+  });
+});

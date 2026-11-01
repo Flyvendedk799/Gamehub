@@ -43,9 +43,16 @@ function deepFreeze<T extends Record<string, unknown>>(obj: T): Readonly<T> {
  *  this codebase: 'claude-sonnet-4-6', 'claude-opus-4-7', etc.).
  *  Deep-frozen so accidental mutation of nested entries throws. */
 export const ANTHROPIC_PRICING: Readonly<Record<string, ModelPricingEntry>> = deepFreeze({
-  // Sonnet 5 — the current Sonnet, and the platform default. Cheaper than the
-  // 4.6 it replaced (2 / 10 vs 3 / 15), so a run's implied cost DROPS on the
-  // model bump rather than rising.
+  // Sonnet 5.5 — the current Sonnet, 2 / 10.
+  'claude-sonnet-5-5': {
+    inputPerMillion: 2.0,
+    cachedInputPerMillion: 0.2,
+    cacheCreationPerMillion: 2.5,
+    outputPerMillion: 10.0,
+  },
+  // Sonnet 5 — the previous Sonnet, and the fallback for unrecognised ids.
+  // Cheaper than the 4.6 it replaced (2 / 10 vs 3 / 15), so a run's implied
+  // cost DROPS on the model bump rather than rising.
   'claude-sonnet-5': {
     inputPerMillion: 2.0,
     cachedInputPerMillion: 0.2,
@@ -64,6 +71,13 @@ export const ANTHROPIC_PRICING: Readonly<Record<string, ModelPricingEntry>> = de
     cachedInputPerMillion: 0.3,
     cacheCreationPerMillion: 3.75,
     outputPerMillion: 15.0,
+  },
+  // Opus 5.5 — the current Opus, 4 / 20.
+  'claude-opus-5-5': {
+    inputPerMillion: 4.0,
+    cachedInputPerMillion: 0.4,
+    cacheCreationPerMillion: 5.0,
+    outputPerMillion: 20.0,
   },
   // Opus family — top-tier reasoning, 5 / 25 (2.5× Sonnet 5).
   'claude-opus-5': {
@@ -160,7 +174,13 @@ export interface UsageTokens {
  *  for unknown models so a missing pricing entry never silently disables the
  *  threshold. */
 export const MODEL_CONTEXT_WINDOWS: Readonly<Record<string, number>> = Object.freeze({
-  // Sonnet 5 — 1M context, the platform default
+  // Sonnet 5.5 / 5 — 1M context
+  'claude-sonnet-5-5': 1_000_000,
+  'claude-sonnet-5-5[1m]': 1_000_000,
+  // Opus 5.5 — 1M context
+  'claude-opus-5-5': 1_000_000,
+  'claude-opus-5-5[1m]': 1_000_000,
+  // Sonnet 5 — 1M context
   'claude-sonnet-5': 1_000_000,
   'claude-sonnet-5[1m]': 1_000_000,
   // Sonnet 4.6 — 1M context at standard pricing

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BUILTIN_PROVIDERS,
   ConfigV3Schema,
+  PROVIDER_SHORTLIST,
   SUPPORTED_ONBOARDING_PROVIDERS,
   defaultProviderCapabilities,
   detectWireFromBaseUrl,
@@ -273,5 +274,14 @@ describe('provider capability helpers', () => {
     expect(caps.supportsKeyless).toBe(true);
     expect(caps.supportsModelsEndpoint).toBe(false);
     expect(caps.modelDiscoveryMode).toBe('manual');
+  });
+});
+
+describe('PROVIDER_SHORTLIST.anthropic', () => {
+  it('offers the current Claude models and defaults to one of them', () => {
+    const { primary, defaultPrimary } = PROVIDER_SHORTLIST.anthropic;
+    expect(primary).toEqual(['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1']);
+    expect(primary).toContain(defaultPrimary);
+    expect(BUILTIN_PROVIDERS.anthropic.defaultModel).toBe(defaultPrimary);
   });
 });

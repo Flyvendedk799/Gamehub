@@ -271,7 +271,7 @@ export const BUILTIN_PROVIDERS: Readonly<Record<SupportedOnboardingProvider, Pro
     builtin: true,
     wire: 'anthropic',
     baseUrl: 'https://api.anthropic.com',
-    defaultModel: 'claude-sonnet-4-6',
+    defaultModel: 'claude-sonnet-5-5',
     capabilities: {
       supportsKeyless: false,
       supportsModelsEndpoint: true,
@@ -504,8 +504,8 @@ export const PROVIDER_SHORTLIST: Record<SupportedOnboardingProvider, ProviderSho
     provider: 'anthropic',
     label: 'Anthropic Claude',
     keyHelpUrl: 'https://console.anthropic.com/settings/keys',
-    primary: ['claude-sonnet-4-6', 'claude-opus-4-1'],
-    defaultPrimary: 'claude-sonnet-4-6',
+    primary: ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1'],
+    defaultPrimary: 'claude-sonnet-5-5',
   },
   openai: {
     provider: 'openai',
