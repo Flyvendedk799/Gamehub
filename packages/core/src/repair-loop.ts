@@ -270,6 +270,23 @@ export function buildRepairInstruction(verdict: RepairVerdict): string | null {
   return lines.join('\n');
 }
 
+/**
+ * Author a targeted repair instruction when a game is unobserved or produced
+ * no evidence (no_verdict) on a completable spec. Instructs the agent to wire
+ * playtest transition and snapshot contracts so the game can be tested instead of
+ * shipping blind.
+ */
+export function buildPlaytestReachabilityInstruction(): string {
+  return [
+    'PLAYTEST REACHABILITY RECOVERY — the automated playtest could not observe or evaluate game state (no_verdict). ' +
+      'A completable game must not ship unverified. Make the game testable, then re-run playtest_game and call done:',
+    '  1. Main scene transition: Wire `window.__game.playtest.begin = () => { ... }` so the harness can transition directly from title/menu screens into the playable gameplay scene.',
+    '  2. Debug contract: Wire `window.__game.debug.track({ ... })` (or assign `window.__game.debug.snapshot = () => ({ ... })`) to expose required state fields (player position, HP, score, wave, enemiesAlive).',
+    '  3. Interactive startup: Ensure the game boots into an active state without blocking on unclicked start screens.',
+    'Fix these items, verify with playtest_game, and call done again.',
+  ].join('\n');
+}
+
 /** Build a debug.track({...}) hint from the failing field names: playerPos.* →
  *  `player: yourPlayerObject`, everything else → `field: () => field`. Distinct
  *  top-level fields only. */
@@ -365,11 +382,13 @@ export function decideRepairAction(
   if (verdict.floorVerified === true && verdict.fatalErrors.length === 0) {
     return { kind: 'ship', reason: 'floor_verified' };
   }
-  // (3) No deterministic evidence to judge — ship as-is rather than claim a
-  // pass we can't substantiate or repair blind. Checked BEFORE the pass branch
-  // because a no-evidence verdict is technically `pass: true` (nothing failed)
-  // but we want it surfaced honestly as `no_verdict`, not `passed`.
+  // (3) No deterministic evidence to judge — an unobserved game or no_verdict
+  // triggers playtest-reachability recovery when repair rounds remain so the game
+  // becomes testable instead of counting as a clean ship.
   if (verdict.noEvidence) {
+    if (state.roundsRun < state.maxRounds && !state.budgetExhausted) {
+      return { kind: 'repair', instruction: buildPlaytestReachabilityInstruction() };
+    }
     return { kind: 'ship', reason: 'no_verdict' };
   }
   // (4) Clean pass.

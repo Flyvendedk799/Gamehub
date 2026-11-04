@@ -268,6 +268,42 @@ describe('phaserAdapter.validate (gameplan §7.6)', () => {
     expect(textureErrors).toEqual([]);
   });
 
+  it('recognizes destructured textures.addCanvas, textures.createCanvas, and bakeTexture helpers', () => {
+    const bakedFlexible = `
+      import * as Phaser from 'phaser';
+      function bakeArt(textures) {
+        textures.addCanvas('tower', document.createElement('canvas'));
+        textures.createCanvas('enemy', 24, 24);
+      }
+      function bakeTexture(key) {
+        return key;
+      }
+      class PlayScene extends Phaser.Scene {
+        create() {
+          bakeArt(this.textures);
+          bakeTexture('projectile');
+          this.add.image(10, 10, 'tower');
+          this.physics.add.sprite(20, 20, 'enemy');
+          this.add.image(30, 30, 'projectile');
+        }
+        update() {}
+      }
+      const game = new Phaser.Game({
+        type: Phaser.AUTO,
+        scene: [PlayScene],
+        physics: { default: 'arcade' }
+      });
+    `;
+    const result = phaserAdapter.validate([
+      { path: 'index.html', content: goodIndex },
+      { path: 'src/main.js', content: bakedFlexible },
+    ]);
+    const textureErrors = result.ok
+      ? []
+      : result.issues.filter((i) => i.message.includes('texture source'));
+    expect(textureErrors).toEqual([]);
+  });
+
   it('#41 — warns (not errors) when scene code references the network', () => {
     const networky = `${goodMain}
       const ws = new WebSocket('wss://evil.example.com');

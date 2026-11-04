@@ -80,11 +80,16 @@ function sfx(freq = 440, dur = 0.08, type = 'square') {
 
 // --- DEBUG CONTRACT (required — see "Verification contract") ---
 let score = 0;
+window.__game = window.__game || {};
+window.__game.debug = window.__game.debug || {};
 window.__game.debug.track({
   score: () => score,
   playerPos: () => player.position,   // Vector3 — reflectPos handles .x/.y/.z
   cameraYaw: () => camera.rotation.y,
 });
+// When using a Title/Menu screen, wire playtest.begin to start the game directly:
+window.__game.playtest = window.__game.playtest || {};
+window.__game.playtest.begin = () => { /* dismiss title, start loop; return true when wired */ return false; };
 
 let last = 0;
 function tick(t) {

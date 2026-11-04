@@ -65,6 +65,10 @@ export interface PlaybookStep {
   button?: number;
   /** For 'wait': how many RAF frames to advance with no input. */
   durationFrames?: number;
+  /** For 'wait': condition expression or snapshot field to wait for. */
+  until?: string;
+  /** For 'wait': maximum RAF frames to wait when `until` is provided. */
+  timeoutFrames?: number;
   /** Human-readable assertion the agent should evaluate against the
    *  snapshot returned by playtest_game AFTER this step. Free-form so
    *  per-engine state shapes don't constrain the playbook. */
@@ -700,6 +704,8 @@ const TOWER_DEFENSE: PlaytestPlaybook = {
     {
       kind: 'wait',
       durationFrames: 40,
+      until: 'enemiesAlive > 0',
+      timeoutFrames: 120,
       assert: 'Enemies spawn from the path entrance and begin advancing toward the base.',
       predicates: [
         { field: 'enemiesAlive', op: 'increased', frame: { step: 0 }, against: 'baseline' },
@@ -715,6 +721,8 @@ const TOWER_DEFENSE: PlaytestPlaybook = {
     {
       kind: 'wait',
       durationFrames: 120,
+      until: 'score > 0 || kills > 0',
+      timeoutFrames: 240,
       // The keystone: proves the place→fire→kill→score loop, the "towers never
       // actually kill anything" bug class made deterministic.
       assert:
@@ -724,6 +732,8 @@ const TOWER_DEFENSE: PlaytestPlaybook = {
     {
       kind: 'wait',
       durationFrames: 200,
+      until: 'wave > 1',
+      timeoutFrames: 300,
       assert:
         'Pressure escalates — the next wave starts with more/faster/tougher enemies (`wave` advanced).',
       predicates: [{ field: 'wave', op: 'increased', frame: { step: 3 }, against: 'baseline' }],

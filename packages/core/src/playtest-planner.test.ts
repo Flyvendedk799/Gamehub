@@ -3,6 +3,7 @@ import {
   INTERACTIVITY_FLOOR_IDLE_STEPS,
   buildInteractivityFloorPlan,
   detectInteractivityResponse,
+  planFromContract,
   planPlaytest,
   selectGamePlaytestPlan,
 } from './playtest-planner';
@@ -214,5 +215,42 @@ describe('selectGamePlaytestPlan: arena plan fits the browser job', () => {
       0,
     );
     expect(frames).toBeLessThanOrEqual(360);
+  });
+});
+
+describe('selectGamePlaytestPlan: condition-based wait steps', () => {
+  it('projects until and timeoutFrames on playbook wait steps', () => {
+    const plan = selectGamePlaytestPlan('tower_defense');
+    expect(plan).not.toBeNull();
+    const waitSteps = (plan?.steps ?? []).filter((s) => s.kind === 'wait');
+    expect(waitSteps.length).toBeGreaterThan(0);
+    expect(waitSteps[0]).toMatchObject({
+      kind: 'wait',
+      until: 'enemiesAlive > 0',
+      timeoutFrames: 120,
+    });
+    expect(waitSteps.some((s) => s.kind === 'wait' && s.until?.includes('wave > 1'))).toBe(true);
+  });
+
+  it('projects authored contract wait checks with until conditions', () => {
+    const plan = planFromContract({
+      intent: 'test wait until condition',
+      checks: [
+        {
+          action: 'wait',
+          holdFrames: 20,
+          until: 'wave > 1',
+          timeoutFrames: 120,
+        },
+      ],
+    });
+    expect(plan).not.toBeNull();
+    const waitSteps = plan.steps.filter((s) => s.kind === 'wait');
+    expect(waitSteps).toContainEqual({
+      kind: 'wait',
+      frames: 20,
+      until: 'wave > 1',
+      timeoutFrames: 120,
+    });
   });
 });

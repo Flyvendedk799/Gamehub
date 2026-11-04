@@ -456,7 +456,7 @@ export type PlaytestStep =
   | { kind: 'mouseMove'; x: number; y: number }
   | { kind: 'mouseDown'; button?: number }
   | { kind: 'mouseUp'; button?: number }
-  | { kind: 'wait'; frames: number }
+  | { kind: 'wait'; frames?: number; until?: string; timeoutFrames?: number }
   | ApproachStep;
 
 export interface BrowserJobData {
@@ -857,6 +857,62 @@ async function dispatchStartInput(page: Page): Promise<void> {
   await page
     .evaluate(() => {
       try {
+        // C2: Standard playtest hook to enter gameplay immediately
+        const win = window as unknown as {
+          __game?: {
+            playtest?: {
+              begin?: () => unknown;
+            };
+          };
+          Phaser?: {
+            GAMES?: Record<
+              string,
+              {
+                scene?: {
+                  getScenes?: (
+                    activeOnly?: boolean,
+                  ) => Array<{ scene?: { key?: string; stop?: () => void } }>;
+                  scenes?: Array<{
+                    scene?: { key?: string; start?: () => void };
+                  }>;
+                };
+              }
+            >;
+          };
+        };
+        const gameObj = win.__game;
+        if (typeof gameObj?.playtest?.begin === 'function') {
+          try {
+            const res = gameObj.playtest.begin();
+            if (res !== false) return;
+          } catch (_) {}
+        }
+        // Auto-advance Phaser scenes if a Title/Menu scene is currently active
+        if (typeof win.Phaser !== 'undefined' && win.Phaser.GAMES) {
+          try {
+            const games = Object.values(win.Phaser.GAMES);
+            for (const g of games) {
+              if (!g || !g.scene) continue;
+              const activeScenes =
+                typeof g.scene.getScenes === 'function' ? g.scene.getScenes(true) : [];
+              for (const s of activeScenes) {
+                const key = s.scene?.key || '';
+                if (/^(title|menu|boot|start)/i.test(key)) {
+                  const all = g.scene.scenes || [];
+                  const playScene = all.find((sc) =>
+                    /^(play|game|main)/i.test(sc.scene?.key || ''),
+                  );
+                  if (playScene && typeof playScene.scene?.start === 'function') {
+                    s.scene?.stop?.();
+                    playScene.scene.start();
+                    return;
+                  }
+                }
+              }
+            }
+          } catch (_) {}
+        }
+
         const c = document.querySelector('canvas');
         // Aim at the CENTER of the canvas: a (0,0) event misses a centered "click
         // to start" button or play area, so a corner click often fails to advance
@@ -1386,6 +1442,120 @@ async function readControlManifest(page: Page): Promise<unknown> {
   }
 }
 
+function getSnapshotPath(obj: unknown, path: string): unknown {
+  if (!obj || typeof obj !== 'object') return undefined;
+  const parts = path.split('.');
+  let curr: unknown = obj;
+  for (const part of parts) {
+    if (
+      !curr ||
+      typeof curr !== 'object' ||
+      part === '__proto__' ||
+      part === 'constructor' ||
+      part === 'prototype'
+    ) {
+      return undefined;
+    }
+    curr = (curr as Record<string, unknown>)[part];
+  }
+  return curr;
+}
+
+function parseLiteral(raw: string): unknown {
+  const trimmed = raw.trim();
+  if (trimmed === 'true') return true;
+  if (trimmed === 'false') return false;
+  if (trimmed === 'null') return null;
+  if (trimmed === 'undefined') return undefined;
+  if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) return Number(trimmed);
+  if (
+    (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+    (trimmed.startsWith('"') && trimmed.endsWith('"'))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return undefined;
+}
+
+function compareValues(left: unknown, op: string, right: unknown): boolean {
+  if (typeof left === 'number' && typeof right === 'number') {
+    switch (op) {
+      case '>':
+        return left > right;
+      case '<':
+        return left < right;
+      case '>=':
+        return left >= right;
+      case '<=':
+        return left <= right;
+      case '==':
+      case '===':
+        return left === right;
+      case '!=':
+      case '!==':
+        return left !== right;
+      default:
+        return false;
+    }
+  }
+  switch (op) {
+    case '===':
+    case '==':
+      return left === right;
+    case '!==':
+    case '!=':
+      return left !== right;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Restricted evaluator for snapshot conditions (C3).
+ * Evaluates expressions like `enemiesAlive > 0`, `score > 0 || kills > 0`, `wave > 1`.
+ * Pure and restricted: no eval/new Function, no bare-field fallback, no host access.
+ */
+export function evaluateCondition(cond: string, snap: unknown): boolean {
+  if (!snap || typeof snap !== 'object' || !cond) return false;
+  const orClauses = cond.split('||');
+  for (const orClause of orClauses) {
+    const trimmedOr = orClause.trim();
+    if (!trimmedOr) continue;
+    const andTerms = trimmedOr.split('&&');
+    let andPass = true;
+    for (const rawTerm of andTerms) {
+      let term = rawTerm.trim();
+      while (term.startsWith('(') && term.endsWith(')')) {
+        term = term.slice(1, -1).trim();
+      }
+      const match = term.match(
+        /^([a-zA-Z_$][a-zA-Z0-9_$.]*)\s*(===|==|!==|!=|>=|<=|>|<)\s*(-?\d+(?:\.\d+)?|true|false|null|'[^']*'|"[^"]*")$/,
+      );
+      if (!match) {
+        andPass = false;
+        break;
+      }
+      const [, path, op, rawVal] = match;
+      if (!path || !op || rawVal === undefined) {
+        andPass = false;
+        break;
+      }
+      const left = getSnapshotPath(snap, path);
+      const right = parseLiteral(rawVal);
+      if (left === undefined || right === undefined) {
+        andPass = false;
+        break;
+      }
+      if (!compareValues(left, op, right)) {
+        andPass = false;
+        break;
+      }
+    }
+    if (andPass && andTerms.length > 0) return true;
+  }
+  return false;
+}
+
 /**
  * Boot the game HTML in a hardened per-job context, wait for `window.__game`,
  * then dispatch each synthetic-input step — ticking RAF frames and reading
@@ -1533,17 +1703,32 @@ export async function runPlaytest(
           break;
         }
         case 'wait': {
-          const atStart = JSON.stringify(await readSnapshot(page));
-          await tickFrames(page, step.frames);
-          // If nothing changed during the nominal wait, the game may simply be
-          // slower than the budget — extend until the state moves or the cap.
-          let extended = 0;
-          while (
-            extended < WAIT_EXTEND_CAP_FRAMES &&
-            JSON.stringify(await readSnapshot(page)) === atStart
-          ) {
-            await tickFrames(page, WAIT_EXTEND_CHUNK_FRAMES);
-            extended += WAIT_EXTEND_CHUNK_FRAMES;
+          const frames =
+            typeof step.frames === 'number' && Number.isFinite(step.frames) ? step.frames : 1;
+          if (step.until) {
+            const timeout = step.timeoutFrames ?? Math.max(frames * 4, 240);
+            let elapsed = 0;
+            const cond = step.until.trim();
+            while (elapsed < timeout) {
+              const snap = await readSnapshot(page);
+              if (evaluateCondition(cond, snap)) break;
+              const chunk = Math.min(5, timeout - elapsed);
+              await tickFrames(page, chunk);
+              elapsed += chunk;
+            }
+          } else {
+            const atStart = JSON.stringify(await readSnapshot(page));
+            await tickFrames(page, frames);
+            // If nothing changed during the nominal wait, the game may simply be
+            // slower than the budget — extend until the state moves or the cap.
+            let extended = 0;
+            while (
+              extended < WAIT_EXTEND_CAP_FRAMES &&
+              JSON.stringify(await readSnapshot(page)) === atStart
+            ) {
+              await tickFrames(page, WAIT_EXTEND_CHUNK_FRAMES);
+              extended += WAIT_EXTEND_CHUNK_FRAMES;
+            }
           }
           break;
         }

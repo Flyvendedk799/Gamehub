@@ -280,17 +280,24 @@ const TUNABLE_LITERAL_PATTERNS: readonly RegExp[] = [
 ];
 
 /** Restart binding — any of: an explicit reset()/restart() function,
- *  a key handler for R / Space that mutates state back, or `location.reload`. */
+ *  a key handler for R, Phaser scene.restart(), or Space/Enter restart in game-over context, or `location.reload`.
+ *  Note: Space/Enter/scene.start on a Title/Menu scene is a start handler, NOT a restart binding. */
 const RESTART_PATTERNS: readonly RegExp[] = [
-  /\b(restart|reset|new[_]?game|reset[_]?game)\s*\(/i,
+  /\b(restart|reset|new[_]?game|reset[_]?game|retry|playAgain|tryAgain)\s*\(/i,
   /K_r\b|key\s*===?\s*['"]r['"]|key\s*===?\s*['"]R['"]|\.code\s*===?\s*['"]KeyR['"]/,
-  // Phaser keyboard bindings for the R restart convention, which the DOM-event
-  // patterns above miss: input.keyboard.once/on('keydown-R', …), addKey('R'),
-  // or Phaser.Input.Keyboard.KeyCodes.R. Their absence made a game that wired
-  // restart on `keydown-R` add a redundant duplicate binding just to pass.
+  // Phaser keyboard bindings for the R restart convention:
+  // input.keyboard.once/on('keydown-R', …), addKey('R'), or Phaser.Input.Keyboard.KeyCodes.R.
   /keydown[-_]r\b/i,
-  /addKey\s*\(\s*['"`]r['"`]/i,
+  /\.(?:once|on)\s*\(\s*['"`]keydown[-_]r\b/i,
+  /\.addKey\s*\(\s*['"`]r['"`]/i,
   /KeyCodes\.R\b/,
+  // Scene-level restart (restarts the active play scene, distinct from scene.start which transitions scenes)
+  /\b(?:this\.)?scene\.restart\s*\(/,
+  // Space or Enter key bindings that explicitly trigger restart/reset actions
+  /\.(?:once|on)\s*\(\s*['"`]keydown[-_](?:space|enter)['"`]\s*,\s*(?:[^{;]*=>\s*)?(?:this\.)?(?:scene\.restart|restart|reset|retry|reboot|startNewGame|playAgain)/i,
+  // Restart or scene transition inside a game-over / fail / defeat / death context (so Title screen scene.start is not counted)
+  /(?:game[_\s]?over|gameover|\b(?:defeat|lose|lost|died|death|fail(?:ed)?)\b)[^{};]*\{[^}]*(?:scene\.(?:restart|start)|\.(?:once|on)\s*\(\s*['"`]keydown[-_](?:space|enter|r)|addKey\s*\(\s*['"`](?:space|enter|r)|KeyCodes\.(?:SPACE|ENTER|R)|key\s*===?\s*['"](?: |Space|Enter)['"]|\.code\s*===?\s*['"](?:Space|Enter)['"])/i,
+  /(?:game[_\s]?over|gameover|\b(?:defeat|lose|lost|died|death|fail(?:ed)?)\b)[^;{}]{0,100}(?:scene\.(?:restart|start)|\.(?:once|on)\s*\(\s*['"`]keydown[-_](?:space|enter|r)|key\s*===?\s*['"](?: |Space|Enter)['"]|\.code\s*===?\s*['"](?:Space|Enter)['"])/i,
   /location\.reload\b/,
 ];
 
@@ -360,6 +367,7 @@ const KEYBOARD_INPUT_PATTERNS: readonly RegExp[] = [
   /\.input\.keyboard/i,
   /createCursorKeys\s*\(/i,
   /\.addKey\s*\(/i,
+  /\.(?:once|on)\s*\(\s*['"`]keydown/i,
   /\bKeyboardEvent\b/,
   /\bcursors?\s*\.\s*(left|right|up|down)/i,
 ];

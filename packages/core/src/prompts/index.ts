@@ -1360,11 +1360,16 @@ function sfx(freq = 440, dur = 0.08, type = 'square') {
 
 // --- DEBUG CONTRACT (required — see "Verification contract") ---
 let score = 0;
+window.__game = window.__game || {};
+window.__game.debug = window.__game.debug || {};
 window.__game.debug.track({
   score: () => score,
   playerPos: () => player.position,   // Vector3 — reflectPos handles .x/.y/.z
   cameraYaw: () => camera.rotation.y,
 });
+// When using a Title/Menu screen, wire playtest.begin to start the game directly:
+window.__game.playtest = window.__game.playtest || {};
+window.__game.playtest.begin = () => { /* dismiss title, start loop; return true when wired */ return false; };
 
 let last = 0;
 function tick(t) {
@@ -1542,8 +1547,12 @@ class TitleScene extends Phaser.Scene {
     const { width: W, height: H } = this.scale;
     this.add.text(W / 2, H / 2 - 18, 'YOUR GAME', { ...TITLE_FONT, fontSize: '56px', color: PAL.ink }).setOrigin(0.5);
     this.add.text(W / 2, H / 2 + 34, 'Click or press Space to play', { ...TITLE_FONT, fontSize: '20px', color: PAL.accent }).setOrigin(0.5);
-    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('Play'));
-    this.input.once('pointerdown', () => this.scene.start('Play'));
+    const startPlay = () => this.scene.start('Play');
+    this.input.keyboard.once('keydown-SPACE', startPlay);
+    this.input.once('pointerdown', startPlay);
+    window.__game = window.__game || {};
+    window.__game.playtest = window.__game.playtest || {};
+    window.__game.playtest.begin = () => { startPlay(); return true; };
   }
 }
 
@@ -1557,6 +1566,8 @@ class PlayScene extends Phaser.Scene {
     this.player = this.add.ellipse(400, 540, 96, 22, 0xffcc4d);
     this.physics.add.existing(this.player);
     this.player.body.setCollideWorldBounds(true);
+    window.__game = window.__game || {};
+    window.__game.debug = window.__game.debug || {};
     window.__game.debug.track({ score: () => this.score, player: () => this.player });
   }
   onHit() { this.cameras.main.shake(120, 0.006); sfx(180, 0.12, 'sawtooth'); this.score += 10; } // JUICE on every event
