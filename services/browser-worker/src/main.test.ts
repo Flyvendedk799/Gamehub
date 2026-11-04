@@ -48,6 +48,7 @@ const withHardTimeout: MainModule['withHardTimeout'] = (fn, ms, label, onTimeout
 const assertBrowserAlive: MainModule['assertBrowserAlive'] = (b) => mod.assertBrowserAlive(b);
 const runJob: MainModule['runJob'] = (b, d) => mod.runJob(b, d);
 const BrowserPool = (): MainModule['BrowserPool'] => mod.BrowserPool;
+const evaluateCondition: MainModule['evaluateCondition'] = (c, s) => mod.evaluateCondition(c, s);
 
 afterAll(
   async () => {
@@ -771,6 +772,75 @@ describe('runPlaytest (synthetic input → snapshot diff, real Chromium)', () =>
     expect(result.baselineSnapshot).toBeNull();
     expect(result.bootErrors).toEqual([]);
   }, 30_000);
+
+  it('(e) condition wait with only until and timeoutFrames advances until condition is satisfied', async () => {
+    const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+      <script>
+        var state = { frameCount: 0, wave: 1 };
+        function loop() {
+          state.frameCount++;
+          if (state.frameCount >= 15) {
+            state.wave = 2;
+          }
+          requestAnimationFrame(loop);
+        }
+        requestAnimationFrame(loop);
+        window.__game = {
+          debug: { snapshot: function () { return { wave: state.wave, frameCount: state.frameCount }; } },
+        };
+      </script>
+    </body></html>`;
+    const result = await runPlaytest(browser, {
+      kind: 'playtest',
+      htmlContent: html,
+      bootTimeoutMs: 5_000,
+      steps: [{ kind: 'wait', until: 'wave > 1', timeoutFrames: 120 }],
+    });
+    expect(result.hasGameContract).toBe(true);
+    expect(result.hasDebugContract).toBe(true);
+    expect(result.steps).toHaveLength(1);
+    const after = result.steps[0]!.snapshotAfter as { wave: number; frameCount: number };
+    expect(after.wave).toBe(2);
+    expect(after.frameCount).toBeGreaterThanOrEqual(15);
+  }, 30_000);
+});
+
+describe('evaluateCondition (C3 snapshot expression unit)', () => {
+  it('evaluates numeric comparisons (> < >= <= == !=)', () => {
+    expect(evaluateCondition('enemiesAlive > 0', { enemiesAlive: 3 })).toBe(true);
+    expect(evaluateCondition('enemiesAlive > 0', { enemiesAlive: 0 })).toBe(false);
+    expect(evaluateCondition('wave > 1', { wave: 2 })).toBe(true);
+    expect(evaluateCondition('wave > 1', { wave: 1 })).toBe(false);
+    expect(evaluateCondition('hp <= 50', { hp: 50 })).toBe(true);
+    expect(evaluateCondition('hp <= 50', { hp: 51 })).toBe(false);
+  });
+
+  it('evaluates boolean and string comparisons', () => {
+    expect(evaluateCondition('started === true', { started: true })).toBe(true);
+    expect(evaluateCondition('started === true', { started: false })).toBe(false);
+    expect(evaluateCondition("state == 'playing'", { state: 'playing' })).toBe(true);
+    expect(evaluateCondition("state == 'playing'", { state: 'menu' })).toBe(false);
+  });
+
+  it('evaluates OR (||) and AND (&&) compound conditions', () => {
+    expect(evaluateCondition('score > 0 || kills > 0', { score: 0, kills: 1 })).toBe(true);
+    expect(evaluateCondition('score > 0 || kills > 0', { score: 0, kills: 0 })).toBe(false);
+    expect(evaluateCondition('score > 0 && wave > 1', { score: 10, wave: 2 })).toBe(true);
+    expect(evaluateCondition('score > 0 && wave > 1', { score: 10, wave: 1 })).toBe(false);
+  });
+
+  it('evaluates nested paths safely', () => {
+    expect(evaluateCondition('playerPos.x >= 10', { playerPos: { x: 15, y: 0 } })).toBe(true);
+    expect(evaluateCondition('playerPos.x >= 10', { playerPos: { x: 5, y: 0 } })).toBe(false);
+    expect(evaluateCondition('playerPos.x >= 10', { playerPos: null })).toBe(false);
+  });
+
+  it('safely rejects arbitrary code / injection attempts without executing', () => {
+    expect(evaluateCondition('process.exit()', { score: 10 })).toBe(false);
+    expect(evaluateCondition("require('fs')", { score: 10 })).toBe(false);
+    expect(evaluateCondition('__proto__.polluted = 1', { score: 10 })).toBe(false);
+    expect(evaluateCondition('', { score: 10 })).toBe(false);
+  });
 });
 
 describe('createHardenedContext (no permissions)', () => {

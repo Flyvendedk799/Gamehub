@@ -223,7 +223,6 @@ try { window.__game.config = ${config}; } catch (e) {}
   var d;
   try {
     d = window.__game.debug = (window.__game.debug && typeof window.__game.debug === 'object') ? window.__game.debug : {};
-    d = window.__game.debug = window.__game.debug || {};
   } catch (e) {
     d = {};
   }

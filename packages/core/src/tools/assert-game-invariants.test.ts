@@ -64,10 +64,8 @@ describe('assertGameInvariants', () => {
       `this.input.once('keydown-SPACE', () => this.scene.restart());`,
       `this.input.on('keydown-ENTER', () => this.scene.start('PlayScene'));`,
       `this.input.keyboard.once('keydown-SPACE', startNewGame);`,
-      `this.spaceKey = this.input.keyboard.addKey('SPACE');`,
       `this.rKey = this.input.keyboard.addKey('R');`,
       'this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);',
-      'this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);',
     ]) {
       const result = assertGameInvariants(
         deps([
@@ -75,15 +73,43 @@ describe('assertGameInvariants', () => {
             path: 'src/main.js',
             content: `
               let score = 0;
-              function onGameOver() {}
+              function onGameOver() {
+                ${binding}
+              }
               function onHit() { score += 1; new Audio('hit.wav').play(); }
-              ${binding}
             `,
           },
         ]),
       );
       expect(result.issues.map((i) => i.invariant)).not.toContain('restart');
     }
+  });
+
+  it('does NOT count title-scene start handlers as a restart binding', () => {
+    const result = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: `
+            let score = 0;
+            class TitleScene extends Phaser.Scene {
+              create() {
+                this.add.text(100, 100, 'Click or press Space to play');
+                this.input.keyboard.once('keydown-SPACE', () => this.scene.start('Play'));
+                this.input.once('pointerdown', () => this.scene.start('Play'));
+              }
+            }
+            class PlayScene extends Phaser.Scene {
+              create() {
+                this.score = 0;
+              }
+              onHit() { score += 1; new Audio('hit.wav').play(); }
+            }
+          `,
+        },
+      ]),
+    );
+    expect(result.issues.map((i) => i.invariant)).toContain('restart');
   });
 
   it('warns on missing fail state', () => {
