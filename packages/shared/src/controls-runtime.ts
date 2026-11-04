@@ -59,7 +59,9 @@ export function stripPlatformRuntime(html: string): string {
 
 /** The injectable `<script>` — self-contained, idempotent, ES5. */
 export const CONTROLS_RUNTIME_SNIPPET = `<script data-pf="${CONTROLS_RUNTIME_MARKER}">(function(){
-  window.__game = window.__game || {};
+  if (!window.__game || typeof window.__game !== 'object') {
+    window.__game = {};
+  }
   var c = window.__game.controls;
   if (!c || typeof c.rebind !== 'function') {
     var bindings={},meta={},order=[],down={},handlers={};
@@ -108,15 +110,54 @@ export const DEBUG_RUNTIME_MARKER = 'pf-debug-runtime';
  * self-contained.
  */
 export const DEBUG_RUNTIME_SNIPPET = `<script data-pf="${DEBUG_RUNTIME_MARKER}">(function(){
-  window.__game = window.__game || {};
-  if (window.__game.debug && typeof window.__game.debug.snapshot === 'function') return;
+  if (!window.__game || typeof window.__game !== 'object') {
+    window.__game = {};
+  }
+  var d;
+  try {
+    d = window.__game.debug = (window.__game.debug && typeof window.__game.debug === 'object') ? window.__game.debug : {};
+    d = window.__game.debug = window.__game.debug || {};
+  } catch (e) {
+    d = {};
+  }
   var tracked = {};
   function read(v){try{return typeof v==='function'?v():v;}catch(e){return null;}}
   function reflectPos(o){if(!o)return undefined;var x=o.x,y=o.y;if((x===undefined||y===undefined)&&o.position){x=o.position.x;y=o.position.y;}if(x===undefined&&y===undefined)return undefined;return {x:x,y:y};}
-  function track(spec){if(spec&&typeof spec==='object'){for(var k in spec)tracked[k]=spec[k];}return api;}
-  function snapshot(){var st=window.__game.state;var hasState=st&&typeof st==='object'&&Object.keys(st).length>0;var hasTracked=Object.keys(tracked).length>0;if(!hasState&&!hasTracked)return null;var out={};if(hasState){for(var k in st)out[k]=read(st[k]);}for(var t in tracked){if(t==='player'){var p=reflectPos(read(tracked.player));if(p)out.playerPos=p;}else{out[t]=read(tracked[t]);}}return out;}
-  var api={track:track,snapshot:snapshot};
-  window.__game.debug=api;
+  function track(spec){if(spec&&typeof spec==='object'){for(var k in spec)tracked[k]=spec[k];}return d;}
+  function snapshot(){
+    var st=window.__game.state;
+    var hasState=st&&typeof st==='object'&&Object.keys(st).length>0;
+    var hasTracked=Object.keys(tracked).length>0;
+    var ap=typeof d.audioPlays==='number'?d.audioPlays:0;
+    if(!hasState&&!hasTracked&&!(ap>0))return null;
+    var out={audioPlays:ap};
+    try{out.pointerLocked=typeof document!=='undefined'&&document.pointerLockElement?1:0;}catch(e){out.pointerLocked=0;}
+    if(hasState){for(var k in st)out[k]=read(st[k]);}
+    for(var t in tracked){if(t==='player'){var p=reflectPos(read(tracked.player));if(p)out.playerPos=p;}else{out[t]=read(tracked[t]);}}
+    return out;
+  }
+  if (typeof d.track !== 'function') d.track = track;
+  if (typeof d.snapshot !== 'function') d.snapshot = snapshot;
+  if (typeof d.audioPlays !== 'number') d.audioPlays = 0;
+  try {
+    window.__game.debug = d;
+  } catch (e) {
+    try { Object.defineProperty(window.__game, 'debug', { value: d, writable: true, configurable: true, enumerable: true }); } catch (e2) {}
+  }
+  var pt;
+  try {
+    pt = (window.__game.playtest && typeof window.__game.playtest === 'object') ? window.__game.playtest : {};
+  } catch (e) {
+    pt = {};
+  }
+  if (typeof pt.begin !== 'function') {
+    pt.begin = function () { return false; };
+  }
+  try {
+    window.__game.playtest = pt;
+  } catch (e) {
+    try { Object.defineProperty(window.__game, 'playtest', { value: pt, writable: true, configurable: true, enumerable: true }); } catch (e2) {}
+  }
 })();</script>`;
 
 /** Marker for the serve-time audio counter. */

@@ -20,6 +20,7 @@ import {
   MAX_REPAIR_ROUNDS_CEILING,
   type RepairLoopState,
   type RepairVerdict,
+  buildPlaytestReachabilityInstruction,
   buildRepairInstruction,
   buildRepairVerdict,
   decideRepairAction,
@@ -210,6 +211,15 @@ describe('buildRepairInstruction', () => {
   });
 });
 
+describe('buildPlaytestReachabilityInstruction', () => {
+  it('builds actionable reachability recovery instructions', () => {
+    const instruction = buildPlaytestReachabilityInstruction();
+    expect(instruction).toContain('PLAYTEST REACHABILITY RECOVERY');
+    expect(instruction).toContain('window.__game.playtest.begin');
+    expect(instruction).toContain('window.__game.debug.track');
+  });
+});
+
 describe('decideRepairAction', () => {
   it('ships with reason=passed on a clean verdict (0 rounds)', () => {
     const verdict = buildRepairVerdict(
@@ -310,9 +320,36 @@ describe('decideRepairAction', () => {
     expect(action).toEqual({ kind: 'ship', reason: 'budget_exhausted' });
   });
 
-  it('ships with reason=no_verdict when there is no deterministic evidence', () => {
+  it('triggers playtest-reachability recovery when there is no evidence and rounds remain', () => {
     const verdict = buildRepairVerdict({ trace: null, fatalErrors: [] }, []);
-    const action = decideRepairAction(verdict, completableSpec('topdown_arcade'), loopState());
+    const action = decideRepairAction(
+      verdict,
+      completableSpec('topdown_arcade'),
+      loopState({ roundsRun: 0 }),
+    );
+    expect(action.kind).toBe('repair');
+    if (action.kind === 'repair') {
+      expect(action.instruction).toBe(buildPlaytestReachabilityInstruction());
+    }
+  });
+
+  it('ships with reason=no_verdict when there is no deterministic evidence and rounds are exhausted', () => {
+    const verdict = buildRepairVerdict({ trace: null, fatalErrors: [] }, []);
+    const action = decideRepairAction(
+      verdict,
+      completableSpec('topdown_arcade'),
+      loopState({ roundsRun: 2, maxRounds: 2 }),
+    );
+    expect(action).toEqual({ kind: 'ship', reason: 'no_verdict' });
+  });
+
+  it('ships with reason=no_verdict when there is no deterministic evidence and budget is exhausted', () => {
+    const verdict = buildRepairVerdict({ trace: null, fatalErrors: [] }, []);
+    const action = decideRepairAction(
+      verdict,
+      completableSpec('topdown_arcade'),
+      loopState({ budgetExhausted: true }),
+    );
     expect(action).toEqual({ kind: 'ship', reason: 'no_verdict' });
   });
 

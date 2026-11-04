@@ -57,12 +57,17 @@ describe('assertGameInvariants', () => {
     expect(result.issues.map((i) => i.invariant)).toContain('restart');
   });
 
-  it('recognizes the Phaser keydown-R restart binding (no false missing-restart)', () => {
+  it('recognizes the Phaser keydown-R, Space, and Enter restart bindings (no false missing-restart)', () => {
     for (const binding of [
       `this.input.keyboard.once('keydown-R', () => this.scene.restart());`,
       `this.input.keyboard.on('keydown-R', reboot);`,
+      `this.input.once('keydown-SPACE', () => this.scene.restart());`,
+      `this.input.on('keydown-ENTER', () => this.scene.start('PlayScene'));`,
+      `this.input.keyboard.once('keydown-SPACE', startNewGame);`,
+      `this.spaceKey = this.input.keyboard.addKey('SPACE');`,
       `this.rKey = this.input.keyboard.addKey('R');`,
       'this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);',
+      'this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);',
     ]) {
       const result = assertGameInvariants(
         deps([

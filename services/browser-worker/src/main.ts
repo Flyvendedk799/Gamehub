@@ -456,7 +456,7 @@ export type PlaytestStep =
   | { kind: 'mouseMove'; x: number; y: number }
   | { kind: 'mouseDown'; button?: number }
   | { kind: 'mouseUp'; button?: number }
-  | { kind: 'wait'; frames: number }
+  | { kind: 'wait'; frames: number; until?: string; timeoutFrames?: number }
   | ApproachStep;
 
 export interface BrowserJobData {
@@ -857,6 +857,62 @@ async function dispatchStartInput(page: Page): Promise<void> {
   await page
     .evaluate(() => {
       try {
+        // C2: Standard playtest hook to enter gameplay immediately
+        const win = window as unknown as {
+          __game?: {
+            playtest?: {
+              begin?: () => unknown;
+            };
+          };
+          Phaser?: {
+            GAMES?: Record<
+              string,
+              {
+                scene?: {
+                  getScenes?: (
+                    activeOnly?: boolean,
+                  ) => Array<{ scene?: { key?: string; stop?: () => void } }>;
+                  scenes?: Array<{
+                    scene?: { key?: string; start?: () => void };
+                  }>;
+                };
+              }
+            >;
+          };
+        };
+        const gameObj = win.__game;
+        if (typeof gameObj?.playtest?.begin === 'function') {
+          try {
+            const res = gameObj.playtest.begin();
+            if (res !== false) return;
+          } catch (_) {}
+        }
+        // Auto-advance Phaser scenes if a Title/Menu scene is currently active
+        if (typeof win.Phaser !== 'undefined' && win.Phaser.GAMES) {
+          try {
+            const games = Object.values(win.Phaser.GAMES);
+            for (const g of games) {
+              if (!g || !g.scene) continue;
+              const activeScenes =
+                typeof g.scene.getScenes === 'function' ? g.scene.getScenes(true) : [];
+              for (const s of activeScenes) {
+                const key = s.scene?.key || '';
+                if (/^(title|menu|boot|start)/i.test(key)) {
+                  const all = g.scene.scenes || [];
+                  const playScene = all.find((sc) =>
+                    /^(play|game|main)/i.test(sc.scene?.key || ''),
+                  );
+                  if (playScene && typeof playScene.scene?.start === 'function') {
+                    s.scene?.stop?.();
+                    playScene.scene.start();
+                    return;
+                  }
+                }
+              }
+            }
+          } catch (_) {}
+        }
+
         const c = document.querySelector('canvas');
         // Aim at the CENTER of the canvas: a (0,0) event misses a centered "click
         // to start" button or play area, so a corner click often fails to advance
@@ -1533,17 +1589,39 @@ export async function runPlaytest(
           break;
         }
         case 'wait': {
-          const atStart = JSON.stringify(await readSnapshot(page));
-          await tickFrames(page, step.frames);
-          // If nothing changed during the nominal wait, the game may simply be
-          // slower than the budget — extend until the state moves or the cap.
-          let extended = 0;
-          while (
-            extended < WAIT_EXTEND_CAP_FRAMES &&
-            JSON.stringify(await readSnapshot(page)) === atStart
-          ) {
-            await tickFrames(page, WAIT_EXTEND_CHUNK_FRAMES);
-            extended += WAIT_EXTEND_CHUNK_FRAMES;
+          if (step.until) {
+            const timeout = step.timeoutFrames ?? Math.max(step.frames * 4, 240);
+            let elapsed = 0;
+            const cond = step.until.trim();
+            const checkCond = (snap: unknown): boolean => {
+              if (!snap || typeof snap !== 'object') return false;
+              try {
+                const fn = new Function('snapshot', `with(snapshot) { return Boolean(${cond}); }`);
+                return Boolean(fn(snap));
+              } catch {
+                return Boolean((snap as Record<string, unknown>)[cond]);
+              }
+            };
+            while (elapsed < timeout) {
+              const snap = await readSnapshot(page);
+              if (checkCond(snap)) break;
+              const chunk = Math.min(5, timeout - elapsed);
+              await tickFrames(page, chunk);
+              elapsed += chunk;
+            }
+          } else {
+            const atStart = JSON.stringify(await readSnapshot(page));
+            await tickFrames(page, step.frames);
+            // If nothing changed during the nominal wait, the game may simply be
+            // slower than the budget — extend until the state moves or the cap.
+            let extended = 0;
+            while (
+              extended < WAIT_EXTEND_CAP_FRAMES &&
+              JSON.stringify(await readSnapshot(page)) === atStart
+            ) {
+              await tickFrames(page, WAIT_EXTEND_CHUNK_FRAMES);
+              extended += WAIT_EXTEND_CHUNK_FRAMES;
+            }
           }
           break;
         }

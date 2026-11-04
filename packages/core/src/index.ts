@@ -231,6 +231,7 @@ export {
   resolveMaxRepairRounds,
   buildRepairVerdict,
   buildRepairInstruction,
+  buildPlaytestReachabilityInstruction,
   decideRepairAction,
   traceFromPlaytestResult,
   type ShipReason,

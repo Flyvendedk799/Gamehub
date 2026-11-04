@@ -206,10 +206,12 @@ export function gameGlobalSetupSnippet(opts: {
   // `stripPlatformRuntime` uses the marker to keep the quality heuristics from
   // grading it (see the fps-no-pointer-lock false positive it used to cause).
   return `<script data-pf="${GAME_GLOBAL_SETUP_MARKER}">
-window.__game = window.__game || {};
-window.__game.engine = ${JSON.stringify(opts.engine)};
-window.__game.params = ${params};
-window.__game.config = ${config};
+if (!window.__game || typeof window.__game !== 'object') {
+  window.__game = {};
+}
+try { window.__game.engine = ${JSON.stringify(opts.engine)}; } catch (e) {}
+try { window.__game.params = ${params}; } catch (e) {}
+try { window.__game.config = ${config}; } catch (e) {}
 // v2 P2 — a live debug contract the deterministic verdict layer can actually
 // read. The old default returned null, so EVERY predicate reported "field
 // missing" and known-genre games could never earn a play verdict. Now the agent
@@ -217,7 +219,14 @@ window.__game.config = ${config};
 // score: () => score, wave: () => wave }) — or sets window.__game.state.*, and
 // snapshot() merges them. It still returns null when NOTHING is wired, so the
 // no_debug_contract outcome is preserved (we don't fake a contract).
-window.__game.debug = window.__game.debug || (function () {
+(function () {
+  var d;
+  try {
+    d = window.__game.debug = (window.__game.debug && typeof window.__game.debug === 'object') ? window.__game.debug : {};
+    d = window.__game.debug = window.__game.debug || {};
+  } catch (e) {
+    d = {};
+  }
   var tracked = {};
   function read(v) { try { return typeof v === 'function' ? v() : v; } catch (e) { return null; } }
   function reflectPos(o) {
@@ -227,13 +236,14 @@ window.__game.debug = window.__game.debug || (function () {
     if (x === undefined && y === undefined) return undefined;
     return { x: x, y: y };
   }
-  function track(spec) { if (spec && typeof spec === 'object') { for (var k in spec) tracked[k] = spec[k]; } return api; }
+  function track(spec) { if (spec && typeof spec === 'object') { for (var k in spec) tracked[k] = spec[k]; } return d; }
   function snapshot() {
     var st = window.__game.state;
     var hasState = st && typeof st === 'object' && Object.keys(st).length > 0;
     var hasTracked = Object.keys(tracked).length > 0;
-    if (!hasState && !hasTracked && !(api.audioPlays > 0)) return null; // nothing wired → honest no_debug_contract
-    var out = { audioPlays: api.audioPlays || 0 };
+    var ap = typeof d.audioPlays === 'number' ? d.audioPlays : 0;
+    if (!hasState && !hasTracked && !(ap > 0)) return null; // nothing wired → honest no_debug_contract
+    var out = { audioPlays: ap };
     // S1 — pointer-lock evidence for FPS playbooks (0/1 so eq predicates work).
     try {
       out.pointerLocked = typeof document !== 'undefined' && document.pointerLockElement ? 1 : 0;
@@ -245,8 +255,37 @@ window.__game.debug = window.__game.debug || (function () {
     }
     return out;
   }
-  var api = { track: track, snapshot: snapshot, audioPlays: 0 };
-  return api;
+  if (typeof d.track !== 'function') d.track = track;
+  if (typeof d.snapshot !== 'function') d.snapshot = snapshot;
+  if (typeof d.audioPlays !== 'number') d.audioPlays = 0;
+  try {
+    window.__game.debug = d;
+  } catch (e) {
+    try {
+      Object.defineProperty(window.__game, 'debug', { value: d, writable: true, configurable: true, enumerable: true });
+    } catch (e2) {}
+  }
+})();
+// C2 — playtest menu transition hook. Default implementation returns false;
+// games wire window.__game.playtest.begin = () => { scene.start('Play'); return true; }
+// so playtests evaluate gameplay rather than idling on title scenes.
+(function () {
+  var p;
+  try {
+    p = (window.__game.playtest && typeof window.__game.playtest === 'object') ? window.__game.playtest : {};
+  } catch (e) {
+    p = {};
+  }
+  if (typeof p.begin !== 'function') {
+    p.begin = function () { return false; };
+  }
+  try {
+    window.__game.playtest = p;
+  } catch (e) {
+    try {
+      Object.defineProperty(window.__game, 'playtest', { value: p, writable: true, configurable: true, enumerable: true });
+    } catch (e2) {}
+  }
 })();
 // S1 — runtime audio evidence. Monkey-patch HTMLAudioElement.play and
 // AudioContext.resume/createOscillator so playtest snapshots can assert

@@ -546,25 +546,29 @@ function phaserValidate(files: ReadonlyArray<InputFile>): ValidationResult {
     // this.load.* produced FALSE errors that pushed the agent to abandon
     // procedural/canvas art for immediate-mode Graphics purely to pass lint.
     const addImageKeys = Array.from(
-      allJs.matchAll(/this\.add\.(?:image|sprite)\s*\(\s*[^,]+,\s*[^,]+,\s*['"`]([^'"`]+)['"`]/g),
+      allJs.matchAll(
+        /(?:this|scene|game)\.(?:add|physics\.add)\.(?:image|sprite)\s*\(\s*[^,]+,\s*[^,]+,\s*['"`]([^'"`]+)['"`]/g,
+      ),
     ).map((m) => m[1]);
     const knownTextureKeys = new Set<string>([
       // From the asset pipeline.
       ...Array.from(
         allJs.matchAll(
-          /this\.load\.(?:image|spritesheet|atlas|svg|aseprite)\s*\(\s*['"`]([^'"`]+)['"`]/g,
+          /(?:this\.|scene\.|game\.)?load\.(?:image|spritesheet|atlas|svg|aseprite)\s*\(\s*['"`]([^'"`]+)['"`]/g,
         ),
       ).map((m) => m[1] ?? ''),
-      // Baked at runtime via the TextureManager (any receiver — this.textures,
-      // scene.textures, game.textures): addCanvas/createCanvas/addBase64/addImage/generate.
+      // Baked at runtime via the TextureManager (this.textures, scene.textures, game.textures, or local textures ref):
+      // addCanvas/createCanvas/addBase64/addImage/generate.
       ...Array.from(
         allJs.matchAll(
-          /\.textures\.(?:addCanvas|createCanvas|addBase64|addImage|generate)\s*\(\s*['"`]([^'"`]+)['"`]/g,
+          /(?:(?:\btextures|\.textures)\.(?:addCanvas|createCanvas|addBase64|addImage|generate)|(?<![\w$])(?:addCanvas|createCanvas))\s*\(\s*['"`]([^'"`]+)['"`]/g,
         ),
       ).map((m) => m[1] ?? ''),
-      // graphics.generateTexture('key', w, h) and renderTexture.saveTexture('key').
+      // graphics.generateTexture('key', w, h), renderTexture.saveTexture('key'), or bakeTexture('key', ...) helpers.
       ...Array.from(
-        allJs.matchAll(/\.(?:generateTexture|saveTexture)\s*\(\s*['"`]([^'"`]+)['"`]/g),
+        allJs.matchAll(
+          /(?:\.(?:generateTexture|saveTexture|bakeTexture)|(?<![\w$])(?:generateTexture|saveTexture|bakeTexture))\s*\(\s*['"`]([^'"`]+)['"`]/g,
+        ),
       ).map((m) => m[1] ?? ''),
     ]);
     for (const key of addImageKeys) {

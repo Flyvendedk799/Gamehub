@@ -280,17 +280,18 @@ const TUNABLE_LITERAL_PATTERNS: readonly RegExp[] = [
 ];
 
 /** Restart binding — any of: an explicit reset()/restart() function,
- *  a key handler for R / Space that mutates state back, or `location.reload`. */
+ *  a key handler for R / Space / Enter that mutates state back, or `location.reload`. */
 const RESTART_PATTERNS: readonly RegExp[] = [
-  /\b(restart|reset|new[_]?game|reset[_]?game)\s*\(/i,
-  /K_r\b|key\s*===?\s*['"]r['"]|key\s*===?\s*['"]R['"]|\.code\s*===?\s*['"]KeyR['"]/,
-  // Phaser keyboard bindings for the R restart convention, which the DOM-event
-  // patterns above miss: input.keyboard.once/on('keydown-R', …), addKey('R'),
-  // or Phaser.Input.Keyboard.KeyCodes.R. Their absence made a game that wired
-  // restart on `keydown-R` add a redundant duplicate binding just to pass.
-  /keydown[-_]r\b/i,
-  /addKey\s*\(\s*['"`]r['"`]/i,
-  /KeyCodes\.R\b/,
+  /\b(restart|reset|new[_]?game|reset[_]?game|retry|playAgain|tryAgain)\s*\(/i,
+  /K_r\b|key\s*===?\s*['"](?:r|R| |Space|Enter)['"]|\.code\s*===?\s*['"](?:KeyR|Space|Enter)['"]/,
+  // Phaser keyboard bindings for the R / Space / Enter restart convention, which the DOM-event
+  // patterns miss: input.keyboard.once/on('keydown-R', …), input.once/on('keydown-SPACE', …),
+  // addKey('R' | 'SPACE' | 'ENTER'), or Phaser.Input.Keyboard.KeyCodes.(R | SPACE | ENTER).
+  /keydown[-_](?:r|space|enter)\b/i,
+  /\.(?:once|on)\s*\(\s*['"`]keydown[-_](?:r|space|enter)\b/i,
+  /\.addKey\s*\(\s*['"`](?:r|space|enter)['"`]/i,
+  /KeyCodes\.(?:R|SPACE|ENTER)\b/,
+  /\b(?:this\.)?scene\.(?:restart|start)\s*\(/,
   /location\.reload\b/,
 ];
 
@@ -360,6 +361,7 @@ const KEYBOARD_INPUT_PATTERNS: readonly RegExp[] = [
   /\.input\.keyboard/i,
   /createCursorKeys\s*\(/i,
   /\.addKey\s*\(/i,
+  /\.(?:once|on)\s*\(\s*['"`]keydown/i,
   /\bKeyboardEvent\b/,
   /\bcursors?\s*\.\s*(left|right|up|down)/i,
 ];

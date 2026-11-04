@@ -61,7 +61,19 @@ const PlaytestMouseUpStep = Type.Object({
 
 const PlaytestWaitStep = Type.Object({
   kind: Type.Literal('wait'),
-  frames: Type.Integer({ minimum: 1, maximum: 240 }),
+  frames: Type.Optional(Type.Integer({ minimum: 1, maximum: 240 })),
+  until: Type.Optional(
+    Type.String({
+      description: 'Snapshot expression or field condition to wait for.',
+    }),
+  ),
+  timeoutFrames: Type.Optional(
+    Type.Integer({
+      minimum: 1,
+      maximum: 600,
+      description: 'Maximum RAF frames to wait when `until` is provided.',
+    }),
+  ),
 });
 
 const PlaytestApproachStep = Type.Object({
@@ -91,7 +103,7 @@ export type PlaytestStep =
   | { kind: 'mouseMove'; x: number; y: number }
   | { kind: 'mouseDown'; button?: number }
   | { kind: 'mouseUp'; button?: number }
-  | { kind: 'wait'; frames: number }
+  | { kind: 'wait'; frames?: number; until?: string; timeoutFrames?: number }
   | { kind: 'approach'; watch: string; frames?: number; finishPlan?: boolean };
 
 const PlaytestGameParams = Type.Object({
@@ -241,7 +253,9 @@ function describeStep(s: PlaytestStep): string {
     case 'mouseUp':
       return `mouseUp b${s.button ?? 0}`;
     case 'wait':
-      return `wait ${s.frames}f`;
+      return s.until
+        ? `wait (until ${s.until}${s.timeoutFrames !== undefined ? `, max ${s.timeoutFrames}f` : ''})`
+        : `wait ${s.frames ?? 1}f`;
     case 'approach':
       return `approach (until ${s.watch} drops)`;
   }

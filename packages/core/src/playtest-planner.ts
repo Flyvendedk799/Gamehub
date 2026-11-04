@@ -131,7 +131,7 @@ export type GamePlaytestStep =
   | { kind: 'mouseMove'; x: number; y: number }
   | { kind: 'mouseDown'; button?: number }
   | { kind: 'mouseUp'; button?: number }
-  | { kind: 'wait'; frames: number }
+  | { kind: 'wait'; frames: number; until?: string; timeoutFrames?: number }
   | { kind: 'approach'; watch: string; frames?: number; finishPlan?: boolean };
 
 /** The genre-selected game playtest plan: the playbook it came from, the
@@ -173,7 +173,12 @@ function projectPlaybookStep(step: PlaybookStep): GamePlaytestStep | null {
   if (step.kind === 'wait') {
     // Playbook waits carry `durationFrames`; the worker step uses `frames`.
     const frames = step.durationFrames ?? step.frames ?? 1;
-    return { kind: 'wait', frames };
+    return {
+      kind: 'wait',
+      frames,
+      ...(step.until !== undefined ? { until: step.until } : {}),
+      ...(step.timeoutFrames !== undefined ? { timeoutFrames: step.timeoutFrames } : {}),
+    };
   }
   // kind === 'mouse' — a movement delta is a look/aim move; otherwise a click.
   if (step.movementX !== undefined || step.movementY !== undefined) {
@@ -441,6 +446,10 @@ export interface AuthoredContractCheck {
   key?: string;
   /** Frames to hold a key / advance a wait. */
   holdFrames?: number;
+  /** For 'wait': condition expression or snapshot field to wait for. */
+  until?: string;
+  /** For 'wait': maximum RAF frames to wait when `until` is provided. */
+  timeoutFrames?: number;
   /** Normalised viewport target (0..1) for `action: 'pointerMove'`. */
   x?: number;
   y?: number;
@@ -498,7 +507,12 @@ function projectContractAction(check: AuthoredContractCheck): GamePlaytestStep |
     case 'pointerUp':
       return { kind: 'mouseUp' };
     case 'wait':
-      return { kind: 'wait', frames: check.holdFrames ?? 30 };
+      return {
+        kind: 'wait',
+        frames: check.holdFrames ?? 30,
+        ...(check.until !== undefined ? { until: check.until } : {}),
+        ...(check.timeoutFrames !== undefined ? { timeoutFrames: check.timeoutFrames } : {}),
+      };
   }
 }
 
