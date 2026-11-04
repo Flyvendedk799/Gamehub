@@ -296,8 +296,8 @@ const RESTART_PATTERNS: readonly RegExp[] = [
   // Space or Enter key bindings that explicitly trigger restart/reset actions
   /\.(?:once|on)\s*\(\s*['"`]keydown[-_](?:space|enter)['"`]\s*,\s*(?:[^{;]*=>\s*)?(?:this\.)?(?:scene\.restart|restart|reset|retry|reboot|startNewGame|playAgain)/i,
   // Restart or scene transition inside a game-over / fail / defeat / death context (so Title screen scene.start is not counted)
-  /(?:game[_\s]?over|gameover|defeat|lose|lost|died|death|fail(?:ed)?)\b[^{};]*\{[^}]*(?:scene\.(?:restart|start)|\.(?:once|on)\s*\(\s*['"`]keydown[-_](?:space|enter|r)|addKey\s*\(\s*['"`](?:space|enter|r)|KeyCodes\.(?:SPACE|ENTER|R)|key\s*===?\s*['"](?: |Space|Enter)['"]|\.code\s*===?\s*['"](?:Space|Enter)['"])/i,
-  /(?:game[_\s]?over|gameover|defeat|lose|lost|died|death|fail(?:ed)?)[^;{}]{0,100}(?:scene\.(?:restart|start)|\.(?:once|on)\s*\(\s*['"`]keydown[-_](?:space|enter|r)|key\s*===?\s*['"](?: |Space|Enter)['"]|\.code\s*===?\s*['"](?:Space|Enter)['"])/i,
+  /(?:game[_\s]?over|gameover|\b(?:defeat|lose|lost|died|death|fail(?:ed)?)\b)[^{};]*\{[^}]*(?:scene\.(?:restart|start)|\.(?:once|on)\s*\(\s*['"`]keydown[-_](?:space|enter|r)|addKey\s*\(\s*['"`](?:space|enter|r)|KeyCodes\.(?:SPACE|ENTER|R)|key\s*===?\s*['"](?: |Space|Enter)['"]|\.code\s*===?\s*['"](?:Space|Enter)['"])/i,
+  /(?:game[_\s]?over|gameover|\b(?:defeat|lose|lost|died|death|fail(?:ed)?)\b)[^;{}]{0,100}(?:scene\.(?:restart|start)|\.(?:once|on)\s*\(\s*['"`]keydown[-_](?:space|enter|r)|key\s*===?\s*['"](?: |Space|Enter)['"]|\.code\s*===?\s*['"](?:Space|Enter)['"])/i,
   /location\.reload\b/,
 ];
 

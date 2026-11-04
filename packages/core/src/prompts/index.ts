@@ -1369,7 +1369,7 @@ window.__game.debug.track({
 });
 // When using a Title/Menu screen, wire playtest.begin to start the game directly:
 window.__game.playtest = window.__game.playtest || {};
-window.__game.playtest.begin = () => { /* dismiss title, start loop */; return true; };
+window.__game.playtest.begin = () => { /* dismiss title, start loop; return true when wired */ return false; };
 
 let last = 0;
 function tick(t) {

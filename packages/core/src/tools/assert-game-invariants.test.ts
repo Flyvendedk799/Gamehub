@@ -112,6 +112,29 @@ describe('assertGameInvariants', () => {
     expect(result.issues.map((i) => i.invariant)).toContain('restart');
   });
 
+  it('does NOT treat close() identifiers as game-over context for restart', () => {
+    const result = assertGameInvariants(
+      deps([
+        {
+          path: 'src/main.js',
+          content: `
+            let score = 0;
+            function close() {
+              this.scene.start('MenuScene');
+            }
+            class PlayScene extends Phaser.Scene {
+              create() {
+                this.score = 0;
+              }
+              onHit() { score += 1; new Audio('hit.wav').play(); }
+            }
+          `,
+        },
+      ]),
+    );
+    expect(result.issues.map((i) => i.invariant)).toContain('restart');
+  });
+
   it('warns on missing fail state', () => {
     const result = assertGameInvariants(
       deps([
