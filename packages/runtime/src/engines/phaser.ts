@@ -546,9 +546,7 @@ function phaserValidate(files: ReadonlyArray<InputFile>): ValidationResult {
     // this.load.* produced FALSE errors that pushed the agent to abandon
     // procedural/canvas art for immediate-mode Graphics purely to pass lint.
     const addImageKeys = Array.from(
-      allJs.matchAll(
-        /(?:this|scene|game)\.(?:add|physics\.add)\.(?:image|sprite)\s*\(\s*[^,]+,\s*[^,]+,\s*['"`]([^'"`]+)['"`]/g,
-      ),
+      allJs.matchAll(/this\.add\.(?:image|sprite)\s*\(\s*[^,]+,\s*[^,]+,\s*['"`]([^'"`]+)['"`]/g),
     ).map((m) => m[1]);
     const knownTextureKeys = new Set<string>([
       // From the asset pipeline.
