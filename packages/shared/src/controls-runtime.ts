@@ -115,7 +115,10 @@ export const DEBUG_RUNTIME_SNIPPET = `<script data-pf="${DEBUG_RUNTIME_MARKER}">
   }
   var d;
   try {
-    d = window.__game.debug = (window.__game.debug && typeof window.__game.debug === 'object') ? window.__game.debug : {};
+    if (!window.__game.debug || typeof window.__game.debug !== 'object') {
+      window.__game.debug = {};
+    }
+    d = window.__game.debug = window.__game.debug || {};
   } catch (e) {
     d = {};
   }
