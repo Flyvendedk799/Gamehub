@@ -1336,16 +1336,14 @@ async function tickFrames(page: Page, frames: number): Promise<void> {
   await page.evaluate(async (count: number) => {
     await new Promise<void>((resolve) => {
       let remaining = count;
-      let timer = setTimeout(resolve, Math.max(500, count * 100));
+      const fallback = setTimeout(resolve, 50 + count * 20);
       const step = (): void => {
         remaining -= 1;
         if (remaining <= 0) {
-          clearTimeout(timer);
+          clearTimeout(fallback);
           resolve();
           return;
         }
-        clearTimeout(timer);
-        timer = setTimeout(resolve, 1000);
         requestAnimationFrame(step);
       };
       requestAnimationFrame(step);
